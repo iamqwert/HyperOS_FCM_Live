@@ -1,23 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- wrap_content card: hugs text+check so checkbox stays ~12dp from label. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:background="@drawable/bg_popup_menu"
-    android:elevation="8dp"
-    android:minWidth="180dp"
+    android:elevation="6dp"
     android:orientation="vertical"
-    android:paddingTop="8dp"
-    android:paddingBottom="8dp">
+    android:paddingTop="5dp"
+    android:paddingBottom="5dp"
+    android:paddingStart="6dp"
+    android:paddingEnd="6dp">
 
     <LinearLayout
         android:id="@+id/menu_show_system"
         android:layout_width="wrap_content"
-        android:layout_height="48dp"
-        android:background="?android:attr/selectableItemBackground"
+        android:layout_height="46dp"
+        android:background="@drawable/bg_popup_item_bg"
+        android:clickable="true"
+        android:clipToOutline="true"
+        android:focusable="true"
+        android:foreground="@drawable/bg_popup_item_ripple"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp">
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp">
 
         <TextView
             android:id="@+id/menu_show_system_label"
@@ -25,7 +31,7 @@
             android:layout_height="wrap_content"
             android:text="@string/show_system_apps"
             android:textColor="@color/md_on_surface"
-            android:textSize="16sp" />
+            android:textSize="15sp" />
 
         <ImageView
             android:id="@+id/menu_show_system_check"
@@ -39,12 +45,16 @@
     <LinearLayout
         android:id="@+id/menu_hide_icon"
         android:layout_width="wrap_content"
-        android:layout_height="48dp"
-        android:background="?android:attr/selectableItemBackground"
+        android:layout_height="46dp"
+        android:background="@drawable/bg_popup_item_bg"
+        android:clickable="true"
+        android:clipToOutline="true"
+        android:focusable="true"
+        android:foreground="@drawable/bg_popup_item_ripple"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp">
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp">
 
         <TextView
             android:id="@+id/menu_hide_icon_label"
@@ -52,7 +62,7 @@
             android:layout_height="wrap_content"
             android:text="@string/hide_launcher_icon"
             android:textColor="@color/md_on_surface"
-            android:textSize="16sp" />
+            android:textSize="15sp" />
 
         <ImageView
             android:id="@+id/menu_hide_icon_check"

@@ -1,12 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Circular press target sized for 48dp icon buttons (not full-bleed rect). -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
-    android:color="#338B4A5A">
+    android:color="#4D8B4A5A">
     <item android:id="@android:id/mask">
         <shape android:shape="oval">
             <solid android:color="@android:color/white" />
             <size
-                android:width="40dp"
-                android:height="40dp" />
+                android:width="44dp"
+                android:height="44dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@android:color/transparent" />
+            <size
+                android:width="44dp"
+                android:height="44dp" />
         </shape>
     </item>
 </ripple>

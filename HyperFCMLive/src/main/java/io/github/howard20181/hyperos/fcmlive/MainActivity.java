@@ -61,6 +61,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private boolean searching = false;
     private String currentQuery = "";
     private boolean showSystemApps = false;
+    /** UI intent for launcher icon; do not infer toggle direction from PM cache. */
+    private boolean launcherIconHidden = false;
     private XposedService xposedService;
 
     @Override
@@ -84,6 +86,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         // Seed UI order from the local cache so allowlisted apps sit on top
         // immediately, before libxposed remote prefs bind.
         allowlist = Prefs.readLocalAllowlist(this);
+        launcherIconHidden = !isLauncherIconVisible();
 
         initXposedService();
 
@@ -217,8 +220,9 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             root.setOnApplyWindowInsetsListener((v, insets) -> {
                 int top = insets.getSystemWindowInsetTop();
                 int bottom = insets.getSystemWindowInsetBottom();
-                topBar.setPadding(topBar.getPaddingLeft(), top,
-                        topBar.getPaddingRight(), topBar.getPaddingBottom());
+                int barPad = dp(12);
+                topBar.setPadding(topBar.getPaddingLeft(), top + barPad,
+                        topBar.getPaddingRight(), barPad);
                 if (list != null) {
                     list.setPadding(list.getPaddingLeft(), list.getPaddingTop(),
                             list.getPaddingRight(), bottom + dp(88));
@@ -230,9 +234,10 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         }
         // Fallback if insets never fire on this ROM.
         int statusBar = statusBarHeight();
-        if (statusBar > 0 && topBar.getPaddingTop() == 0) {
-            topBar.setPadding(topBar.getPaddingLeft(), statusBar,
-                    topBar.getPaddingRight(), topBar.getPaddingBottom());
+        if (statusBar > 0 && topBar.getPaddingTop() <= statusBar) {
+            int barPad = dp(12);
+            topBar.setPadding(topBar.getPaddingLeft(), statusBar + barPad,
+                    topBar.getPaddingRight(), barPad);
         }
         applyFabBottomMargin(fab, 0);
     }
@@ -361,38 +366,80 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     /**
      * MD3-style overflow: custom popup with rounded-square checkboxes
      * (primary fill + check when on; outline when off) — not system PopupMenu.
+     * Click toggles; long-press does nothing (only the row ripple).
      */
     private void showOverflowMenu(View anchor) {
         View content = getLayoutInflater().inflate(R.layout.popup_overflow, null);
         ImageView sysCheck = content.findViewById(R.id.menu_show_system_check);
         ImageView hideCheck = content.findViewById(R.id.menu_hide_icon_check);
         bindMd3Check(sysCheck, showSystemApps);
-        bindMd3Check(hideCheck, !isLauncherIconVisible());
+        bindMd3Check(hideCheck, launcherIconHidden);
 
         final PopupWindow popup = new PopupWindow(
                 content,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 true);
-        popup.setElevation(dp(8));
+        popup.setElevation(dp(6));
         popup.setBackgroundDrawable(
                 new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
+        popup.setFocusable(true);
+        popup.setTouchable(true);
 
-        content.findViewById(R.id.menu_show_system).setOnClickListener(v -> {
+        // Measure wrap_content only — NEVER force a fixed width.
+        // Width = padding + longest(label + 12dp + checkbox); no right void,
+        // and checkbox stays ~12dp from the text (no layout_weight).
+        content.measure(
+                View.MeasureSpec.makeMeasureSpec(
+                        getResources().getDisplayMetrics().widthPixels,
+                        View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(
+                        getResources().getDisplayMetrics().heightPixels,
+                        View.MeasureSpec.AT_MOST));
+        int popupW = content.getMeasuredWidth();
+        int popupH = content.getMeasuredHeight();
+        if (popupW > 0) {
+            popup.setWidth(popupW);
+        }
+        if (popupH > 0) {
+            popup.setHeight(popupH);
+        }
+
+        View rowSystem = content.findViewById(R.id.menu_show_system);
+        rowSystem.setOnClickListener(v -> {
             showSystemApps = !showSystemApps;
             bindMd3Check(sysCheck, showSystemApps);
             loadApps();
             popup.dismiss();
         });
-        content.findViewById(R.id.menu_hide_icon).setOnClickListener(v -> {
-            boolean hide = !isLauncherIconVisible();
-            setLauncherIconHidden(hide);
-            bindMd3Check(hideCheck, hide);
+
+        View rowHide = content.findViewById(R.id.menu_hide_icon);
+        rowHide.setOnClickListener(v -> {
+            // Toggle by intended UI state — PM may be stale on HyperOS and
+            // used to invert the action (always toast "已恢复").
+            boolean target = !launcherIconHidden;
+            boolean ok = setLauncherIconHidden(target);
+            if (ok) {
+                launcherIconHidden = target;
+            }
+            bindMd3Check(hideCheck, launcherIconHidden);
             popup.dismiss();
         });
 
-        popup.showAsDropDown(anchor, -dp(8), dp(4));
+        // Keep the popup fully on-screen; width already equals content.
+        int[] loc = new int[2];
+        anchor.getLocationOnScreen(loc);
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        int margin = dp(8);
+        int xOff = anchor.getWidth() - popupW;
+        if (loc[0] + xOff < margin) {
+            xOff = margin - loc[0];
+        }
+        if (loc[0] + xOff + popupW > screenW - margin) {
+            xOff = screenW - margin - loc[0] - popupW;
+        }
+        popup.showAsDropDown(anchor, xOff, dp(4));
     }
 
     private void bindMd3Check(ImageView box, boolean checked) {
@@ -433,13 +480,19 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     private ComponentName launcherAliasComponent() {
-        return new ComponentName(this, LAUNCHER_ALIAS);
+        return new ComponentName(getPackageName(),
+                getPackageName() + ".LauncherAlias");
     }
 
     private boolean isLauncherIconVisible() {
         try {
             int state = getPackageManager()
                     .getComponentEnabledSetting(launcherAliasComponent());
+            if (state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED) {
+                return false;
+            }
             return state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
                     || state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
         } catch (Throwable t) {
@@ -447,9 +500,15 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         }
     }
 
-    private void setLauncherIconHidden(boolean hidden) {
+    /**
+     * Apply launcher-alias visibility. Toast follows the requested action
+     * (hide → 已隐藏, show → 已恢复). Returns whether PackageManager accepted
+     * the write.
+     */
+    private boolean setLauncherIconHidden(boolean hidden) {
         PackageManager pm = getPackageManager();
         ComponentName alias = launcherAliasComponent();
+        boolean applied = false;
         try {
             pm.setComponentEnabledSetting(
                     alias,
@@ -457,12 +516,44 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                             ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED
                             : PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
                     PackageManager.DONT_KILL_APP);
-            Toast.makeText(this,
-                    hidden ? R.string.hide_icon_toast : R.string.show_icon_toast,
-                    Toast.LENGTH_LONG).show();
+            applied = true;
         } catch (Throwable t) {
-            Toast.makeText(this, R.string.hide_icon_failed, Toast.LENGTH_LONG).show();
+            try {
+                Intent home = new Intent(Intent.ACTION_MAIN);
+                home.addCategory(Intent.CATEGORY_LAUNCHER);
+                home.setPackage(getPackageName());
+                java.util.List<android.content.pm.ResolveInfo> list =
+                        pm.queryIntentActivities(home, 0);
+                for (android.content.pm.ResolveInfo ri : list) {
+                    if (ri.activityInfo == null) {
+                        continue;
+                    }
+                    ComponentName cn = new ComponentName(
+                            ri.activityInfo.packageName, ri.activityInfo.name);
+                    pm.setComponentEnabledSetting(
+                            cn,
+                            hidden
+                                    ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                                    : PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                            PackageManager.DONT_KILL_APP);
+                    applied = true;
+                }
+            } catch (Throwable ignored) {
+            }
         }
+
+        try {
+            Intent changed = new Intent(Intent.ACTION_PACKAGE_CHANGED,
+                    android.net.Uri.parse("package:" + getPackageName()));
+            changed.putExtra(Intent.EXTRA_CHANGED_COMPONENT_NAME, alias.getClassName());
+            sendBroadcast(changed);
+        } catch (Throwable ignored) {
+        }
+
+        Toast.makeText(this,
+                hidden ? R.string.hide_icon_toast : R.string.show_icon_toast,
+                Toast.LENGTH_LONG).show();
+        return applied;
     }
 
     private void openFcmDiagnostics() {

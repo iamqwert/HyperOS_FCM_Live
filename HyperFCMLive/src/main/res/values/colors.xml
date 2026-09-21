@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Soft rose MD3-like palette (matches reference screenshots). -->
+    <!-- Light fallback when Monet (API 31+) is unavailable. -->
     <color name="md_primary">#8B4A5A</color>
     <color name="md_primary_deep">#5A2A36</color>
     <color name="md_on_primary">#FFFFFF</color>
