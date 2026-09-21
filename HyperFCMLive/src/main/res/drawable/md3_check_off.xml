@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MD3-like unchecked checkbox: rounded square outline. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <stroke
+        android:width="2dp"
+        android:color="@color/md_outline" />
+    <solid android:color="@android:color/transparent" />
+    <corners android:radius="3dp" />
+    <size
+        android:width="20dp"
+        android:height="20dp" />
+</shape>

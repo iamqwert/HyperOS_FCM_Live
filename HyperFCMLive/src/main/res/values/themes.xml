@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.HyperFCMLive" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/md_surface</item>
+        <item name="android:navigationBarColor">@color/md_surface</item>
+        <item name="android:windowBackground">@color/md_surface</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowTranslucentStatus">false</item>
+        <item name="android:windowTranslucentNavigation">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:fitsSystemWindows">false</item>
+        <item name="android:colorPrimary">@color/md_primary</item>
+        <item name="android:colorAccent">@color/md_primary</item>
+        <item name="android:textColorPrimary">@color/md_on_surface</item>
+        <item name="android:textColorSecondary">@color/md_on_surface_variant</item>
+    </style>
+
+    <!-- MD3-like overflow menu: rose surface, rounded corners, dark text. -->
+    <style name="Theme.HyperFCMLive.Popup" parent="android:Theme.Material.Light">
+        <item name="android:popupMenuStyle">@style/Widget.HyperFCMLive.PopupMenu</item>
+        <item name="android:dropDownListViewStyle">@style/Widget.HyperFCMLive.PopupList</item>
+        <item name="android:textColorPrimary">@color/md_on_surface</item>
+        <item name="android:textColorSecondary">@color/md_on_surface_variant</item>
+        <item name="android:colorBackground">@color/md_surface_container_high</item>
+        <item name="android:windowIsFloating">true</item>
+    </style>
+
+    <style name="Widget.HyperFCMLive.PopupMenu" parent="android:Widget.Material.Light.PopupMenu">
+        <item name="android:popupBackground">@drawable/bg_popup_menu</item>
+        <item name="android:popupElevation">8dp</item>
+    </style>
+
+    <style name="Widget.HyperFCMLive.PopupList" parent="android:Widget.Material.Light.ListView">
+        <item name="android:listSelector">@drawable/bg_popup_item_ripple</item>
+        <item name="android:divider">@android:color/transparent</item>
+        <item name="android:dividerHeight">0dp</item>
+    </style>
+</resources>

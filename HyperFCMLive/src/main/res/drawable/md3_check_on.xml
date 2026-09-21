@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MD3-like checked checkbox: primary fill + white checkmark. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/md_primary" />
+            <corners android:radius="3dp" />
+            <size
+                android:width="20dp"
+                android:height="20dp" />
+        </shape>
+    </item>
+    <item
+        android:drawable="@drawable/ic_md3_checkmark"
+        android:gravity="center" />
+</layer-list>

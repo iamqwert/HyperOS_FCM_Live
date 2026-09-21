@@ -1,19 +1,33 @@
 package io.github.howard20181.hyperos.fcmlive;
 
 import android.app.Activity;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.TextUtils;
-import android.widget.Button;
-import android.widget.CheckBox;
+import android.view.ContextThemeWrapper;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.ListView;
+import android.widget.PopupWindow;
 import android.widget.SearchView;
+import android.widget.TextView;
+import android.widget.Toast;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 
 import androidx.annotation.NonNull;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -22,25 +36,54 @@ import io.github.libxposed.service.XposedService;
 import io.github.libxposed.service.XposedServiceHelper;
 
 /**
- * Settings screen: lets the user pick which apps FCM is allowed to wake /
- * auto-launch (manual whitelist). Apps not checked are never woken.
+ * Settings screen: pick which apps FCM may wake / auto-launch.
+ * MD3-inspired card list; search + overflow (system apps / hide icon) in the
+ * top bar; FAB opens GMS FCM diagnostics.
  */
 public class MainActivity extends Activity implements SearchView.OnQueryTextListener {
+
+    private static final String LAUNCHER_ALIAS =
+            "io.github.howard20181.hyperos.fcmlive.LauncherAlias";
+    private static final String TAG_UI = "HyperFCMLive";
+    private static final int MENU_SHOW_SYSTEM = 1001;
+    private static final int MENU_HIDE_ICON = 1002;
 
     private final List<AppListAdapter.AppEntry> allApps = new ArrayList<>();
     private final List<AppListAdapter.AppEntry> filteredApps = new ArrayList<>();
     private Set<String> allowlist = new HashSet<>();
     private AppListAdapter adapter;
+    private TextView titleView;
     private SearchView searchView;
-    // Don't show system apps by default; toggle to include them.
+    private ImageButton btnSearch;
+    private ImageButton btnBack;
+    private SwipeRefreshLayout swipeRefresh;
+    private Object backInvokedCallback;
+    private boolean searching = false;
+    private String currentQuery = "";
     private boolean showSystemApps = false;
     private XposedService xposedService;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-        setTitle(R.string.settings_title);
+        try {
+            setContentView(R.layout.activity_main);
+        } catch (Throwable t) {
+            android.util.Log.e(TAG_UI, "setContentView failed", t);
+            finish();
+            return;
+        }
+
+        applySystemBarInsets();
+
+        titleView = findViewById(R.id.toolbar_title);
+        if (titleView != null) {
+            titleView.setText(R.string.settings_title);
+        }
+
+        // Seed UI order from the local cache so allowlisted apps sit on top
+        // immediately, before libxposed remote prefs bind.
+        allowlist = Prefs.readLocalAllowlist(this);
 
         initXposedService();
 
@@ -51,35 +94,312 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 allowlist.remove(pkg);
             }
             updateAllowlist();
-            // Re-sort so the just-toggled app moves to/from the top.
+            // Stay in place on tap. Order refreshes on pull-to-refresh / reopen.
             for (AppListAdapter.AppEntry app : allApps) {
                 if (app.packageName.equals(pkg)) {
                     app.checked = checked;
                     break;
                 }
             }
-            sortApps();
-            filterApps(searchView.getQuery().toString());
         });
-        ((ListView) findViewById(R.id.app_list)).setAdapter(adapter);
 
         searchView = findViewById(R.id.search_view);
-        searchView.setOnQueryTextListener(this);
+        if (searchView != null) {
+            searchView.setOnQueryTextListener(this);
+            styleSearchView(searchView);
+        }
+        btnBack = findViewById(R.id.btn_back);
+        btnSearch = findViewById(R.id.btn_search);
+        if (btnSearch != null) {
+            btnSearch.setOnClickListener(v -> enterSearch());
+            attachTip(btnSearch, R.string.tooltip_search);
+        }
+        if (btnBack != null) {
+            btnBack.setOnClickListener(v -> exitSearch());
+            attachTip(btnBack, R.string.exit_search);
+        }
 
-        CheckBox cbSystemApps = findViewById(R.id.cb_system_apps);
-        cbSystemApps.setChecked(showSystemApps);
-        cbSystemApps.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            showSystemApps = isChecked;
-            // loadApps runs off the main thread and refreshes the list on completion.
+        ImageButton btnMore = findViewById(R.id.btn_more);
+        if (btnMore != null) {
+            btnMore.setOnClickListener(this::showOverflowMenu);
+            attachTip(btnMore, R.string.more_menu);
+        }
+
+        // Material / Android standard pull-to-refresh (SwipeRefreshLayout).
+        swipeRefresh = findViewById(R.id.refresh_layout);
+        if (swipeRefresh != null) {
+            try {
+                swipeRefresh.setColorSchemeColors(getColor(R.color.md_primary));
+            } catch (Throwable ignored) {
+            }
+            swipeRefresh.setOnRefreshListener(this::loadApps);
+            // Only at the top of the list; default Material trigger distance.
+            swipeRefresh.setEnabled(true);
+        }
+
+        View fab = findViewById(R.id.fab_fcm_diagnostics);
+        if (fab != null) {
+            fab.setOnClickListener(v -> openFcmDiagnostics());
+            attachTip(fab, R.string.fcm_diagnostics);
+        }
+
+        View list = findViewById(R.id.app_list);
+        if (list instanceof ListView listView) {
+            listView.setAdapter(adapter);
+        }
+
+        registerBackCallback();
+        loadApps();
+    }
+
+    /** Long-press: short system tooltip only (e.g. 「搜索」「更多选项」). */
+    private void attachTip(View view, int tooltipRes) {
+        if (view == null) {
+            return;
+        }
+        CharSequence t = getText(tooltipRes);
+        view.setTooltipText(t);
+        view.setContentDescription(t);
+    }
+
+    private void registerBackCallback() {
+        if (Build.VERSION.SDK_INT < 33) {
+            return;
+        }
+        try {
+            OnBackInvokedCallback cb = this::handleBack;
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb);
+            backInvokedCallback = cb;
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** Search: first back closes IME (system), next back exits search — not home. */
+    private void handleBack() {
+        if (searching) {
+            exitSearch();
+        } else {
+            finish();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (Build.VERSION.SDK_INT >= 33 && backInvokedCallback instanceof OnBackInvokedCallback cb) {
+            try {
+                getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(cb);
+            } catch (Throwable ignored) {
+            }
+        }
+        super.onDestroy();
+    }
+
+    @Override
+    public void onBackPressed() {
+        handleBack();
+    }
+
+    /**
+     * Pad the top bar by the real window inset so it sits just below the status
+     * bar (no fitsSystemWindows — that stacked with dimen padding and pushed
+     * the title too far down).
+     */
+    private void applySystemBarInsets() {
+        final View root = findViewById(android.R.id.content);
+        final View topBar = findViewById(R.id.top_bar);
+        final View list = findViewById(R.id.app_list);
+        final View fab = findViewById(R.id.fab_fcm_diagnostics);
+        if (topBar == null) {
+            return;
+        }
+        if (root != null) {
+            root.setOnApplyWindowInsetsListener((v, insets) -> {
+                int top = insets.getSystemWindowInsetTop();
+                int bottom = insets.getSystemWindowInsetBottom();
+                topBar.setPadding(topBar.getPaddingLeft(), top,
+                        topBar.getPaddingRight(), topBar.getPaddingBottom());
+                if (list != null) {
+                    list.setPadding(list.getPaddingLeft(), list.getPaddingTop(),
+                            list.getPaddingRight(), bottom + dp(88));
+                }
+                applyFabBottomMargin(fab, bottom);
+                return insets.consumeSystemWindowInsets();
+            });
+            root.requestApplyInsets();
+        }
+        // Fallback if insets never fire on this ROM.
+        int statusBar = statusBarHeight();
+        if (statusBar > 0 && topBar.getPaddingTop() == 0) {
+            topBar.setPadding(topBar.getPaddingLeft(), statusBar,
+                    topBar.getPaddingRight(), topBar.getPaddingBottom());
+        }
+        applyFabBottomMargin(fab, 0);
+    }
+
+    /**
+     * Keep a fixed visual gap under the FAB: at least {@code base} dp from the
+     * window bottom, or nav-bar height + extra when a system bar occupies the
+     * edge — so large-corner devices are not clipped, without leaving a huge
+     * hole on small-corner screens.
+     */
+    private void applyFabBottomMargin(View fab, int systemBottomInset) {
+        if (!(fab.getLayoutParams() instanceof android.widget.FrameLayout.LayoutParams)) {
+            return;
+        }
+        int base = dp(26);
+        int extra = dp(14);
+        int margin = Math.max(base, systemBottomInset + extra);
+        // If insets missing, still lift a bit on gesture/button nav devices.
+        if (systemBottomInset <= 0) {
+            int nav = navigationBarHeight();
+            margin = Math.max(base, nav + extra);
+        }
+        android.widget.FrameLayout.LayoutParams lp =
+                (android.widget.FrameLayout.LayoutParams) fab.getLayoutParams();
+        if (lp.bottomMargin != margin) {
+            lp.bottomMargin = margin;
+            lp.rightMargin = dp(20);
+            fab.setLayoutParams(lp);
+        }
+    }
+
+    private int navigationBarHeight() {
+        int id = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
+        return id > 0 ? getResources().getDimensionPixelSize(id) : 0;
+    }
+
+    private int statusBarHeight() {
+        int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        return id > 0 ? getResources().getDimensionPixelSize(id) : 0;
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    /** Lighter query hint + no underline so inline search does not shift the bar. */
+    private void styleSearchView(SearchView sv) {
+        if (sv == null) {
+            return;
+        }
+        sv.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+        int hintColor = getColor(R.color.md_hint_light);
+        int textColor = getColor(R.color.md_on_surface);
+        int[] ids = new int[]{
+                getResources().getIdentifier("search_src_text", "id", "android"),
+                getResources().getIdentifier("search_edit_text", "id", "android"),
+        };
+        for (int id : ids) {
+            if (id == 0) {
+                continue;
+            }
+            View inner = sv.findViewById(id);
+            if (inner instanceof TextView tv) {
+                tv.setHintTextColor(hintColor);
+                tv.setTextColor(textColor);
+                tv.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+                tv.setSingleLine(true);
+            }
+        }
+        String[] plates = new String[]{"search_plate", "search_edit_frame", "search_bar"};
+        for (String name : plates) {
+            int id = getResources().getIdentifier(name, "id", "android");
+            if (id == 0) {
+                continue;
+            }
+            View plate = sv.findViewById(id);
+            if (plate != null) {
+                plate.setBackground(null);
+                plate.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+            }
+        }
+    }
+
+    /** Title becomes an inline search field; more-menu stays visible. */
+    private void enterSearch() {
+        searching = true;
+        // Keep ListView height stable so the scrollbar does not jump when IME opens.
+        getWindow().setSoftInputMode(
+                android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
+        if (titleView != null) {
+            titleView.setVisibility(View.GONE);
+        }
+        if (searchView != null) {
+            searchView.setVisibility(View.VISIBLE);
+            searchView.setIconified(false);
+            searchView.requestFocus();
+        }
+        if (btnSearch != null) {
+            btnSearch.setVisibility(View.GONE);
+        }
+        if (btnBack != null) {
+            btnBack.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void exitSearch() {
+        searching = false;
+        if (searchView != null) {
+            searchView.setQuery("", false);
+            searchView.clearFocus();
+            searchView.setVisibility(View.GONE);
+        }
+        if (titleView != null) {
+            titleView.setVisibility(View.VISIBLE);
+        }
+        if (btnSearch != null) {
+            btnSearch.setVisibility(View.VISIBLE);
+        }
+        if (btnBack != null) {
+            btnBack.setVisibility(View.GONE);
+        }
+        currentQuery = "";
+        filterApps("");
+    }
+
+    /**
+     * MD3-style overflow: custom popup with rounded-square checkboxes
+     * (primary fill + check when on; outline when off) — not system PopupMenu.
+     */
+    private void showOverflowMenu(View anchor) {
+        View content = getLayoutInflater().inflate(R.layout.popup_overflow, null);
+        ImageView sysCheck = content.findViewById(R.id.menu_show_system_check);
+        ImageView hideCheck = content.findViewById(R.id.menu_hide_icon_check);
+        bindMd3Check(sysCheck, showSystemApps);
+        bindMd3Check(hideCheck, !isLauncherIconVisible());
+
+        final PopupWindow popup = new PopupWindow(
+                content,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                true);
+        popup.setElevation(dp(8));
+        popup.setBackgroundDrawable(
+                new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+        popup.setOutsideTouchable(true);
+
+        content.findViewById(R.id.menu_show_system).setOnClickListener(v -> {
+            showSystemApps = !showSystemApps;
+            bindMd3Check(sysCheck, showSystemApps);
             loadApps();
+            popup.dismiss();
+        });
+        content.findViewById(R.id.menu_hide_icon).setOnClickListener(v -> {
+            boolean hide = !isLauncherIconVisible();
+            setLauncherIconHidden(hide);
+            bindMd3Check(hideCheck, hide);
+            popup.dismiss();
         });
 
-        Button selectAll = findViewById(R.id.btn_select_all);
-        Button clearAll = findViewById(R.id.btn_clear_all);
-        selectAll.setOnClickListener(v -> setAllChecked(true));
-        clearAll.setOnClickListener(v -> setAllChecked(false));
+        popup.showAsDropDown(anchor, -dp(8), dp(4));
+    }
 
-        loadApps();
+    private void bindMd3Check(ImageView box, boolean checked) {
+        if (box == null) {
+            return;
+        }
+        box.setImageResource(checked ? R.drawable.md3_check_on : R.drawable.md3_check_off);
     }
 
     @Override
@@ -89,7 +409,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
 
     @Override
     public boolean onQueryTextChange(String newText) {
-        filterApps(newText);
+        currentQuery = newText != null ? newText : "";
+        filterApps(currentQuery);
         return true;
     }
 
@@ -106,30 +427,60 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 }
             }
         }
-        adapter.notifyDataSetChanged();
+        if (adapter != null) {
+            adapter.notifyDataSetChanged();
+        }
     }
 
-    private void setAllChecked(boolean checked) {
-        allowlist = new HashSet<>();
-        // Apply to all apps, not just filtered ones
-        for (AppListAdapter.AppEntry app : allApps) {
-            app.checked = checked;
-            if (checked) {
-                allowlist.add(app.packageName);
+    private ComponentName launcherAliasComponent() {
+        return new ComponentName(this, LAUNCHER_ALIAS);
+    }
+
+    private boolean isLauncherIconVisible() {
+        try {
+            int state = getPackageManager()
+                    .getComponentEnabledSetting(launcherAliasComponent());
+            return state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+                    || state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    private void setLauncherIconHidden(boolean hidden) {
+        PackageManager pm = getPackageManager();
+        ComponentName alias = launcherAliasComponent();
+        try {
+            pm.setComponentEnabledSetting(
+                    alias,
+                    hidden
+                            ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                            : PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP);
+            Toast.makeText(this,
+                    hidden ? R.string.hide_icon_toast : R.string.show_icon_toast,
+                    Toast.LENGTH_LONG).show();
+        } catch (Throwable t) {
+            Toast.makeText(this, R.string.hide_icon_failed, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void openFcmDiagnostics() {
+        Intent intent = new Intent();
+        intent.setClassName("com.google.android.gms",
+                "com.google.android.gms.gcm.GcmDiagnostics");
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(intent);
+        } catch (Throwable t) {
+            try {
+                Intent fallback = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                fallback.setData(android.net.Uri.parse("package:com.google.android.gms"));
+                fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(fallback);
+            } catch (Throwable t2) {
+                Toast.makeText(this, R.string.fcm_diagnostics_not_found, Toast.LENGTH_LONG).show();
             }
-        }
-        updateAllowlist();
-        if (adapter != null) {
-            adapter.notifyDataSetChanged();
-        }
-    }
-
-    private void toggleSystemApps() {
-        showSystemApps = !showSystemApps;
-        loadApps();
-        filterApps(searchView != null ? searchView.getQuery().toString() : "");
-        if (adapter != null) {
-            adapter.notifyDataSetChanged();
         }
     }
 
@@ -137,7 +488,6 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         allApps.sort(MainActivity::compareEntries);
     }
 
-    /** Checked (allowlisted) apps first, then alphabetically by label. */
     private static int compareEntries(AppListAdapter.AppEntry a, AppListAdapter.AppEntry b) {
         if (a.checked != b.checked) {
             return a.checked ? -1 : 1;
@@ -147,15 +497,10 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     private boolean isSystemApp(ApplicationInfo ai) {
-        // System app: either installed in /system or updated system app
         return (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0
                 && (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0;
     }
 
-    /**
-     * Bind to the libxposed XposedService so we can read/write the cross-process
-     * remote preferences that the system_server hooks read from.
-     */
     private void initXposedService() {
         try {
             XposedServiceHelper.registerListener(new XposedServiceHelper.OnServiceListener() {
@@ -163,10 +508,9 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 public void onServiceBind(@NonNull XposedService service) {
                     xposedService = service;
                     runOnUiThread(() -> {
+                        // Remote prefs are the source of truth once bound.
                         reloadAllowlist();
-                        if (adapter != null) {
-                            adapter.notifyDataSetChanged();
-                        }
+                        loadApps();
                     });
                 }
 
@@ -177,8 +521,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                     }
                 }
             });
-        } catch (Throwable e) {
-            // Xposed service unavailable; the UI just won't be able to persist.
+        } catch (Throwable ignored) {
         }
     }
 
@@ -196,44 +539,42 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private void reloadAllowlist() {
         SharedPreferences prefs = remotePrefs();
         if (prefs == null) {
+            // Keep local cache if remote is not ready yet.
             return;
         }
         allowlist = Prefs.readAllowlist(prefs);
+        Prefs.writeLocalAllowlist(this, allowlist);
         for (AppListAdapter.AppEntry app : allApps) {
             app.checked = allowlist.contains(app.packageName);
         }
         sortApps();
-        filterApps(searchView != null ? searchView.getQuery().toString() : "");
+        filterApps(currentQuery);
     }
 
-    /** Persist the allowlist to remote prefs and tell system_server to refresh. */
     private void updateAllowlist() {
         SharedPreferences prefs = remotePrefs();
         if (prefs == null) {
+            // Still mirror locally so the next launch can sort immediately.
+            Prefs.writeLocalAllowlist(this, allowlist);
             return;
         }
         Prefs.writeAllowlist(this, prefs, allowlist);
     }
 
     private void loadApps() {
-        // Query the package manager and load labels off the main thread so the
-        // first open of the screen stays responsive. Icons are loaded lazily by
-        // the adapter, so only the lightweight query/label work happens here.
         final boolean showSys = showSystemApps;
         final Set<String> allow = new HashSet<>(allowlist);
+        final boolean emptyUi = allApps.isEmpty();
         new Thread(() -> {
             PackageManager pm = getPackageManager();
 
-            // Phase 1: show the allowlisted apps immediately, resolved from the
-            // allowlist package names, so the user sees their selection without
-            // waiting for the full package query to finish.
-            java.util.List<AppListAdapter.AppEntry> selected = new ArrayList<>();
+            List<AppListAdapter.AppEntry> selected = new ArrayList<>();
             for (String pkg : allow) {
                 ApplicationInfo ai;
                 try {
                     ai = pm.getApplicationInfo(pkg, 0);
                 } catch (PackageManager.NameNotFoundException e) {
-                    continue; // allowlisted app no longer installed
+                    continue;
                 }
                 AppListAdapter.AppEntry entry =
                         new AppListAdapter.AppEntry(pkg, ai.loadLabel(pm).toString());
@@ -241,26 +582,18 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 selected.add(entry);
             }
             selected.sort(MainActivity::compareEntries);
-            if (!selected.isEmpty()) {
-                runOnUiThread(() -> {
-                    allApps.clear();
-                    allApps.addAll(selected);
-                    filterApps(searchView != null ? searchView.getQuery().toString() : "");
-                    adapter.notifyDataSetChanged();
-                });
+            // First open only: show allowlisted apps before the full query returns.
+            if (emptyUi && !selected.isEmpty()) {
+                runOnUiThread(() -> applyAppSnapshot(selected, false));
             }
 
-            // Phase 2: full query, replacing with the complete sorted list.
-            java.util.List<android.content.pm.PackageInfo> installed =
-                    pm.getInstalledPackages(0);
-            java.util.List<AppListAdapter.AppEntry> result = new ArrayList<>();
+            List<android.content.pm.PackageInfo> installed = pm.getInstalledPackages(0);
+            List<AppListAdapter.AppEntry> result = new ArrayList<>();
             for (android.content.pm.PackageInfo pi : installed) {
                 ApplicationInfo ai = pi.applicationInfo;
-                // Skip the module's own package (it's never FCM-targeted by GMS).
                 if (ai.packageName.equals(getPackageName())) {
                     continue;
                 }
-                // By default, only show user apps. Toggle to show system apps.
                 if (!showSys && isSystemApp(ai)) {
                     continue;
                 }
@@ -268,15 +601,69 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                         ai.packageName, ai.loadLabel(pm).toString()));
             }
             for (AppListAdapter.AppEntry app : result) {
-                app.checked = allowlist.contains(app.packageName);
+                app.checked = allow.contains(app.packageName);
             }
             result.sort(MainActivity::compareEntries);
             runOnUiThread(() -> {
-                allApps.clear();
-                allApps.addAll(result);
-                filterApps(searchView != null ? searchView.getQuery().toString() : "");
-                adapter.notifyDataSetChanged();
+                applyAppSnapshot(result, true);
+                // Xposed remote prefs may bind after the first package query;
+                // re-read allowlist so checked apps stay on top after update.
+                reloadAllowlist();
             });
         }).start();
+    }
+
+    /**
+     * Swap the visible list once. Skips notify when nothing changed, and keeps
+     * scroll position so refresh does not “flash” or jump.
+     */
+    private void applyAppSnapshot(List<AppListAdapter.AppEntry> next, boolean stopRefresh) {
+        ListView listView = findViewById(R.id.app_list);
+        int firstPos = 0;
+        int firstTop = 0;
+        if (listView != null) {
+            firstPos = listView.getFirstVisiblePosition();
+            View child = listView.getChildAt(0);
+            firstTop = child != null ? child.getTop() : 0;
+        }
+
+        // Always re-sync from the live allowlist — loadApps may have started
+        // before libxposed bound and read remote prefs.
+        Set<String> live = allowlist != null ? allowlist : Collections.emptySet();
+        for (AppListAdapter.AppEntry app : next) {
+            app.checked = live.contains(app.packageName);
+        }
+        List<AppListAdapter.AppEntry> ordered = new ArrayList<>(next);
+        ordered.sort(MainActivity::compareEntries);
+
+        boolean changed = !sameAppSnapshot(allApps, ordered);
+        if (changed) {
+            allApps.clear();
+            allApps.addAll(ordered);
+            filterApps(currentQuery);
+            if (listView != null) {
+                listView.setSelectionFromTop(firstPos, firstTop);
+            }
+        }
+
+        if (stopRefresh && swipeRefresh != null) {
+            swipeRefresh.setRefreshing(false);
+        }
+    }
+
+    private static boolean sameAppSnapshot(List<AppListAdapter.AppEntry> a,
+                                           List<AppListAdapter.AppEntry> b) {
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (int i = 0; i < a.size(); i++) {
+            AppListAdapter.AppEntry x = a.get(i);
+            AppListAdapter.AppEntry y = b.get(i);
+            if (!x.packageName.equals(y.packageName) || x.checked != y.checked
+                    || !x.label.equals(y.label)) {
+                return false;
+            }
+        }
+        return true;
     }
 }

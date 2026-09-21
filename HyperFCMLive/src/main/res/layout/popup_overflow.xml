@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_popup_menu"
+    android:elevation="8dp"
+    android:minWidth="180dp"
+    android:orientation="vertical"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp">
+
+    <LinearLayout
+        android:id="@+id/menu_show_system"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:background="?android:attr/selectableItemBackground"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp">
+
+        <TextView
+            android:id="@+id/menu_show_system_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/show_system_apps"
+            android:textColor="@color/md_on_surface"
+            android:textSize="16sp" />
+
+        <ImageView
+            android:id="@+id/menu_show_system_check"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_marginStart="12dp"
+            android:contentDescription="@null"
+            android:src="@drawable/md3_check_off" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/menu_hide_icon"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:background="?android:attr/selectableItemBackground"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp">
+
+        <TextView
+            android:id="@+id/menu_hide_icon_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/hide_launcher_icon"
+            android:textColor="@color/md_on_surface"
+            android:textSize="16sp" />
+
+        <ImageView
+            android:id="@+id/menu_hide_icon_check"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_marginStart="12dp"
+            android:contentDescription="@null"
+            android:src="@drawable/md3_check_off" />
+    </LinearLayout>
+
+</LinearLayout>

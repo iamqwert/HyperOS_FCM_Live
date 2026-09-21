@@ -2,6 +2,7 @@ package io.github.howard20181.hyperos.fcmlive;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Looper;
@@ -9,7 +10,6 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
-import android.widget.CheckBox;
 import android.widget.ImageView;
 import android.widget.TextView;
 
@@ -26,7 +26,7 @@ public class AppListAdapter extends BaseAdapter {
     public static class AppEntry {
         public final String packageName;
         public final String label;
-        public Drawable icon;   // loaded lazily, null until resolved
+        public Drawable icon;
         public volatile boolean iconLoading;
         public boolean checked;
 
@@ -42,12 +42,16 @@ public class AppListAdapter extends BaseAdapter {
     private final ExecutorService iconLoader = Executors.newFixedThreadPool(4);
     private final List<AppEntry> apps;
     private final OnCheckedChangeListener listener;
+    private final int enabledColor;
+    private final int disabledColor;
 
     public AppListAdapter(Context context, List<AppEntry> apps, OnCheckedChangeListener listener) {
         this.inflater = LayoutInflater.from(context);
         this.pm = context.getPackageManager();
         this.apps = apps;
         this.listener = listener;
+        this.enabledColor = context.getColor(R.color.md_primary);
+        this.disabledColor = context.getColor(R.color.md_on_surface_variant);
     }
 
     @Override
@@ -74,7 +78,7 @@ public class AppListAdapter extends BaseAdapter {
             holder.icon = convertView.findViewById(R.id.app_icon);
             holder.label = convertView.findViewById(R.id.app_label);
             holder.pkg = convertView.findViewById(R.id.app_pkg);
-            holder.check = convertView.findViewById(R.id.app_check);
+            holder.status = convertView.findViewById(R.id.app_status);
             convertView.setTag(holder);
         } else {
             holder = (ViewHolder) convertView.getTag();
@@ -85,22 +89,29 @@ public class AppListAdapter extends BaseAdapter {
         if (app.icon != null) {
             holder.icon.setImageDrawable(app.icon);
         } else {
-            // Placeholder while the icon loads off the main thread.
             holder.icon.setImageResource(android.R.drawable.sym_def_app_icon);
             loadIcon(app);
         }
-        holder.check.setOnCheckedChangeListener(null);
-        holder.check.setChecked(app.checked);
-        holder.check.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            app.checked = isChecked;
+
+        bindStatus(holder.status, app.checked);
+        convertView.setOnClickListener(v -> {
+            boolean next = !app.checked;
+            app.checked = next;
+            bindStatus(holder.status, next);
             if (listener != null) {
-                listener.onCheckedChanged(app.packageName, isChecked);
+                listener.onCheckedChanged(app.packageName, next);
             }
         });
         return convertView;
     }
 
-    /** Load an app icon off the main thread, then refresh the row once ready. */
+    private void bindStatus(ImageView status, boolean checked) {
+        status.setImageResource(checked
+                ? R.drawable.ic_status_enabled
+                : R.drawable.ic_status_disabled);
+        status.setColorFilter(checked ? enabledColor : disabledColor, PorterDuff.Mode.SRC_IN);
+    }
+
     private void loadIcon(final AppEntry app) {
         if (app.iconLoading) {
             return;
@@ -126,6 +137,6 @@ public class AppListAdapter extends BaseAdapter {
         ImageView icon;
         TextView label;
         TextView pkg;
-        CheckBox check;
+        ImageView status;
     }
 }

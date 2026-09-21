@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Soft rose MD3-like palette (matches reference screenshots). -->
+    <color name="md_primary">#8B4A5A</color>
+    <color name="md_primary_deep">#5A2A36</color>
+    <color name="md_on_primary">#FFFFFF</color>
+    <color name="md_primary_container">#F4D6DC</color>
+    <color name="md_on_primary_container">#3B101C</color>
+    <color name="md_surface">#F7EEF0</color>
+    <color name="md_on_surface">#23191B</color>
+    <color name="md_on_surface_variant">#534347</color>
+    <color name="md_hint_light">#A89298</color>
+    <color name="md_surface_container">#F1E4E7</color>
+    <color name="md_surface_container_high">#EBDADD</color>
+    <color name="md_outline">#857377</color>
+    <color name="md_card">#F3E4E7</color>
+    <color name="md_icon_tint">#6B5158</color>
+</resources>
