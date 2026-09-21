@@ -9,7 +9,9 @@ android {
         applicationId namespace
         minSdkVersion 27
         targetSdkVersion 37
-        versionCode rootProject.ext.commitCount
+        // Fixed so LSPosed update checks never treat this fork as older than
+        // upstream builds that inherit a low jgit commitCount.
+        versionCode 13
         versionName "1.5.0-beta2"
     }
 
