@@ -73,6 +73,12 @@ jobs:
           name: hyperos-fcm-live-release
           path: release
 
+      - name: Download debug APK
+        uses: actions/download-artifact@v4
+        with:
+          name: hyperos-fcm-live-debug
+          path: debug
+
       - name: Publish nightly release
         uses: softprops/action-gh-release@v2
         with:
@@ -81,5 +87,14 @@ jobs:
           prerelease: true
           make_latest: false
           target_commitish: ${{ github.sha }}
-          files: release/*.apk
+          body: |
+            LSPosed module builds for HyperOS FCM Live.
+
+            - `*-release.apk` — R8 minified; signed with the release keystore when `SIGNING_KEY` secrets are configured, otherwise debug-signed.
+            - `*-debug.apk` — debug build (no minify); debug-signed. Use only for troubleshooting.
+
+            Prefer the **release** APK for daily use. Uninstall first if the signature changes.
+          files: |
+            release/*.apk
+            debug/*.apk
           fail_on_unmatched_files: true
