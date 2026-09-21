@@ -83,7 +83,7 @@ base {
 dependencies {
     compileOnly 'androidx.annotation:annotation:1.10.0'
     // Standard Material/Android pull-to-refresh (SwipeRefreshLayout).
-    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.2.0'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
     compileOnly project(":hiddenapi:stubs")
