@@ -10,5 +10,21 @@ tasks.named("updateDaemonJvm") {
     languageVersion = JavaLanguageVersion.of(21)
     vendor = JvmVendorSpec.ADOPTIUM
 }
-var repo = jgit.repo(true)
-ext.commitCount = repo.commitCount('refs/remotes/origin/main')
+ext.commitCount = 0
+try {
+    var repo = jgit.repo(true)
+    def count = repo.commitCount('refs/remotes/origin/main')
+    if (count != null && count > 0) {
+        ext.commitCount = count
+    } else {
+        def headCount = repo.commitCount('HEAD')
+        if (headCount != null) {
+            ext.commitCount = headCount
+        }
+    }
+} catch (Exception ignored) {
+    ext.commitCount = 2
+}
+if (ext.commitCount == 0) {
+    ext.commitCount = 2
+}

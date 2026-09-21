@@ -258,6 +258,20 @@ public class Hooker extends XposedModule {
             }
         });
         deoptimize(triggerGMSLimitActionMethod);
+        // HyperOS 4 PowerKeeper uses IGreezeManager.updateGmsNetStatus(boolean limit).
+        try {
+            var updateGmsNetStatusMethod = GreezeManagerServiceClass.getDeclaredMethod("updateGmsNetStatus", boolean.class);
+            hookE(updateGmsNetStatusMethod).intercept(chain -> {
+                var args = chain.getArgs().toArray();
+                if (args.length > 0) {
+                    args[0] = false;
+                }
+                return chain.proceed(args);
+            });
+            deoptimize(updateGmsNetStatusMethod);
+        } catch (NoSuchMethodException e) {
+            log(Log.INFO, TAG, "GreezeManagerService#updateGmsNetStatus absent, skip");
+        }
     }
 
     private void hookDomesticPolicyManager(ClassLoader classLoader) throws ClassNotFoundException,
@@ -407,47 +421,171 @@ public class Hooker extends XposedModule {
         }
     }
 
-    private void hookGmsObserver(ClassLoader classLoader) throws ClassNotFoundException,
-            NoSuchMethodException {
-        var NetdExecutorClass = classLoader.loadClass("com.miui.powerkeeper.utils.NetdExecutor");
-        var initGmsChainMethod = NetdExecutorClass.getDeclaredMethod("initGmsChain", String.class, int.class, String.class);
-        hookE(initGmsChainMethod).intercept(chain -> {
-            var args = chain.getArgs().toArray();
-            args[2] = "ACCEPT";
-            return chain.proceed(args);
-        });
-        deoptimize(initGmsChainMethod);
-        var GmsObserverClass = classLoader.loadClass("com.miui.powerkeeper.utils.GmsObserver");
-        Hooker hooker = chain -> {
-            var args = chain.getArgs().toArray();
-            args[0] = false;
-            return chain.proceed(args);
-        };
-        var updateGmsAlarmMethod = GmsObserverClass.getDeclaredMethod("updateGmsAlarm", boolean.class);
-        hookE(updateGmsAlarmMethod).intercept(hooker);
-        deoptimize(updateGmsAlarmMethod);
-        var updateGmsNetWorkMethod = GmsObserverClass.getDeclaredMethod("updateGmsNetWork", boolean.class);
-        hookE(updateGmsNetWorkMethod).intercept(hooker);
-        deoptimize(updateGmsNetWorkMethod);
-        var updateGoogleReletivesWakelockMethod = GmsObserverClass.getDeclaredMethod("updateGoogleReletivesWakelock", boolean.class);
-        hookE(updateGoogleReletivesWakelockMethod).intercept(hooker);
-        deoptimize(updateGoogleReletivesWakelockMethod);
-    }
-
-    private void hookGlobalFeatureConfigureHelper(ClassLoader classLoader)
-            throws ClassNotFoundException, NoSuchMethodException {
-        var GlobalFeatureConfigureHelperClass = classLoader.loadClass("com.miui.powerkeeper.provider.GlobalFeatureConfigureHelper");
-        var getDozeWhiteListAppsMethod = GlobalFeatureConfigureHelperClass.getDeclaredMethod("getDozeWhiteListApps", Bundle.class);
-        hookE(getDozeWhiteListAppsMethod).intercept(chain -> {
-            var result = chain.proceed();
-            if (result instanceof List<?>) {
-                var whiteList = (List<String>) result;
-                if (!whiteList.contains(GMS_PACKAGE_NAME)) {
-                    whiteList.add(GMS_PACKAGE_NAME);
+    /**
+     * PowerKeeper 4.x (HyperOS 4) removed NetdExecutor#initGmsChain and the old
+     * GmsObserver#updateGmsAlarm / updateGmsNetWork / updateGoogleReletivesWakelock
+     * trio. GMS network limiting now goes through:
+     *   GmsObserver.onGoogleReachabilityChanged → notifyFrameworkGmsNetworkChanged
+     *     → updateFrameworkGmsNetStatus(limit) → IGreezeManager.updateGmsNetStatus
+     * and DNS blocking via NetdExecutor.setGmsDnsBlockerState(uid, block) /
+     * execute(..., "setuiddnsrule", ...). Each hook is applied independently so a
+     * missing method on one ROM does not abort the rest.
+     */
+    private void hookGmsObserver(ClassLoader classLoader) {
+        try {
+            var NetdExecutorClass = classLoader.loadClass("com.miui.powerkeeper.utils.NetdExecutor");
+            // Legacy (pre-HyperOS 4): rewrite iptables action to ACCEPT.
+            try {
+                var initGmsChainMethod = NetdExecutorClass.getDeclaredMethod("initGmsChain", String.class, int.class, String.class);
+                hookE(initGmsChainMethod).intercept(chain -> {
+                    var args = chain.getArgs().toArray();
+                    args[2] = "ACCEPT";
+                    return chain.proceed(args);
+                });
+                deoptimize(initGmsChainMethod);
+            } catch (NoSuchMethodException e) {
+                log(Log.INFO, TAG, "NetdExecutor#initGmsChain absent (PowerKeeper 4.x), using setGmsDnsBlockerState");
+            }
+            // PowerKeeper 4.x: never deny GMS DNS.
+            try {
+                var setGmsDnsBlockerStateMethod = NetdExecutorClass.getDeclaredMethod("setGmsDnsBlockerState", int.class, boolean.class);
+                hookE(setGmsDnsBlockerStateMethod).intercept(chain -> {
+                    var args = chain.getArgs().toArray();
+                    if (args.length > 1) {
+                        args[1] = false;
+                    }
+                    return chain.proceed(args);
+                });
+                deoptimize(setGmsDnsBlockerStateMethod);
+            } catch (NoSuchMethodException e) {
+                log(Log.ERROR, TAG, "Failed to hook NetdExecutor#setGmsDnsBlockerState", e);
+            }
+            // Defense in depth: force setuiddnsrule → allow; skip enabling standby firewall.
+            try {
+                var executeMethod = NetdExecutorClass.getDeclaredMethod("execute", int.class, String.class, String.class, Object[].class);
+                hookE(executeMethod).intercept(chain -> {
+                    var args = chain.getArgs().toArray();
+                    if (args.length >= 4 && args[2] instanceof String cmd && args[3] instanceof Object[] cmdArgs) {
+                        if ("setuiddnsrule".equals(cmd) && cmdArgs.length >= 2) {
+                            var rewritten = cmdArgs.clone();
+                            rewritten[1] = "allow";
+                            args[3] = rewritten;
+                            return chain.proceed(args);
+                        }
+                        if ("enablemiuistandby".equals(cmd) && cmdArgs.length >= 1
+                                && "enable".equals(String.valueOf(cmdArgs[0]))) {
+                            // Do not enable the standby firewall chain for GMS.
+                            return null;
+                        }
+                    }
+                    return chain.proceed();
+                });
+                deoptimize(executeMethod);
+            } catch (NoSuchMethodException e) {
+                log(Log.INFO, TAG, "NetdExecutor#execute not found, skip command-level GMS net hooks");
+            }
+        } catch (ClassNotFoundException e) {
+            log(Log.ERROR, TAG, "Failed to hook NetdExecutor", e);
+        }
+        try {
+            var GmsObserverClass = classLoader.loadClass("com.miui.powerkeeper.utils.GmsObserver");
+            // Legacy method names — present on older PowerKeeper only.
+            for (String legacyName : new String[]{"updateGmsAlarm", "updateGmsNetWork", "updateGoogleReletivesWakelock"}) {
+                try {
+                    var legacyMethod = GmsObserverClass.getDeclaredMethod(legacyName, boolean.class);
+                    hookE(legacyMethod).intercept(chain -> {
+                        var args = chain.getArgs().toArray();
+                        args[0] = false;
+                        return chain.proceed(args);
+                    });
+                    deoptimize(legacyMethod);
+                } catch (NoSuchMethodException e) {
+                    log(Log.INFO, TAG, "GmsObserver#" + legacyName + " absent, skip");
                 }
             }
-            return result;
-        });
+            // PowerKeeper 4.x: never apply the framework GMS network limit.
+            try {
+                var updateFrameworkGmsNetStatusMethod =
+                        GmsObserverClass.getDeclaredMethod("updateFrameworkGmsNetStatus", boolean.class);
+                hookE(updateFrameworkGmsNetStatusMethod).intercept(chain -> {
+                    var args = chain.getArgs().toArray();
+                    if (args.length > 0 && Boolean.TRUE.equals(args[0])) {
+                        args[0] = false;
+                    }
+                    return chain.proceed(args);
+                });
+                deoptimize(updateFrameworkGmsNetStatusMethod);
+            } catch (NoSuchMethodException e) {
+                log(Log.ERROR, TAG, "Failed to hook GmsObserver#updateFrameworkGmsNetStatus", e);
+            }
+            // Treat Google as always reachable so notifyFrameworkGmsNetworkChanged
+            // computes limit = reachable ^ 1 == false.
+            try {
+                var onGoogleReachabilityChangedMethod =
+                        GmsObserverClass.getDeclaredMethod("onGoogleReachabilityChanged", boolean.class);
+                hookE(onGoogleReachabilityChangedMethod).intercept(chain -> {
+                    var args = chain.getArgs().toArray();
+                    args[0] = true;
+                    return chain.proceed(args);
+                });
+                deoptimize(onGoogleReachabilityChangedMethod);
+            } catch (NoSuchMethodException e) {
+                log(Log.INFO, TAG, "GmsObserver#onGoogleReachabilityChanged absent, skip");
+            }
+            // Synthetic bridge c(GmsObserver, boolean) → onGoogleReachabilityChanged.
+            try {
+                var bridgeMethod = GmsObserverClass.getDeclaredMethod("c", GmsObserverClass, boolean.class);
+                hookE(bridgeMethod).intercept(chain -> {
+                    var args = chain.getArgs().toArray();
+                    args[1] = true;
+                    return chain.proceed(args);
+                });
+                deoptimize(bridgeMethod);
+            } catch (NoSuchMethodException ignored) {
+            }
+        } catch (ClassNotFoundException e) {
+            log(Log.ERROR, TAG, "Failed to hook GmsObserver", e);
+        }
+        try {
+            var GmsObserverListenerClass = classLoader.loadClass("com.miui.powerkeeper.utils.GmsObserver$2");
+            // Drop disconnect events so PowerKeeper never learns "Google unreachable".
+            try {
+                var disconnectMethod = GmsObserverListenerClass.getDeclaredMethod("googleNetworkDisconnect");
+                hookE(disconnectMethod).intercept(chain -> null);
+                deoptimize(disconnectMethod);
+            } catch (NoSuchMethodException e) {
+                log(Log.INFO, TAG, "GmsObserver$2#googleNetworkDisconnect absent, skip");
+            }
+        } catch (ClassNotFoundException e) {
+            log(Log.INFO, TAG, "GmsObserver$2 absent, skip disconnect rewrite");
+        }
+    }
+
+    private void hookGlobalFeatureConfigureHelper(ClassLoader classLoader) {
+        try {
+            var GlobalFeatureConfigureHelperClass = classLoader.loadClass("com.miui.powerkeeper.provider.GlobalFeatureConfigureHelper");
+            for (Class<?> argType : new Class<?>[]{Bundle.class, android.content.Context.class}) {
+                try {
+                    var getDozeWhiteListAppsMethod =
+                            GlobalFeatureConfigureHelperClass.getDeclaredMethod("getDozeWhiteListApps", argType);
+                    hookE(getDozeWhiteListAppsMethod).intercept(chain -> {
+                        var result = chain.proceed();
+                        if (result instanceof List<?>) {
+                            @SuppressWarnings("unchecked")
+                            var whiteList = (List<String>) result;
+                            if (!whiteList.contains(GMS_PACKAGE_NAME)) {
+                                whiteList.add(GMS_PACKAGE_NAME);
+                            }
+                        }
+                        return result;
+                    });
+                } catch (NoSuchMethodException e) {
+                    log(Log.INFO, TAG, "GlobalFeatureConfigureHelper#getDozeWhiteListApps(" + argType.getSimpleName() + ") absent, skip");
+                }
+            }
+        } catch (ClassNotFoundException e) {
+            log(Log.ERROR, TAG, "Failed to hook GlobalFeatureConfigureHelper", e);
+        }
     }
 
     private static PowerExemptionManager powerExemptionManager = null;
