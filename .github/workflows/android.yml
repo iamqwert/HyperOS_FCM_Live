@@ -59,7 +59,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  nightly-release:
+  # Formal versioned release (not nightly). Tag/name come from the APK
+  # filename built from HyperFCMLive/build.gradle (versionName.versionCode).
+  release:
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: build
     runs-on: ubuntu-latest
@@ -79,21 +81,61 @@ jobs:
           name: hyperos-fcm-live-debug
           path: debug
 
-      - name: Publish nightly release
+      - name: Resolve version from APK name
+        id: ver
+        run: |
+          apk=$(ls release/*.apk | head -1)
+          base=$(basename "$apk")
+          # e.g. HyperFCMLive-1.5.0-beta2.13-release.apk -> 1.5.0-beta2.13
+          ver=${base#HyperFCMLive-}
+          ver=${ver%-release.apk}
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "tag=v${ver}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version=${ver} tag=v${ver}"
+
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: nightly
-          name: HyperOS FCM Live Nightly
-          prerelease: true
-          make_latest: false
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: HyperOS FCM Live ${{ steps.ver.outputs.version }}
+          prerelease: false
+          make_latest: true
           target_commitish: ${{ github.sha }}
           body: |
-            LSPosed module builds for HyperOS FCM Live.
+            ## 更新内容 / Changelog
 
-            - `*-release.apk` — R8 minified; signed with the release keystore when `SIGNING_KEY` secrets are configured, otherwise debug-signed.
-            - `*-debug.apk` — debug build (no minify); debug-signed. Use only for troubleshooting.
+            ### 适配 HyperOS 4 · PowerKeeper 4.2
+            - PowerKeeper 4.x 移除了 `NetdExecutor#initGmsChain` 与旧版 `GmsObserver#updateGmsAlarm` / `updateGmsNetWork` / `updateGoogleReletivesWakelock`，导致 hook 整段失败，FCM 仍可能需自启动才能收消息。
+            - 改为 hook 新 API：
+              - `NetdExecutor#setGmsDnsBlockerState`（禁止 GMS DNS 拦截）
+              - `NetdExecutor#execute`（`setuiddnsrule` 强制 allow；不启用 standby 防火墙链）
+              - `GmsObserver#updateFrameworkGmsNetStatus`（禁止下发 GMS 网络限制）
+              - `GmsObserver#onGoogleReachabilityChanged` / `GmsObserver$2#googleNetworkDisconnect`（按「Google 可达」处理）
+            - 旧方法名仍尝试 hook，找不到则跳过；每个 hook 独立 try/catch，避免单点失败拖垮整段。
+            - system_server：增加 `GreezeManagerService#updateGmsNetStatus` 防御性 hook。
+            - Doze 白名单：同时 hook `getDozeWhiteListApps` 的 `Bundle` 与 `Context` 重载。
 
-            Prefer the **release** APK for daily use. Uninstall first if the signature changes.
+            ### 发布与版本
+            - `versionCode` 固定为 **13**，避免 LSPosed 将本包识别为旧版而提示更新到未修改的上游包。
+            - `versionName`：`${{ steps.ver.outputs.version }}`
+            - 正式 Release（非 nightly）；同时提供 **release** 与 **debug** 两个 APK。
+            - Release APK：R8 混淆；在配置 GitHub Secrets 后使用发布签名。
+
+            ### 安装包说明
+            | 文件 | 用途 |
+            |------|------|
+            | `*-release.apk` | 日常使用（推荐） |
+            | `*-debug.apk` | 排查问题（未混淆，debug 签名） |
+
+            ### 安装注意
+            - 作用域：`system` + `com.miui.powerkeeper`
+            - 安装或更新后请**重启**手机（system_server hook 需完整加载）
+            - 若签名变更（例如从 debug 签名换成发布签名），需先**卸载**旧模块再安装，并在 LSPosed 中重新启用模块
+
+            ### 环境（本版验证）
+            - HyperOS 4.0.0.31 beta · Android 17
+            - PowerKeeper 4.2.00
+            - LSPosed 2.2.0-it(7891)
           files: |
             release/*.apk
             debug/*.apk
