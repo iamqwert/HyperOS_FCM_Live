@@ -13,14 +13,23 @@ import android.widget.BaseAdapter;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class AppListAdapter extends BaseAdapter {
 
-    public interface OnCheckedChangeListener {
-        void onCheckedChanged(String packageName, boolean checked);
+    public interface OnCardListener {
+        /** Normal mode: toggle whitelist. Multi-select mode is handled by the adapter. */
+        void onToggleAllowlist(String packageName, boolean checked);
+
+        /** Long-press outside multi-select: enter selection mode with this package. */
+        void onEnterMultiSelect(String packageName);
+
+        /** Multi-select mode: selection set changed (count for title bar). */
+        void onSelectionChanged(int count);
     }
 
     public static class AppEntry {
@@ -29,6 +38,8 @@ public class AppListAdapter extends BaseAdapter {
         public Drawable icon;
         public volatile boolean iconLoading;
         public boolean checked;
+        /** Manifest receivers suggest the app can take FCM/C2DM pushes. */
+        public boolean supportFcm;
 
         public AppEntry(String packageName, String label) {
             this.packageName = packageName;
@@ -41,17 +52,63 @@ public class AppListAdapter extends BaseAdapter {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService iconLoader = Executors.newFixedThreadPool(4);
     private final List<AppEntry> apps;
-    private final OnCheckedChangeListener listener;
+    private final OnCardListener listener;
     private final int enabledColor;
     private final int disabledColor;
+    private final Context context;
 
-    public AppListAdapter(Context context, List<AppEntry> apps, OnCheckedChangeListener listener) {
+    private boolean multiSelectMode = false;
+    private final Set<String> selectedPkgs = new HashSet<>();
+
+    public AppListAdapter(Context context, List<AppEntry> apps, OnCardListener listener) {
+        this.context = context.getApplicationContext();
         this.inflater = LayoutInflater.from(context);
         this.pm = context.getPackageManager();
         this.apps = apps;
         this.listener = listener;
         this.enabledColor = context.getColor(R.color.md_primary);
         this.disabledColor = context.getColor(R.color.md_on_surface_variant);
+    }
+
+    public boolean isMultiSelectMode() {
+        return multiSelectMode;
+    }
+
+    public void setMultiSelectMode(boolean enabled) {
+        if (multiSelectMode == enabled) {
+            return;
+        }
+        multiSelectMode = enabled;
+        if (!enabled) {
+            selectedPkgs.clear();
+        }
+        notifyDataSetChanged();
+        if (listener != null) {
+            listener.onSelectionChanged(selectedPkgs.size());
+        }
+    }
+
+    public void setSelectedPackages(Set<String> packages) {
+        selectedPkgs.clear();
+        if (packages != null) {
+            selectedPkgs.addAll(packages);
+        }
+        notifyDataSetChanged();
+    }
+
+    public Set<String> getSelectedPackages() {
+        return new HashSet<>(selectedPkgs);
+    }
+
+    public void clearSelection() {
+        if (selectedPkgs.isEmpty()) {
+            return;
+        }
+        selectedPkgs.clear();
+        notifyDataSetChanged();
+        if (listener != null) {
+            listener.onSelectionChanged(0);
+        }
     }
 
     @Override
@@ -94,15 +151,101 @@ public class AppListAdapter extends BaseAdapter {
         }
 
         bindStatus(holder.status, app.checked);
+        clearIconTooltip(convertView);
+        clearIconTooltip(holder.icon);
+        clearIconTooltip(holder.status);
+
+        final boolean selected = multiSelectMode && selectedPkgs.contains(app.packageName);
+        // Fresh mutate() instance per bind — never share a RippleDrawable across
+        // recycled rows (that paints the press ripple on the wrong bounds).
+        convertView.setBackground(newSolidCardBg(selected));
+        ensurePressRipple(convertView);
+
+        final String pkg = app.packageName;
         convertView.setOnClickListener(v -> {
-            boolean next = !app.checked;
-            app.checked = next;
+            if (multiSelectMode) {
+                toggleSelection(pkg);
+                return;
+            }
+            AppEntry current = findByPackage(pkg);
+            if (current == null) {
+                return;
+            }
+            boolean next = !current.checked;
+            current.checked = next;
             bindStatus(holder.status, next);
             if (listener != null) {
-                listener.onCheckedChanged(app.packageName, next);
+                listener.onToggleAllowlist(pkg, next);
             }
         });
+
+        convertView.setOnLongClickListener(v -> {
+            if (!multiSelectMode && listener != null) {
+                listener.onEnterMultiSelect(pkg);
+            } else if (multiSelectMode) {
+                toggleSelection(pkg);
+            }
+            return true;
+        });
         return convertView;
+    }
+
+    private Drawable newSolidCardBg(boolean selected) {
+        Drawable d = context.getDrawable(
+                selected ? R.drawable.bg_card_selected : R.drawable.bg_card);
+        return d != null ? d.mutate() : null;
+    }
+
+    /**
+     * Row press ripple lives on foreground (inflated per item view). Background
+     * stays a solid shape so multi-select can swap colors without ripple state bugs.
+     */
+    private void ensurePressRipple(View row) {
+        if (row == null || row.getForeground() != null) {
+            return;
+        }
+        Drawable fg = context.getDrawable(R.drawable.bg_card_press_ripple);
+        if (fg != null) {
+            row.setForeground(fg.mutate());
+        }
+    }
+
+    private AppEntry findByPackage(String packageName) {
+        if (packageName == null) {
+            return null;
+        }
+        for (AppEntry e : apps) {
+            if (packageName.equals(e.packageName)) {
+                return e;
+            }
+        }
+        return null;
+    }
+
+    private void toggleSelection(String packageName) {
+        if (packageName == null) {
+            return;
+        }
+        if (selectedPkgs.contains(packageName)) {
+            selectedPkgs.remove(packageName);
+        } else {
+            selectedPkgs.add(packageName);
+        }
+        notifyDataSetChanged();
+        if (listener != null) {
+            listener.onSelectionChanged(selectedPkgs.size());
+        }
+    }
+
+    private void clearIconTooltip(View view) {
+        if (view == null) {
+            return;
+        }
+        view.setTooltipText(null);
+        view.setLongClickable(false);
+        if (view instanceof ImageView) {
+            view.setContentDescription(null);
+        }
     }
 
     private void bindStatus(ImageView status, boolean checked) {

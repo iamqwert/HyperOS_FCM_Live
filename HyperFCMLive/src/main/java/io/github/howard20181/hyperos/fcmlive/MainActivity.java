@@ -9,7 +9,6 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.text.TextUtils;
 import android.view.ContextThemeWrapper;
 import android.view.View;
 import android.view.ViewGroup;
@@ -56,14 +55,23 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private SearchView searchView;
     private ImageButton btnSearch;
     private ImageButton btnBack;
+    private ImageButton btnMore;
+    private ImageButton btnBatchAdd;
+    private ImageButton btnBatchRemove;
+    private ImageButton btnSelectAll;
     private SwipeRefreshLayout swipeRefresh;
     private Object backInvokedCallback;
     private boolean searching = false;
+    private boolean multiSelectMode = false;
     private String currentQuery = "";
     private boolean showSystemApps = false;
+    /** Overflow: when true, list only apps whose Manifest has FCM-style receivers. */
+    private boolean showFcmSupportedOnly = false;
     /** UI intent for launcher icon; do not infer toggle direction from PM cache. */
     private boolean launcherIconHidden = false;
     private XposedService xposedService;
+    private PopupWindow activeTooltip;
+    private final Runnable dismissTooltipRunnable = this::dismissActiveTooltip;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -87,21 +95,41 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         // immediately, before libxposed remote prefs bind.
         allowlist = Prefs.readLocalAllowlist(this);
         launcherIconHidden = !isLauncherIconVisible();
+        // First launch: show FCM-supported apps by default. After the user
+        // toggles the overflow option, their stored preference wins.
+        showFcmSupportedOnly = getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
+                .getBoolean(Prefs.KEY_SHOW_FCM_ONLY, true);
 
         initXposedService();
 
-        adapter = new AppListAdapter(this, filteredApps, (pkg, checked) -> {
-            if (checked) {
-                allowlist.add(pkg);
-            } else {
-                allowlist.remove(pkg);
+        adapter = new AppListAdapter(this, filteredApps, new AppListAdapter.OnCardListener() {
+            @Override
+            public void onToggleAllowlist(String pkg, boolean checked) {
+                if (checked) {
+                    allowlist.add(pkg);
+                } else {
+                    allowlist.remove(pkg);
+                }
+                updateAllowlist();
+                // Stay in place on tap. Order refreshes on pull-to-refresh / reopen.
+                for (AppListAdapter.AppEntry app : allApps) {
+                    if (app.packageName.equals(pkg)) {
+                        app.checked = checked;
+                        break;
+                    }
+                }
             }
-            updateAllowlist();
-            // Stay in place on tap. Order refreshes on pull-to-refresh / reopen.
-            for (AppListAdapter.AppEntry app : allApps) {
-                if (app.packageName.equals(pkg)) {
-                    app.checked = checked;
-                    break;
+
+            @Override
+            public void onEnterMultiSelect(String packageName) {
+                enterMultiSelect(packageName);
+            }
+
+            @Override
+            public void onSelectionChanged(int count) {
+                if (multiSelectMode) {
+                    updateSelectionTitle(count);
+                    updateSelectAllIcon();
                 }
             }
         });
@@ -113,19 +141,39 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         }
         btnBack = findViewById(R.id.btn_back);
         btnSearch = findViewById(R.id.btn_search);
+        btnMore = findViewById(R.id.btn_more);
+        btnBatchAdd = findViewById(R.id.btn_batch_add);
+        btnBatchRemove = findViewById(R.id.btn_batch_remove);
+        btnSelectAll = findViewById(R.id.btn_select_all);
         if (btnSearch != null) {
             btnSearch.setOnClickListener(v -> enterSearch());
             attachTip(btnSearch, R.string.tooltip_search);
         }
         if (btnBack != null) {
-            btnBack.setOnClickListener(v -> exitSearch());
+            btnBack.setOnClickListener(v -> {
+                if (multiSelectMode) {
+                    exitMultiSelect();
+                } else {
+                    exitSearch();
+                }
+            });
             attachTip(btnBack, R.string.exit_search);
         }
-
-        ImageButton btnMore = findViewById(R.id.btn_more);
         if (btnMore != null) {
             btnMore.setOnClickListener(this::showOverflowMenu);
             attachTip(btnMore, R.string.more_menu);
+        }
+        if (btnBatchAdd != null) {
+            btnBatchAdd.setOnClickListener(v -> applyBatchAllowlist(true));
+            attachTip(btnBatchAdd, R.string.batch_add_allowlist);
+        }
+        if (btnBatchRemove != null) {
+            btnBatchRemove.setOnClickListener(v -> applyBatchAllowlist(false));
+            attachTip(btnBatchRemove, R.string.batch_remove_allowlist);
+        }
+        if (btnSelectAll != null) {
+            btnSelectAll.setOnClickListener(v -> toggleSelectAllVisible());
+            attachTip(btnSelectAll, R.string.select_all);
         }
 
         // Material / Android standard pull-to-refresh (SwipeRefreshLayout).
@@ -155,14 +203,164 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         loadApps();
     }
 
-    /** Long-press: short system tooltip only (e.g. 「搜索」「更多选项」). */
+    /**
+     * Long-press tooltip that never covers the anchor icon.
+     * HyperOS (and some AOSP builds) place the system bubble on top of the
+     * control; we show a custom MD-style popup with an explicit gap instead.
+     */
     private void attachTip(View view, int tooltipRes) {
         if (view == null) {
             return;
         }
-        CharSequence t = getText(tooltipRes);
-        view.setTooltipText(t);
-        view.setContentDescription(t);
+        final CharSequence tip = getText(tooltipRes);
+        view.setContentDescription(tip);
+        // Suppress framework / HyperOS bubbles that sit on the icon.
+        view.setTooltipText(null);
+        view.setLongClickable(true);
+        view.setOnLongClickListener(v -> {
+            showAnchorTooltip(v, tip);
+            return true;
+        });
+    }
+
+    /** Show a short bubble below (or above when needed) the given anchor. */
+    private void showAnchorTooltip(View anchor, CharSequence text) {
+        dismissActiveTooltip();
+        if (anchor == null || text == null || text.length() == 0 || isFinishing()) {
+            return;
+        }
+
+        // HyperOS may re-surface contentDescription as a covering bubble on
+        // long-press. Hide it while our offset tooltip is visible, restore for
+        // accessibility after dismiss.
+        final CharSequence restoredCd = anchor.getContentDescription() != null
+                ? anchor.getContentDescription()
+                : text;
+        anchor.setContentDescription(null);
+
+        TextView tipView = new TextView(this);
+        tipView.setText(text);
+        tipView.setTextColor(getColor(R.color.md_tooltip_text));
+        tipView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f);
+        tipView.setGravity(android.view.Gravity.CENTER);
+        tipView.setBackgroundResource(R.drawable.bg_tooltip);
+        int padH = dp(12);
+        int padV = dp(6);
+        tipView.setPadding(padH, padV, padH, padV);
+        tipView.setSingleLine(true);
+        tipView.setIncludeFontPadding(false);
+
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        int screenH = getResources().getDisplayMetrics().heightPixels;
+        int maxTextW = Math.max(dp(64), Math.min(dp(240), screenW - dp(48)));
+        tipView.setMaxWidth(maxTextW);
+        tipView.measure(
+                View.MeasureSpec.makeMeasureSpec(maxTextW, View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(dp(64), View.MeasureSpec.AT_MOST));
+        int tipW = Math.max(tipView.getMeasuredWidth(), padH * 2 + dp(24));
+        int tipH = Math.max(tipView.getMeasuredHeight(), dp(28));
+
+        PopupWindow popup = new PopupWindow(
+                tipView,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        popup.setContentView(tipView);
+        popup.setWidth(tipW);
+        popup.setHeight(tipH);
+        popup.setOutsideTouchable(true);
+        popup.setFocusable(false);
+        popup.setTouchable(true);
+        popup.setClippingEnabled(true);
+        try {
+            popup.setElevation(dp(6));
+        } catch (Throwable ignored) {
+        }
+        // Transparent so the rounded shape is not clipped by a default frame.
+        popup.setBackgroundDrawable(
+                new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+        final PopupWindow popupRef = popup;
+        final View anchorRef = anchor;
+        final CharSequence cdToRestore = restoredCd;
+        popup.setOnDismissListener(() -> {
+            tipView.removeCallbacks(dismissTooltipRunnable);
+            if (activeTooltip == popupRef) {
+                activeTooltip = null;
+            }
+            try {
+                anchorRef.setContentDescription(cdToRestore);
+            } catch (Throwable ignored) {
+            }
+        });
+
+        int[] loc = new int[2];
+        anchor.getLocationOnScreen(loc);
+        int gap = dp(8);
+        int edge = dp(8);
+
+        // Horizontal: center on the anchor, then clamp into the screen.
+        int screenX = loc[0] + (anchor.getWidth() - tipW) / 2;
+        if (screenX < edge) {
+            screenX = edge;
+        }
+        if (screenX + tipW > screenW - edge) {
+            screenX = Math.max(edge, screenW - edge - tipW);
+        }
+
+        // Vertical: prefer a clear gap under the icon; flip above when tight
+        // (toolbar icons near the status bar, FAB near the nav bar).
+        int yBelow = loc[1] + anchor.getHeight() + gap;
+        int yAbove = loc[1] - gap - tipH;
+        int roomBelow = screenH - edge - (loc[1] + anchor.getHeight());
+        int roomAbove = loc[1] - edge;
+        boolean fitsBelow = roomBelow >= tipH + gap;
+        boolean fitsAbove = roomAbove >= tipH + gap;
+        int screenY;
+        if (fitsBelow) {
+            screenY = yBelow;
+        } else if (fitsAbove) {
+            screenY = yAbove;
+        } else if (roomBelow >= roomAbove) {
+            screenY = Math.min(yBelow, screenH - edge - tipH);
+        } else {
+            screenY = Math.max(yAbove, edge);
+        }
+        if (screenY < edge) {
+            screenY = edge;
+        }
+        if (screenY + tipH > screenH - edge) {
+            screenY = Math.max(edge, screenH - edge - tipH);
+        }
+
+        // PopupWindow coordinates are window-relative.
+        View decor = getWindow() != null ? getWindow().getDecorView() : null;
+        int decorX = 0;
+        int decorY = 0;
+        if (decor != null) {
+            int[] decorLoc = new int[2];
+            decor.getLocationOnScreen(decorLoc);
+            decorX = decorLoc[0];
+            decorY = decorLoc[1];
+        }
+        int winX = screenX - decorX;
+        int winY = screenY - decorY;
+
+        try {
+            popup.showAtLocation(anchor, android.view.Gravity.NO_GRAVITY, winX, winY);
+            activeTooltip = popup;
+            tipView.postDelayed(dismissTooltipRunnable, 2200);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void dismissActiveTooltip() {
+        PopupWindow popup = activeTooltip;
+        activeTooltip = null;
+        if (popup != null) {
+            try {
+                popup.dismiss();
+            } catch (Throwable ignored) {
+            }
+        }
     }
 
     private void registerBackCallback() {
@@ -180,7 +378,9 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
 
     /** Search: first back closes IME (system), next back exits search — not home. */
     private void handleBack() {
-        if (searching) {
+        if (multiSelectMode) {
+            exitMultiSelect();
+        } else if (searching) {
             exitSearch();
         } else {
             finish();
@@ -189,6 +389,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
 
     @Override
     protected void onDestroy() {
+        dismissActiveTooltip();
         if (Build.VERSION.SDK_INT >= 33 && backInvokedCallback instanceof OnBackInvokedCallback cb) {
             try {
                 getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(cb);
@@ -323,6 +524,10 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
 
     /** Title becomes an inline search field; more-menu stays visible. */
     private void enterSearch() {
+        if (multiSelectMode) {
+            exitMultiSelect();
+        }
+        dismissActiveTooltip();
         searching = true;
         // Keep ListView height stable so the scrollbar does not jump when IME opens.
         getWindow().setSoftInputMode(
@@ -340,10 +545,24 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         }
         if (btnBack != null) {
             btnBack.setVisibility(View.VISIBLE);
+            attachTip(btnBack, R.string.exit_search);
+        }
+        if (btnMore != null) {
+            btnMore.setVisibility(View.VISIBLE);
+        }
+        if (btnBatchAdd != null) {
+            btnBatchAdd.setVisibility(View.GONE);
+        }
+        if (btnBatchRemove != null) {
+            btnBatchRemove.setVisibility(View.GONE);
+        }
+        if (btnSelectAll != null) {
+            btnSelectAll.setVisibility(View.GONE);
         }
     }
 
     private void exitSearch() {
+        dismissActiveTooltip();
         searching = false;
         if (searchView != null) {
             searchView.setQuery("", false);
@@ -352,6 +571,9 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         }
         if (titleView != null) {
             titleView.setVisibility(View.VISIBLE);
+            if (!multiSelectMode) {
+                titleView.setText(R.string.settings_title);
+            }
         }
         if (btnSearch != null) {
             btnSearch.setVisibility(View.VISIBLE);
@@ -359,8 +581,206 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         if (btnBack != null) {
             btnBack.setVisibility(View.GONE);
         }
+        if (btnBatchAdd != null) {
+            btnBatchAdd.setVisibility(View.GONE);
+        }
+        if (btnBatchRemove != null) {
+            btnBatchRemove.setVisibility(View.GONE);
+        }
+        if (btnSelectAll != null) {
+            btnSelectAll.setVisibility(View.GONE);
+        }
         currentQuery = "";
         filterApps("");
+    }
+
+    /**
+     * Multi-select: long-press a card. Top bar mirrors search mode — back arrow
+     * on the left, selection count as title, batch whitelist actions on the right.
+     */
+    private void enterMultiSelect(String firstPackage) {
+        dismissActiveTooltip();
+        if (searching) {
+            searching = false;
+            if (searchView != null) {
+                searchView.setQuery("", false);
+                searchView.clearFocus();
+                searchView.setVisibility(View.GONE);
+            }
+            currentQuery = "";
+            filterApps("");
+        }
+        multiSelectMode = true;
+        if (adapter != null) {
+            adapter.setMultiSelectMode(true);
+            java.util.Set<String> seed = new java.util.HashSet<>();
+            if (firstPackage != null) {
+                seed.add(firstPackage);
+            }
+            adapter.setSelectedPackages(seed);
+        }
+        applyMultiSelectBar();
+    }
+
+    private void exitMultiSelect() {
+        multiSelectMode = false;
+        if (adapter != null) {
+            adapter.setMultiSelectMode(false);
+        }
+        if (titleView != null) {
+            titleView.setVisibility(View.VISIBLE);
+            titleView.setText(R.string.settings_title);
+        }
+        if (searchView != null) {
+            searchView.setVisibility(View.GONE);
+        }
+        if (btnSearch != null) {
+            btnSearch.setVisibility(View.VISIBLE);
+        }
+        if (btnBack != null) {
+            btnBack.setVisibility(View.GONE);
+        }
+        if (btnMore != null) {
+            btnMore.setVisibility(View.VISIBLE);
+        }
+        if (btnBatchAdd != null) {
+            btnBatchAdd.setVisibility(View.GONE);
+        }
+        if (btnBatchRemove != null) {
+            btnBatchRemove.setVisibility(View.GONE);
+        }
+        if (btnSelectAll != null) {
+            btnSelectAll.setVisibility(View.GONE);
+        }
+    }
+
+    private void applyMultiSelectBar() {
+        if (!multiSelectMode) {
+            return;
+        }
+        if (titleView != null) {
+            titleView.setVisibility(View.VISIBLE);
+        }
+        if (searchView != null) {
+            searchView.setVisibility(View.GONE);
+        }
+        if (btnBack != null) {
+            btnBack.setVisibility(View.VISIBLE);
+            attachTip(btnBack, R.string.exit_multi_select);
+        }
+        if (btnSearch != null) {
+            btnSearch.setVisibility(View.GONE);
+        }
+        if (btnMore != null) {
+            btnMore.setVisibility(View.GONE);
+        }
+        if (btnBatchAdd != null) {
+            btnBatchAdd.setVisibility(View.VISIBLE);
+        }
+        if (btnBatchRemove != null) {
+            btnBatchRemove.setVisibility(View.VISIBLE);
+        }
+        if (btnSelectAll != null) {
+            btnSelectAll.setVisibility(View.VISIBLE);
+        }
+        int count = adapter != null ? adapter.getSelectedPackages().size() : 0;
+        updateSelectionTitle(count);
+        updateSelectAllIcon();
+    }
+
+    private void updateSelectionTitle(int count) {
+        if (titleView != null && multiSelectMode) {
+            titleView.setText(getString(R.string.selected_count, count));
+        }
+    }
+
+    /** All currently visible (filtered) rows are selected → show deselect-all icon. */
+    private boolean isAllVisibleSelected() {
+        if (adapter == null || filteredApps.isEmpty()) {
+            return false;
+        }
+        java.util.Set<String> selected = adapter.getSelectedPackages();
+        for (AppListAdapter.AppEntry app : filteredApps) {
+            if (!selected.contains(app.packageName)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * One control, two states: select-all icon → tap selects every visible row;
+     * when all are selected the icon flips to deselect-all.
+     */
+    private void updateSelectAllIcon() {
+        if (btnSelectAll == null || !multiSelectMode) {
+            return;
+        }
+        boolean all = isAllVisibleSelected();
+        btnSelectAll.setImageResource(all
+                ? R.drawable.ic_deselect_all
+                : R.drawable.ic_select_all);
+        attachTip(btnSelectAll, all ? R.string.deselect_all : R.string.select_all);
+    }
+
+    private void toggleSelectAllVisible() {
+        if (!multiSelectMode || adapter == null) {
+            return;
+        }
+        if (isAllVisibleSelected()) {
+            java.util.Set<String> next = adapter.getSelectedPackages();
+            for (AppListAdapter.AppEntry app : filteredApps) {
+                next.remove(app.packageName);
+            }
+            adapter.setSelectedPackages(next);
+        } else {
+            java.util.Set<String> next = adapter.getSelectedPackages();
+            for (AppListAdapter.AppEntry app : filteredApps) {
+                next.add(app.packageName);
+            }
+            adapter.setSelectedPackages(next);
+        }
+        int count = adapter.getSelectedPackages().size();
+        updateSelectionTitle(count);
+        updateSelectAllIcon();
+    }
+
+    /**
+     * Apply selected packages to the allowlist. Selection is a staging set;
+     * the whitelist only changes when the user taps a batch action.
+     */
+    private void applyBatchAllowlist(boolean add) {
+        if (!multiSelectMode || adapter == null) {
+            return;
+        }
+        java.util.Set<String> selected = adapter.getSelectedPackages();
+        if (selected.isEmpty()) {
+            Toast.makeText(this, R.string.batch_nothing_selected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        boolean changed = false;
+        for (AppListAdapter.AppEntry app : allApps) {
+            if (!selected.contains(app.packageName)) {
+                continue;
+            }
+            if (add && !app.checked) {
+                app.checked = true;
+                allowlist.add(app.packageName);
+                changed = true;
+            } else if (!add && app.checked) {
+                app.checked = false;
+                allowlist.remove(app.packageName);
+                changed = true;
+            }
+        }
+        if (changed) {
+            updateAllowlist();
+        }
+        if (adapter != null) {
+            adapter.notifyDataSetChanged();
+        }
+        Toast.makeText(this, R.string.batch_added, Toast.LENGTH_SHORT).show();
+        exitMultiSelect();
     }
 
     /**
@@ -369,10 +789,13 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
      * Click toggles; long-press does nothing (only the row ripple).
      */
     private void showOverflowMenu(View anchor) {
+        dismissActiveTooltip();
         View content = getLayoutInflater().inflate(R.layout.popup_overflow, null);
         ImageView sysCheck = content.findViewById(R.id.menu_show_system_check);
+        ImageView fcmCheck = content.findViewById(R.id.menu_show_fcm_check);
         ImageView hideCheck = content.findViewById(R.id.menu_hide_icon_check);
         bindMd3Check(sysCheck, showSystemApps);
+        bindMd3Check(fcmCheck, showFcmSupportedOnly);
         bindMd3Check(hideCheck, launcherIconHidden);
 
         final PopupWindow popup = new PopupWindow(
@@ -411,6 +834,19 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             showSystemApps = !showSystemApps;
             bindMd3Check(sysCheck, showSystemApps);
             loadApps();
+            popup.dismiss();
+        });
+
+        View rowFcm = content.findViewById(R.id.menu_show_fcm);
+        rowFcm.setOnClickListener(v -> {
+            showFcmSupportedOnly = !showFcmSupportedOnly;
+            bindMd3Check(fcmCheck, showFcmSupportedOnly);
+            getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(Prefs.KEY_SHOW_FCM_ONLY, showFcmSupportedOnly)
+                    .apply();
+            // Filter only — keep package scan; toggle just hides non-FCM rows.
+            filterApps(currentQuery);
             popup.dismiss();
         });
 
@@ -463,15 +899,17 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
 
     private void filterApps(String query) {
         filteredApps.clear();
-        if (TextUtils.isEmpty(query)) {
-            filteredApps.addAll(allApps);
-        } else {
-            String lower = query.toLowerCase();
-            for (AppListAdapter.AppEntry app : allApps) {
-                if (app.label.toLowerCase().contains(lower)
-                        || app.packageName.toLowerCase().contains(lower)) {
-                    filteredApps.add(app);
-                }
+        String lower = query != null && query.length() > 0
+                ? query.toLowerCase() : null;
+        boolean fcmOnly = showFcmSupportedOnly;
+        for (AppListAdapter.AppEntry app : allApps) {
+            if (fcmOnly && !app.supportFcm) {
+                continue;
+            }
+            if (lower == null
+                    || app.label.toLowerCase().contains(lower)
+                    || app.packageName.toLowerCase().contains(lower)) {
+                filteredApps.add(app);
             }
         }
         if (adapter != null) {
@@ -592,6 +1030,32 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 && (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0;
     }
 
+    /**
+     * FCMPushViewer-style detection: scan Manifest receivers for well-known
+     * Firebase / GCM component names.
+     */
+    private static boolean hasFcmStyleReceivers(android.content.pm.PackageInfo pi) {
+        if (pi == null || pi.receivers == null) {
+            return false;
+        }
+        for (android.content.pm.ActivityInfo ri : pi.receivers) {
+            if (ri == null || ri.name == null) {
+                continue;
+            }
+            String name = ri.name;
+            // Matches HappyMax0/FCMPushViewer MainActivity.getAppList().
+            if ("com.google.firebase.iid.FirebaseInstanceIdReceiver".equals(name)
+                    || "com.google.android.gms.measurement.AppMeasurementReceiver".equals(name)) {
+                return true;
+            }
+            // Same judgment (receiver class name); modern firebase-messaging SDK.
+            if ("com.google.firebase.messaging.FirebaseMessagingReceiver".equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void initXposedService() {
         try {
             XposedServiceHelper.registerListener(new XposedServiceHelper.OnServiceListener() {
@@ -678,7 +1142,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 runOnUiThread(() -> applyAppSnapshot(selected, false));
             }
 
-            List<android.content.pm.PackageInfo> installed = pm.getInstalledPackages(0);
+            List<android.content.pm.PackageInfo> installed =
+                    pm.getInstalledPackages(PackageManager.GET_RECEIVERS);
             List<AppListAdapter.AppEntry> result = new ArrayList<>();
             for (android.content.pm.PackageInfo pi : installed) {
                 ApplicationInfo ai = pi.applicationInfo;
@@ -688,8 +1153,10 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 if (!showSys && isSystemApp(ai)) {
                     continue;
                 }
-                result.add(new AppListAdapter.AppEntry(
-                        ai.packageName, ai.loadLabel(pm).toString()));
+                AppListAdapter.AppEntry entry = new AppListAdapter.AppEntry(
+                        ai.packageName, ai.loadLabel(pm).toString());
+                entry.supportFcm = hasFcmStyleReceivers(pi);
+                result.add(entry);
             }
             for (AppListAdapter.AppEntry app : result) {
                 app.checked = allow.contains(app.packageName);
@@ -751,6 +1218,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             AppListAdapter.AppEntry x = a.get(i);
             AppListAdapter.AppEntry y = b.get(i);
             if (!x.packageName.equals(y.packageName) || x.checked != y.checked
+                    || x.supportFcm != y.supportFcm
                     || !x.label.equals(y.label)) {
                 return false;
             }

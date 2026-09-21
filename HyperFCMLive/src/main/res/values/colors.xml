@@ -15,4 +15,7 @@
     <color name="md_outline">#857377</color>
     <color name="md_card">#F3E4E7</color>
     <color name="md_icon_tint">#6B5158</color>
+    <!-- Inverse surface tooltips (always contrast against the app surface). -->
+    <color name="md_tooltip_bg">#E62D2D30</color>
+    <color name="md_tooltip_text">#F4EFF4</color>
 </resources>

@@ -29,6 +29,8 @@ public final class Prefs {
     public static final String KEY_ALLOWLIST = "allowlist";
     /** Local mirror group (UI-only; remote remains source of truth for hooks). */
     public static final String LOCAL_PREFS = "fcmlive_allowlist_cache";
+    /** UI-only: overflow menu "Show FCM-supported apps". */
+    public static final String KEY_SHOW_FCM_ONLY = "show_fcm_supported_only";
     /** Action the app broadcasts after writing, to refresh system_server. */
     public static final String ACTION_ALLOWLIST_CHANGED = MODULE_PKG + ".ALLOWLIST_CHANGED";
 

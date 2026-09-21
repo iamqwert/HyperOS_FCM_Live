@@ -83,6 +83,48 @@
                 android:tint="@color/md_icon_tint" />
 
             <ImageButton
+                android:id="@+id/btn_batch_add"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginEnd="2dp"
+                android:layout_gravity="center_vertical"
+                android:background="@drawable/bg_icon_ripple"
+                android:contentDescription="@string/batch_add_allowlist"
+                android:padding="12dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_batch_add"
+                android:tint="@color/md_icon_tint"
+                android:visibility="gone" />
+
+            <ImageButton
+                android:id="@+id/btn_batch_remove"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginEnd="2dp"
+                android:layout_gravity="center_vertical"
+                android:background="@drawable/bg_icon_ripple"
+                android:contentDescription="@string/batch_remove_allowlist"
+                android:padding="12dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_batch_remove"
+                android:tint="@color/md_icon_tint"
+                android:visibility="gone" />
+
+            <ImageButton
+                android:id="@+id/btn_select_all"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginEnd="2dp"
+                android:layout_gravity="center_vertical"
+                android:background="@drawable/bg_icon_ripple"
+                android:contentDescription="@string/select_all"
+                android:padding="12dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_select_all"
+                android:tint="@color/md_icon_tint"
+                android:visibility="gone" />
+
+            <ImageButton
                 android:id="@+id/btn_more"
                 android:layout_width="48dp"
                 android:layout_height="48dp"

@@ -15,4 +15,7 @@
     <color name="md_outline">#9A8589</color>
     <color name="md_card">#2A1E22</color>
     <color name="md_icon_tint">#E0C8CE</color>
+    <!-- Inverse: light bubble on dark surface. -->
+    <color name="md_tooltip_bg">#E6E6E0E5</color>
+    <color name="md_tooltip_text">#322F37</color>
 </resources>
