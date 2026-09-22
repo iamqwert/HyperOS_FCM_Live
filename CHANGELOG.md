@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.0 (versionCode 18)
+
+- 修复 HyperOS 3 上误报的报错
+- 修复 HyperOS 3 上 `googleNetworkDisconnect` 从未生效的问题
+
 ## 1.7.0 (versionCode 17)
 
 - 新增关于页，完善开放源代码许可清单

@@ -11,8 +11,8 @@ android {
         targetSdkVersion 37
         // Fixed so LSPosed update checks never treat this fork as older than
         // upstream builds that inherit a low jgit commitCount.
-        versionCode 17
-        versionName "1.7.0"
+        versionCode 18
+        versionName "1.8.0"
     }
 
     Properties localProperties = new Properties()

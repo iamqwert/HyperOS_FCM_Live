@@ -510,8 +510,10 @@ public class Hooker extends XposedModule {
                     log(Log.INFO, TAG, "GmsObserver#" + legacyName + " absent, skip");
                 }
             }
-            // HyperOS 3: GmsObserver can turn Google components off entirely.
+            // GmsObserver can turn Google components off entirely.
             // Never execute the disable path (FCM needs GMS packages alive).
+            // disableGms exists on HyperOS 3 only; disableGmsApps is a HyperOS 4 name
+            // that is absent from both the OS3 and OS4 PowerKeeper 4.2.00 builds.
             for (String alwaysSkip : new String[]{"disableGms", "disableGmsApps"}) {
                 try {
                     var disableMethod = GmsObserverClass.getDeclaredMethod(alwaysSkip);
@@ -548,7 +550,7 @@ public class Hooker extends XposedModule {
                 });
                 deoptimize(updateFrameworkGmsNetStatusMethod);
             } catch (NoSuchMethodException e) {
-                log(Log.ERROR, TAG, "Failed to hook GmsObserver#updateFrameworkGmsNetStatus", e);
+                log(Log.INFO, TAG, "GmsObserver#updateFrameworkGmsNetStatus absent, skip");
             }
             // Treat Google as always reachable so notifyFrameworkGmsNetworkChanged
             // computes limit = reachable ^ 1 == false.
@@ -578,18 +580,29 @@ public class Hooker extends XposedModule {
         } catch (ClassNotFoundException e) {
             log(Log.ERROR, TAG, "Failed to hook GmsObserver", e);
         }
-        try {
-            var GmsObserverListenerClass = classLoader.loadClass("com.miui.powerkeeper.utils.GmsObserver$2");
-            // Drop disconnect events so PowerKeeper never learns "Google unreachable".
+        // The disconnect listener is an anonymous inner class whose index drifts
+        // between ROM builds: HyperOS 3 ships it as GmsObserver$5 while HyperOS 4
+        // ships it as GmsObserver$2. Probe every candidate instead of hard-coding
+        // a single index, otherwise OS3 silently loses this hook.
+        boolean disconnectHooked = false;
+        for (int i = 1; i <= 8 && !disconnectHooked; i++) {
+            String listenerName = "com.miui.powerkeeper.utils.GmsObserver$" + i;
             try {
-                var disconnectMethod = GmsObserverListenerClass.getDeclaredMethod("googleNetworkDisconnect");
-                hookE(disconnectMethod).intercept(chain -> null);
-                deoptimize(disconnectMethod);
-            } catch (NoSuchMethodException e) {
-                log(Log.INFO, TAG, "GmsObserver$2#googleNetworkDisconnect absent, skip");
+                var GmsObserverListenerClass = classLoader.loadClass(listenerName);
+                // Drop disconnect events so PowerKeeper never learns "Google unreachable".
+                try {
+                    var disconnectMethod = GmsObserverListenerClass.getDeclaredMethod("googleNetworkDisconnect");
+                    hookE(disconnectMethod).intercept(chain -> null);
+                    deoptimize(disconnectMethod);
+                    disconnectHooked = true;
+                    log(Log.INFO, TAG, listenerName + "#googleNetworkDisconnect hooked");
+                } catch (NoSuchMethodException ignored) {
+                }
+            } catch (ClassNotFoundException ignored) {
             }
-        } catch (ClassNotFoundException e) {
-            log(Log.INFO, TAG, "GmsObserver$2 absent, skip disconnect rewrite");
+        }
+        if (!disconnectHooked) {
+            log(Log.INFO, TAG, "GmsObserver$*#googleNetworkDisconnect absent, skip disconnect rewrite");
         }
     }
 
