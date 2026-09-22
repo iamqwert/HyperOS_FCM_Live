@@ -1,6 +1,5 @@
 plugins {
     id 'com.android.application' version '9.4.0' apply false
-    id 'org.lsposed.lsplugin.jgit' version "1.1"
 }
 
 tasks.register('clean', Delete) {
@@ -9,22 +8,4 @@ tasks.register('clean', Delete) {
 tasks.named("updateDaemonJvm") {
     languageVersion = JavaLanguageVersion.of(21)
     vendor = JvmVendorSpec.ADOPTIUM
-}
-ext.commitCount = 0
-try {
-    var repo = jgit.repo(true)
-    def count = repo.commitCount('refs/remotes/origin/main')
-    if (count != null && count > 0) {
-        ext.commitCount = count
-    } else {
-        def headCount = repo.commitCount('HEAD')
-        if (headCount != null) {
-            ext.commitCount = headCount
-        }
-    }
-} catch (Exception ignored) {
-    ext.commitCount = 2
-}
-if (ext.commitCount == 0) {
-    ext.commitCount = 2
 }

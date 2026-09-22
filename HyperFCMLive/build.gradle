@@ -11,8 +11,8 @@ android {
         targetSdkVersion 37
         // Fixed so LSPosed update checks never treat this fork as older than
         // upstream builds that inherit a low jgit commitCount.
-        versionCode 16
-        versionName "1.6.0"
+        versionCode 17
+        versionName "1.7.0"
     }
 
     Properties localProperties = new Properties()
@@ -86,6 +86,6 @@ dependencies {
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
+    // Compile-time hidden-API signatures (not packaged in the APK).
     compileOnly project(":hiddenapi:stubs")
-    implementation project(":hiddenapi:bridge")
 }

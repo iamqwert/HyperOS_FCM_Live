@@ -2,20 +2,18 @@
 <resources>
     <!-- Light fallback when Monet (API 31+) is unavailable. -->
     <color name="md_primary">#8B4A5A</color>
-    <color name="md_primary_deep">#5A2A36</color>
-    <color name="md_on_primary">#FFFFFF</color>
     <color name="md_primary_container">#F4D6DC</color>
-    <color name="md_on_primary_container">#3B101C</color>
     <color name="md_surface">#F7EEF0</color>
     <color name="md_on_surface">#23191B</color>
     <color name="md_on_surface_variant">#534347</color>
     <color name="md_hint_light">#A89298</color>
-    <color name="md_surface_container">#F1E4E7</color>
-    <color name="md_surface_container_high">#EBDADD</color>
     <color name="md_outline">#857377</color>
     <color name="md_card">#F3E4E7</color>
     <color name="md_icon_tint">#6B5158</color>
     <!-- Inverse surface tooltips (always contrast against the app surface). -->
     <color name="md_tooltip_bg">#E62D2D30</color>
     <color name="md_tooltip_text">#F4EFF4</color>
+    <!-- Elevated menu: soft Monet blush — tinted but not muddy. -->
+    <color name="md_popup_menu_bg">#FAF2F4</color>
+    <color name="md_popup_item_ripple">#3D8B4A5A</color>
 </resources>

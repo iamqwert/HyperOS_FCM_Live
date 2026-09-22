@@ -8,6 +8,13 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
+    <!-- Update check via GitHub Releases. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- MIUI 13 / HyperOS gates getInstalledPackages() behind this runtime
+         permission on top of QUERY_ALL_PACKAGES (owner: com.lbe.security.miui). -->
+    <uses-permission android:name="com.android.permission.GET_INSTALLED_APPS" />
+
     <application
         android:description="@string/xposed_description"
         android:enableOnBackInvokedCallback="true"
@@ -44,11 +51,19 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".AboutActivity"
+            android:exported="false" />
+        <activity
+            android:name=".LicensesActivity"
+            android:exported="false" />
+
         <activity-alias
             android:name=".LauncherAlias"
             android:targetActivity=".MainActivity"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true"
+            android:label="@string/launcher_name">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

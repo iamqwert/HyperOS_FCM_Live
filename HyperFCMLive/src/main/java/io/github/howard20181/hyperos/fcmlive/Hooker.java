@@ -52,11 +52,6 @@ public class Hooker extends XposedModule {
     }
 
     @Override
-    public void onModuleLoaded(@NonNull ModuleLoadedParam param) {
-        UnsafeUtils.INSTANCE.setXposedModule(this);
-    }
-
-    @Override
     public void onSystemServerStarting(@NonNull SystemServerStartingParam param) {
         var classLoader = param.getClassLoader();
         this.param = Pair.create("system", classLoader);
@@ -159,7 +154,6 @@ public class Hooker extends XposedModule {
 
     @Override
     public void onHotReloaded(@NonNull HotReloadedParam param) {
-        UnsafeUtils.INSTANCE.setXposedModule(this);
         // Clean reload: reset id bookkeeping and remove every previous hook so the
         // re-setup below starts fresh. Without this, old handles were never unhooked
         // (hookedIds accumulated across passes) and stacked duplicate hooks made the
@@ -422,19 +416,17 @@ public class Hooker extends XposedModule {
     }
 
     /**
-     * PowerKeeper 4.x (HyperOS 4) removed NetdExecutor#initGmsChain and the old
-     * GmsObserver#updateGmsAlarm / updateGmsNetWork / updateGoogleReletivesWakelock
-     * trio. GMS network limiting now goes through:
-     *   GmsObserver.onGoogleReachabilityChanged → notifyFrameworkGmsNetworkChanged
-     *     → updateFrameworkGmsNetStatus(limit) → IGreezeManager.updateGmsNetStatus
-     * and DNS blocking via NetdExecutor.setGmsDnsBlockerState(uid, block) /
-     * execute(..., "setuiddnsrule", ...). Each hook is applied independently so a
-     * missing method on one ROM does not abort the rest.
+     * PowerKeeper hooks for GMS network / DNS / package control.
+     * HyperOS 3 (PowerKeeper 3.x) keeps initGmsChain + updateGmsAlarm trio AND
+     * also exposes setGmsDnsBlockerState / setGmsChainState / disableGms.
+     * HyperOS 4 removed the legacy trio and routes limits through
+     * updateFrameworkGmsNetStatus. Each hook is independent so a missing
+     * method on one ROM does not abort the rest.
      */
     private void hookGmsObserver(ClassLoader classLoader) {
         try {
             var NetdExecutorClass = classLoader.loadClass("com.miui.powerkeeper.utils.NetdExecutor");
-            // Legacy (pre-HyperOS 4): rewrite iptables action to ACCEPT.
+            // HyperOS 3: rewrite iptables action to ACCEPT.
             try {
                 var initGmsChainMethod = NetdExecutorClass.getDeclaredMethod("initGmsChain", String.class, int.class, String.class);
                 hookE(initGmsChainMethod).intercept(chain -> {
@@ -444,9 +436,9 @@ public class Hooker extends XposedModule {
                 });
                 deoptimize(initGmsChainMethod);
             } catch (NoSuchMethodException e) {
-                log(Log.INFO, TAG, "NetdExecutor#initGmsChain absent (PowerKeeper 4.x), using setGmsDnsBlockerState");
+                log(Log.INFO, TAG, "NetdExecutor#initGmsChain absent, skip");
             }
-            // PowerKeeper 4.x: never deny GMS DNS.
+            // HyperOS 3+: never deny GMS DNS (present on 3 and 4).
             try {
                 var setGmsDnsBlockerStateMethod = NetdExecutorClass.getDeclaredMethod("setGmsDnsBlockerState", int.class, boolean.class);
                 hookE(setGmsDnsBlockerStateMethod).intercept(chain -> {
@@ -458,7 +450,22 @@ public class Hooker extends XposedModule {
                 });
                 deoptimize(setGmsDnsBlockerStateMethod);
             } catch (NoSuchMethodException e) {
-                log(Log.ERROR, TAG, "Failed to hook NetdExecutor#setGmsDnsBlockerState", e);
+                log(Log.INFO, TAG, "NetdExecutor#setGmsDnsBlockerState absent, skip");
+            }
+            // HyperOS 3: keep the GMS firewall chain enabled (disable = block).
+            try {
+                var setGmsChainStateMethod =
+                        NetdExecutorClass.getDeclaredMethod("setGmsChainState", String.class, boolean.class);
+                hookE(setGmsChainStateMethod).intercept(chain -> {
+                    var args = chain.getArgs().toArray();
+                    if (args.length > 1) {
+                        args[1] = true;
+                    }
+                    return chain.proceed(args);
+                });
+                deoptimize(setGmsChainStateMethod);
+            } catch (NoSuchMethodException e) {
+                log(Log.INFO, TAG, "NetdExecutor#setGmsChainState absent, skip");
             }
             // Defense in depth: force setuiddnsrule → allow; skip enabling standby firewall.
             try {
@@ -503,7 +510,32 @@ public class Hooker extends XposedModule {
                     log(Log.INFO, TAG, "GmsObserver#" + legacyName + " absent, skip");
                 }
             }
-            // PowerKeeper 4.x: never apply the framework GMS network limit.
+            // HyperOS 3: GmsObserver can turn Google components off entirely.
+            // Never execute the disable path (FCM needs GMS packages alive).
+            for (String alwaysSkip : new String[]{"disableGms", "disableGmsApps"}) {
+                try {
+                    var disableMethod = GmsObserverClass.getDeclaredMethod(alwaysSkip);
+                    hookE(disableMethod).intercept(chain -> null);
+                    deoptimize(disableMethod);
+                } catch (NoSuchMethodException e) {
+                    log(Log.INFO, TAG, "GmsObserver#" + alwaysSkip + " absent, skip");
+                }
+            }
+            // HyperOS 3: updateGmsEnabled(true) / updateGmsState(true) apply limits.
+            for (String limitFlag : new String[]{"updateGmsEnabled", "updateGmsState", "updateGmsInstalled"}) {
+                try {
+                    var limitMethod = GmsObserverClass.getDeclaredMethod(limitFlag, boolean.class);
+                    hookE(limitMethod).intercept(chain -> {
+                        var args = chain.getArgs().toArray();
+                        args[0] = false;
+                        return chain.proceed(args);
+                    });
+                    deoptimize(limitMethod);
+                } catch (NoSuchMethodException e) {
+                    log(Log.INFO, TAG, "GmsObserver#" + limitFlag + " absent, skip");
+                }
+            }
+            // HyperOS 3+: never apply the framework GMS network limit (4.x path).
             try {
                 var updateFrameworkGmsNetStatusMethod =
                         GmsObserverClass.getDeclaredMethod("updateFrameworkGmsNetStatus", boolean.class);

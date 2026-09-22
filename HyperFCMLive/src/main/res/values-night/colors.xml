@@ -2,20 +2,18 @@
 <resources>
     <!-- Dark fallback when Monet is unavailable. -->
     <color name="md_primary">#E8B4C0</color>
-    <color name="md_primary_deep">#F0C4CE</color>
-    <color name="md_on_primary">#4A2030</color>
     <color name="md_primary_container">#6B3545</color>
-    <color name="md_on_primary_container">#F4D6DC</color>
     <color name="md_surface">#1A1214</color>
     <color name="md_on_surface">#F1E4E7</color>
     <color name="md_on_surface_variant">#C9B4B8</color>
     <color name="md_hint_light">#9A8288</color>
-    <color name="md_surface_container">#2A1E22</color>
-    <color name="md_surface_container_high">#3A2A2E</color>
     <color name="md_outline">#9A8589</color>
     <color name="md_card">#2A1E22</color>
     <color name="md_icon_tint">#E0C8CE</color>
     <!-- Inverse: light bubble on dark surface. -->
     <color name="md_tooltip_bg">#E6E6E0E5</color>
     <color name="md_tooltip_text">#322F37</color>
+    <!-- Elevated menu: neutral charcoal (not muddy brown-gray). -->
+    <color name="md_popup_menu_bg">#2A2428</color>
+    <color name="md_popup_item_ripple">#4DE8B4C0</color>
 </resources>

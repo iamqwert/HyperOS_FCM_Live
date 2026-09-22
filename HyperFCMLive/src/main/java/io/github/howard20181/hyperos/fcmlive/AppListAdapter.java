@@ -70,10 +70,6 @@ public class AppListAdapter extends BaseAdapter {
         this.disabledColor = context.getColor(R.color.md_on_surface_variant);
     }
 
-    public boolean isMultiSelectMode() {
-        return multiSelectMode;
-    }
-
     public void setMultiSelectMode(boolean enabled) {
         if (multiSelectMode == enabled) {
             return;
@@ -98,17 +94,6 @@ public class AppListAdapter extends BaseAdapter {
 
     public Set<String> getSelectedPackages() {
         return new HashSet<>(selectedPkgs);
-    }
-
-    public void clearSelection() {
-        if (selectedPkgs.isEmpty()) {
-            return;
-        }
-        selectedPkgs.clear();
-        notifyDataSetChanged();
-        if (listener != null) {
-            listener.onSelectionChanged(0);
-        }
     }
 
     @Override
@@ -271,9 +256,31 @@ public class AppListAdapter extends BaseAdapter {
             app.iconLoading = false;
             if (loaded != null) {
                 app.icon = loaded;
-                mainHandler.post(AppListAdapter.this::notifyDataSetChanged);
+                scheduleIconRefresh();
             }
         });
+    }
+
+    /** True while a coalesced icon refresh is already posted to the main handler. */
+    private boolean refreshPosted;
+
+    /** Coalesce icon-load refreshes so one frame does not spam notifyDataSetChanged. */
+    private void scheduleIconRefresh() {
+        if (refreshPosted) {
+            return;
+        }
+        refreshPosted = true;
+        mainHandler.postDelayed(() -> {
+            refreshPosted = false;
+            notifyDataSetChanged();
+        }, 50L);
+    }
+
+    /** Release icon worker threads (call from Activity.onDestroy). */
+    public void shutdown() {
+        iconLoader.shutdown();
+        // Also drops the pending coalesced refresh post.
+        mainHandler.removeCallbacksAndMessages(null);
     }
 
     private static class ViewHolder {

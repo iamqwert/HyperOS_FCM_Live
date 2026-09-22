@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Monet system accent ripple (light). -->
+<!-- Accent ripple; color follows day/night via md_popup_item_ripple. -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
-    android:color="#558B4A5A">
+    android:color="@color/md_popup_item_ripple">
     <item android:id="@android:id/mask">
         <shape android:shape="rectangle">
             <solid android:color="@android:color/white" />

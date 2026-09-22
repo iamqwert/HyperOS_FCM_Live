@@ -9,7 +9,6 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.ContextThemeWrapper;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageButton;
@@ -41,11 +40,12 @@ import io.github.libxposed.service.XposedServiceHelper;
  */
 public class MainActivity extends Activity implements SearchView.OnQueryTextListener {
 
-    private static final String LAUNCHER_ALIAS =
-            "io.github.howard20181.hyperos.fcmlive.LauncherAlias";
     private static final String TAG_UI = "HyperFCMLive";
-    private static final int MENU_SHOW_SYSTEM = 1001;
-    private static final int MENU_HIDE_ICON = 1002;
+    /** MIUI 13 / HyperOS runtime gate on top of QUERY_ALL_PACKAGES. */
+    private static final String GET_INSTALLED_APPS_PERMISSION =
+            "com.android.permission.GET_INSTALLED_APPS";
+    private static final String MIUI_SECURITY_PACKAGE = "com.lbe.security.miui";
+    private static final int REQUEST_GET_INSTALLED_APPS = 1001;
 
     private final List<AppListAdapter.AppEntry> allApps = new ArrayList<>();
     private final List<AppListAdapter.AppEntry> filteredApps = new ArrayList<>();
@@ -63,6 +63,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private Object backInvokedCallback;
     private boolean searching = false;
     private boolean multiSelectMode = false;
+    /** True only after the first full package scan — blocks empty-list toasts while loading. */
+    private boolean packagesReady = false;
     private String currentQuery = "";
     private boolean showSystemApps = false;
     /** Overflow: when true, list only apps whose Manifest has FCM-style receivers. */
@@ -200,6 +202,69 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         }
 
         registerBackCallback();
+        // Wait for HyperOS app-list grant when needed; other ROMs load immediately.
+        if (!requestInstalledAppsPermissionIfNeeded()) {
+            loadApps();
+        }
+        startUpdateCheck();
+    }
+
+    /** Launch-time update check: Toast only (About keeps its badge). */
+    private void startUpdateCheck() {
+        UpdateChecker.checkAutoAsync(this, (available, version, url) -> {
+            if (available) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        Toast.makeText(this,
+                                getString(R.string.update_found, version),
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * MIUI 13 / HyperOS only: request GET_INSTALLED_APPS when the permission
+     * exists and is owned by Xiaomi's security center. Returns true when a
+     * runtime request was launched and loading should wait for the result.
+     */
+    private boolean requestInstalledAppsPermissionIfNeeded() {
+        PackageManager pm = getPackageManager();
+        try {
+            android.content.pm.PermissionInfo info =
+                    pm.getPermissionInfo(GET_INSTALLED_APPS_PERMISSION, 0);
+            if (info == null || !MIUI_SECURITY_PACKAGE.equals(info.packageName)) {
+                return false;
+            }
+        } catch (PackageManager.NameNotFoundException ignored) {
+            // AOSP and non-MIUI ROMs do not expose this permission.
+            return false;
+        }
+        if (checkSelfPermission(GET_INSTALLED_APPS_PERMISSION)
+                == PackageManager.PERMISSION_GRANTED) {
+            return false;
+        }
+        requestPermissions(new String[]{GET_INSTALLED_APPS_PERMISSION},
+                REQUEST_GET_INSTALLED_APPS);
+        return true;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+                                           @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_GET_INSTALLED_APPS) {
+            return;
+        }
+        boolean granted = grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+        if (!granted) {
+            // Partial package list is still usable — do not block the screen.
+            Toast.makeText(this, R.string.installed_apps_permission_denied,
+                    Toast.LENGTH_LONG).show();
+        }
         loadApps();
     }
 
@@ -390,6 +455,9 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     @Override
     protected void onDestroy() {
         dismissActiveTooltip();
+        if (adapter != null) {
+            adapter.shutdown();
+        }
         if (Build.VERSION.SDK_INT >= 33 && backInvokedCallback instanceof OnBackInvokedCallback cb) {
             try {
                 getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(cb);
@@ -863,6 +931,14 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             popup.dismiss();
         });
 
+        View rowAbout = content.findViewById(R.id.menu_about);
+        if (rowAbout != null) {
+            rowAbout.setOnClickListener(v -> {
+                popup.dismiss();
+                startActivity(new Intent(this, AboutActivity.class));
+            });
+        }
+
         // Keep the popup fully on-screen; width already equals content.
         int[] loc = new int[2];
         anchor.getLocationOnScreen(loc);
@@ -915,6 +991,21 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         if (adapter != null) {
             adapter.notifyDataSetChanged();
         }
+        maybeToastNoFcmApps();
+    }
+
+    /** Empty FCM-only list after a full package scan (no search query). */
+    private void maybeToastNoFcmApps() {
+        if (!showFcmSupportedOnly || !packagesReady) {
+            return;
+        }
+        if (currentQuery != null && currentQuery.length() > 0) {
+            return;
+        }
+        if (!filteredApps.isEmpty()) {
+            return;
+        }
+        Toast.makeText(this, R.string.no_fcm_apps_found, Toast.LENGTH_SHORT).show();
     }
 
     private ComponentName launcherAliasComponent() {
@@ -1195,6 +1286,9 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         ordered.sort(MainActivity::compareEntries);
 
         boolean changed = !sameAppSnapshot(allApps, ordered);
+        if (stopRefresh) {
+            packagesReady = true;
+        }
         if (changed) {
             allApps.clear();
             allApps.addAll(ordered);
@@ -1202,6 +1296,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             if (listView != null) {
                 listView.setSelectionFromTop(firstPos, firstTop);
             }
+        } else if (stopRefresh) {
+            maybeToastNoFcmApps();
         }
 
         if (stopRefresh && swipeRefresh != null) {

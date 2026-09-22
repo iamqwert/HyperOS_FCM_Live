@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">修复澎湃系统谷歌推送重连</string>
+    <string name="launcher_name">FCM 唤醒名单</string>
+    <string name="back">返回</string>
     <string name="xposed_description">去除澎湃系统对谷歌推送连接相关广播的限制。启用模块后，系统耗电可能会增加。</string>
     <string name="settings_title">FCM 唤醒白名单</string>
-    <string name="settings_title_count">FCM 唤醒白名单 (%1$d)</string>
-    <string name="settings_hint">仅点击开启的应用会被 FCM 推送唤醒 / 自动拉起。点按卡片即可切换。</string>
     <string name="select_all">全选</string>
     <string name="deselect_all">取消全选</string>
-    <string name="clear_all">清空</string>
     <string name="search_hint">搜索…</string>
     <string name="tooltip_search">搜索</string>
     <string name="exit_search">退出搜索</string>
@@ -17,21 +16,31 @@
     <string name="batch_remove_allowlist">移出白名单</string>
     <string name="batch_added">白名单已更新</string>
     <string name="batch_nothing_selected">未选择应用</string>
-    <string name="pull_to_refresh">下拉刷新</string>
-    <string name="refreshing">正在刷新…</string>
+    <string name="installed_apps_permission_denied">未授权时应用列表可能不完整</string>
     <string name="show_system_apps">显示系统应用</string>
     <string name="show_fcm_supported_apps">展示支持应用</string>
+    <string name="no_fcm_apps_found">未发现支持FCM的应用</string>
+    <string name="about">关于</string>
+    <string name="view_source_code">查看源代码</string>
+    <string name="check_for_updates">检查更新</string>
+    <string name="update_checking">正在检查更新…</string>
+    <string name="update_none">已是最新版本</string>
+    <string name="update_found">发现新版本 %1$s</string>
+    <string name="update_open">前往下载</string>
+    <string name="open_source_licenses">开放源代码许可</string>
+    <string name="licenses_title">开放源代码许可</string>
+    <string name="licenses_section_deps">依赖</string>
+    <string name="licenses_section_refs">参考项目</string>
+    <string name="licenses_section_licenses">许可证</string>
+    <string name="licenses_section_this_app">本项目</string>
+    <string name="license_view_full_text">点击查看全文</string>
+    <string name="license_apache_2">Apache License 2.0</string>
+    <string name="license_gpl_3">GPL-3.0</string>
+    <string name="license_gpl_2_ce">GPL-2.0 with Classpath Exception</string>
     <string name="hide_launcher_icon">隐藏桌面图标</string>
-    <string name="hide_launcher_icon_hint">隐藏后可在 LSPosed（模块 → 本模块）中打开设置。若桌面图标未消失，请强制停止桌面应用或重启手机。</string>
     <string name="hide_icon_toast">桌面图标已隐藏，需要设置时请从 LSPosed 打开模块</string>
     <string name="show_icon_toast">桌面图标已恢复</string>
-    <string name="hide_icon_failed">无法更改桌面图标显示状态</string>
     <string name="more_menu">更多选项</string>
     <string name="fcm_diagnostics">FCM 诊断</string>
     <string name="fcm_diagnostics_not_found">当前设备无法打开 FCM 诊断界面。</string>
-    <string name="allowlist_status">白名单状态</string>
-    <string name="tip_search">搜索：点按在标题栏内搜索应用</string>
-    <string name="tip_more">更多选项：显示系统应用、隐藏桌面图标</string>
-    <string name="tip_back">返回：退出搜索，恢复标题</string>
-    <string name="tip_fab">FCM 诊断：打开谷歌推送诊断界面</string>
 </resources>
