@@ -77,6 +77,11 @@ jobs:
       contents: write
 
     steps:
+      # 下面的「Compose release notes from CHANGELOG.md」要读仓库里的 CHANGELOG.md
+      # 与 .github/release-notes.md，本 job 又没有别的步骤会拉仓库，所以这次 checkout 不可省略。
+      - name: Checkout
+        uses: actions/checkout@v7
+
       - name: Download release APK
         uses: actions/download-artifact@v4
         with:
@@ -107,7 +112,7 @@ jobs:
           version="${{ steps.ver.outputs.version }}"   # 例如 2.0.0.19
           name="${version%.*}"                          # 去掉 versionCode 段 -> 2.0.0
           awk -v v="$name" '$0 ~ "^## " v "( |$)" { grab=1; next } grab && /^## / { exit } grab { print }' \
-            CHANGELOG.md > section.md
+            CHANGELOG.md > section.md || true
           if [ ! -s section.md ]; then
             echo "- 详见仓库 CHANGELOG.md" > section.md
             echo "::warning::CHANGELOG.md 中没有找到 $name 的小节，已使用占位文本"
@@ -122,7 +127,7 @@ jobs:
             echo "- 正式 Release（非 nightly），同时提供 **release** 与 **debug** 两个 APK。"
             echo "- Release APK：R8 混淆；配置 GitHub Secrets 后使用发布签名。"
             echo
-            cat .github/release-notes.md
+            if [ -f .github/release-notes.md ]; then cat .github/release-notes.md; fi
           } > body.md
 
       - name: Publish GitHub Release
