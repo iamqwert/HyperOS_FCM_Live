@@ -1,0 +1,86 @@
+# CodeQL —— 高级设置（advanced setup），Java/Kotlin 用显式构建步骤。
+#
+# 为什么不能用默认设置（default setup）：
+#   仓库含 Kotlin 代码（HyperFCMLive/.../UnsafeUtils.kt）。CodeQL 对 Kotlin 只支持
+#   `autobuild` / `manual`，**没有 `none`**；因此默认设置必然选 autobuild，由它自己跑
+#   `./gradlew build`。而 release 打包任务在缺少 local.properties:storeFile 时会按设计抛出
+#   GradleException（防止用公开 debug 密钥签出「正式包」，见 HyperFCMLive/build.gradle 的
+#   签名守护），干净 runner 上没有 local.properties —— autobuild 必然失败。
+#   这里改为手动构建，只编 debug 变体：不触碰签名守护，也不需要任何密钥。
+#
+# 注意：本仓库当前启用的是「默认设置」，它会禁用仓库中的 CodeQL 工作流文件并阻止其结果上传。
+#   启用本工作流前，请先到 Settings → Advanced Security → CodeQL analysis → ⋯ →
+#   Switch to advanced → 弹窗点 Disable CodeQL；若本工作流显示为 disabled，再点 Enable workflow。
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # 每周一 03:23 UTC 自动扫描
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+
+    permissions:
+      # 上传分析结果到 code scanning 所必需
+      security-events: write
+      # 读取本仓库私有的 CodeQL 包所必需
+      packages: read
+      # 仅对非 pull_request 事件需要
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+            build-mode: manual
+          - language: actions
+            build-mode: none
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        if: matrix.language == 'java-kotlin'
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # Kotlin 不支持 build-mode: none，必须真正编译一次供 CodeQL 抽取。
+      # 只编 debug：不涉及 release 签名，GitHub runner 上无需配置任何密钥。
+      # （若希望分析 R8 混淆后的产物，可改为
+      #   ./gradlew --no-daemon -PallowDebugSignedRelease :HyperFCMLive:assembleRelease）
+      - name: Build (manual)
+        if: matrix.language == 'java-kotlin'
+        run: ./gradlew --no-daemon :HyperFCMLive:assembleDebug
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
