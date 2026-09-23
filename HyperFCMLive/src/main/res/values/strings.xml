@@ -2,6 +2,7 @@
     <string name="app_name">Fix HyperOS FCM reconnection</string>
     <string name="launcher_name">FCM Wake List</string>
     <string name="back">Back</string>
+    <string name="help">Help</string>
     <string name="xposed_description">Remove HyperOS\'s restrictions on FCM connection-related broadcasts. System power consumption may increase when this module is enabled.</string>
     <string name="settings_title">FCM wake whitelist</string>
     <string name="select_all">Select all</string>
@@ -15,15 +16,38 @@
     <string name="batch_remove_allowlist">Remove from whitelist</string>
     <string name="batch_added">Whitelist updated</string>
     <string name="batch_nothing_selected">Nothing selected</string>
+    <string name="multi_select_tip">Long-press an app card for batch actions</string>
     <string name="installed_apps_permission_denied">App list may be incomplete without this permission</string>
     <string name="show_system_apps">Show system apps</string>
     <string name="show_fcm_supported_apps">Show FCM-supported apps</string>
     <string name="no_fcm_apps_found">No FCM-supported apps found</string>
     <string name="about">About</string>
+    <string name="settings">Settings</string>
+    <string name="about_section_display">Display</string>
+    <string name="about_section_theme">Theme</string>
+    <string name="about_section_backup">Backup &amp; Restore</string>
+    <string name="about_section_project">About</string>
+    <string name="about_current_version">Current version</string>
+    <string name="no_developer_options">No developer options here</string>
+    <string name="about_sub_hide_icon_on">Hidden — open from LSPosed</string>
+    <string name="about_sub_hide_icon_off">Shown — tap to hide</string>
+    <string name="about_sub_check_update">Check GitHub for new releases</string>
+    <string name="about_sub_export">Save the allowlist to a text file</string>
+    <string name="about_sub_import">Restore the allowlist from a text file</string>
+    <string name="about_sub_source">View this project on GitHub</string>
+    <string name="about_sub_licenses">Open source components used by this app</string>
     <string name="view_source_code">View source code</string>
     <string name="check_for_updates">Check for updates</string>
     <string name="update_checking">Checking for updates…</string>
     <string name="update_none">You are up to date</string>
+    <string name="update_error">Update check failed. Check your connection and retry.</string>
+    <string name="export_allowlist">Export allowlist</string>
+    <string name="import_allowlist">Import allowlist</string>
+    <string name="allowlist_export_failed">Export failed</string>
+    <string name="allowlist_import_failed">Import failed</string>
+    <string name="allowlist_import_empty">No valid package names found in that file</string>
+    <string name="allowlist_import_done">Imported %1$d app(s)</string>
+    <string name="allowlist_export_done">Exported %1$d app(s)</string>
     <string name="update_found">New version %1$s is available</string>
     <string name="update_open">Go to download</string>
     <string name="open_source_licenses">Open source licenses</string>
@@ -37,9 +61,70 @@
     <string name="license_gpl_3">GPL-3.0</string>
     <string name="license_gpl_2_ce">GPL-2.0 with Classpath Exception</string>
     <string name="hide_launcher_icon">Hide desktop icon</string>
+    <string name="language">Language</string>
+    <string name="about_sub_language">Change the app language</string>
+    <!-- Language names stay in their own form and must be identical in every
+         values-* folder; do not translate them. -->
+    <string-array name="language_entries">
+        <item>简体中文</item>
+        <item>English</item>
+    </string-array>
+    <string name="theme_mode">Theme mode</string>
+    <string name="palette_style">Palette style</string>
+    <string name="color_spec">Color spec</string>
+    <string name="about_sub_theme_mode">Adjust the app theme mode</string>
+    <string name="about_sub_palette_style">Choose dynamic color style</string>
+    <string name="about_sub_color_spec">Choose Material color spec</string>
+    <string name="dynamic_color">Dynamic color</string>
+    <string name="about_sub_dynamic_color_on">Following the wallpaper colors</string>
+    <string name="about_sub_dynamic_color_off">Using a custom theme color</string>
+    <string-array name="theme_mode_entries">
+        <item>Follow system</item>
+        <item>Light</item>
+        <item>Dark</item>
+        <item>AMOLED</item>
+    </string-array>
+    <!-- Order matches Scheme.Variant (official Material 3 palette styles). -->
+    <string-array name="palette_style_entries">
+        <item>Monochrome</item>
+        <item>Neutral</item>
+        <item>Tonal spot</item>
+        <item>Vibrant</item>
+        <item>Expressive</item>
+        <item>Fidelity</item>
+        <item>Content</item>
+        <item>Rainbow</item>
+        <item>Fruit salad</item>
+    </string-array>
+    <string-array name="color_spec_entries">
+        <item>Material You (2021)</item>
+        <item>Expressive (2025)</item>
+    </string-array>
     <string name="hide_icon_toast">Desktop icon hidden. Open settings from LSPosed if needed</string>
     <string name="show_icon_toast">Desktop icon restored</string>
     <string name="more_menu">More options</string>
     <string name="fcm_diagnostics">FCM Diagnostics</string>
     <string name="fcm_diagnostics_not_found">FCM Diagnostics is unavailable on this device.</string>
+
+    <!-- Help page. Wording must match Hooker.java: an empty allowlist lets
+         everything through, a non-empty one only lets the listed apps through,
+         a match gets a 2000ms temporary exemption plus
+         FLAG_INCLUDE_STOPPED_PACKAGES; list edits apply at once, enabling or
+         updating the module needs one reboot. -->
+    <string name="help_section_how">About this app</string>
+    <string name="help_how_body">HyperOS power policy throttles background broadcasts and network access. Push (FCM) works by having GMS deliver a broadcast that wakes the app; if that broadcast is deferred or dropped, the app never sees the message.\n\nThis module changes those decisions inside system_server: it lets the push and reconnect broadcasts through, keeps GMS from being cut off, frozen or blacklisted, and on every push it grants the target app a temporary ~2s power exemption and lets the broadcast reach apps that are in the stopped state.</string>
+    <string name="help_section_allowlist">The allowlist mechanism</string>
+    <string name="help_allowlist_empty_title">Nothing checked</string>
+    <string name="help_allowlist_empty_body">Equivalent to letting everything through: any app that receives a push may be auto-started and woken, with no list to maintain. The cost is noticeably higher background battery and memory use than checking only a few apps.</string>
+    <string name="help_allowlist_checked_title">Some apps checked</string>
+    <string name="help_allowlist_checked_body">Only those apps are affected and can be woken by a push. Everything unchecked falls back to the stock system behaviour: pushes may be deferred, batched, or only delivered once you open the app yourself. You have to maintain the list — miss an app and its pushes are delayed.</string>
+    <string name="help_section_faq">Troubleshooting</string>
+    <string name="help_faq_q1">I checked an app but pushes still do not arrive</string>
+    <string name="help_faq_a1">Check in order: (1) the module is enabled in LSPosed and its scope includes System Framework; (2) the device was rebooted once after enabling or updating the module; (3) the app really uses FCM; (4) use FCM Diagnostics to check the GMS connection state.</string>
+    <string name="help_faq_q2">Do I need to reboot after editing the list?</string>
+    <string name="help_faq_a2">No. The change notifies the module inside the system immediately and it re-reads the list (as long as the module is enabled with the right scope). Only the first enable — or an update of the module — needs one reboot.</string>
+    <string name="help_faq_q3">Battery use went up</string>
+    <string name="help_faq_a3">That is inherent to the module: it lets push reconnects through and allows apps to be woken. To save power, switch to allowlist mode and check only the apps whose pushes must be instant — the narrower the list, the smaller the cost.</string>
+    <string name="help_faq_q4">How is “supported apps” decided?</string>
+    <string name="help_faq_a4">It looks for Firebase / GMS push receiver class names in each app’s manifest, which is a heuristic — an unusual implementation can be missed. The mark only helps you filter; checking an app is never limited by it.</string>
 </resources>

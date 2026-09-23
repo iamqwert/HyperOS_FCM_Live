@@ -1,16 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+      Dark counterpart of values/themes.xml. Kept as a near-duplicate on
+      purpose: this is the resource the app resolves when the user forces dark
+      mode (see ThemeSupport.attach, which rewrites uiMode), so the light/dark
+      split still has to exist even though the bar colours are gone — see the
+      comment in values/themes.xml for why.
+    -->
     <style name="Theme.HyperFCMLive" parent="android:Theme.DeviceDefault.DayNight">
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
-        <item name="android:statusBarColor">@color/md_surface</item>
-        <item name="android:navigationBarColor">@color/md_surface</item>
-        <item name="android:windowBackground">@color/md_surface</item>
+        <item name="android:windowBackground">@color/md_page_bg</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowTranslucentStatus">false</item>
-        <item name="android:windowTranslucentNavigation">false</item>
-        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
-        <item name="android:fitsSystemWindows">false</item>
         <item name="android:colorPrimary">@color/md_primary</item>
         <item name="android:colorAccent">@color/md_primary</item>
         <item name="android:textColorPrimary">@color/md_on_surface</item>

@@ -17,3 +17,8 @@ local.properties
 *.keystore
 *.p12
 /.idea/*
+# Device logcat dumps (local debugging only)
+*.logcat
+
+# WorkBuddy local data (internal notes / scratch) — never publish
+.workbuddy/

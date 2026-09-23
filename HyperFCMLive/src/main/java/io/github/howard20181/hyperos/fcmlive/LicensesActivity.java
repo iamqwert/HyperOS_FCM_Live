@@ -1,11 +1,16 @@
 package io.github.howard20181.hyperos.fcmlive;
 
 import android.app.Activity;
+import android.content.Context;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+
+import io.github.howard20181.hyperos.fcmlive.theme.AppPalette;
+import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine;
+import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport;
 
 /**
  * Open-source license list. Deps show version on the right; this project and
@@ -17,6 +22,8 @@ public class LicensesActivity extends Activity {
     private static final String ANDROIDX_URL = "https://github.com/androidx/androidx";
     private static final String AOSP_URL = "https://android.googlesource.com/platform/frameworks/base";
     private static final String OPENJDK_URL = "https://github.com/openjdk/jdk";
+    private static final String MCU_URL =
+            "https://github.com/material-foundation/material-color-utilities";
 
     /** name, version ("" if none), license label, project URL. */
     private static final String[][] DEPS = {
@@ -26,7 +33,6 @@ public class LicensesActivity extends Activity {
             {"AndroidX Interpolator", "1.0.0", "Apache License 2.0", ANDROIDX_URL},
             // Build-only stubs vendored under hiddenapi/stubs; kept for attribution.
             {"AOSP Framework Annotations", "", "Apache License 2.0", AOSP_URL},
-            {"Arch Core Common", "2.0.0", "Apache License 2.0", ANDROIDX_URL},
             {"JetBrains Annotations", "13.0", "Apache License 2.0", "https://github.com/JetBrains/java-annotations"},
             {"Kotlin Stdlib", "2.2.10", "Apache License 2.0", "https://github.com/JetBrains/kotlin"},
             {"libxposed API", "102.0.0", "Apache License 2.0", "https://github.com/libxposed/api"},
@@ -34,6 +40,8 @@ public class LicensesActivity extends Activity {
             {"libxposed Service", "102.0.0", "Apache License 2.0", "https://github.com/libxposed/service"},
             {"Lifecycle Common", "2.0.0", "Apache License 2.0", ANDROIDX_URL},
             {"Lifecycle Runtime", "2.0.0", "Apache License 2.0", ANDROIDX_URL},
+            // Vendored source under mcu/ (no Gradle artifact) — listed for attribution.
+            {"Material Color Utilities", "", "Apache License 2.0", MCU_URL},
             {"OpenJDK Unsafe", "", "GPL-2.0 with Classpath Exception", OPENJDK_URL},
             {"SwipeRefreshLayout", "1.1.0", "Apache License 2.0", ANDROIDX_URL},
             {"VersionedParcelable", "1.1.0", "Apache License 2.0", ANDROIDX_URL},
@@ -49,8 +57,14 @@ public class LicensesActivity extends Activity {
     };
 
     @Override
+    protected void attachBaseContext(Context newBase) {
+        super.attachBaseContext(ThemeSupport.attach(newBase));
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        ThemeSupport.onCreate(this);
         setContentView(R.layout.activity_licenses);
         applySystemBarInsets();
 
@@ -69,7 +83,7 @@ public class LicensesActivity extends Activity {
         View appRow = inflater.inflate(R.layout.item_license_ref, list, false);
         bindRow(appRow, getString(R.string.app_name), "GPL-3.0");
         appRow.setOnClickListener(v -> openUrl(REPO_URL));
-        addRow(list, appRow);
+        addRow(list, appRow, true, true);
 
         addSectionHeader(list, inflater, getString(R.string.licenses_section_licenses));
         String licenseHint = getString(R.string.license_view_full_text);
@@ -93,25 +107,27 @@ public class LicensesActivity extends Activity {
             final String title = licenseNames[i];
             final int rawRes = licenseRaw[i];
             row.setOnClickListener(v -> showLicenseDialog(title, rawRes));
-            addRow(list, row);
+            addRow(list, row, i == 0, i == licenseNames.length - 1);
         }
 
         addSectionHeader(list, inflater, getString(R.string.licenses_section_deps));
-        for (String[] dep : DEPS) {
+        for (int i = 0; i < DEPS.length; i++) {
+            String[] dep = DEPS[i];
             View row = inflater.inflate(R.layout.item_license_dep, list, false);
             bindRow(row, dep[0], dep[1], dep[2]);
             final String url = dep[3];
             row.setOnClickListener(v -> openUrl(url));
-            addRow(list, row);
+            addRow(list, row, i == 0, i == DEPS.length - 1);
         }
 
         addSectionHeader(list, inflater, getString(R.string.licenses_section_refs));
-        for (String[] ref : REFERENCES) {
+        for (int i = 0; i < REFERENCES.length; i++) {
+            String[] ref = REFERENCES[i];
             View row = inflater.inflate(R.layout.item_license_ref, list, false);
             bindRow(row, ref[0], ref[1]);
             final String url = ref[2];
             row.setOnClickListener(v -> openUrl(url));
-            addRow(list, row);
+            addRow(list, row, i == 0, i == REFERENCES.length - 1);
         }
     }
 
@@ -136,21 +152,49 @@ public class LicensesActivity extends Activity {
         }
     }
 
+    /** Section header styled exactly like the About page groups. */
     private void addSectionHeader(LinearLayout list, LayoutInflater inflater, String title) {
         TextView header = new TextView(this);
         header.setText(title);
-        header.setTextColor(getColor(R.color.md_on_surface_variant));
-        header.setTextSize(13f);
-        header.setPadding(dp(8), dp(16), dp(8), dp(4));
-        header.setTypeface(null, android.graphics.Typeface.BOLD);
+        header.setTextColor(ThemeEngine.palette(this).primary);
+        header.setTextSize(14f);
+        header.setTypeface(android.graphics.Typeface.create(
+                "sans-medium", android.graphics.Typeface.NORMAL));
+        header.setPadding(dp(8), dp(28), dp(8), dp(12));
         list.addView(header);
     }
 
-    private void addRow(LinearLayout list, View row) {
+    /**
+     * Adds one card to a section with the M3 connected-group look used on the
+     * About page: 2dp gaps between cards, 16dp outer corners, 4dp inner
+     * corners, flat (no elevation), and a ripple masked to the same shape.
+     */
+    private void addRow(LinearLayout list, View row, boolean first, boolean last) {
+        row.setBackground(groupRowBackground(first, last));
         if (row.getLayoutParams() instanceof LinearLayout.LayoutParams lp) {
-            lp.topMargin = dp(8);
+            lp.topMargin = first ? 0 : dp(2);
         }
         list.addView(row);
+    }
+
+    /** Position-aware rounded ripple matching the About page card groups. */
+    private android.graphics.drawable.Drawable groupRowBackground(boolean first, boolean last) {
+        AppPalette palette = ThemeEngine.palette(this);
+        float top = first ? dp(16) : dp(4);
+        float bottom = last ? dp(16) : dp(4);
+        float[] radii = {top, top, top, top, bottom, bottom, bottom, bottom};
+        android.graphics.drawable.GradientDrawable content =
+                new android.graphics.drawable.GradientDrawable();
+        content.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        content.setCornerRadii(radii);
+        content.setColor(palette.card);
+        android.graphics.drawable.GradientDrawable mask =
+                new android.graphics.drawable.GradientDrawable();
+        mask.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        mask.setCornerRadii(radii);
+        mask.setColor(android.graphics.Color.WHITE);
+        return new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(palette.ripple), content, mask);
     }
 
     private void openUrl(String url) {
@@ -164,10 +208,11 @@ public class LicensesActivity extends Activity {
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(pad, pad, pad, pad);
 
+        AppPalette palette = ThemeEngine.palette(this);
         TextView titleView = new TextView(this);
         titleView.setText(title);
         titleView.setTextSize(18f);
-        titleView.setTextColor(getColor(R.color.md_on_surface));
+        titleView.setTextColor(palette.onSurface);
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -177,7 +222,7 @@ public class LicensesActivity extends Activity {
         TextView body = new TextView(this);
         body.setText(readRawText(rawRes));
         body.setTextSize(12f);
-        body.setTextColor(getColor(R.color.md_on_surface_variant));
+        body.setTextColor(palette.onSurfaceVariant);
         body.setTextIsSelectable(true);
         body.setLineSpacing(0, 1.15f);
 
@@ -212,8 +257,11 @@ public class LicensesActivity extends Activity {
             return;
         }
         root.setOnApplyWindowInsetsListener((v, insets) -> {
-            int top = insets.getSystemWindowInsetTop();
-            int bottom = insets.getSystemWindowInsetBottom();
+            int top = UiUtils.topInset(insets);
+            // Union of navigation-bar and gesture insets: correct under gesture
+            // navigation too, where the bar inset alone can be zero and the
+            // home-indicator area is only reported by systemGestures.
+            int bottom = UiUtils.bottomInset(insets);
             int barPad = dp(12);
             if (topBar != null) {
                 topBar.setPadding(topBar.getPaddingLeft(), top + barPad,
@@ -224,7 +272,7 @@ public class LicensesActivity extends Activity {
                         list.getPaddingRight(), bottom + dp(16));
                 ((android.view.ViewGroup) list).setClipToPadding(false);
             }
-            return insets.consumeSystemWindowInsets();
+            return insets;
         });
         root.requestApplyInsets();
         int statusBar = statusBarHeight();

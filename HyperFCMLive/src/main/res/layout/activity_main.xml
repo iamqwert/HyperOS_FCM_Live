@@ -3,7 +3,7 @@
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/md_surface">
+    android:background="@color/md_page_bg">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -45,10 +45,11 @@
                 <TextView
                     android:id="@+id/toolbar_title"
                     android:layout_width="match_parent"
-                    android:layout_height="52dp"
+                    android:layout_height="wrap_content"
                     android:layout_gravity="center_vertical"
                     android:ellipsize="end"
                     android:gravity="center_vertical"
+                    android:minHeight="52dp"
                     android:paddingStart="8dp"
                     android:paddingEnd="8dp"
                     android:text="@string/settings_title"

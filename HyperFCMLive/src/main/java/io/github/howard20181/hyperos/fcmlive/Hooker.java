@@ -10,7 +10,10 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.PowerExemptionManager;
+import android.os.SystemClock;
 import android.util.Log;
 import android.util.Pair;
 
@@ -20,11 +23,16 @@ import androidx.annotation.RequiresApi;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.github.libxposed.api.XposedModule;
 
@@ -379,15 +387,32 @@ public class Hooker extends XposedModule {
         var getWhiteListMethod = ProcessPolicyClass.getDeclaredMethod("getWhiteList", int.class);
         hookE(getWhiteListMethod).intercept(chain -> {
             var result = chain.proceed();
-            if (chain.getArg(0) instanceof Integer flags && (flags & 1) != 0) {
-                if (result instanceof List<?>) {
-                    var whiteList = (List<String>) result;
-                    whiteList.add(GMS_PACKAGE_NAME);
-                    whiteList.add(GMS_PERSISTENT_PROCESS_NAME);
+            // Never add to the collection the framework hands back: it may be
+            // immutable (the UnsupportedOperationException would escape into
+            // ActivityManagerService) and it may be a shared, cached instance
+            // (then the entries accumulate on every single call). A private copy
+            // keeps the same order and element types while leaving the original
+            // untouched. On any failure the original result is returned as-is.
+            try {
+                if (chain.getArg(0) instanceof Integer flags && (flags & 1) != 0
+                        && result instanceof List<?> source) {
+                    var whiteList = new ArrayList<Object>(source);
+                    addIfAbsent(whiteList, GMS_PACKAGE_NAME);
+                    addIfAbsent(whiteList, GMS_PERSISTENT_PROCESS_NAME);
+                    return whiteList;
                 }
+            } catch (Throwable t) {
+                log(Log.ERROR, TAG, "Failed to extend ProcessPolicy white list", t);
             }
             return result;
         });
+    }
+
+    /** Appends {@code value} unless an equal element is already present. */
+    private static void addIfAbsent(List<Object> list, String value) {
+        if (!list.contains(value)) {
+            list.add(value);
+        }
     }
 
     private void hookAwareResourceControl(ClassLoader classLoader) throws ClassNotFoundException,
@@ -402,16 +427,62 @@ public class Hooker extends XposedModule {
                     return chain.proceed();
                 } finally {
                     try {
-                        var mNoNetworkBlackUids = (List<String>) mNoNetworkBlackUidsField.get(chain.getThisObject());
-                        if (mNoNetworkBlackUids != null) {
-                            mNoNetworkBlackUids.remove(GMS_PACKAGE_NAME);
-                        }
-                    } catch (Exception e) {
-                        log(Log.ERROR, TAG, "Failed to modify AwareResourceControl.mNoNetworkBlackUids", e);
+                        pruneGmsFromNoNetworkBlacklist(mNoNetworkBlackUidsField, chain.getThisObject());
+                    } catch (Throwable t) {
+                        log(Log.ERROR, TAG, "Failed to modify AwareResourceControl.mNoNetworkBlackUids", t);
                     }
                 }
             });
             deoptimize(constructor);
+        }
+    }
+
+    /** Set after the "nothing matched" case has been reported once, to keep logs quiet. */
+    private volatile boolean noNetworkBlacklistMismatchLogged;
+
+    /**
+     * Drop GMS from {@code AwareResourceControl.mNoNetworkBlackUids}.
+     *
+     * <p>The field is named as a collection of <em>uids</em>, while the previous
+     * code only ever removed the package name — a lookup that can never match a
+     * uid, which would have left this hook silently doing nothing. Both forms are
+     * tried now, and which one matched is logged: the field's real element type can
+     * only be observed on a device, so the log is the verification.
+     */
+    private void pruneGmsFromNoNetworkBlacklist(Field blacklistField, Object awareResourceControl)
+            throws IllegalAccessException {
+        Object raw = blacklistField.get(awareResourceControl);
+        if (!(raw instanceof Collection<?> blacklist)) {
+            return;
+        }
+        boolean removedByName = blacklist.remove(GMS_PACKAGE_NAME);
+        Integer uid = gmsUid();
+        boolean removedByUid = uid != null && blacklist.remove(uid);
+        if (removedByName || removedByUid) {
+            log(Log.INFO, TAG, "Removed GMS from NoNetworkBlackUids (by "
+                    + (removedByUid ? "uid " + uid : "package name") + ")");
+        } else if (!noNetworkBlacklistMismatchLogged) {
+            noNetworkBlacklistMismatchLogged = true;
+            log(Log.INFO, TAG, "NoNetworkBlackUids (size=" + blacklist.size()
+                    + ") matched neither the GMS package name nor its uid"
+                    + (uid == null ? " (uid not resolvable yet)" : ""));
+        }
+    }
+
+    /**
+     * uid of the GMS package, or null when the package manager cannot answer yet.
+     * {@link #getSystemContext()} is used from whichever process the module runs in
+     * (here: PowerKeeper), so this does not require system_server.
+     */
+    private Integer gmsUid() {
+        try {
+            Context context = getSystemContext();
+            if (context == null) {
+                return null;
+            }
+            return context.getPackageManager().getApplicationInfo(GMS_PACKAGE_NAME, 0).uid;
+        } catch (Throwable t) {
+            return null;
         }
     }
 
@@ -470,6 +541,12 @@ public class Hooker extends XposedModule {
             // Defense in depth: force setuiddnsrule → allow; skip enabling standby firewall.
             try {
                 var executeMethod = NetdExecutorClass.getDeclaredMethod("execute", int.class, String.class, String.class, Object[].class);
+                // Skipping a call by returning null is only safe when the method
+                // returns void or a reference type: for a primitive return the caller
+                // would unbox null and crash inside PowerKeeper, so in that case the
+                // standby-firewall skip is dropped rather than risked.
+                Class<?> executeReturn = executeMethod.getReturnType();
+                boolean skippable = executeReturn == void.class || !executeReturn.isPrimitive();
                 hookE(executeMethod).intercept(chain -> {
                     var args = chain.getArgs().toArray();
                     if (args.length >= 4 && args[2] instanceof String cmd && args[3] instanceof Object[] cmdArgs) {
@@ -482,12 +559,16 @@ public class Hooker extends XposedModule {
                         if ("enablemiuistandby".equals(cmd) && cmdArgs.length >= 1
                                 && "enable".equals(String.valueOf(cmdArgs[0]))) {
                             // Do not enable the standby firewall chain for GMS.
-                            return null;
+                            return skippable ? null : chain.proceed();
                         }
                     }
                     return chain.proceed();
                 });
                 deoptimize(executeMethod);
+                if (!skippable) {
+                    log(Log.WARN, TAG, "NetdExecutor#execute returns " + executeReturn.getName()
+                            + "; cannot skip the standby-firewall call safely");
+                }
             } catch (NoSuchMethodException e) {
                 log(Log.INFO, TAG, "NetdExecutor#execute not found, skip command-level GMS net hooks");
             }
@@ -615,12 +696,18 @@ public class Hooker extends XposedModule {
                             GlobalFeatureConfigureHelperClass.getDeclaredMethod("getDozeWhiteListApps", argType);
                     hookE(getDozeWhiteListAppsMethod).intercept(chain -> {
                         var result = chain.proceed();
-                        if (result instanceof List<?>) {
-                            @SuppressWarnings("unchecked")
-                            var whiteList = (List<String>) result;
-                            if (!whiteList.contains(GMS_PACKAGE_NAME)) {
+                        // Same rule as the ProcessPolicy hook: hand back a copy
+                        // rather than mutating the framework's own list, which may
+                        // be immutable or shared between calls.
+                        try {
+                            if (result instanceof List<?> source
+                                    && !source.contains(GMS_PACKAGE_NAME)) {
+                                var whiteList = new ArrayList<Object>(source);
                                 whiteList.add(GMS_PACKAGE_NAME);
+                                return whiteList;
                             }
+                        } catch (Throwable t) {
+                            log(Log.ERROR, TAG, "Failed to extend doze white list", t);
                         }
                         return result;
                     });
@@ -678,21 +765,131 @@ public class Hooker extends XposedModule {
         } catch (Exception e) {
             log(Log.ERROR, TAG, "Failed to read remote allowlist", e);
         }
+        // Stamped even on failure, so the stale-copy fallback below cannot turn
+        // into a read storm while the module's prefs are unreadable.
+        sAllowlistReadMs = SystemClock.uptimeMillis();
     }
 
     /** Called from hookSystemServer: load the initial allowlist at boot. */
     private void hookAllowlist() {
         loadAllowlistFromRemotePrefs();
+        installAllowlistReceiverAsync();
     }
 
-    private boolean allowlistReceiverRegistered = false;
+    private volatile boolean allowlistReceiverRegistered = false;
+    private final AtomicBoolean allowlistRegistering = new AtomicBoolean(false);
+    /** True while a coalesced reload is already queued on the background thread. */
+    private final AtomicBoolean allowlistReloadQueued = new AtomicBoolean(false);
+    private volatile long sAllowlistReadMs = 0L;
+    /** How often the stale-copy fallback may re-read the prefs (see getFcmAllowlist). */
+    private static final long ALLOWLIST_STALE_MS = 10_000L;
+    /**
+     * Minimum spacing between two reloads. A burst of broadcasts (or a hostile app
+     * spamming them) collapses into one queued read: the read always fetches the
+     * whole current set, so coalescing cannot lose a change.
+     */
+    private static final long ALLOWLIST_RELOAD_MIN_MS = 500L;
+
+    /** Handler running on a private background thread; null until first use. */
+    private volatile Handler allowlistHandler;
+
+    /**
+     * A Handler on a dedicated background thread.
+     *
+     * <p>Everything that touches the shared prefs from the hook side runs here.
+     * Reading them can be a cross-process call, and this used to happen on
+     * system_server's main thread — once from the receiver, and once from the
+     * stale-copy fallback inside a hooked ActivityManagerService call. Neither is
+     * acceptable on the main thread of the system.
+     */
+    private Handler allowlistBackgroundHandler() {
+        Handler handler = allowlistHandler;
+        if (handler != null) {
+            return handler;
+        }
+        synchronized (this) {
+            if (allowlistHandler == null) {
+                HandlerThread thread = new HandlerThread("fcmlive-allowlist");
+                thread.start();
+                allowlistHandler = new Handler(thread.getLooper());
+            }
+            return allowlistHandler;
+        }
+    }
+
+    /**
+     * Ask for the allowlist to be re-read on the background thread.
+     *
+     * <p>Never blocks and never performs the read inline, so it is safe to call
+     * from a hooked ActivityManagerService path. Requests inside
+     * {@link #ALLOWLIST_RELOAD_MIN_MS} collapse into one pending read.
+     */
+    private void requestAllowlistReload() {
+        long sinceLastRead = SystemClock.uptimeMillis() - sAllowlistReadMs;
+        if (sinceLastRead >= ALLOWLIST_RELOAD_MIN_MS) {
+            allowlistBackgroundHandler().post(this::loadAllowlistFromRemotePrefs);
+            return;
+        }
+        if (!allowlistReloadQueued.compareAndSet(false, true)) {
+            return;
+        }
+        allowlistBackgroundHandler().postDelayed(() -> {
+            allowlistReloadQueued.set(false);
+            loadAllowlistFromRemotePrefs();
+        }, ALLOWLIST_RELOAD_MIN_MS - sinceLastRead);
+    }
+    /** Delay between two attempts to install the receiver during boot. */
+    private static final long ALLOWLIST_REGISTER_RETRY_MS = 1_000L;
+    /** Stop retrying after this many attempts (about two minutes). */
+    private static final int ALLOWLIST_REGISTER_MAX_ATTEMPTS = 120;
+
+    /**
+     * Install the allowlist-change receiver as soon as the system can take one,
+     * rather than waiting for the first C2DM broadcast to come through.
+     *
+     * <p>The receiver used to be registered lazily, from the first hooked C2DM
+     * call. Until that happened the in-memory allowlist kept its boot-time value
+     * and every broadcast the settings app sent after a toggle was dropped, so a
+     * freshly checked app only started working once some *later* push happened to
+     * install the receiver — the change appeared to need a refresh first.
+     *
+     * <p>Registering cannot be done synchronously here: IActivityManager does not
+     * exist yet during early SystemServer startup, so registerReceiver NPEs. A
+     * daemon thread does the retrying instead of a Handler because the main looper
+     * is not guaranteed to be ready this early either.
+     */
+    private void installAllowlistReceiverAsync() {
+        if (allowlistReceiverRegistered) {
+            return;
+        }
+        Thread t = new Thread(() -> {
+            for (int attempt = 0; attempt < ALLOWLIST_REGISTER_MAX_ATTEMPTS; attempt++) {
+                if (registerAllowlistReceiver()) {
+                    return;
+                }
+                try {
+                    Thread.sleep(ALLOWLIST_REGISTER_RETRY_MS);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+            log(Log.WARN, TAG, "Allowlist receiver not installed during boot;"
+                    + " falling back to lazy registration");
+        }, "fcmlive-allowlist-register");
+        t.setDaemon(true);
+        t.start();
+    }
 
     private Set<String> getFcmAllowlist() {
-        // Lazily register the refresh receiver on first real use. It can't be done
-        // in onSystemServerStarting because IActivityManager is null during early
-        // SystemServer startup, so registerReceiver would NPE. By the time any C2DM
-        // broadcast reaches here the system is fully up.
-        ensureAllowlistReceiver();
+        // Fallback only: the receiver is normally installed at boot by
+        // installAllowlistReceiverAsync(). If that has not happened yet, ask the
+        // background thread for a refresh — this method runs inside a hooked
+        // ActivityManagerService call, so it must never do the read itself.
+        registerAllowlistReceiver();
+        if (!allowlistReceiverRegistered
+                && SystemClock.uptimeMillis() - sAllowlistReadMs >= ALLOWLIST_STALE_MS) {
+            requestAllowlistReload();
+        }
         return new HashSet<>(sAllowlist);
     }
 
@@ -706,33 +903,54 @@ public class Hooker extends XposedModule {
         return allowlist.isEmpty() || allowlist.contains(targetPackage);
     }
 
-    /** Register the receiver that re-reads the allowlist when the app updates it. */
-    private void ensureAllowlistReceiver() {
+    /**
+     * Register the receiver that re-reads the allowlist when the app updates it.
+     *
+     * <p>Guarded by {@link #allowlistRegistering} rather than {@code synchronized}
+     * so the hooked path never waits on the boot-time retry thread: a broadcast
+     * arriving mid-registration just proceeds with the current set.
+     *
+     * @return true once the receiver is installed (or was already); false when the
+     *         system is not ready for it yet, in which case the caller retries.
+     */
+    private boolean registerAllowlistReceiver() {
         if (allowlistReceiverRegistered) {
-            return;
+            return true;
+        }
+        if (!allowlistRegistering.compareAndSet(false, true)) {
+            return allowlistReceiverRegistered;
         }
         try {
             Context sys = getSystemContext();
             if (sys == null) {
-                return;
+                return false;
             }
             BroadcastReceiver receiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context context, Intent intent) {
                     if (Prefs.ACTION_ALLOWLIST_CHANGED.equals(intent.getAction())) {
-                        loadAllowlistFromRemotePrefs();
+                        // Runs on the background looper (see registerReceiver below)
+                        // and coalesces bursts, so a flood of this (unauthenticated)
+                        // broadcast cannot stall the system's main thread.
+                        requestAllowlistReload();
                     }
                 }
             };
             IntentFilter filter = new IntentFilter(Prefs.ACTION_ALLOWLIST_CHANGED);
+            Handler handler = allowlistBackgroundHandler();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                sys.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
+                sys.registerReceiver(receiver, filter, null, handler, Context.RECEIVER_EXPORTED);
             } else {
-                sys.registerReceiver(receiver, filter);
+                sys.registerReceiver(receiver, filter, null, handler);
             }
             allowlistReceiverRegistered = true;
-        } catch (Exception e) {
-            log(Log.ERROR, TAG, "Failed to register allowlist receiver", e);
+            log(Log.INFO, TAG, "Allowlist receiver installed");
+            return true;
+        } catch (Throwable e) {
+            // Still booting (IActivityManager absent) — the caller retries.
+            return false;
+        } finally {
+            allowlistRegistering.set(false);
         }
     }
 
@@ -812,24 +1030,45 @@ public class Hooker extends XposedModule {
                     boolean.class, boolean.class, int.class);
         }
         hookE(broadcastMethod).intercept(chain -> {
-            if (chain.getArg(intentArgIndex) instanceof Intent intent) {
-                if (ACTION_REMOTE_INTENT.equals(intent.getAction())
-                        && getInvoker(getRecordMethod).invoke(chain.getThisObject(), chain.getArg(0)) instanceof Object app
-                        && infoField.get(app) instanceof ApplicationInfo info
-                        && GMS_PACKAGE_NAME.equals(info.packageName)) {
-                    // Wake / auto-start only apps the user whitelisted; empty list = all.
-                    if (intent.getPackage() instanceof String targetPackage
+            // This runs for every broadcast in the system, so reject on the
+            // action before touching anything reflective.
+            if (chain.getArg(intentArgIndex) instanceof Intent intent
+                    && ACTION_REMOTE_INTENT.equals(intent.getAction())) {
+                try {
+                    Object app = getInvoker(getRecordMethod)
+                            .invoke(chain.getThisObject(), chain.getArg(0));
+                    if (app != null && infoField.get(app) instanceof ApplicationInfo info
+                            && GMS_PACKAGE_NAME.equals(info.packageName)
+                            // Wake / auto-start only apps the user whitelisted; empty list = all.
+                            && intent.getPackage() instanceof String targetPackage
                             && shouldWake(targetPackage)) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-                                && mContextField.get(chain.getThisObject()) instanceof Context mContext) {
-                            getPowerExemptionManager(mContext).addToTemporaryAllowList(
-                                    targetPackage, 102 /* PowerExemptionManager.REASON_PUSH_MESSAGING_OVER_QUOTA */,
-                                    "GOOGLE_C2DM", 2000);
+                        // The stopped-package flag is what this hook exists for, so
+                        // it is applied first and protected on its own.
+                        try {
+                            if ((intent.getFlags() & Intent.FLAG_INCLUDE_STOPPED_PACKAGES) == 0) {
+                                intent.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
+                            }
+                        } catch (Throwable t) {
+                            log(Log.ERROR, TAG, "Failed to add FLAG_INCLUDE_STOPPED_PACKAGES", t);
                         }
-                        if ((intent.getFlags() & Intent.FLAG_INCLUDE_STOPPED_PACKAGES) == 0) {
-                            intent.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
+                        // Optional extra: ~2s power exemption. A failure here (hidden
+                        // API drift, SELinux) must not take the flag above with it.
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                                    && mContextField.get(chain.getThisObject()) instanceof Context mContext) {
+                                getPowerExemptionManager(mContext).addToTemporaryAllowList(
+                                        targetPackage,
+                                        102 /* PowerExemptionManager.REASON_PUSH_MESSAGING_OVER_QUOTA */,
+                                        "GOOGLE_C2DM", 2000);
+                            }
+                        } catch (Throwable t) {
+                            log(Log.ERROR, TAG, "Failed to add temporary power exemption", t);
                         }
                     }
+                } catch (Throwable t) {
+                    // Never let a hook failure escape into ActivityManagerService:
+                    // this is the broadcast path of every app on the device.
+                    log(Log.ERROR, TAG, "C2DM broadcast hook failed", t);
                 }
             }
             return chain.proceed();
@@ -837,21 +1076,94 @@ public class Hooker extends XposedModule {
         deoptimize(broadcastMethod);
     }
 
+    /** Reused walker: building one per call would allocate on every isPushApp(). */
+    private static final StackWalker STACK_WALKER = StackWalker.getInstance();
+
     private void hookInternationalPolicyManager(ClassLoader classLoader) throws ClassNotFoundException, NoSuchMethodException {
         var InternationalPolicyManagerClass = classLoader.loadClass("com.miui.server.greeze.InternationalPolicyManager");
-        var systemServerCl = InternationalPolicyManagerClass.getClassLoader();
         var isPushAppMethod = InternationalPolicyManagerClass.getDeclaredMethod("isPushApp", String.class);
+        // Match the caller by class name rather than by ClassLoader identity:
+        // RETAIN_CLASS_REFERENCE is what forces the walker to resolve and retain the
+        // declaring classes, and it buys nothing here — this hook runs inside
+        // system_server, so no app-supplied frame can ever appear on that stack.
+        final String restrictNetOwner = InternationalPolicyManagerClass.getName();
         hookE(isPushAppMethod).intercept(chain -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                var walker = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
-                var match = walker.walk(frames -> frames
-                        .anyMatch(frame -> frame.getDeclaringClass() != null &&
-                                frame.getDeclaringClass().getClassLoader() == systemServerCl &&
-                                (frame.getMethodName().equals("isRestrictNet"))));
-                if (match) return false;
+                try {
+                    boolean fromRestrictNet = STACK_WALKER.walk(frames -> frames.anyMatch(frame ->
+                            "isRestrictNet".equals(frame.getMethodName())
+                                    && restrictNetOwner.equals(frame.getClassName())));
+                    if (fromRestrictNet) {
+                        return false;
+                    }
+                } catch (Throwable t) {
+                    log(Log.ERROR, TAG, "Stack inspection failed", t);
+                }
             }
             return chain.proceed();
         });
+    }
+
+    /** How long a "declares a C2DM receiver" answer is reused. */
+    private static final long C2DM_CACHE_TTL_MS = 5L * 60L * 1000L;
+    /** Hard cap on the cache; cleared wholesale when exceeded. */
+    private static final int C2DM_CACHE_MAX = 256;
+
+    /** One cached C2DM-receiver answer plus when it was resolved. */
+    private static final class C2dmQuery {
+        final boolean declaresReceiver;
+        final long checkedAtMs;
+
+        C2dmQuery(boolean declaresReceiver, long checkedAtMs) {
+            this.declaresReceiver = declaresReceiver;
+            this.checkedAtMs = checkedAtMs;
+        }
+    }
+
+    private final Map<String, C2dmQuery> c2dmReceiverCache = new HashMap<>();
+
+    /**
+     * Whether {@code packageName} declares a C2DM receiver.
+     *
+     * <p>This is what grants the cleaner exemption, and it is deliberately
+     * <em>not</em> narrowed to the user's allowlist: every app that genuinely
+     * ships a push receiver stays protected, which is the historical behaviour and
+     * what a "keep push alive" module is expected to do. The trade-off is that the
+     * action can also be declared purely to opt out of the cleaner; that was
+     * reviewed and accepted on 2026-09-23 — do not "fix" it again without asking,
+     * since tightening it changes behaviour for people who never opened the app.
+     *
+     * <p>Answering it needs a PackageManager query, and the cleaner asks far more
+     * often than apps get installed, so answers are reused for a few minutes
+     * instead of querying the package manager on every call. An app that only
+     * starts declaring the receiver in an update keeps its old answer for at most
+     * {@link #C2DM_CACHE_TTL_MS}.
+     */
+    private boolean declaresC2dmReceiver(PackageManager pm, String packageName) {
+        long now = SystemClock.uptimeMillis();
+        synchronized (c2dmReceiverCache) {
+            C2dmQuery cached = c2dmReceiverCache.get(packageName);
+            if (cached != null && now - cached.checkedAtMs < C2DM_CACHE_TTL_MS) {
+                return cached.declaresReceiver;
+            }
+        }
+        final boolean declares;
+        try {
+            var intent = new Intent(ACTION_REMOTE_INTENT);
+            intent.setPackage(packageName);
+            declares = !pm.queryBroadcastReceivers(intent, 0).isEmpty();
+        } catch (Throwable t) {
+            // Fail safe: when in doubt, let the cleaner keep its own decision.
+            log(Log.ERROR, TAG, "queryBroadcastReceivers failed for " + packageName, t);
+            return false;
+        }
+        synchronized (c2dmReceiverCache) {
+            if (c2dmReceiverCache.size() >= C2DM_CACHE_MAX) {
+                c2dmReceiverCache.clear();
+            }
+            c2dmReceiverCache.put(packageName, new C2dmQuery(declares, now));
+        }
+        return declares;
     }
 
     private void hookProcessCleanerBase(ClassLoader classLoader) throws ClassNotFoundException, NoSuchMethodException, NoSuchFieldException {
@@ -864,12 +1176,20 @@ public class Hooker extends XposedModule {
         // boolean isForceStopEnable(ProcessRecord app, int policy, ProcessManagerService pms)
         var isForceStopEnableMethod = ProcessCleanerBaseClass.getDeclaredMethod("isForceStopEnable", ProcessRecordClass, int.class, ProcessManagerServiceClass);
         hookE(isForceStopEnableMethod).intercept(chain -> {
-            if (chain.getArg(1) instanceof Integer policy && policy != 13 && mPkms.get(chain.getArg(2)) instanceof PackageManager pm) {
-                var info = (ApplicationInfo) getInvoker(mGetApplicationInfo).invoke(chain.getArg(0));
-                var intent = new Intent(ACTION_REMOTE_INTENT);
-                intent.setPackage(info.packageName);
-                var isPushApp = !pm.queryBroadcastReceivers(intent, 0).isEmpty();
-                if (isPushApp) return false;
+            try {
+                if (chain.getArg(1) instanceof Integer policy && policy != 13
+                        && mPkms.get(chain.getArg(2)) instanceof PackageManager pm
+                        // getApplicationInfo() is null for processes that never
+                        // finished attaching; reading through it used to NPE.
+                        && getInvoker(mGetApplicationInfo).invoke(chain.getArg(0)) instanceof ApplicationInfo info
+                        && info.packageName != null
+                        && declaresC2dmReceiver(pm, info.packageName)) {
+                    // Declares a push receiver: keep the cleaner's hands off it.
+                    return false;
+                }
+            } catch (Throwable t) {
+                // Fall through to the system's own decision — never crash the cleaner.
+                log(Log.ERROR, TAG, "isForceStopEnable hook failed", t);
             }
             return chain.proceed();
         });

@@ -1,14 +1,13 @@
 package io.github.howard20181.hyperos.fcmlive;
 
 import android.app.Activity;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageButton;
@@ -31,6 +30,9 @@ import java.util.List;
 import java.util.Set;
 
 import io.github.libxposed.service.XposedService;
+import io.github.howard20181.hyperos.fcmlive.theme.AppPalette;
+import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine;
+import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport;
 import io.github.libxposed.service.XposedServiceHelper;
 
 /**
@@ -46,6 +48,14 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             "com.android.permission.GET_INSTALLED_APPS";
     private static final String MIUI_SECURITY_PACKAGE = "com.lbe.security.miui";
     private static final int REQUEST_GET_INSTALLED_APPS = 1001;
+    /**
+     * Tapping apps one by one into the allowlist looks like this: fill the
+     * window with adds, then tell the user the long-press multi-select exists —
+     * that is the gesture they were doing by hand. A gap longer than the window
+     * restarts the count, so a slow browse never triggers the tip.
+     */
+    private static final long RAPID_CHECK_WINDOW_MS = 12000L;
+    private static final int RAPID_CHECK_HINT_AT = 4;
 
     private final List<AppListAdapter.AppEntry> allApps = new ArrayList<>();
     private final List<AppListAdapter.AppEntry> filteredApps = new ArrayList<>();
@@ -60,24 +70,40 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private ImageButton btnBatchRemove;
     private ImageButton btnSelectAll;
     private SwipeRefreshLayout swipeRefresh;
-    private Object backInvokedCallback;
+    private OnBackInvokedCallback backInvokedCallback;
     private boolean searching = false;
     private boolean multiSelectMode = false;
+    /**
+     * Set once the multi-select gesture is known — either because the tip below
+     * was shown, or because the user already used multi-select. Either way the
+     * gesture needs no advertising again, so the tip can never nag.
+     */
+    private boolean multiSelectKnown = false;
+    /** Start of the current burst of adds, and how many it holds (see RAPID_CHECK_*). */
+    private long rapidCheckStartMs;
+    private int rapidCheckCount;
     /** True only after the first full package scan — blocks empty-list toasts while loading. */
     private boolean packagesReady = false;
     private String currentQuery = "";
     private boolean showSystemApps = false;
     /** Overflow: when true, list only apps whose Manifest has FCM-style receivers. */
     private boolean showFcmSupportedOnly = false;
-    /** UI intent for launcher icon; do not infer toggle direction from PM cache. */
-    private boolean launcherIconHidden = false;
     private XposedService xposedService;
     private PopupWindow activeTooltip;
     private final Runnable dismissTooltipRunnable = this::dismissActiveTooltip;
+    /** Palette this activity was painted with; a mismatch on resume = repaint. */
+    private AppPalette appliedPalette;
+
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        super.attachBaseContext(ThemeSupport.attach(newBase));
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        ThemeSupport.onCreate(this);
+        appliedPalette = ThemeEngine.palette(this);
         try {
             setContentView(R.layout.activity_main);
         } catch (Throwable t) {
@@ -96,7 +122,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         // Seed UI order from the local cache so allowlisted apps sit on top
         // immediately, before libxposed remote prefs bind.
         allowlist = Prefs.readLocalAllowlist(this);
-        launcherIconHidden = !isLauncherIconVisible();
+
         // First launch: show FCM-supported apps by default. After the user
         // toggles the overflow option, their stored preference wins.
         showFcmSupportedOnly = getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
@@ -109,6 +135,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             public void onToggleAllowlist(String pkg, boolean checked) {
                 if (checked) {
                     allowlist.add(pkg);
+                    perhapsAdvertiseMultiSelect();
                 } else {
                     allowlist.remove(pkg);
                 }
@@ -182,7 +209,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         swipeRefresh = findViewById(R.id.refresh_layout);
         if (swipeRefresh != null) {
             try {
-                swipeRefresh.setColorSchemeColors(getColor(R.color.md_primary));
+                swipeRefresh.setColorSchemeColors(
+                        ThemeEngine.palette(this).primary);
             } catch (Throwable ignored) {
             }
             swipeRefresh.setOnRefreshListener(this::loadApps);
@@ -201,7 +229,9 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             listView.setAdapter(adapter);
         }
 
-        registerBackCallback();
+        // Idle at startup, so this is a no-op; kept for symmetry with the state
+        // changes below (enterSearch / enterMultiSelect ...).
+        updateBackCallback();
         // Wait for HyperOS app-list grant when needed; other ROMs load immediately.
         if (!requestInstalledAppsPermissionIfNeeded()) {
             loadApps();
@@ -230,15 +260,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
      * runtime request was launched and loading should wait for the result.
      */
     private boolean requestInstalledAppsPermissionIfNeeded() {
-        PackageManager pm = getPackageManager();
-        try {
-            android.content.pm.PermissionInfo info =
-                    pm.getPermissionInfo(GET_INSTALLED_APPS_PERMISSION, 0);
-            if (info == null || !MIUI_SECURITY_PACKAGE.equals(info.packageName)) {
-                return false;
-            }
-        } catch (PackageManager.NameNotFoundException ignored) {
-            // AOSP and non-MIUI ROMs do not expose this permission.
+        if (!hasAppListGate()) {
             return false;
         }
         if (checkSelfPermission(GET_INSTALLED_APPS_PERMISSION)
@@ -248,6 +270,37 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         requestPermissions(new String[]{GET_INSTALLED_APPS_PERMISSION},
                 REQUEST_GET_INSTALLED_APPS);
         return true;
+    }
+
+    /**
+     * Whether this ROM gates the package list behind a runtime permission.
+     * MIUI 13 / HyperOS declare {@code GET_INSTALLED_APPS}, owned by the
+     * security centre; AOSP and every other ROM do not.
+     */
+    private boolean hasAppListGate() {
+        try {
+            android.content.pm.PermissionInfo info =
+                    getPackageManager().getPermissionInfo(GET_INSTALLED_APPS_PERMISSION, 0);
+            return info != null && MIUI_SECURITY_PACKAGE.equals(info.packageName);
+        } catch (PackageManager.NameNotFoundException ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether {@code getInstalledPackages()} may be trusted to return the whole
+     * list. Until the app-list permission is granted the query comes back nearly
+     * empty, which is indistinguishable from a device that genuinely has no FCM
+     * app — so anything that reacts to an empty scan has to ask this first.
+     *
+     * <p>This is deliberately a live check rather than a flag set from
+     * {@code onRequestPermissionsResult}: the Xposed service can bind and kick
+     * off a scan before the user has even answered the dialog.
+     */
+    private boolean isAppListReadable() {
+        return !hasAppListGate()
+                || checkSelfPermission(GET_INSTALLED_APPS_PERMISSION)
+                == PackageManager.PERMISSION_GRANTED;
     }
 
     @Override
@@ -305,10 +358,12 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
 
         TextView tipView = new TextView(this);
         tipView.setText(text);
-        tipView.setTextColor(getColor(R.color.md_tooltip_text));
+        AppPalette tooltipPalette = ThemeEngine.palette(this);
+        tipView.setTextColor(tooltipPalette.tooltipText);
         tipView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f);
         tipView.setGravity(android.view.Gravity.CENTER);
-        tipView.setBackgroundResource(R.drawable.bg_tooltip);
+        tipView.setBackground(
+                ThemeSupport.cardBackground(this, tooltipPalette.tooltipBg, 4f));
         int padH = dp(12);
         int padV = dp(6);
         tipView.setPadding(padH, padV, padH, padV);
@@ -428,20 +483,37 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         }
     }
 
-    private void registerBackCallback() {
-        if (Build.VERSION.SDK_INT < 33) {
-            return;
-        }
+    /**
+     * Predictive back (Android 13+, opt-in via enableOnBackInvokedCallback):
+     * register only while there is an internal state to unwind. In the idle
+     * state no callback is registered, which is what lets the system run its
+     * own "back to home" preview animation instead of a plain activity finish.
+     * Call this whenever {@code searching} or {@code multiSelectMode} changes.
+     */
+    private void updateBackCallback() {
+        // Predictive back is always on: the gesture is only intercepted while
+        // an internal state (search / multi-select) needs unwinding; otherwise
+        // the system shows its own back-to-home preview animation.
+        boolean intercept = multiSelectMode || searching;
         try {
-            OnBackInvokedCallback cb = this::handleBack;
-            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
-                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb);
-            backInvokedCallback = cb;
+            if (intercept && backInvokedCallback == null) {
+                backInvokedCallback = this::handleBack;
+                getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                        OnBackInvokedDispatcher.PRIORITY_DEFAULT, backInvokedCallback);
+            } else if (!intercept && backInvokedCallback != null) {
+                getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backInvokedCallback);
+                backInvokedCallback = null;
+            }
         } catch (Throwable ignored) {
+            // Dispatcher unavailable on this ROM build: nothing to unwind.
         }
     }
 
-    /** Search: first back closes IME (system), next back exits search — not home. */
+    /**
+     * Search: first back closes IME (system), next back exits search — not home.
+     * Only reached when the callback is registered, i.e. an internal state is
+     * active; the idle case is handled by the system default (finish).
+     */
     private void handleBack() {
         if (multiSelectMode) {
             exitMultiSelect();
@@ -453,23 +525,30 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        // Appearance settings may have changed while the settings screen was
+        // on top (palette style, theme mode, seed color...). ThemeEngine was
+        // invalidated there, so a fresh instance here means we are showing
+        // stale colors: rebuild the whole activity to repaint everything.
+        if (appliedPalette != null && ThemeEngine.palette(this) != appliedPalette) {
+            recreate();
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         dismissActiveTooltip();
         if (adapter != null) {
             adapter.shutdown();
         }
-        if (Build.VERSION.SDK_INT >= 33 && backInvokedCallback instanceof OnBackInvokedCallback cb) {
+        if (backInvokedCallback != null) {
             try {
-                getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(cb);
+                getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backInvokedCallback);
             } catch (Throwable ignored) {
             }
         }
         super.onDestroy();
-    }
-
-    @Override
-    public void onBackPressed() {
-        handleBack();
     }
 
     /**
@@ -487,8 +566,10 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         }
         if (root != null) {
             root.setOnApplyWindowInsetsListener((v, insets) -> {
-                int top = insets.getSystemWindowInsetTop();
-                int bottom = insets.getSystemWindowInsetBottom();
+                int top = UiUtils.topInset(insets);
+                // Union of navigation-bar and gesture insets so the list keeps
+                // clear of the home indicator under gesture navigation as well.
+                int bottom = UiUtils.bottomInset(insets);
                 int barPad = dp(12);
                 topBar.setPadding(topBar.getPaddingLeft(), top + barPad,
                         topBar.getPaddingRight(), barPad);
@@ -497,7 +578,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                             list.getPaddingRight(), bottom + dp(88));
                 }
                 applyFabBottomMargin(fab, bottom);
-                return insets.consumeSystemWindowInsets();
+                return insets;
             });
             root.requestApplyInsets();
         }
@@ -597,6 +678,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         }
         dismissActiveTooltip();
         searching = true;
+        updateBackCallback();
         // Keep ListView height stable so the scrollbar does not jump when IME opens.
         getWindow().setSoftInputMode(
                 android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
@@ -632,6 +714,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private void exitSearch() {
         dismissActiveTooltip();
         searching = false;
+        updateBackCallback();
         if (searchView != null) {
             searchView.setQuery("", false);
             searchView.clearFocus();
@@ -666,7 +749,32 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
      * Multi-select: long-press a card. Top bar mirrors search mode — back arrow
      * on the left, selection count as title, batch whitelist actions on the right.
      */
+    /**
+     * Advertise the long-press multi-select gesture when the user is visibly
+     * checking apps one at a time: {@link #RAPID_CHECK_HINT_AT} apps added
+     * inside {@link #RAPID_CHECK_WINDOW_MS} is exactly the manual work
+     * multi-select does in one go. Shown at most once per visit — and never
+     * again once the gesture has been used.
+     */
+    private void perhapsAdvertiseMultiSelect() {
+        if (multiSelectKnown) {
+            return;
+        }
+        long now = SystemClock.uptimeMillis();
+        if (now - rapidCheckStartMs > RAPID_CHECK_WINDOW_MS) {
+            rapidCheckStartMs = now;
+            rapidCheckCount = 0;
+        }
+        rapidCheckCount++;
+        if (rapidCheckCount >= RAPID_CHECK_HINT_AT) {
+            multiSelectKnown = true;
+            Toast.makeText(this, R.string.multi_select_tip, Toast.LENGTH_LONG).show();
+        }
+    }
+
     private void enterMultiSelect(String firstPackage) {
+        // The gesture is known from here on: stop advertising it.
+        multiSelectKnown = true;
         dismissActiveTooltip();
         if (searching) {
             searching = false;
@@ -679,6 +787,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             filterApps("");
         }
         multiSelectMode = true;
+        updateBackCallback();
         if (adapter != null) {
             adapter.setMultiSelectMode(true);
             java.util.Set<String> seed = new java.util.HashSet<>();
@@ -692,6 +801,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
 
     private void exitMultiSelect() {
         multiSelectMode = false;
+        updateBackCallback();
         if (adapter != null) {
             adapter.setMultiSelectMode(false);
         }
@@ -861,10 +971,34 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         View content = getLayoutInflater().inflate(R.layout.popup_overflow, null);
         ImageView sysCheck = content.findViewById(R.id.menu_show_system_check);
         ImageView fcmCheck = content.findViewById(R.id.menu_show_fcm_check);
-        ImageView hideCheck = content.findViewById(R.id.menu_hide_icon_check);
         bindMd3Check(sysCheck, showSystemApps);
         bindMd3Check(fcmCheck, showFcmSupportedOnly);
-        bindMd3Check(hideCheck, launcherIconHidden);
+
+        // Line the two check boxes up on one vertical line. Each row lays out as
+        // [label][12dp][check box], so a wrap_content label parks its check box
+        // wherever the text happens to end — invisible while both Chinese labels
+        // are the same length, but "Show system apps" and "Show FCM supported
+        // apps" differ in English and the boxes drifted apart. Giving both
+        // labels the width of the wider one fixes that; in Chinese the two
+        // labels already measure the same, so nothing moves there. Done before
+        // the measure pass so the popup width stays exactly what it was.
+        int[] labelIds = {R.id.menu_show_system_label, R.id.menu_show_fcm_label};
+        int widestLabel = 0;
+        for (int id : labelIds) {
+            TextView label = content.findViewById(id);
+            if (label != null) {
+                label.measure(0, 0);
+                widestLabel = Math.max(widestLabel, label.getMeasuredWidth());
+            }
+        }
+        if (widestLabel > 0) {
+            for (int id : labelIds) {
+                View label = content.findViewById(id);
+                if (label != null) {
+                    label.getLayoutParams().width = widestLabel;
+                }
+            }
+        }
 
         final PopupWindow popup = new PopupWindow(
                 content,
@@ -898,6 +1032,10 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         }
 
         View rowSystem = content.findViewById(R.id.menu_show_system);
+        // All rows must fill the popup width so the ripple covers the full
+        // clickable area; wrap_content rows would stop at their own content
+        // width and leave a gap on the right.
+        rowSystem.getLayoutParams().width = ViewGroup.LayoutParams.MATCH_PARENT;
         rowSystem.setOnClickListener(v -> {
             showSystemApps = !showSystemApps;
             bindMd3Check(sysCheck, showSystemApps);
@@ -906,6 +1044,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         });
 
         View rowFcm = content.findViewById(R.id.menu_show_fcm);
+        rowFcm.getLayoutParams().width = ViewGroup.LayoutParams.MATCH_PARENT;
         rowFcm.setOnClickListener(v -> {
             showFcmSupportedOnly = !showFcmSupportedOnly;
             bindMd3Check(fcmCheck, showFcmSupportedOnly);
@@ -918,21 +1057,9 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             popup.dismiss();
         });
 
-        View rowHide = content.findViewById(R.id.menu_hide_icon);
-        rowHide.setOnClickListener(v -> {
-            // Toggle by intended UI state — PM may be stale on HyperOS and
-            // used to invert the action (always toast "已恢复").
-            boolean target = !launcherIconHidden;
-            boolean ok = setLauncherIconHidden(target);
-            if (ok) {
-                launcherIconHidden = target;
-            }
-            bindMd3Check(hideCheck, launcherIconHidden);
-            popup.dismiss();
-        });
-
         View rowAbout = content.findViewById(R.id.menu_about);
         if (rowAbout != null) {
+            rowAbout.getLayoutParams().width = ViewGroup.LayoutParams.MATCH_PARENT;
             rowAbout.setOnClickListener(v -> {
                 popup.dismiss();
                 startActivity(new Intent(this, AboutActivity.class));
@@ -1005,84 +1132,15 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         if (!filteredApps.isEmpty()) {
             return;
         }
+        // Empty only means "no FCM apps" when the package list itself was
+        // readable. On HyperOS the very first launch scans while the app-list
+        // permission is still unanswered, the query returns almost nothing, and
+        // saying "no supported apps" then would blame the device for a question
+        // the user has not been asked yet.
+        if (!isAppListReadable()) {
+            return;
+        }
         Toast.makeText(this, R.string.no_fcm_apps_found, Toast.LENGTH_SHORT).show();
-    }
-
-    private ComponentName launcherAliasComponent() {
-        return new ComponentName(getPackageName(),
-                getPackageName() + ".LauncherAlias");
-    }
-
-    private boolean isLauncherIconVisible() {
-        try {
-            int state = getPackageManager()
-                    .getComponentEnabledSetting(launcherAliasComponent());
-            if (state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
-                    || state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED) {
-                return false;
-            }
-            return state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
-                    || state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
-        } catch (Throwable t) {
-            return true;
-        }
-    }
-
-    /**
-     * Apply launcher-alias visibility. Toast follows the requested action
-     * (hide → 已隐藏, show → 已恢复). Returns whether PackageManager accepted
-     * the write.
-     */
-    private boolean setLauncherIconHidden(boolean hidden) {
-        PackageManager pm = getPackageManager();
-        ComponentName alias = launcherAliasComponent();
-        boolean applied = false;
-        try {
-            pm.setComponentEnabledSetting(
-                    alias,
-                    hidden
-                            ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-                            : PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                    PackageManager.DONT_KILL_APP);
-            applied = true;
-        } catch (Throwable t) {
-            try {
-                Intent home = new Intent(Intent.ACTION_MAIN);
-                home.addCategory(Intent.CATEGORY_LAUNCHER);
-                home.setPackage(getPackageName());
-                java.util.List<android.content.pm.ResolveInfo> list =
-                        pm.queryIntentActivities(home, 0);
-                for (android.content.pm.ResolveInfo ri : list) {
-                    if (ri.activityInfo == null) {
-                        continue;
-                    }
-                    ComponentName cn = new ComponentName(
-                            ri.activityInfo.packageName, ri.activityInfo.name);
-                    pm.setComponentEnabledSetting(
-                            cn,
-                            hidden
-                                    ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-                                    : PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                            PackageManager.DONT_KILL_APP);
-                    applied = true;
-                }
-            } catch (Throwable ignored) {
-            }
-        }
-
-        try {
-            Intent changed = new Intent(Intent.ACTION_PACKAGE_CHANGED,
-                    android.net.Uri.parse("package:" + getPackageName()));
-            changed.putExtra(Intent.EXTRA_CHANGED_COMPONENT_NAME, alias.getClassName());
-            sendBroadcast(changed);
-        } catch (Throwable ignored) {
-        }
-
-        Toast.makeText(this,
-                hidden ? R.string.hide_icon_toast : R.string.show_icon_toast,
-                Toast.LENGTH_LONG).show();
-        return applied;
     }
 
     private void openFcmDiagnostics() {
@@ -1154,6 +1212,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 public void onServiceBind(@NonNull XposedService service) {
                     xposedService = service;
                     runOnUiThread(() -> {
+                        // Publish for other screens (About import/export).
+                        Prefs.setRemote(remotePrefs());
                         // Remote prefs are the source of truth once bound.
                         reloadAllowlist();
                         loadApps();
@@ -1164,6 +1224,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 public void onServiceDied(@NonNull XposedService service) {
                     if (xposedService == service) {
                         xposedService = null;
+                        Prefs.setRemote(null);
                     }
                 }
             });
@@ -1188,8 +1249,30 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             // Keep local cache if remote is not ready yet.
             return;
         }
-        allowlist = Prefs.readAllowlist(prefs);
-        Prefs.writeLocalAllowlist(this, allowlist);
+        if (Prefs.hasPendingPush(this)) {
+            // A check made before the service bound is newer than the remote set:
+            // push it up (the write broadcasts, so system_server re-reads too)
+            // instead of adopting the stale value, which used to silently revert
+            // the user's selection.
+            Prefs.writeAllowlist(this, prefs, allowlist);
+        } else {
+            allowlist = Prefs.readAllowlist(prefs);
+            // Remote is authoritative, but an empty remote with a populated local
+            // mirror means the allowlist was imported before the service bound
+            // (About screen): push the mirror up instead of wiping it.
+            if (allowlist.isEmpty()) {
+                Set<String> local = Prefs.readLocalAllowlist(this);
+                if (!local.isEmpty()) {
+                    Prefs.writeAllowlist(this, prefs, local);
+                    allowlist = local;
+                }
+            } else {
+                Prefs.writeLocalAllowlist(this, allowlist);
+            }
+            // This runs on every app open, so it also repairs a system_server copy
+            // that missed its broadcast (e.g. one sent during early boot).
+            Prefs.broadcastAllowlistChanged(this);
+        }
         for (AppListAdapter.AppEntry app : allApps) {
             app.checked = allowlist.contains(app.packageName);
         }
@@ -1198,13 +1281,12 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     private void updateAllowlist() {
-        SharedPreferences prefs = remotePrefs();
-        if (prefs == null) {
-            // Still mirror locally so the next launch can sort immediately.
-            Prefs.writeLocalAllowlist(this, allowlist);
-            return;
-        }
-        Prefs.writeAllowlist(this, prefs, allowlist);
+        // Remote prefs are what the hooks read, so this write plus the broadcast it
+        // sends is the whole point: a check takes effect immediately, with no
+        // refresh and no restart. When the module service is not bound yet,
+        // writeAllowlist keeps the change in the mirror and flags it so the next
+        // bind pushes it up rather than losing it.
+        Prefs.writeAllowlist(this, remotePrefs(), allowlist);
     }
 
     private void loadApps() {

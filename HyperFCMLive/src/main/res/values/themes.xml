@@ -1,17 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Always follow system light/dark (DayNight). No in-app theme switch. -->
+    <!--
+      minSdk is 35, so the window is ALWAYS edge-to-edge: Android 15 ignores
+      windowStatusBarColor / windowNavigationBarColor /
+      windowDrawsSystemBarBackgrounds and draws both bars transparent, which is
+      why those items are gone. The page colour therefore comes from
+      windowBackground (what still shows through the bar strips) plus the
+      per-screen inset handling — see ThemeSupport.applyWindow and
+      UiUtils.topInset / bottomInset.
+
+      windowLightStatusBar stays: it is still honoured on 35+ and keeps the
+      status-bar icons readable on the very first frame, before
+      ThemeSupport.applyWindow applies the runtime appearance.
+    -->
     <style name="Theme.HyperFCMLive" parent="android:Theme.DeviceDefault.DayNight">
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
-        <item name="android:statusBarColor">@color/md_surface</item>
-        <item name="android:navigationBarColor">@color/md_surface</item>
-        <item name="android:windowBackground">@color/md_surface</item>
+        <item name="android:windowBackground">@color/md_page_bg</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowTranslucentStatus">false</item>
-        <item name="android:windowTranslucentNavigation">false</item>
-        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
-        <item name="android:fitsSystemWindows">false</item>
         <item name="android:colorPrimary">@color/md_primary</item>
         <item name="android:colorAccent">@color/md_primary</item>
         <item name="android:textColorPrimary">@color/md_on_surface</item>

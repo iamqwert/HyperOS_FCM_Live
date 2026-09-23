@@ -4,16 +4,22 @@
     <color name="md_primary">#8B4A5A</color>
     <color name="md_primary_container">#F4D6DC</color>
     <color name="md_surface">#F7EEF0</color>
+    <!-- Page background: one step deeper than the cards so they stand out. -->
+    <color name="md_page_bg">#F2F2F3</color>
     <color name="md_on_surface">#23191B</color>
     <color name="md_on_surface_variant">#534347</color>
     <color name="md_hint_light">#A89298</color>
     <color name="md_outline">#857377</color>
-    <color name="md_card">#F3E4E7</color>
+    <color name="md_card">#FFFFFF</color>
     <color name="md_icon_tint">#6B5158</color>
     <!-- Inverse surface tooltips (always contrast against the app surface). -->
     <color name="md_tooltip_bg">#E62D2D30</color>
     <color name="md_tooltip_text">#F4EFF4</color>
-    <!-- Elevated menu: soft Monet blush — tinted but not muddy. -->
-    <color name="md_popup_menu_bg">#FAF2F4</color>
+    <!-- Overflow menu: the page colour, so the menu and the page agree. The
+         separation comes from the popup's own elevation shadow, not from a
+         different fill (a tinted fill reads as muddy next to the page). -->
+    <color name="md_popup_menu_bg">#F2F2F3</color>
     <color name="md_popup_item_ripple">#3D8B4A5A</color>
+    <!-- Hover state layer: on-surface at 8%. -->
+    <color name="md_state_hover">#1423191B</color>
 </resources>

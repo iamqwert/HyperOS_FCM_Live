@@ -1,21 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Circular press target sized for 48dp icon buttons (not full-bleed rect). -->
+<!--
+  MD3 icon-button ripple: a true circle, never a rounded rectangle.
+
+  The mask used to be a rectangle with a 20dp corner radius, sized 40dp — but a
+  background drawable is stretched to the view bounds and its <size> is ignored,
+  so on a 48dp button the "20dp radius" became a visible rounded SQUARE. An oval
+  has no such failure mode: it fills whatever square bounds it is given and
+  always reads as a circle, at any button size or density.
+
+  The state layer (hover / disabled) is oval for the same reason.
+-->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
-    android:color="#4D8B4A5A">
+    android:color="@color/md_popup_item_ripple">
     <item android:id="@android:id/mask">
         <shape android:shape="oval">
             <solid android:color="@android:color/white" />
-            <size
-                android:width="44dp"
-                android:height="44dp" />
         </shape>
     </item>
     <item>
-        <shape android:shape="oval">
-            <solid android:color="@android:color/transparent" />
-            <size
-                android:width="44dp"
-                android:height="44dp" />
-        </shape>
+        <selector>
+            <item android:state_enabled="false">
+                <shape android:shape="oval">
+                    <solid android:color="@android:color/transparent" />
+                </shape>
+            </item>
+            <item android:state_hovered="true">
+                <shape android:shape="oval">
+                    <solid android:color="@color/md_state_hover" />
+                </shape>
+            </item>
+            <item>
+                <shape android:shape="oval">
+                    <solid android:color="@android:color/transparent" />
+                </shape>
+            </item>
+        </selector>
     </item>
 </ripple>

@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Reference / this-project row: name + license stacked; link icon vertically centered. -->
+<!-- Reference / this-project row: name + license stacked; link icon vertically centered.
+     The card background (M3 connected-group ripple) is set in code by
+     LicensesActivity, so its corner radii match the row's position. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:background="@drawable/bg_card_ripple"
     android:clickable="true"
-    android:clipToOutline="true"
     android:focusable="true"
-    android:foreground="@drawable/bg_popup_item_ripple"
     android:gravity="center_vertical"
+    android:minHeight="72dp"
     android:orientation="horizontal"
-    android:paddingStart="18dp"
+    android:paddingStart="16dp"
     android:paddingTop="14dp"
-    android:paddingEnd="18dp"
+    android:paddingEnd="16dp"
     android:paddingBottom="14dp">
 
     <LinearLayout
@@ -26,7 +26,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textColor="@color/md_on_surface"
-            android:textSize="15sp" />
+            android:textSize="16sp" />
 
         <TextView
             android:id="@+id/dep_license"
@@ -38,8 +38,8 @@
 
     <ImageView
         android:id="@+id/dep_link"
-        android:layout_width="20dp"
-        android:layout_height="20dp"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
         android:layout_marginStart="12dp"
         android:contentDescription="@null"
         android:src="@drawable/ic_link"

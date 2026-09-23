@@ -3,9 +3,10 @@ package io.github.howard20181.hyperos.fcmlive;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.view.WindowInsets;
 import android.widget.Toast;
 
-/** Small shared UI helpers (open URL, px conversion). */
+/** Small shared UI helpers (open URL, px conversion, safe-area insets). */
 public final class UiUtils {
 
     private UiUtils() {
@@ -23,6 +24,32 @@ public final class UiUtils {
 
     public static int dp(Context context, int value) {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
+    }
+
+    /**
+     * Safe area at the top of the window.
+     *
+     * <p>Android 15 (API 35) enforces edge-to-edge for apps targeting 35+: the
+     * window always extends behind the system bars, and the status/navigation
+     * bar colour APIs have no effect. Every screen therefore has to apply its
+     * own insets, which is what these helpers are for. The display cutout is
+     * included so the title never slides under a notch in landscape.
+     */
+    public static int topInset(WindowInsets insets) {
+        return insets.getInsets(WindowInsets.Type.systemBars()
+                | WindowInsets.Type.displayCutout()).top;
+    }
+
+    /**
+     * Safe area at the bottom of the window — the union of the navigation-bar
+     * and the gesture insets, so the value is right for both navigation modes:
+     * with gesture navigation the navigation-bar inset alone can be zero and
+     * the home-indicator area is only reported through {@code systemGestures},
+     * which is exactly how the last list item ends up under the indicator.
+     */
+    public static int bottomInset(WindowInsets insets) {
+        return insets.getInsets(WindowInsets.Type.systemBars()
+                | WindowInsets.Type.systemGestures()).bottom;
     }
 
     public static int statusBarHeight(Context context) {

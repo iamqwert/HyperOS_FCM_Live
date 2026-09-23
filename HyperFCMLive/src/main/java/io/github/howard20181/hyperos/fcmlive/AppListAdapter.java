@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.LayoutInflater;
@@ -18,6 +19,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import io.github.howard20181.hyperos.fcmlive.theme.AppPalette;
+import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine;
+import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport;
 
 public class AppListAdapter extends BaseAdapter {
 
@@ -55,6 +60,10 @@ public class AppListAdapter extends BaseAdapter {
     private final OnCardListener listener;
     private final int enabledColor;
     private final int disabledColor;
+    private final int cardColor;
+    private final int cardSelectedColor;
+    private final int rippleColor;
+    private final float density;
     private final Context context;
 
     private boolean multiSelectMode = false;
@@ -66,8 +75,13 @@ public class AppListAdapter extends BaseAdapter {
         this.pm = context.getPackageManager();
         this.apps = apps;
         this.listener = listener;
-        this.enabledColor = context.getColor(R.color.md_primary);
-        this.disabledColor = context.getColor(R.color.md_on_surface_variant);
+        AppPalette palette = ThemeEngine.palette(context);
+        this.enabledColor = palette.primary;
+        this.disabledColor = palette.onSurfaceVariant;
+        this.cardColor = palette.card;
+        this.cardSelectedColor = palette.primaryContainer;
+        this.rippleColor = palette.ripple;
+        this.density = context.getResources().getDisplayMetrics().density;
     }
 
     public void setMultiSelectMode(boolean enabled) {
@@ -175,10 +189,12 @@ public class AppListAdapter extends BaseAdapter {
         return convertView;
     }
 
+    /** Row corner radius in dp; matches bg_card / bg_card_selected. */
+    private static final float CARD_RADIUS_DP = 24f;
+
     private Drawable newSolidCardBg(boolean selected) {
-        Drawable d = context.getDrawable(
-                selected ? R.drawable.bg_card_selected : R.drawable.bg_card);
-        return d != null ? d.mutate() : null;
+        return ThemeSupport.cardBackground(context,
+                selected ? cardSelectedColor : cardColor, CARD_RADIUS_DP);
     }
 
     /**
@@ -189,10 +205,11 @@ public class AppListAdapter extends BaseAdapter {
         if (row == null || row.getForeground() != null) {
             return;
         }
-        Drawable fg = context.getDrawable(R.drawable.bg_card_press_ripple);
-        if (fg != null) {
-            row.setForeground(fg.mutate());
-        }
+        GradientDrawable mask = new GradientDrawable();
+        mask.setColor(android.graphics.Color.WHITE);
+        mask.setCornerRadius(CARD_RADIUS_DP * density);
+        row.setForeground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(rippleColor), null, mask));
     }
 
     private AppEntry findByPackage(String packageName) {

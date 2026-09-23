@@ -2,6 +2,7 @@ package io.github.howard20181.hyperos.fcmlive;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -23,11 +24,25 @@ public final class UpdateChecker {
 
     public interface Callback {
         void onResult(boolean updateAvailable, String latestVersion, String downloadUrl);
+
+        /**
+         * Invoked instead of {@link #onResult} when the request failed (network,
+         * non-200 status, or an empty tag). Optional so existing lambdas compile.
+         */
+        default void onError() {
+        }
     }
 
     private static final String TAG = "UpdateChecker";
     private static final String LATEST_RELEASE_API =
             "https://api.github.com/repos/iamqwert/HyperOS_FCM_Live/releases/latest";
+    /** Fallback source: no API rate limit and no User-Agent requirement. */
+    private static final String LATEST_RELEASE_ATOM =
+            "https://github.com/iamqwert/HyperOS_FCM_Live/releases.atom";
+    private static final String RELEASES_PAGE =
+            "https://github.com/iamqwert/HyperOS_FCM_Live/releases";
+    /** GitHub rejects requests with no User-Agent header (HTTP 403). */
+    private static final String USER_AGENT = "HyperOS-FCM-Live";
     private static final String KEY_UPDATE_AVAILABLE = "update_available";
     private static final String KEY_UPDATE_VERSION = "update_version";
     private static final String KEY_UPDATE_URL = "update_url";
@@ -61,19 +76,27 @@ public final class UpdateChecker {
         }
         new Thread(() -> {
             String latest = null;
-            String htmlUrl = "https://github.com/iamqwert/HyperOS_FCM_Live/releases";
+            String htmlUrl = RELEASES_PAGE;
+            boolean ok = false;
             HttpURLConnection conn = null;
             try {
                 conn = (HttpURLConnection) new URL(LATEST_RELEASE_API).openConnection();
                 conn.setConnectTimeout(10000);
                 conn.setReadTimeout(10000);
                 conn.setRequestProperty("Accept", "application/vnd.github+json");
+                conn.setRequestProperty("User-Agent",
+                        USER_AGENT + "/" + localVersionName(app));
+                conn.setRequestProperty("X-GitHub-Api-Version", "2022-11-28");
                 int code = conn.getResponseCode();
                 if (code == 200) {
                     JSONObject json = new JSONObject(readStream(conn.getInputStream()));
-                    latest = json.optString("tag_name", "").replaceFirst("^v", "");
+                    String tag = json.optString("tag_name", "").replaceFirst("^v", "");
+                    if (tag.length() > 0) {
+                        latest = tag;
+                        ok = true;
+                    }
                     String page = json.optString("html_url", "");
-                    if (page.length() > 0) {
+                    if (isTrustedReleasePage(page)) {
                         htmlUrl = page;
                     }
                 } else {
@@ -85,13 +108,38 @@ public final class UpdateChecker {
                 if (conn != null) {
                     conn.disconnect();
                 }
+            }
+            if (!ok) {
+                // API blocked (rate limit / no User-Agent / network): fall back to
+                // the public Atom feed, which is neither rate limited nor picky
+                // about headers. Its <title> is the release name, so read the tag
+                // from <id> and the page from the alternate <link>.
+                String[] atom = fetchLatestFromAtom(USER_AGENT + "/" + localVersionName(app));
+                if (atom != null && atom[0] != null && atom[0].length() > 0) {
+                    latest = atom[0];
+                    ok = true;
+                    if (isTrustedReleasePage(atom[1])) {
+                        htmlUrl = atom[1];
+                    }
+                }
+            }
+            if (ok) {
+                // Only a successful lookup consumes the 24h auto-check budget.
                 prefs(app).edit()
                         .putLong(KEY_LAST_AUTO_CHECK, System.currentTimeMillis())
                         .apply();
+            } else {
+                // A failed check is not proof that there is no update: keep the
+                // cached badge and report the failure instead of "up to date".
+                if (callback != null) {
+                    new Handler(Looper.getMainLooper()).post(callback::onError);
+                }
+                return;
             }
-            boolean available = latest != null && latest.length() > 0
-                    && compareVersions(latest, localVersionName(app)) > 0;
-            final String version = latest != null ? latest : "";
+            // CI tags releases as v{versionName}.{versionCode}, so compare
+            // against the same shape to avoid a permanent false positive.
+            boolean available = compareVersions(latest, localVersionTag(app)) > 0;
+            final String version = latest;
             final String url = htmlUrl;
             saveState(app, available, version, url);
             if (callback != null) {
@@ -132,11 +180,34 @@ public final class UpdateChecker {
 
     public static String localVersionName(Context context) {
         try {
-            return context.getPackageManager()
+            String name = context.getPackageManager()
                     .getPackageInfo(context.getPackageName(), 0).versionName;
+            return name != null ? name : "0";
         } catch (Throwable t) {
             Log.w(TAG, "localVersionName", t);
             return "0";
+        }
+    }
+
+    /**
+     * Local version in the same shape as the release tag
+     * ({@code versionName.versionCode}), e.g. {@code 1.7.0.17}. CI tags releases
+     * as {@code v{versionName}.{versionCode}}, so comparing against the plain
+     * versionName would make the extra tag segment look like a newer build
+     * forever.
+     */
+    public static String localVersionTag(Context context) {
+        return localVersionName(context) + "." + localVersionCode(context);
+    }
+
+    private static long localVersionCode(Context context) {
+        try {
+            PackageInfo pi = context.getPackageManager()
+                    .getPackageInfo(context.getPackageName(), 0);
+            return pi.getLongVersionCode();
+        } catch (Throwable t) {
+            Log.w(TAG, "localVersionCode", t);
+            return 0L;
         }
     }
 
@@ -179,6 +250,91 @@ public final class UpdateChecker {
         } catch (Throwable t) {
             return 0;
         }
+    }
+
+    /**
+     * Fallback latest-release lookup over the public Atom feed.
+     * Returns {@code {version, pageUrl}} or null when the feed is unreachable or
+     * has no entry. String parsing keeps this dependency-free; the feed layout is
+     * stable (&lt;id&gt; ends with the tag, first href is the release page).
+     */
+    private static String[] fetchLatestFromAtom(String userAgent) {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(LATEST_RELEASE_ATOM).openConnection();
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
+            conn.setRequestProperty("User-Agent", userAgent);
+            if (conn.getResponseCode() != 200) {
+                return null;
+            }
+            String feed = readStream(conn.getInputStream());
+            int entry = feed.indexOf("<entry>");
+            if (entry < 0) {
+                return null;
+            }
+            String first = feed.substring(entry);
+            String id = between(first, "<id>", "</id>");
+            if (id == null || id.indexOf('/') < 0) {
+                return null;
+            }
+            // tag:github.com,2008:Repository/<id>/v1.8.0.18
+            String tag = id.substring(id.lastIndexOf('/') + 1).replaceFirst("^v", "");
+            if (tag.length() == 0) {
+                return null;
+            }
+            String page = between(first, "href=\"", "\"");
+            if (!isTrustedReleasePage(page)) {
+                page = RELEASES_PAGE;
+            }
+            return new String[]{tag, page};
+        } catch (Throwable t) {
+            Log.w(TAG, "atom fallback failed", t);
+            return null;
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
+    /**
+     * Whether a page from the release feed may be opened for the user.
+     *
+     * <p>The update flow hands this URL to an implicit ACTION_VIEW, so an
+     * unexpected value — a hijacked repository, a tampered response — would turn
+     * "a new version is available" into a phishing redirect. Only https pages on
+     * github.com under /releases/ are accepted; anything else falls back to the
+     * fixed releases page.
+     */
+    private static boolean isTrustedReleasePage(String url) {
+        if (url == null || url.length() == 0) {
+            return false;
+        }
+        try {
+            java.net.URI uri = new java.net.URI(url);
+            if (!"https".equalsIgnoreCase(uri.getScheme())) {
+                return false;
+            }
+            String host = uri.getHost();
+            if (host == null || !"github.com".equalsIgnoreCase(host)) {
+                return false;
+            }
+            String path = uri.getPath();
+            return path != null && path.contains("/releases/");
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static String between(String src, String start, String end) {
+        int from = src.indexOf(start);
+        if (from < 0) {
+            return null;
+        }
+        from += start.length();
+        int to = src.indexOf(end, from);
+        return to < 0 ? null : src.substring(from, to);
     }
 
     private static String readStream(InputStream in) throws Exception {

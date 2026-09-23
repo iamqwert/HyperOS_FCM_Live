@@ -2,22 +2,28 @@ plugins {
     id 'com.android.application'
 }
 
+// Signing keys live outside the repository (local.properties is gitignored).
+// Hoisted out of the android block so the release guard at the end of this file
+// can see it too.
+Properties localProperties = new Properties()
+if (project.rootProject.file('local.properties').exists()) {
+    localProperties.load(project.rootProject.file('local.properties').newDataInputStream())
+}
+
 android {
     compileSdk 37
 
     defaultConfig {
         applicationId namespace
-        minSdkVersion 27
+        // HyperOS 3 (and 4) devices ship Android 15 at the very least, so the
+        // module targets them directly: everything below API 35 is dropped, and
+        // with it the whole pre-edge-to-edge window handling path.
+        minSdkVersion 35
         targetSdkVersion 37
-        // Fixed so LSPosed update checks never treat this fork as older than
-        // upstream builds that inherit a low jgit commitCount.
-        versionCode 18
-        versionName "1.8.0"
-    }
-
-    Properties localProperties = new Properties()
-    if (project.rootProject.file('local.properties').exists()) {
-        localProperties.load(project.rootProject.file('local.properties').newDataInputStream())
+        // Fixed (bumped by hand each release) so LSPosed update checks never treat
+        // this fork as older than upstream builds that inherit a low jgit commitCount.
+        versionCode 19
+        versionName "2.0.0"
     }
 
     signingConfigs {
@@ -40,9 +46,11 @@ android {
         release {
             if (localProperties.getProperty("storeFile") != null) {
                 signingConfig signingConfigs.config
-            } else {
-                signingConfig signingConfigs.debug
             }
+            // No debug fallback on purpose: the AOSP debug keystore is public, so a
+            // release signed with it can be impersonated — anyone can sign an APK
+            // with the same signature and it installs over this one as an update.
+            // Which is refused, loudly, by the guard at the end of this file.
             minifyEnabled true
             // Resource shrink often drops values only referenced from code
             // (e.g. getColor) and can break Release-only inflation.
@@ -81,6 +89,7 @@ base {
 }
 
 dependencies {
+    // Compile-time only: annotations used by the source; nothing is packaged.
     compileOnly 'androidx.annotation:annotation:1.10.0'
     // Standard Material/Android pull-to-refresh (SwipeRefreshLayout).
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
@@ -89,3 +98,25 @@ dependencies {
     // Compile-time hidden-API signatures (not packaged in the APK).
     compileOnly project(":hiddenapi:stubs")
 }
+
+// Refuse to produce a release artifact without a real keystore. The AOSP debug
+// keystore is public, so a release signed with it can be impersonated: anyone can
+// sign an APK with the same signature and it installs over this one as an update.
+// The check runs when a release is actually built (not at configuration time), so
+// debug builds and plain `gradle tasks` still work on machines without keys.
+// CI without signing secrets opts in explicitly with -PallowDebugSignedRelease
+// (it also prints a warning there) instead of silently shipping a debug-signed APK.
+tasks.matching { it.name in ["assembleRelease", "bundleRelease", "packageRelease"] }
+        .configureEach {
+            doFirst {
+                if (localProperties.getProperty("storeFile") == null
+                        && !project.hasProperty("allowDebugSignedRelease")) {
+                    throw new GradleException(
+                            "Release signing is not configured. Add storeFile, " +
+                            "storePassword, keyAlias and keyPassword to " +
+                            "local.properties; refusing to sign a release with the " +
+                            "public debug key. (Pass -PallowDebugSignedRelease to " +
+                            "override on purpose.)")
+                }
+            }
+        }

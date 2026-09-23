@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Material 3 easing token: md.sys.motion.easing.emphasized.accelerate
+  (Android: PathInterpolator(0.3f, 0f, 0.8f, 0.15f)).
+
+  M3 pairs this with emphasised decelerate for anything that LEAVES the screen:
+  the element eases in slowly and then accelerates away, so the dismissal reads
+  as the menu folding back into its anchor.
+-->
+<pathInterpolator xmlns:android="http://schemas.android.com/apk/res/android"
+    android:controlX1="0.3"
+    android:controlY1="0.0"
+    android:controlX2="0.8"
+    android:controlY2="0.15" />
