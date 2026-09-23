@@ -43,7 +43,7 @@ public class LicensesActivity extends Activity {
             // Vendored source under mcu/ (no Gradle artifact) — listed for attribution.
             {"Material Color Utilities", "", "Apache License 2.0", MCU_URL},
             {"OpenJDK Unsafe", "", "GPL-2.0 with Classpath Exception", OPENJDK_URL},
-            {"SwipeRefreshLayout", "1.1.0", "Apache License 2.0", ANDROIDX_URL},
+            {"SwipeRefreshLayout", "1.2.0", "Apache License 2.0", ANDROIDX_URL},
             {"VersionedParcelable", "1.1.0", "Apache License 2.0", ANDROIDX_URL},
     };
 

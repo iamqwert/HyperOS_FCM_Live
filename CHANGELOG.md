@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.1 (versionCode 20)
+
+- 更新 Android Gradle Plugin 至 9.4.1
+- 更新 SwipeRefreshLayout 至 1.2.0
+
 ## 2.0.0 (versionCode 19)
 
 - 新增**应用内语言切换**（简体中文 / English）

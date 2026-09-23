@@ -22,8 +22,8 @@ android {
         targetSdkVersion 37
         // Fixed (bumped by hand each release) so LSPosed update checks never treat
         // this fork as older than upstream builds that inherit a low jgit commitCount.
-        versionCode 19
-        versionName "2.0.0"
+        versionCode 20
+        versionName "2.0.1"
     }
 
     signingConfigs {
@@ -92,7 +92,7 @@ dependencies {
     // Compile-time only: annotations used by the source; nothing is packaged.
     compileOnly 'androidx.annotation:annotation:1.10.0'
     // Standard Material/Android pull-to-refresh (SwipeRefreshLayout).
-    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.2.0'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
     // Compile-time hidden-API signatures (not packaged in the APK).
