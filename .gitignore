@@ -20,5 +20,26 @@ local.properties
 # Device logcat dumps (local debugging only)
 *.logcat
 
-# WorkBuddy local data (internal notes / scratch) — never publish
+# WorkBuddy local data (internal notes / scratch) - never publish
 .workbuddy/
+
+# 技术分析报告 / 内部日志 / 敏感报告等内部材料 - 仅本地，禁止入库
+# （README、CHANGELOG、.github/release-notes 等公开文档不受影响）
+*分析报告*
+*内部日志*
+*敏感报告*
+*敏感信息*
+*analysis-report*
+*internal-log*
+*sensitive-report*
+*.internal.md
+*.private.md
+*.secret.*
+/private/
+/confidential/
+/internal-notes/
+/reports/internal/
+docs/*报告*
+docs/internal/
+docs/private/
+docs/sensitive/
