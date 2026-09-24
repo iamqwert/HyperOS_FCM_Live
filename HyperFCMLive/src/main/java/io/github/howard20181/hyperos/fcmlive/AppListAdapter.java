@@ -2,7 +2,9 @@ package io.github.howard20181.hyperos.fcmlive;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.graphics.PorterDuff;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
@@ -269,13 +271,51 @@ public class AppListAdapter extends BaseAdapter {
             } catch (PackageManager.NameNotFoundException e) {
                 d = null;
             }
-            final Drawable loaded = d;
+            final Drawable loaded = d != null ? shrinkToRowSize(d) : null;
             app.iconLoading = false;
             if (loaded != null) {
                 app.icon = loaded;
                 scheduleIconRefresh();
             }
         });
+    }
+
+    /** Row icon size in dp; matches {@code @+id/app_icon} in item_app.xml. */
+    private static final int ICON_SIZE_DP = 44;
+
+    /**
+     * Re-decode a bitmap icon at the size the row actually paints.
+     *
+     * <p>Every loaded icon is kept on its {@link AppEntry} for the whole session,
+     * and a few hundred of them at full resolution is real memory the list never
+     * uses: the row is 44dp, so anything larger is stored at a size that can only
+     * ever be drawn scaled down. Shrinking to the row size caps that.
+     *
+     * <p>Only {@link BitmapDrawable} sources are touched — a plain downscale,
+     * which is pixel-identical to what the view was already drawing. Adaptive
+     * icons are left alone on purpose: they carry a safe zone that a flat
+     * rescale would break, and they hold no oversized bitmap of their own.
+     */
+    private Drawable shrinkToRowSize(Drawable source) {
+        int size = Math.round(ICON_SIZE_DP * density);
+        if (size <= 0) {
+            return source;
+        }
+        if (!(source instanceof BitmapDrawable)) {
+            return source;
+        }
+        Bitmap bitmap = ((BitmapDrawable) source).getBitmap();
+        if (bitmap == null || (bitmap.getWidth() <= size && bitmap.getHeight() <= size)) {
+            return source;
+        }
+        Bitmap scaled;
+        try {
+            scaled = Bitmap.createScaledBitmap(bitmap, size, size, true);
+        } catch (Throwable t) {
+            // Allocation failed: keep the original rather than show a blank row.
+            return source;
+        }
+        return new BitmapDrawable(context.getResources(), scaled);
     }
 
     /** True while a coalesced icon refresh is already posted to the main handler. */

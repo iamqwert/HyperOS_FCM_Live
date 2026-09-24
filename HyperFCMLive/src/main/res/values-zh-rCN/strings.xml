@@ -110,19 +110,19 @@
          空名单放行全部、非空名单只放行名单内、命中时临时豁免 2000ms 并补
          FLAG_INCLUDE_STOPPED_PACKAGES；改名单立即生效，启用/更新模块后需重启。 -->
     <string name="help_section_how">应用介绍</string>
-    <string name="help_how_body">澎湃的省电策略会限制后台应用的广播与网络。谷歌推送（FCM）靠 GMS 发一条广播把应用叫醒，这条广播一旦被延后或拦下，应用就收不到推送。\n\n本模块在系统框架里改掉这套判定：放行谷歌推送与重连相关的广播，不让 GMS 断网、被冻结或被拉黑；收到推送时还会为目标应用申请约 2 秒的临时省电豁免，并让处于「已停止」状态的应用也能收到这条广播。</string>
+    <string name="help_how_body">澎湃的省电策略会限制后台应用的广播与网络。谷歌推送（FCM）靠 GMS 发一条广播把应用叫醒，这条广播一旦被延后或拦下，应用就收不到推送。\n\n本模块在系统框架里改掉这套判定：放行谷歌推送与重连相关的广播，不让 GMS 断网、被冻结或被拉黑；收到推送时还会为你勾选的应用申请约 2 秒的临时省电豁免，并让它即使在「已停止」状态下也能收到这条广播。</string>
     <string name="help_section_allowlist">白名单机制介绍</string>
     <string name="help_allowlist_empty_title">一个都不勾选</string>
     <string name="help_allowlist_empty_body">相当于全部放行：任何收到谷歌推送的应用都会被允许自启动并被叫醒，不需要逐个维护名单。代价是后台耗电和内存占用会比只勾选若干应用上升更明显。</string>
     <string name="help_allowlist_checked_title">勾选了若干应用</string>
-    <string name="help_allowlist_checked_body">只对这些应用生效，它们能被推送唤醒。没勾选的应用回到系统原本的判定：推送可能被延后、攒批，或者直到你手动打开应用才送达。名单需要自己维护，漏勾一项就会延迟。</string>
+    <string name="help_allowlist_checked_body">勾选的应用会拿到额外权限：允许被推送自启动、从「已停止」状态被唤醒，并在每次推送时获得一小段省电豁免。没勾选的应用同样不再被拦截——它们的推送广播不会被延后或丢弃，GMS 也保持可达——只是拿不到这几项额外权限，所以推送可能到得晚一些，或要等你打开应用才送达。因此名单是「把耗电花在刀刃上」的开关，而不是把模块对其它应用关掉。</string>
     <string name="help_section_faq">常见问题</string>
     <string name="help_faq_q1">勾选了应用还是不推送？</string>
     <string name="help_faq_a1">依次检查：① LSPosed 里模块已启用、作用域包含「系统框架」；② 模块首次启用或更新后重启过一次设备；③ 该应用确实支持 FCM；④ 用「FCM 诊断」看 GMS 的连接状态。</string>
     <string name="help_faq_q2">改名单要重启吗？</string>
     <string name="help_faq_a2">不用。改动会立刻通知系统里的模块重新读取名单（前提是模块已启用、作用域正确）。只有首次启用或更新模块之后需要重启一次设备。</string>
     <string name="help_faq_q3">耗电变多了？</string>
-    <string name="help_faq_a3">这是模块的固有代价——它放行推送重连并允许应用被唤醒。想省电就改用白名单模式，只勾选真正需要即时推送的应用，范围越窄越省电。</string>
+    <string name="help_faq_a3">这是模块的固有代价——它放行推送重连并允许应用被唤醒。只勾选真正需要即时推送的应用，可以减少应用从「已停止」状态被唤醒的次数，耗电主要就花在这里。但这并不是把模块对其它应用关掉：GMS 与推送广播始终受保护。</string>
     <string name="help_faq_q4">「展示支持应用」是怎么判断的？</string>
-    <string name="help_faq_a4">扫描应用清单里是否声明了 Firebase / GMS 的推送接收器类名，属于启发式判断，实现方式小众的应用可能被漏掉。这个标记只是帮你筛选，勾选本身不受它限制。</string>
+    <string name="help_faq_a4">用的判断和系统里模块用的是同一个：该应用是否声明了接收 FCM 广播（com.google.android.c2dm.intent.RECEIVE）的接收器。凡是声明了的都会被标记，不管它的接收器类叫什么名字。这个标记只是帮你筛选，勾选本身不受它限制。</string>
 </resources>

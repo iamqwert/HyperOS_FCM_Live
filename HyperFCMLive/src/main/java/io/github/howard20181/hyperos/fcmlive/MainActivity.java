@@ -7,7 +7,10 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
+import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageButton;
@@ -27,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 import io.github.libxposed.service.XposedService;
@@ -90,9 +94,34 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private boolean showFcmSupportedOnly = false;
     private XposedService xposedService;
     private PopupWindow activeTooltip;
+    /** Overflow menu, dismissed on destroy so a rotation cannot leak the window. */
+    private PopupWindow activeOverflowMenu;
     private final Runnable dismissTooltipRunnable = this::dismissActiveTooltip;
     /** Palette this activity was painted with; a mismatch on resume = repaint. */
     private AppPalette appliedPalette;
+
+    /** Main-thread handler used to coalesce filtering while the user types. */
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private Runnable pendingFilter;
+
+    /**
+     * Last full package scan, reused across a configuration change. A rotation or
+     * a theme/language rebuild recreates this activity, and re-running
+     * {@code getInstalledPackages()} plus a label load per app to produce a
+     * result that cannot have changed is the most expensive thing this screen
+     * does. Dropped in {@link #onDestroy} when the screen is really finishing, so
+     * the icons it pins go with it and a fresh open always re-scans.
+     */
+    private static volatile List<AppListAdapter.AppEntry> sAppScanCache;
+    private static volatile boolean sAppScanCacheShowSystemApps;
+
+    private static final String KEY_STATE_QUERY = "state_query";
+    private static final String KEY_STATE_SEARCHING = "state_searching";
+    private static final String KEY_STATE_MULTI_SELECT = "state_multi_select";
+    private static final String KEY_STATE_SELECTION = "state_selection";
+    private static final String KEY_STATE_SHOW_SYSTEM = "state_show_system";
+    /** Typing is coalesced over this window: one filter pass per burst, not per key. */
+    private static final long FILTER_DEBOUNCE_MS = 150L;
 
     @Override
     protected void attachBaseContext(Context newBase) {
@@ -232,8 +261,15 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         // Idle at startup, so this is a no-op; kept for symmetry with the state
         // changes below (enterSearch / enterMultiSelect ...).
         updateBackCallback();
+
+        // Read back what a configuration change would otherwise drop — search
+        // text and an in-progress batch selection — before the list is built.
+        restoreUiState(savedInstanceState);
+
         // Wait for HyperOS app-list grant when needed; other ROMs load immediately.
-        if (!requestInstalledAppsPermissionIfNeeded()) {
+        if (requestInstalledAppsPermissionIfNeeded()) {
+            // The scan starts from onRequestPermissionsResult instead.
+        } else if (!restoreAppListFromCache()) {
             loadApps();
         }
         startUpdateCheck();
@@ -243,13 +279,9 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private void startUpdateCheck() {
         UpdateChecker.checkAutoAsync(this, (available, version, url) -> {
             if (available) {
-                runOnUiThread(() -> {
-                    if (!isFinishing() && !isDestroyed()) {
-                        Toast.makeText(this,
-                                getString(R.string.update_found, version),
-                                Toast.LENGTH_LONG).show();
-                    }
-                });
+                runOnUiThreadSafe(() -> Toast.makeText(this,
+                        getString(R.string.update_found, version),
+                        Toast.LENGTH_LONG).show());
             }
         });
     }
@@ -537,10 +569,96 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putString(KEY_STATE_QUERY, currentQuery);
+        outState.putBoolean(KEY_STATE_SEARCHING, searching);
+        outState.putBoolean(KEY_STATE_MULTI_SELECT, multiSelectMode);
+        outState.putBoolean(KEY_STATE_SHOW_SYSTEM, showSystemApps);
+        if (multiSelectMode && adapter != null) {
+            outState.putStringArrayList(KEY_STATE_SELECTION,
+                    new ArrayList<>(adapter.getSelectedPackages()));
+        }
+    }
+
+    /**
+     * Re-apply what a rebuild would otherwise drop. Rotation and the
+     * theme/language rebuild both recreate this screen, and losing a batch
+     * selection the user just made is exactly the kind of thing that reads as
+     * "the app is broken" rather than "the screen rotated".
+     */
+    private void restoreUiState(Bundle saved) {
+        if (saved == null) {
+            return;
+        }
+        showSystemApps = saved.getBoolean(KEY_STATE_SHOW_SYSTEM, showSystemApps);
+        String query = saved.getString(KEY_STATE_QUERY);
+        currentQuery = query != null ? query : "";
+        if (saved.getBoolean(KEY_STATE_MULTI_SELECT, false)) {
+            enterMultiSelect(null);
+            ArrayList<String> selection = saved.getStringArrayList(KEY_STATE_SELECTION);
+            if (adapter != null && selection != null) {
+                adapter.setSelectedPackages(new HashSet<>(selection));
+                updateSelectionTitle(adapter.getSelectedPackages().size());
+                updateSelectAllIcon();
+            }
+            return;
+        }
+        if (saved.getBoolean(KEY_STATE_SEARCHING, false)) {
+            enterSearch();
+            if (searchView != null) {
+                searchView.setQuery(currentQuery, false);
+            }
+        }
+        filterApps(currentQuery);
+    }
+
+    /**
+     * Reuse the previous package scan after a configuration change instead of
+     * querying PackageManager for every installed package again. Returns false
+     * when there is nothing to reuse (first open, or the system-app filter
+     * changed since the scan), which is when a real scan runs.
+     */
+    private boolean restoreAppListFromCache() {
+        List<AppListAdapter.AppEntry> cached = sAppScanCache;
+        if (cached == null || sAppScanCacheShowSystemApps != showSystemApps) {
+            return false;
+        }
+        applyAppSnapshot(new ArrayList<>(cached), true);
+        reloadAllowlist();
+        return true;
+    }
+
+    /**
+     * Post to the UI thread only while this activity can still be used. Both the
+     * Xposed service callback and the package scan outlive a screen the user has
+     * already left; running them against a destroyed activity touches dead views
+     * and pins the whole hierarchy for nothing.
+     */
+    private void runOnUiThreadSafe(Runnable action) {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) {
+                return;
+            }
+            action.run();
+        });
+    }
+
+    @Override
     protected void onDestroy() {
         dismissActiveTooltip();
+        dismissOverflowMenu();
+        if (pendingFilter != null) {
+            uiHandler.removeCallbacks(pendingFilter);
+            pendingFilter = null;
+        }
         if (adapter != null) {
             adapter.shutdown();
+        }
+        if (isFinishing()) {
+            // Leaving for real rather than being rebuilt: drop the scan cache so
+            // the icons it pins are released with the screen.
+            sAppScanCache = null;
         }
         if (backInvokedCallback != null) {
             try {
@@ -966,8 +1084,21 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
      * (primary fill + check when on; outline when off) — not system PopupMenu.
      * Click toggles; long-press does nothing (only the row ripple).
      */
+    /** Close the overflow menu if one is showing; safe to call at any time. */
+    private void dismissOverflowMenu() {
+        PopupWindow popup = activeOverflowMenu;
+        activeOverflowMenu = null;
+        if (popup != null) {
+            try {
+                popup.dismiss();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
     private void showOverflowMenu(View anchor) {
         dismissActiveTooltip();
+        dismissOverflowMenu();
         View content = getLayoutInflater().inflate(R.layout.popup_overflow, null);
         ImageView sysCheck = content.findViewById(R.id.menu_show_system_check);
         ImageView fcmCheck = content.findViewById(R.id.menu_show_fcm_check);
@@ -1000,11 +1131,19 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             }
         }
 
-        final PopupWindow popup = new PopupWindow(
+        PopupWindow popup = new PopupWindow(
                 content,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 true);
+        // Tracked so a rotation or a back press while it is open cannot leave the
+        // window attached to a destroyed activity (WindowLeaked).
+        activeOverflowMenu = popup;
+        popup.setOnDismissListener(() -> {
+            if (activeOverflowMenu == popup) {
+                activeOverflowMenu = null;
+            }
+        });
         popup.setElevation(dp(6));
         popup.setBackgroundDrawable(
                 new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
@@ -1096,22 +1235,35 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     @Override
     public boolean onQueryTextChange(String newText) {
         currentQuery = newText != null ? newText : "";
-        filterApps(currentQuery);
+        // Coalesce: one pass walks every app twice, and the list cannot usefully
+        // change faster than the user reads it, so a burst of keystrokes costs
+        // one filter instead of one per character.
+        if (pendingFilter != null) {
+            uiHandler.removeCallbacks(pendingFilter);
+        }
+        final String query = currentQuery;
+        pendingFilter = () -> {
+            pendingFilter = null;
+            filterApps(query);
+        };
+        uiHandler.postDelayed(pendingFilter, FILTER_DEBOUNCE_MS);
         return true;
     }
 
     private void filterApps(String query) {
         filteredApps.clear();
+        // Locale.ROOT: the default locale would fold "I" to "ı" under a Turkish
+        // locale and silently stop matching package names that contain it.
         String lower = query != null && query.length() > 0
-                ? query.toLowerCase() : null;
+                ? query.toLowerCase(Locale.ROOT) : null;
         boolean fcmOnly = showFcmSupportedOnly;
         for (AppListAdapter.AppEntry app : allApps) {
             if (fcmOnly && !app.supportFcm) {
                 continue;
             }
             if (lower == null
-                    || app.label.toLowerCase().contains(lower)
-                    || app.packageName.toLowerCase().contains(lower)) {
+                    || app.label.toLowerCase(Locale.ROOT).contains(lower)
+                    || app.packageName.toLowerCase(Locale.ROOT).contains(lower)) {
                 filteredApps.add(app);
             }
         }
@@ -1183,26 +1335,38 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
      * FCMPushViewer-style detection: scan Manifest receivers for well-known
      * Firebase / GCM component names.
      */
-    private static boolean hasFcmStyleReceivers(android.content.pm.PackageInfo pi) {
-        if (pi == null || pi.receivers == null) {
-            return false;
+    /**
+     * Packages that declare a C2DM / FCM receiver.
+     *
+     * <p>This is the same question the module asks in system_server
+     * ({@code Hooker#declaresC2dmReceiver}), and asking it the same way is the
+     * point: the list used to match three hard-coded receiver class names, so an
+     * app with its own receiver class was marked unsupported even though the
+     * module was already waking it. Since the "supported apps" filter is on by
+     * default, those apps were simply absent from the first screen — the user
+     * could not check the one app they came here for.
+     *
+     * <p>One query for the whole device, not one per package: the hook caches its
+     * per-package answers for that reason, and a scan is a few hundred packages.
+     */
+    private static Set<String> queryC2dmPackages(PackageManager pm) {
+        Set<String> packages = new HashSet<>();
+        try {
+            List<android.content.pm.ResolveInfo> receivers = pm.queryBroadcastReceivers(
+                    new Intent(Hooker.ACTION_REMOTE_INTENT),
+                    PackageManager.ResolveInfoFlags.of(0));
+            if (receivers != null) {
+                for (android.content.pm.ResolveInfo ri : receivers) {
+                    if (ri != null && ri.activityInfo != null
+                            && ri.activityInfo.packageName != null) {
+                        packages.add(ri.activityInfo.packageName);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG_UI, "Failed to query C2DM receivers", t);
         }
-        for (android.content.pm.ActivityInfo ri : pi.receivers) {
-            if (ri == null || ri.name == null) {
-                continue;
-            }
-            String name = ri.name;
-            // Matches HappyMax0/FCMPushViewer MainActivity.getAppList().
-            if ("com.google.firebase.iid.FirebaseInstanceIdReceiver".equals(name)
-                    || "com.google.android.gms.measurement.AppMeasurementReceiver".equals(name)) {
-                return true;
-            }
-            // Same judgment (receiver class name); modern firebase-messaging SDK.
-            if ("com.google.firebase.messaging.FirebaseMessagingReceiver".equals(name)) {
-                return true;
-            }
-        }
-        return false;
+        return packages;
     }
 
     private void initXposedService() {
@@ -1211,7 +1375,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 @Override
                 public void onServiceBind(@NonNull XposedService service) {
                     xposedService = service;
-                    runOnUiThread(() -> {
+                    runOnUiThreadSafe(() -> {
                         // Publish for other screens (About import/export).
                         Prefs.setRemote(remotePrefs());
                         // Remote prefs are the source of truth once bound.
@@ -1293,54 +1457,81 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         final boolean showSys = showSystemApps;
         final Set<String> allow = new HashSet<>(allowlist);
         final boolean emptyUi = allApps.isEmpty();
+        // Read on this thread: it gates whether the scan may be cached below.
+        final boolean readable = isAppListReadable();
         new Thread(() -> {
             PackageManager pm = getPackageManager();
+            try {
+                List<AppListAdapter.AppEntry> selected = new ArrayList<>();
+                for (String pkg : allow) {
+                    ApplicationInfo ai;
+                    try {
+                        ai = pm.getApplicationInfo(pkg, 0);
+                    } catch (PackageManager.NameNotFoundException e) {
+                        continue;
+                    }
+                    AppListAdapter.AppEntry entry =
+                            new AppListAdapter.AppEntry(pkg, ai.loadLabel(pm).toString());
+                    entry.checked = true;
+                    selected.add(entry);
+                }
+                selected.sort(MainActivity::compareEntries);
+                // First open only: show allowlisted apps before the full query returns.
+                if (emptyUi && !selected.isEmpty()) {
+                    runOnUiThreadSafe(() -> applyAppSnapshot(selected, false));
+                }
 
-            List<AppListAdapter.AppEntry> selected = new ArrayList<>();
-            for (String pkg : allow) {
-                ApplicationInfo ai;
-                try {
-                    ai = pm.getApplicationInfo(pkg, 0);
-                } catch (PackageManager.NameNotFoundException e) {
-                    continue;
+                // No GET_RECEIVERS any more: the C2DM question is answered by one
+                // query below, and without it the scan marshals a lot less.
+                List<android.content.pm.PackageInfo> installed =
+                        pm.getInstalledPackages(0);
+                final Set<String> c2dmPackages = queryC2dmPackages(pm);
+                List<AppListAdapter.AppEntry> result = new ArrayList<>();
+                for (android.content.pm.PackageInfo pi : installed) {
+                    ApplicationInfo ai = pi.applicationInfo;
+                    if (ai == null || ai.packageName.equals(getPackageName())) {
+                        continue;
+                    }
+                    if (!showSys && isSystemApp(ai)) {
+                        continue;
+                    }
+                    AppListAdapter.AppEntry entry = new AppListAdapter.AppEntry(
+                            ai.packageName, ai.loadLabel(pm).toString());
+                    entry.supportFcm = c2dmPackages.contains(ai.packageName);
+                    result.add(entry);
                 }
-                AppListAdapter.AppEntry entry =
-                        new AppListAdapter.AppEntry(pkg, ai.loadLabel(pm).toString());
-                entry.checked = true;
-                selected.add(entry);
-            }
-            selected.sort(MainActivity::compareEntries);
-            // First open only: show allowlisted apps before the full query returns.
-            if (emptyUi && !selected.isEmpty()) {
-                runOnUiThread(() -> applyAppSnapshot(selected, false));
-            }
-
-            List<android.content.pm.PackageInfo> installed =
-                    pm.getInstalledPackages(PackageManager.GET_RECEIVERS);
-            List<AppListAdapter.AppEntry> result = new ArrayList<>();
-            for (android.content.pm.PackageInfo pi : installed) {
-                ApplicationInfo ai = pi.applicationInfo;
-                if (ai.packageName.equals(getPackageName())) {
-                    continue;
+                for (AppListAdapter.AppEntry app : result) {
+                    app.checked = allow.contains(app.packageName);
                 }
-                if (!showSys && isSystemApp(ai)) {
-                    continue;
+                result.sort(MainActivity::compareEntries);
+                // Remember the scan for a configuration change. Only a readable
+                // scan counts: on HyperOS the first query runs before the
+                // app-list permission is answered and returns almost nothing, and
+                // caching that would make a rotation show an empty list forever.
+                if (readable && !result.isEmpty()) {
+                    sAppScanCache = new ArrayList<>(result);
+                    sAppScanCacheShowSystemApps = showSys;
                 }
-                AppListAdapter.AppEntry entry = new AppListAdapter.AppEntry(
-                        ai.packageName, ai.loadLabel(pm).toString());
-                entry.supportFcm = hasFcmStyleReceivers(pi);
-                result.add(entry);
+                runOnUiThreadSafe(() -> {
+                    applyAppSnapshot(result, true);
+                    // Xposed remote prefs may bind after the first package query;
+                    // re-read allowlist so checked apps stay on top after update.
+                    reloadAllowlist();
+                });
+            } catch (Throwable t) {
+                // The package query is a binder call on the whole installed set;
+                // it can fail (a very large package list is one documented
+                // cause). Swallowed here would leave the refresh spinner running
+                // forever with no list and no way back but killing the app, so
+                // the failure is logged and the spinner is stopped below.
+                Log.w(TAG_UI, "Failed to load the app list", t);
+            } finally {
+                runOnUiThreadSafe(() -> {
+                    if (swipeRefresh != null) {
+                        swipeRefresh.setRefreshing(false);
+                    }
+                });
             }
-            for (AppListAdapter.AppEntry app : result) {
-                app.checked = allow.contains(app.packageName);
-            }
-            result.sort(MainActivity::compareEntries);
-            runOnUiThread(() -> {
-                applyAppSnapshot(result, true);
-                // Xposed remote prefs may bind after the first package query;
-                // re-read allowlist so checked apps stay on top after update.
-                reloadAllowlist();
-            });
         }).start();
     }
 

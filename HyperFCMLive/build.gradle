@@ -22,8 +22,8 @@ android {
         targetSdkVersion 37
         // Fixed (bumped by hand each release) so LSPosed update checks never treat
         // this fork as older than upstream builds that inherit a low jgit commitCount.
-        versionCode 20
-        versionName "2.0.1"
+        versionCode 21
+        versionName "2.0.2"
     }
 
     signingConfigs {

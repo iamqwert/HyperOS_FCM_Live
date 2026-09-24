@@ -13,6 +13,12 @@ import io.github.howard20181.hyperos.fcmlive.mcu.Scheme;
  * dynamic color with a custom seed, Material palette style, color spec version
  * and the in-app language. Stored in a private prefs file — unlike the allowlist
  * these are UI-only, so they never need to reach system_server.
+ *
+ * <p>Writes use {@code apply()}, not {@code commit()}: they run on the main
+ * thread from click handlers, and everything that reads them back is this same
+ * process, whose in-memory copy {@code apply()} updates synchronously. Only
+ * {@code Prefs} needs {@code commit()}, because there the write has to be on
+ * disk before the broadcast that announces it crosses into system_server.
  */
 public final class ThemePrefs {
 
@@ -58,13 +64,13 @@ public final class ThemePrefs {
         // Migrate the old standalone AMOLED switch into a real theme mode.
         if (mode == MODE_DARK && p.getBoolean(KEY_AMOLED, false)) {
             mode = MODE_AMOLED;
-            p.edit().putInt(KEY_THEME_MODE, MODE_AMOLED).remove(KEY_AMOLED).commit();
+            p.edit().putInt(KEY_THEME_MODE, MODE_AMOLED).remove(KEY_AMOLED).apply();
         }
         return mode >= MODE_SYSTEM && mode <= MODE_AMOLED ? mode : MODE_SYSTEM;
     }
 
     public static void setThemeMode(Context context, int mode) {
-        prefs(context).edit().putInt(KEY_THEME_MODE, mode).commit();
+        prefs(context).edit().putInt(KEY_THEME_MODE, mode).apply();
     }
 
     public static Scheme.Variant paletteStyle(Context context) {
@@ -74,7 +80,7 @@ public final class ThemePrefs {
     }
 
     public static void setPaletteStyle(Context context, Scheme.Variant variant) {
-        prefs(context).edit().putInt(KEY_PALETTE_STYLE, variant.ordinal()).commit();
+        prefs(context).edit().putInt(KEY_PALETTE_STYLE, variant.ordinal()).apply();
     }
 
     public static int specVersion(Context context) {
@@ -83,7 +89,7 @@ public final class ThemePrefs {
     }
 
     public static void setSpecVersion(Context context, int spec) {
-        prefs(context).edit().putInt(KEY_SPEC, spec).commit();
+        prefs(context).edit().putInt(KEY_SPEC, spec).apply();
     }
 
     /** Whether colors follow the wallpaper; when off, {@link #seedColor} wins. */
@@ -92,7 +98,7 @@ public final class ThemePrefs {
     }
 
     public static void setDynamicColor(Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_DYNAMIC_COLOR, enabled).commit();
+        prefs(context).edit().putBoolean(KEY_DYNAMIC_COLOR, enabled).apply();
     }
 
     /** Custom seed (ARGB) used while dynamic color is off; 0 means unset. */
@@ -101,7 +107,7 @@ public final class ThemePrefs {
     }
 
     public static void setSeedColor(Context context, int color) {
-        prefs(context).edit().putInt(KEY_SEED_COLOR, color).commit();
+        prefs(context).edit().putInt(KEY_SEED_COLOR, color).apply();
     }
 
     /** Whether the resolved mode is the AMOLED pure-black variant. */
@@ -125,7 +131,7 @@ public final class ThemePrefs {
     }
 
     public static void setLanguage(Context context, int index) {
-        prefs(context).edit().putInt(KEY_LANGUAGE, index).commit();
+        prefs(context).edit().putInt(KEY_LANGUAGE, index).apply();
     }
 
     /** Locale to force, or {@code null} to keep the device's own choice. */

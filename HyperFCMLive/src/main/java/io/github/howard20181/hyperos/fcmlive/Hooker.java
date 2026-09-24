@@ -2,12 +2,14 @@ package io.github.howard20181.hyperos.fcmlive;
 
 import android.annotation.SuppressLint;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.os.Binder;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -40,7 +42,9 @@ import io.github.libxposed.api.XposedModule;
 public class Hooker extends XposedModule {
     private static final String TAG = "HyperGreeze";
     private static final List<String> CN_DEFER_BROADCAST = Arrays.asList("com.google.android.intent.action.GCM_RECONNECT", "com.google.android.gcm.DISCONNECTED", "com.google.android.gcm.CONNECTED", "com.google.android.gms.gcm.HEARTBEAT_ALARM");
-    private static final String ACTION_REMOTE_INTENT = "com.google.android.c2dm.intent.RECEIVE";
+    // Package-visible: the settings screen asks the same question when it marks
+    // apps as FCM-supported, and the two must not drift apart.
+    static final String ACTION_REMOTE_INTENT = "com.google.android.c2dm.intent.RECEIVE";
     private static final String GMS_PACKAGE_NAME = "com.google.android.gms";
     private static final String GMS_PERSISTENT_PROCESS_NAME = "com.google.android.gms.persistent";
     private Pair<String, ClassLoader> param;
@@ -73,53 +77,53 @@ public class Hooker extends XposedModule {
     private void hookSystemServer(ClassLoader classLoader) {
         try {
             hookAllowlist();
-        } catch (Exception t) {
+        } catch (Throwable t) {
             log(Log.ERROR, TAG, "Failed to hook allowlist receiver", t);
         }
         try {
             hookGreezeManagerService(classLoader);
-        } catch (Exception t) {
+        } catch (Throwable t) {
             log(Log.ERROR, TAG, "Failed to hook GreezeManagerService", t);
         }
         try {
             hookDomesticPolicyManager(classLoader);
-        } catch (Exception t) {
+        } catch (Throwable t) {
             log(Log.ERROR, TAG, "Failed to hook DomesticPolicyManager", t);
         }
         try {
             hookListAppsManager(classLoader);
-        } catch (Exception t) {
+        } catch (Throwable t) {
             log(Log.ERROR, TAG, "Failed to hook ListAppsManager", t);
         }
         try {
             hookBroadcastQueueModernStubImpl(classLoader);
-        } catch (Exception e) {
-            log(Log.ERROR, TAG, "Failed to hook BroadcastQueueModernStubImpl", e);
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "Failed to hook BroadcastQueueModernStubImpl", t);
         }
         try {
             hookProcessPolicy(classLoader);
-        } catch (Exception e) {
-            log(Log.ERROR, TAG, "Failed to hook ProcessPolicy", e);
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "Failed to hook ProcessPolicy", t);
         }
         try {
             hookAwareResourceControl(classLoader);
-        } catch (Exception e) {
-            log(Log.ERROR, TAG, "Failed to hook AwareResourceControl", e);
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "Failed to hook AwareResourceControl", t);
         }
         try {
             hookActivityManagerService(classLoader);
-        } catch (Exception e) {
-            log(Log.ERROR, TAG, "Failed to hook ActivityManagerService", e);
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "Failed to hook ActivityManagerService", t);
         }
         try {
             hookInternationalPolicyManager(classLoader);
-        } catch (Exception e) {
-            log(Log.ERROR, TAG, "Failed to hook InternationalPolicyManager", e);
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "Failed to hook InternationalPolicyManager", t);
         }
         try {
             hookProcessCleanerBase(classLoader);
-        } catch (Exception e) {
-            log(Log.ERROR, TAG, "Failed to hook ProcessCleanerBase", e);
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "Failed to hook ProcessCleanerBase", t);
         }
     }
 
@@ -140,13 +144,13 @@ public class Hooker extends XposedModule {
         if ("com.miui.powerkeeper".equals(packageName)) {
             try {
                 hookGmsObserver(classLoader);
-            } catch (Exception e) {
-                log(Log.ERROR, TAG, "Failed to hook GmsObserver", e);
+            } catch (Throwable t) {
+                log(Log.ERROR, TAG, "Failed to hook GmsObserver", t);
             }
             try {
                 hookGlobalFeatureConfigureHelper(classLoader);
-            } catch (Exception e) {
-                log(Log.ERROR, TAG, "Failed to hook GlobalFeatureConfigureHelper", e);
+            } catch (Throwable t) {
+                log(Log.ERROR, TAG, "Failed to hook GlobalFeatureConfigureHelper", t);
             }
         }
     }
@@ -198,33 +202,54 @@ public class Hooker extends XposedModule {
             // calleePkgName = (app.info == null || app.info.packageName == null) ? app.processName : app.info.packageName
             // It could be the process name.
             // boolean isAllowBroadcast(int callerUid, String callerPkgName, int calleeUid, String calleePkgName, String action)
-            var isAllowBroadcastMethod = GreezeManagerServiceClass.getDeclaredMethod("isAllowBroadcast", int.class, String.class, int.class, String.class, String.class);
-            var getPackageNameFromUidMethod = GreezeManagerServiceClass.getDeclaredMethod("getPackageNameFromUid", int.class);
-            getPackageNameFromUidMethod.setAccessible(true);
-            hookE(isAllowBroadcastMethod).intercept(chain -> {
-                String calleePkgName = chain.getArg(3) instanceof String calleeProcessName ? calleeProcessName : null;
-                try {
-                    if (chain.getArg(2) instanceof Integer calleeUid
-                            && getInvoker(getPackageNameFromUidMethod).invoke(chain.getThisObject(), calleeUid) instanceof String calleePackageName) {
-                        calleePkgName = calleePackageName;
+            var isAllowBroadcastMethod = findMethod(GreezeManagerServiceClass,
+                    "isAllowBroadcast", int.class, String.class, int.class, String.class, String.class);
+            // Optional helper, not a prerequisite: when a release drops it the
+            // hook still works off the raw callee argument, which is what makes
+            // the GMS reconnect/heartbeat branch match at all. Losing the uid
+            // lookup used to take the whole isAllowBroadcast hook down with it.
+            var getPackageNameFromUidMethod = findMethod(GreezeManagerServiceClass,
+                    "getPackageNameFromUid", int.class);
+            if (getPackageNameFromUidMethod != null) {
+                getPackageNameFromUidMethod.setAccessible(true);
+            } else {
+                log(Log.INFO, TAG, "GreezeManagerService#getPackageNameFromUid absent;"
+                        + " isAllowBroadcast falls back to the raw callee argument");
+            }
+            // Note: no early return here. A missing method must only cost its own
+            // hook — the rest of this group (deferBroadcastForMiui, the GMS limit
+            // hooks) still has to be given its chance.
+            if (isAllowBroadcastMethod == null) {
+                log(Log.ERROR, TAG, "GreezeManagerService#isAllowBroadcast absent, skip");
+            } else {
+                final Method uidLookup = getPackageNameFromUidMethod;
+                hookE(isAllowBroadcastMethod).intercept(chain -> {
+                    String calleePkgName = chain.getArg(3) instanceof String calleeProcessName ? calleeProcessName : null;
+                    if (uidLookup != null) {
+                        try {
+                            if (chain.getArg(2) instanceof Integer calleeUid
+                                    && getInvoker(uidLookup).invoke(chain.getThisObject(), calleeUid) instanceof String calleePackageName) {
+                                calleePkgName = calleePackageName;
+                            }
+                        } catch (Exception e) {
+                            log(Log.ERROR, TAG, "Failed to get callee package name", e);
+                        }
                     }
-                } catch (Exception e) {
-                    log(Log.ERROR, TAG, "Failed to get callee package name", e);
-                }
-                if (chain.getArg(4) instanceof String action
-                        && ((chain.getArg(1) instanceof String callerPkgName
-                        // callerPkgName get from intent or BroadcastRecord.callerPackage,
-                        // both are nullable, but they won't become null in FCM broadcasts.
-                        && GMS_PACKAGE_NAME.equals(callerPkgName)
-                        && ACTION_REMOTE_INTENT.equals(action))
-                        || ((GMS_PACKAGE_NAME.equals(calleePkgName)
-                        || GMS_PERSISTENT_PROCESS_NAME.equals(calleePkgName))
-                        && CN_DEFER_BROADCAST.contains(action)))) {
-                    return true;
-                }
-                return chain.proceed();
-            });
-            deoptimize(isAllowBroadcastMethod);
+                    if (chain.getArg(4) instanceof String action
+                            && ((chain.getArg(1) instanceof String callerPkgName
+                            // callerPkgName get from intent or BroadcastRecord.callerPackage,
+                            // both are nullable, but they won't become null in FCM broadcasts.
+                            && GMS_PACKAGE_NAME.equals(callerPkgName)
+                            && ACTION_REMOTE_INTENT.equals(action))
+                            || ((GMS_PACKAGE_NAME.equals(calleePkgName)
+                            || GMS_PERSISTENT_PROCESS_NAME.equals(calleePkgName))
+                            && CN_DEFER_BROADCAST.contains(action)))) {
+                        return true;
+                    }
+                    return chain.proceed();
+                });
+                deoptimize(isAllowBroadcastMethod);
+            }
         } catch (Exception e) {
             log(Log.ERROR, TAG, "Failed to hook GreezeManagerService#isAllowBroadcast", e);
         }
@@ -244,22 +269,35 @@ public class Hooker extends XposedModule {
         }
         Method triggerGMSLimitActionMethod;
         try {
-            triggerGMSLimitActionMethod = GreezeManagerServiceClass.getDeclaredMethod("triggerGMSLimitAction", boolean.class);
-        } catch (NoSuchMethodException ignored) {
-            triggerGMSLimitActionMethod = GreezeManagerServiceClass.getDeclaredMethod("triggerGMSLimitAction");
-        }
-        hookE(triggerGMSLimitActionMethod).intercept(chain -> {
-            if (!chain.getArgs().isEmpty()) {
-                var args = chain.getArgs().toArray();
-                args[0] = false;
-                return chain.proceed(args);
-            } else {
-                var mGmsLimitEnabled = GreezeManagerServiceClass.getDeclaredField("mGmsLimitEnabled");
-                UnsafeUtils.INSTANCE.setBooleanField(mGmsLimitEnabled, chain.getThisObject(), false);
-                return chain.proceed();
+            try {
+                triggerGMSLimitActionMethod = GreezeManagerServiceClass.getDeclaredMethod("triggerGMSLimitAction", boolean.class);
+            } catch (NoSuchMethodException ignored) {
+                triggerGMSLimitActionMethod = GreezeManagerServiceClass.getDeclaredMethod("triggerGMSLimitAction");
             }
-        });
-        deoptimize(triggerGMSLimitActionMethod);
+            hookE(triggerGMSLimitActionMethod).intercept(chain -> {
+                if (!chain.getArgs().isEmpty()) {
+                    var args = chain.getArgs().toArray();
+                    args[0] = false;
+                    return chain.proceed(args);
+                }
+                // No-arg overload: clear the flag the method reads, so the GMS
+                // limit can never be switched on. Every step is isolated: this
+                // runs inside GreezeManagerService, so an exception escaping it
+                // would take the host service down with it. The module has to
+                // degrade to "not applied", never crash the host — which is
+                // what the other hooks in this method already do.
+                try {
+                    var mGmsLimitEnabled = GreezeManagerServiceClass.getDeclaredField("mGmsLimitEnabled");
+                    UnsafeUtils.INSTANCE.setBooleanField(mGmsLimitEnabled, chain.getThisObject(), false);
+                } catch (Throwable t) {
+                    log(Log.ERROR, TAG, "Failed to clear mGmsLimitEnabled", t);
+                }
+                return chain.proceed();
+            });
+            deoptimize(triggerGMSLimitActionMethod);
+        } catch (Throwable e) {
+            log(Log.ERROR, TAG, "Failed to hook GreezeManagerService#triggerGMSLimitAction", e);
+        }
         // HyperOS 4 PowerKeeper uses IGreezeManager.updateGmsNetStatus(boolean limit).
         try {
             var updateGmsNetStatusMethod = GreezeManagerServiceClass.getDeclaredMethod("updateGmsNetStatus", boolean.class);
@@ -369,7 +407,7 @@ public class Hooker extends XposedModule {
                         && intentField.get(broadcastRecord) instanceof Intent intent
                         && ACTION_REMOTE_INTENT.equals(intent.getAction())
                         // Auto-start only apps the user whitelisted; empty list = all.
-                        && intent.getPackage() instanceof String targetPackage
+                        && targetPackageOf(intent) instanceof String targetPackage
                         && shouldWake(targetPackage)) {
                     return true;
                 }
@@ -894,6 +932,24 @@ public class Hooker extends XposedModule {
     }
 
     /**
+     * Target package of a push broadcast, or null when neither form is present.
+     *
+     * <p>GMS normally sends these with an explicit package, but a build that
+     * switches to {@code setComponent()} leaves {@code getPackage()} null — and
+     * both call sites read it as a guard, so the whole enhancement (the
+     * stopped-package flag and the power exemption) would then be skipped
+     * silently, with no log line and nothing to fall back to.
+     */
+    private static String targetPackageOf(Intent intent) {
+        String pkg = intent.getPackage();
+        if (pkg != null) {
+            return pkg;
+        }
+        ComponentName component = intent.getComponent();
+        return component != null ? component.getPackageName() : null;
+    }
+
+    /**
      * Whether a target package should be woken / auto-started by FCM.
      * An empty allowlist keeps the legacy behaviour (wake everything); once the
      * user checks at least one app it becomes whitelist mode (only checked apps).
@@ -954,8 +1010,72 @@ public class Hooker extends XposedModule {
         }
     }
 
+    /**
+     * {@code getDeclaredMethod} that reports a miss as {@code null} instead of
+     * throwing.
+     *
+     * <p>Nearly every hook here is identified by name and exact parameter list, so
+     * one renamed parameter is enough to make a hook disappear. The old code let
+     * that exception escape and abort the whole group, which cost far more than
+     * the single hook that had actually drifted; returning null lets each lookup
+     * fail on its own and lets the caller fall back to another signature.
+     */
+    private static Method findMethod(Class<?> owner, String name, Class<?>... parameterTypes) {
+        try {
+            return owner.getDeclaredMethod(name, parameterTypes);
+        } catch (NoSuchMethodException | SecurityException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Whether the process sending the broadcast is GMS.
+     *
+     * <p>{@code getRecordForApp*} is an internal helper that a release can rename;
+     * the binder calling uid cannot be renamed, so it is the durable answer and
+     * the one used whenever the helper is missing. Both are best effort: answering
+     * false only means this one broadcast misses the enhancement, which is exactly
+     * what would have happened without the hook.
+     */
+    private boolean callerIsGms(Method getRecordMethod, Field infoField, Object ams,
+                                Object callerThread) {
+        if (getRecordMethod != null && callerThread != null) {
+            try {
+                Object app = getInvoker(getRecordMethod).invoke(ams, callerThread);
+                if (app != null && infoField.get(app) instanceof ApplicationInfo info) {
+                    return GMS_PACKAGE_NAME.equals(info.packageName);
+                }
+            } catch (Throwable t) {
+                log(Log.ERROR, TAG, "Failed to resolve the broadcast caller", t);
+            }
+        }
+        return binderCallerIsGms();
+    }
+
+    private boolean binderCallerIsGms() {
+        try {
+            Context context = getSystemContext();
+            if (context == null) {
+                return false;
+            }
+            String[] packages = context.getPackageManager()
+                    .getPackagesForUid(Binder.getCallingUid());
+            if (packages == null) {
+                return false;
+            }
+            for (String pkg : packages) {
+                if (GMS_PACKAGE_NAME.equals(pkg)) {
+                    return true;
+                }
+            }
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "Failed to resolve the binder caller uid", t);
+        }
+        return false;
+    }
+
     private void hookActivityManagerService(ClassLoader classLoader) throws ClassNotFoundException,
-            NoSuchMethodException, NoSuchFieldException {
+            NoSuchFieldException {
         var ActivityManagerServiceClass = classLoader.loadClass("com.android.server.am.ActivityManagerService");
         var mContextField = ActivityManagerServiceClass.getDeclaredField("mContext");
         mContextField.setAccessible(true);
@@ -964,83 +1084,82 @@ public class Hooker extends XposedModule {
         var ProcessRecordClass = classLoader.loadClass("com.android.server.am.ProcessRecord");
         var infoField = ProcessRecordClass.getDeclaredField("info");
         infoField.setAccessible(true);
-        Method getRecordMethod;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12~16
-            getRecordMethod = ActivityManagerServiceClass.getDeclaredMethod("getRecordForAppLOSP", IApplicationThreadClass);
-        } else {
-            // Android 8~11
-            getRecordMethod = ActivityManagerServiceClass.getDeclaredMethod("getRecordForAppLocked", IApplicationThreadClass);
+        // Both names are tried rather than branching on SDK_INT: this helper has
+        // been renamed before, and a miss used to abort the whole method — taking
+        // the stopped-package flag and the power exemption down with it.
+        Method getRecordMethod = findMethod(ActivityManagerServiceClass,
+                "getRecordForAppLOSP", IApplicationThreadClass);
+        if (getRecordMethod == null) {
+            getRecordMethod = findMethod(ActivityManagerServiceClass,
+                    "getRecordForAppLocked", IApplicationThreadClass);
         }
-        Method broadcastMethod;
-        int intentArgIndex;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // int broadcastIntentWithFeature(IApplicationThread caller, String callingFeatureId,
-            //    Intent intent, String resolvedType, IIntentReceiver resultTo,
-            //    int resultCode, String resultData, Bundle resultExtras,
-            //    String[] requiredPermissions, String[] excludedPermissions,
-            //    String[] excludedPackages, int appOp, Bundle bOptions,
-            //    boolean serialized, boolean sticky, int userId)
-            intentArgIndex = 2;
-            broadcastMethod = ActivityManagerServiceClass.getDeclaredMethod("broadcastIntentWithFeature",
-                    IApplicationThreadClass, String.class,
-                    Intent.class, String.class, IIntentReceiverClass,
-                    int.class, String.class, Bundle.class,
-                    String[].class, String[].class,
-                    String[].class, int.class, Bundle.class,
-                    boolean.class, boolean.class, int.class);
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // int broadcastIntentWithFeature(IApplicationThread caller, String callingFeatureId,
-            //    Intent intent, String resolvedType, IIntentReceiver resultTo,
-            //    int resultCode, String resultData, Bundle resultExtras,
-            //    String[] requiredPermissions, String[] excludedPermissions, int appOp, Bundle bOptions,
-            //    boolean serialized, boolean sticky, int userId)
-            intentArgIndex = 2;
-            broadcastMethod = ActivityManagerServiceClass.getDeclaredMethod("broadcastIntentWithFeature",
-                    IApplicationThreadClass, String.class,
-                    Intent.class, String.class, IIntentReceiverClass,
-                    int.class, String.class, Bundle.class,
-                    String[].class, String[].class, int.class, Bundle.class,
-                    boolean.class, boolean.class, int.class);
-        } else if (Build.VERSION.SDK_INT == Build.VERSION_CODES.R) {
-            // int broadcastIntentWithFeature(IApplicationThread caller, String callingFeatureId,
-            //    Intent intent, String resolvedType, IIntentReceiver resultTo,
-            //    int resultCode, String resultData, Bundle resultExtras,
-            //    String[] requiredPermissions, int appOp, Bundle bOptions,
-            //    boolean serialized, boolean sticky, int userId)
-            intentArgIndex = 2;
-            broadcastMethod = ActivityManagerServiceClass.getDeclaredMethod("broadcastIntentWithFeature",
-                    IApplicationThreadClass, String.class,
-                    Intent.class, String.class, IIntentReceiverClass,
-                    int.class, String.class, Bundle.class,
-                    String[].class, int.class, Bundle.class,
-                    boolean.class, boolean.class, int.class);
-        } else {
-            // int broadcastIntent(IApplicationThread caller,
-            //    Intent intent, String resolvedType, IIntentReceiver resultTo,
-            //    int resultCode, String resultData, Bundle resultExtras,
-            //    String[] requiredPermissions, int appOp, Bundle bOptions,
-            //    boolean serialized, boolean sticky, int userId)
-            intentArgIndex = 1;
-            broadcastMethod = ActivityManagerServiceClass.getDeclaredMethod("broadcastIntent",
+        if (getRecordMethod == null) {
+            log(Log.WARN, TAG, "No ActivityManagerService#getRecordForApp*;"
+                    + " the broadcast caller is identified by binder uid instead");
+        }
+        // Every known shape, newest first, instead of trusting SDK_INT: a release
+        // that reshuffles a parameter would otherwise drop this hook silently,
+        // which is the one failure nobody can see from the settings screen.
+        // int broadcastIntentWithFeature(IApplicationThread caller, String callingFeatureId,
+        //    Intent intent, String resolvedType, IIntentReceiver resultTo,
+        //    int resultCode, String resultData, Bundle resultExtras,
+        //    String[] requiredPermissions, String[] excludedPermissions,
+        //    [String[] excludedPackages,] int appOp, Bundle bOptions,
+        //    boolean serialized, boolean sticky, int userId)
+        Method broadcastMethod = null;
+        int intentArgIndex = 2;
+        List<Class<?>[]> featureSignatures = Arrays.asList(
+                // Android 13+: excludedPackages added.
+                new Class<?>[]{IApplicationThreadClass, String.class, Intent.class, String.class,
+                        IIntentReceiverClass, int.class, String.class, Bundle.class,
+                        String[].class, String[].class, String[].class, int.class, Bundle.class,
+                        boolean.class, boolean.class, int.class},
+                // Android 12.
+                new Class<?>[]{IApplicationThreadClass, String.class, Intent.class, String.class,
+                        IIntentReceiverClass, int.class, String.class, Bundle.class,
+                        String[].class, String[].class, int.class, Bundle.class,
+                        boolean.class, boolean.class, int.class},
+                // Android 11.
+                new Class<?>[]{IApplicationThreadClass, String.class, Intent.class, String.class,
+                        IIntentReceiverClass, int.class, String.class, Bundle.class,
+                        String[].class, int.class, Bundle.class,
+                        boolean.class, boolean.class, int.class});
+        for (Class<?>[] signature : featureSignatures) {
+            broadcastMethod = findMethod(ActivityManagerServiceClass,
+                    "broadcastIntentWithFeature", signature);
+            if (broadcastMethod != null) {
+                break;
+            }
+        }
+        if (broadcastMethod == null) {
+            // Pre-feature-id name: one argument less, and the intent sits at 1.
+            broadcastMethod = findMethod(ActivityManagerServiceClass, "broadcastIntent",
                     IApplicationThreadClass,
                     Intent.class, String.class, IIntentReceiverClass,
                     int.class, String.class, Bundle.class,
                     String[].class, int.class, Bundle.class,
                     boolean.class, boolean.class, int.class);
+            if (broadcastMethod != null) {
+                intentArgIndex = 1;
+            }
         }
+        if (broadcastMethod == null) {
+            log(Log.ERROR, TAG, "No broadcastIntent* in ActivityManagerService;"
+                    + " stopped-package delivery and the power exemption are not installed");
+            return;
+        }
+        final Method finalGetRecordMethod = getRecordMethod;
+        final int finalIntentArgIndex = intentArgIndex;
         hookE(broadcastMethod).intercept(chain -> {
             // This runs for every broadcast in the system, so reject on the
             // action before touching anything reflective.
-            if (chain.getArg(intentArgIndex) instanceof Intent intent
+            if (chain.getArg(finalIntentArgIndex) instanceof Intent intent
                     && ACTION_REMOTE_INTENT.equals(intent.getAction())) {
                 try {
-                    Object app = getInvoker(getRecordMethod)
-                            .invoke(chain.getThisObject(), chain.getArg(0));
-                    if (app != null && infoField.get(app) instanceof ApplicationInfo info
-                            && GMS_PACKAGE_NAME.equals(info.packageName)
+                    if (callerIsGms(finalGetRecordMethod, infoField,
+                            chain.getThisObject(), chain.getArg(0))
                             // Wake / auto-start only apps the user whitelisted; empty list = all.
-                            && intent.getPackage() instanceof String targetPackage
+                            && targetPackageOf(intent) instanceof String targetPackage
                             && shouldWake(targetPackage)) {
                         // The stopped-package flag is what this hook exists for, so
                         // it is applied first and protected on its own.
