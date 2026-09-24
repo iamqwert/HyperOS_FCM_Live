@@ -21,6 +21,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Process;
 import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -1016,6 +1017,7 @@ public class AboutActivity extends Activity {
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("text/plain");
+            intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             intent.putExtra(Intent.EXTRA_TITLE, "fcmlive-allowlist.txt");
             startActivityForResult(intent, REQ_EXPORT);
         } catch (Throwable t) {
@@ -1028,6 +1030,7 @@ public class AboutActivity extends Activity {
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("text/plain");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivityForResult(intent, REQ_IMPORT);
         } catch (Throwable t) {
             Toast.makeText(this, R.string.allowlist_import_failed, Toast.LENGTH_SHORT).show();
@@ -1054,6 +1057,16 @@ public class AboutActivity extends Activity {
     private void writeAllowlistTo(Uri uri) {
         List<String> sorted = new ArrayList<>(currentAllowlist());
         Collections.sort(sorted);
+
+        // ACTION_CREATE_DOCUMENT returns an externally supplied URI. Require a
+        // content URI and an explicit write grant before resolving it. This
+        // prevents an arbitrary caller/provider URI from being used as a
+        // ContentResolver target.
+        if (!isGrantedContentUri(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION)) {
+            Toast.makeText(this, R.string.allowlist_export_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
         try (OutputStream out = getContentResolver().openOutputStream(uri)) {
             if (out == null) {
                 throw new java.io.IOException("null stream");
@@ -1072,6 +1085,15 @@ public class AboutActivity extends Activity {
 
     private void readAllowlistFrom(Uri uri) {
         Set<String> allow = new HashSet<>();
+
+        // ACTION_OPEN_DOCUMENT returns an externally supplied URI. Require a
+        // content URI and an explicit read grant before resolving it. This is
+        // the security boundary for the ContentResolver operation.
+        if (!isGrantedContentUri(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)) {
+            Toast.makeText(this, R.string.allowlist_import_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
         try (InputStream in = getContentResolver().openInputStream(uri)) {
             if (in == null) {
                 throw new java.io.IOException("null stream");
@@ -1097,6 +1119,21 @@ public class AboutActivity extends Activity {
         Prefs.writeAllowlist(this, Prefs.remote(), allow);
         Toast.makeText(this, getString(R.string.allowlist_import_done, allow.size()),
                 Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Accept only content:// URIs for which this process currently has the
+     * requested explicit URI permission. The permission check is performed
+     * against this process UID/PID, so an arbitrary URI supplied by another
+     * component cannot be resolved unless Android has actually granted access.
+     */
+    private boolean isGrantedContentUri(Uri uri, int grantFlag) {
+        if (uri == null || !"content".equals(uri.getScheme())
+                || uri.getAuthority() == null || uri.getAuthority().isEmpty()) {
+            return false;
+        }
+        return checkUriPermission(uri, Process.myPid(), Process.myUid(), grantFlag)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
     }
 
     /** Offset tooltip below the anchor so HyperOS does not cover the icon. */
