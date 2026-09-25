@@ -3,6 +3,8 @@ package io.github.howard20181.hyperos.fcmlive;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.view.HapticFeedbackConstants;
+import android.view.View;
 import android.view.WindowInsets;
 import android.widget.Toast;
 
@@ -50,6 +52,27 @@ public final class UiUtils {
     public static int bottomInset(WindowInsets insets) {
         return insets.getInsets(WindowInsets.Type.systemBars()
                 | WindowInsets.Type.systemGestures()).bottom;
+    }
+
+    /**
+     * One tick of haptic feedback for a tap on a card.
+     *
+     * <p>{@code performHapticFeedback} rather than the vibrator service: it
+     * needs no permission and is already gated on the user's own touch-feedback
+     * setting, so switching haptics off in the system silences the app too. On
+     * a device without a vibrator — or a ROM that ignores the request — it just
+     * returns false, and there is nothing to clean up: no service handle, no
+     * permission to revoke.
+     */
+    public static void tapFeedback(View view) {
+        if (view == null) {
+            return;
+        }
+        try {
+            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+        } catch (Throwable ignored) {
+            // No vibrator / no haptics on this device: a tap is still a tap.
+        }
     }
 
     public static int statusBarHeight(Context context) {

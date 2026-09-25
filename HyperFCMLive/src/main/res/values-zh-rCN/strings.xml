@@ -124,5 +124,5 @@
     <string name="help_faq_q3">耗电变多了？</string>
     <string name="help_faq_a3">这是模块的固有代价——它放行推送重连并允许应用被唤醒。只勾选真正需要即时推送的应用，可以减少应用从「已停止」状态被唤醒的次数，耗电主要就花在这里。但这并不是把模块对其它应用关掉：GMS 与推送广播始终受保护。</string>
     <string name="help_faq_q4">「展示支持应用」是怎么判断的？</string>
-    <string name="help_faq_a4">用的判断和系统里模块用的是同一个：该应用是否声明了接收 FCM 广播（com.google.android.c2dm.intent.RECEIVE）的接收器。凡是声明了的都会被标记，不管它的接收器类叫什么名字。这个标记只是帮你筛选，勾选本身不受它限制。</string>
+    <string name="help_faq_a4">只要在该应用的清单里发现下面任意一项，就标记为支持：FirebaseMessagingService、FirebaseInstanceIdReceiver 这两个组件类，或者 com.google.firebase.MESSAGING_EVENT、com.google.android.c2dm.intent.RECEIVE 这两个意图动作。命中任意一项即算支持，与组件叫什么名字无关。这个标记只是帮你筛选，勾选本身不受它限制。</string>
 </resources>

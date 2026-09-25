@@ -10,7 +10,13 @@
 - 修复更多选项菜单未随页面销毁关闭导致的内存泄漏
 - 修复搜索结果匹配异常的问题
 - 应用图标改为按列表实际显示尺寸加载
-- FCM 应用的判断改用查询 `com.google.android.c2dm.intent.RECEIVE` 接收器
+- FCM 应用的判断改为：命中 `FirebaseMessagingService`、`FirebaseInstanceIdReceiver` 组件类，或 `com.google.firebase.MESSAGING_EVENT`、`com.google.android.c2dm.intent.RECEIVE` 意图动作中的任意一项即算支持
+- 模块内的推送判定同步放宽为上述四个标记
+- 主界面应用卡片、关于页卡片点击增加振动反馈
+- 修复夜间息屏后 FCM 不推送：待机防火墙 `enablemiuistandby` 在 `NetdExecutor#execute` 返回基本类型时被放行
+- 修复 `isRestrictNet` 调用栈匹配过严导致夜间网络限制生效、GMS 长连接被掐断
+- 修复 Doze/进程白名单只返回副本、未写回框架列表的问题
+- 修复导入/导出白名单时外部 URI 缺少路径校验的问题（CodeQL `java/android/unsafe-content-uri-resolution`）
 - 重建时复用已扫描的应用列表
 - 服务回调增加生命周期判断
 - 更新帮助页文案

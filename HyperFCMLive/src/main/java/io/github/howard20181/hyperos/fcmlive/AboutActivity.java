@@ -143,6 +143,20 @@ public class AboutActivity extends Activity {
         return value < min ? min : Math.min(value, max);
     }
 
+    /**
+     * A card tap: one tick of haptic feedback, then whatever the row does.
+     *
+     * <p>Only the list cards get it — not the version row (it is deliberately
+     * inert, and a buzz on every tap would give the easter egg away) and not
+     * the open-source licenses screen.
+     */
+    private static View.OnClickListener rowClick(Runnable action) {
+        return v -> {
+            UiUtils.tapFeedback(v);
+            action.run();
+        };
+    }
+
     private final ArrayList<Long> eggTaps = new ArrayList<>(EGG_TAP_COUNT);
     private long lastEggAtMs;
     private TextView hideIconState;
@@ -195,28 +209,28 @@ public class AboutActivity extends Activity {
 
         View sourceRow = findViewById(R.id.row_view_source);
         if (sourceRow != null) {
-            sourceRow.setOnClickListener(v -> openUrl(REPO_URL));
+            sourceRow.setOnClickListener(rowClick(() -> openUrl(REPO_URL)));
         }
 
         View licensesRow = findViewById(R.id.row_open_source_licenses);
         if (licensesRow != null) {
-            licensesRow.setOnClickListener(v ->
-                    startActivity(new Intent(this, LicensesActivity.class)));
+            licensesRow.setOnClickListener(rowClick(() ->
+                    startActivity(new Intent(this, LicensesActivity.class))));
         }
 
         View exportRow = findViewById(R.id.row_export_allowlist);
         if (exportRow != null) {
-            exportRow.setOnClickListener(v -> exportAllowlist());
+            exportRow.setOnClickListener(rowClick(this::exportAllowlist));
         }
 
         View importRow = findViewById(R.id.row_import_allowlist);
         if (importRow != null) {
-            importRow.setOnClickListener(v -> importAllowlist());
+            importRow.setOnClickListener(rowClick(this::importAllowlist));
         }
 
         View updateRow = findViewById(R.id.row_check_update);
         if (updateRow != null) {
-            updateRow.setOnClickListener(v -> checkForUpdates());
+            updateRow.setOnClickListener(rowClick(this::checkForUpdates));
         }
 
         View versionRow = findViewById(R.id.row_current_version);
@@ -242,26 +256,26 @@ public class AboutActivity extends Activity {
         // exactly like a tap anywhere else on the card.
         View themeModeRow = findViewById(R.id.row_theme_mode);
         if (themeModeRow != null) {
-            themeModeRow.setOnClickListener(v -> showPopupMenu(themeModeRow,
+            themeModeRow.setOnClickListener(rowClick(() -> showPopupMenu(themeModeRow,
                     R.string.theme_mode, R.array.theme_mode_entries,
                     ThemePrefs.themeMode(this),
-                    index -> ThemePrefs.setThemeMode(this, index)));
+                    index -> ThemePrefs.setThemeMode(this, index))));
         }
 
         View paletteRow = findViewById(R.id.row_palette_style);
         if (paletteRow != null) {
-            paletteRow.setOnClickListener(v -> showPopupMenu(paletteRow,
+            paletteRow.setOnClickListener(rowClick(() -> showPopupMenu(paletteRow,
                     R.string.palette_style, R.array.palette_style_entries,
                     ThemePrefs.paletteStyle(this).ordinal(),
-                    index -> ThemePrefs.setPaletteStyle(this, variantAt(index))));
+                    index -> ThemePrefs.setPaletteStyle(this, variantAt(index)))));
         }
 
         View specRow = findViewById(R.id.row_color_spec);
         if (specRow != null) {
-            specRow.setOnClickListener(v -> showPopupMenu(specRow,
+            specRow.setOnClickListener(rowClick(() -> showPopupMenu(specRow,
                     R.string.color_spec, R.array.color_spec_entries,
                     ThemePrefs.specVersion(this),
-                    index -> ThemePrefs.setSpecVersion(this, index)));
+                    index -> ThemePrefs.setSpecVersion(this, index))));
         }
 
         // Version name (version code), shown under the "Current version" row.
@@ -339,11 +353,11 @@ public class AboutActivity extends Activity {
         hideIconSwitch = findViewById(R.id.hide_icon_switch);
         View hideRow = findViewById(R.id.row_hide_icon);
         if (hideRow != null) {
-            hideRow.setOnClickListener(v -> {
+            hideRow.setOnClickListener(rowClick(() -> {
                 if (hideIconSwitch != null) {
                     hideIconSwitch.setChecked(!hideIconSwitch.isChecked());
                 }
-            });
+            }));
         }
         if (hideIconSwitch == null) {
             return;
@@ -370,13 +384,13 @@ public class AboutActivity extends Activity {
         dynamicColorSwatches = findViewById(R.id.dynamic_color_swatches);
         View row = findViewById(R.id.row_dynamic_color);
         if (row != null) {
-            row.setOnClickListener(v -> {
+            row.setOnClickListener(rowClick(() -> {
                 if (dynamicColorSwitch != null) {
                     // Same reasoning as the listener below: the state change
                     // rebuilds the screen, so jump straight to the new state.
                     dynamicColorSwitch.setCheckedImmediate(!dynamicColorSwitch.isChecked());
                 }
-            });
+            }));
         }
         if (dynamicColorSwitch == null) {
             return;
@@ -945,10 +959,10 @@ public class AboutActivity extends Activity {
     private void bindLanguageRow() {
         View row = findViewById(R.id.row_language);
         if (row != null) {
-            row.setOnClickListener(v -> showPopupMenu(row,
+            row.setOnClickListener(rowClick(() -> showPopupMenu(row,
                     R.string.language, R.array.language_entries,
                     effectiveLanguage(),
-                    index -> ThemePrefs.setLanguage(this, index)));
+                    index -> ThemePrefs.setLanguage(this, index))));
         }
     }
 
@@ -1063,7 +1077,35 @@ public class AboutActivity extends Activity {
         // prevents an arbitrary caller/provider URI from being used as a
         // ContentResolver target.
         if (!isGrantedContentUri(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION)) {
-            Toast.makeText(this, R.string.allowlist_export_failed, Toast.LENGTH_SHORT).show();
+            toastShort(R.string.allowlist_export_failed);
+            return;
+        }
+        // The authority decides which provider answers; the *path* is what the
+        // provider itself interprets, and a provider is free to mean
+        // "/data/data/<app>/..." by it. Resolving such a URI is what turns a
+        // document picker into a way to overwrite this app's own private files.
+        // Normalising first is what makes the prefix test mean anything:
+        // "/safe/../../data/data/<app>/x" names the /data path it normalises to.
+        String path = uri.getPath();
+        if (path == null) {
+            toastShort(R.string.allowlist_export_failed);
+            return;
+        }
+        java.nio.file.Path normalized =
+                java.nio.file.FileSystems.getDefault().getPath(path).normalize();
+        if (normalized.startsWith("/data")) {
+            toastShort(R.string.allowlist_export_failed);
+            return;
+        }
+        String resolved = normalized.toString();
+        // A leftover ".." means the path still escapes upwards: normalize()
+        // keeps it when there is nothing above it to collapse into.
+        if (resolved.contains("..")
+                || resolved.startsWith("/system")
+                || resolved.startsWith("/vendor")
+                || resolved.startsWith("/proc")
+                || resolved.startsWith("/dev")) {
+            toastShort(R.string.allowlist_export_failed);
             return;
         }
 
@@ -1090,7 +1132,30 @@ public class AboutActivity extends Activity {
         // content URI and an explicit read grant before resolving it. This is
         // the security boundary for the ContentResolver operation.
         if (!isGrantedContentUri(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)) {
-            Toast.makeText(this, R.string.allowlist_import_failed, Toast.LENGTH_SHORT).show();
+            toastShort(R.string.allowlist_import_failed);
+            return;
+        }
+        // Same path check as the export side: the provider interprets the path,
+        // so it is normalised and the private roots are refused before a stream
+        // is opened — otherwise a provider can answer with this app's own files.
+        String path = uri.getPath();
+        if (path == null) {
+            toastShort(R.string.allowlist_import_failed);
+            return;
+        }
+        java.nio.file.Path normalized =
+                java.nio.file.FileSystems.getDefault().getPath(path).normalize();
+        if (normalized.startsWith("/data")) {
+            toastShort(R.string.allowlist_import_failed);
+            return;
+        }
+        String resolved = normalized.toString();
+        if (resolved.contains("..")
+                || resolved.startsWith("/system")
+                || resolved.startsWith("/vendor")
+                || resolved.startsWith("/proc")
+                || resolved.startsWith("/dev")) {
+            toastShort(R.string.allowlist_import_failed);
             return;
         }
 
@@ -1134,6 +1199,10 @@ public class AboutActivity extends Activity {
         }
         return checkUriPermission(uri, Process.myPid(), Process.myUid(), grantFlag)
                 == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void toastShort(int resId) {
+        Toast.makeText(this, resId, Toast.LENGTH_SHORT).show();
     }
 
     /** Offset tooltip below the anchor so HyperOS does not cover the icon. */

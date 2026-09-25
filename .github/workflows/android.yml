@@ -6,6 +6,11 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: '同时发布 GitHub Release（默认勾选为否，仅构建 CI 产物）'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -70,7 +75,9 @@ jobs:
   # Formal versioned release (not nightly). Tag/name come from the APK
   # filename built from HyperFCMLive/build.gradle (versionName.versionCode).
   release:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    # 日常 push 只做 CI 构建。发版改为手动触发：Actions → Android CI →
+    # Run workflow → 勾选 publish_release。这样误推 main 不会自动发 Release。
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true'
     needs: build
     runs-on: ubuntu-latest
     permissions:

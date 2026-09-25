@@ -42,9 +42,15 @@ import io.github.libxposed.api.XposedModule;
 public class Hooker extends XposedModule {
     private static final String TAG = "HyperGreeze";
     private static final List<String> CN_DEFER_BROADCAST = Arrays.asList("com.google.android.intent.action.GCM_RECONNECT", "com.google.android.gcm.DISCONNECTED", "com.google.android.gcm.CONNECTED", "com.google.android.gms.gcm.HEARTBEAT_ALARM");
-    // Package-visible: the settings screen asks the same question when it marks
-    // apps as FCM-supported, and the two must not drift apart.
+    // The four FCM markers, package-visible: the settings screen asks the same
+    // question when it marks apps as FCM-supported, and the two must not drift
+    // apart. Shipping any one of them is enough.
     static final String ACTION_REMOTE_INTENT = "com.google.android.c2dm.intent.RECEIVE";
+    static final String ACTION_MESSAGING_EVENT = "com.google.firebase.MESSAGING_EVENT";
+    static final String FCM_MESSAGING_SERVICE_CLASS =
+            "com.google.firebase.messaging.FirebaseMessagingService";
+    static final String FCM_IID_RECEIVER_CLASS =
+            "com.google.firebase.iid.FirebaseInstanceIdReceiver";
     private static final String GMS_PACKAGE_NAME = "com.google.android.gms";
     private static final String GMS_PERSISTENT_PROCESS_NAME = "com.google.android.gms.persistent";
     private Pair<String, ClassLoader> param;
@@ -425,18 +431,23 @@ public class Hooker extends XposedModule {
         var getWhiteListMethod = ProcessPolicyClass.getDeclaredMethod("getWhiteList", int.class);
         hookE(getWhiteListMethod).intercept(chain -> {
             var result = chain.proceed();
-            // Never add to the collection the framework hands back: it may be
-            // immutable (the UnsupportedOperationException would escape into
-            // ActivityManagerService) and it may be a shared, cached instance
-            // (then the entries accumulate on every single call). A private copy
-            // keeps the same order and element types while leaving the original
-            // untouched. On any failure the original result is returned as-is.
+            // The copy is what guarantees *this* call sees GMS: the framework's
+            // own list may be immutable (an UnsupportedOperationException here
+            // would escape into ActivityManagerService).
+            //
+            // The in-place write is kept as well, best effort. PowerKeeper reads
+            // this list through a cached field on some builds, and a caller that
+            // reads the cache directly never sees a copy — 1.8.0 only ever wrote
+            // in place, and dropping that is one of the differences between a
+            // device that pushes overnight and one that does not.
             try {
                 if (chain.getArg(0) instanceof Integer flags && (flags & 1) != 0
                         && result instanceof List<?> source) {
                     var whiteList = new ArrayList<Object>(source);
                     addIfAbsent(whiteList, GMS_PACKAGE_NAME);
                     addIfAbsent(whiteList, GMS_PERSISTENT_PROCESS_NAME);
+                    addIfAbsentInPlace(source, GMS_PACKAGE_NAME);
+                    addIfAbsentInPlace(source, GMS_PERSISTENT_PROCESS_NAME);
                     return whiteList;
                 }
             } catch (Throwable t) {
@@ -450,6 +461,26 @@ public class Hooker extends XposedModule {
     private static void addIfAbsent(List<Object> list, String value) {
         if (!list.contains(value)) {
             list.add(value);
+        }
+    }
+
+    /**
+     * Same, but on the framework's own list.
+     *
+     * <p>Only ever a bonus on top of the copy: an immutable or fixed-size list
+     * throws, and that is answered by leaving it alone — which is where the copy
+     * already carries the entry. Guarded by {@code contains} so a cached,
+     * shared list cannot accumulate duplicates across calls.
+     */
+    @SuppressWarnings("unchecked")
+    private static void addIfAbsentInPlace(List<?> target, String value) {
+        if (target == null || target.contains(value)) {
+            return;
+        }
+        try {
+            ((List<Object>) target).add(value);
+        } catch (Throwable ignored) {
+            // Immutable list: the copy handed back is the real answer.
         }
     }
 
@@ -579,12 +610,20 @@ public class Hooker extends XposedModule {
             // Defense in depth: force setuiddnsrule → allow; skip enabling standby firewall.
             try {
                 var executeMethod = NetdExecutorClass.getDeclaredMethod("execute", int.class, String.class, String.class, Object[].class);
-                // Skipping a call by returning null is only safe when the method
-                // returns void or a reference type: for a primitive return the caller
-                // would unbox null and crash inside PowerKeeper, so in that case the
-                // standby-firewall skip is dropped rather than risked.
+                // A skipped call has to hand back something the caller can use.
+                // null is right for void and for reference returns; for a
+                // primitive return it would be unboxed and crash PowerKeeper.
+                //
+                // Refusing to skip in that case — an earlier fix — silently lets
+                // "enablemiuistandby enable" through, and that chain is exactly
+                // what cuts GMS off while the screen is off: pushes stop
+                // overnight and come back on wake. So hand back the type's
+                // "nothing happened" value instead, which skips the command and
+                // still gives the caller a value it can read.
                 Class<?> executeReturn = executeMethod.getReturnType();
-                boolean skippable = executeReturn == void.class || !executeReturn.isPrimitive();
+                final Object skipValue = skipValueFor(executeReturn);
+                final boolean skippable = skipValue != null
+                        || executeReturn == void.class || !executeReturn.isPrimitive();
                 hookE(executeMethod).intercept(chain -> {
                     var args = chain.getArgs().toArray();
                     if (args.length >= 4 && args[2] instanceof String cmd && args[3] instanceof Object[] cmdArgs) {
@@ -597,16 +636,16 @@ public class Hooker extends XposedModule {
                         if ("enablemiuistandby".equals(cmd) && cmdArgs.length >= 1
                                 && "enable".equals(String.valueOf(cmdArgs[0]))) {
                             // Do not enable the standby firewall chain for GMS.
-                            return skippable ? null : chain.proceed();
+                            return skippable ? skipValue : chain.proceed();
                         }
                     }
                     return chain.proceed();
                 });
                 deoptimize(executeMethod);
-                if (!skippable) {
-                    log(Log.WARN, TAG, "NetdExecutor#execute returns " + executeReturn.getName()
-                            + "; cannot skip the standby-firewall call safely");
-                }
+                log(Log.INFO, TAG, "NetdExecutor#execute returns " + executeReturn.getName()
+                        + "; standby-firewall skip " + (skippable
+                        ? "returns " + (skipValue == null ? "null" : skipValue)
+                        : "NOT installed"));
             } catch (NoSuchMethodException e) {
                 log(Log.INFO, TAG, "NetdExecutor#execute not found, skip command-level GMS net hooks");
             }
@@ -735,13 +774,15 @@ public class Hooker extends XposedModule {
                     hookE(getDozeWhiteListAppsMethod).intercept(chain -> {
                         var result = chain.proceed();
                         // Same rule as the ProcessPolicy hook: hand back a copy
-                        // rather than mutating the framework's own list, which may
-                        // be immutable or shared between calls.
+                        // (safe against an immutable list) *and* write through to
+                        // the original, because PowerKeeper may hand out — and
+                        // later read back — one cached instance.
                         try {
                             if (result instanceof List<?> source
                                     && !source.contains(GMS_PACKAGE_NAME)) {
                                 var whiteList = new ArrayList<Object>(source);
                                 whiteList.add(GMS_PACKAGE_NAME);
+                                addIfAbsentInPlace(source, GMS_PACKAGE_NAME);
                                 return whiteList;
                             }
                         } catch (Throwable t) {
@@ -1195,24 +1236,92 @@ public class Hooker extends XposedModule {
         deoptimize(broadcastMethod);
     }
 
-    /** Reused walker: building one per call would allocate on every isPushApp(). */
-    private static final StackWalker STACK_WALKER = StackWalker.getInstance();
+    /**
+     * What to return for a call that must be neutralised, or {@code null} — for
+     * void and reference returns, where null is the correct "nothing happened".
+     *
+     * <p>A primitive return cannot take null: the caller unboxes it and crashes
+     * inside PowerKeeper. Its zero value reads as "the command did nothing",
+     * which is what a skipped command should look like, so the skip survives a
+     * signature that returns {@code boolean} or {@code int}.
+     */
+    private static Object skipValueFor(Class<?> returnType) {
+        if (returnType == void.class || !returnType.isPrimitive()) {
+            return null;
+        }
+        if (returnType == boolean.class) {
+            return Boolean.FALSE;
+        }
+        if (returnType == int.class) {
+            return 0;
+        }
+        if (returnType == long.class) {
+            return 0L;
+        }
+        if (returnType == short.class) {
+            return (short) 0;
+        }
+        if (returnType == byte.class) {
+            return (byte) 0;
+        }
+        if (returnType == char.class) {
+            return (char) 0;
+        }
+        if (returnType == float.class) {
+            return 0f;
+        }
+        if (returnType == double.class) {
+            return 0d;
+        }
+        return null;
+    }
+
+    /**
+     * Reused walker: building one per call would allocate on every isPushApp().
+     *
+     * <p>{@code RETAIN_CLASS_REFERENCE} costs a class resolution per frame, which
+     * is accepted here because the caller has to be identified by its
+     * {@code ClassLoader} — see the hook below — and the alternative (matching
+     * only the class name) silently loses the hook on builds where
+     * {@code isRestrictNet} lives in another system_server class.
+     */
+    private static final StackWalker STACK_WALKER =
+            StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+
+    /** Logged once: proof on a device that the isRestrictNet branch is reached. */
+    private volatile boolean restrictNetMatchLogged;
 
     private void hookInternationalPolicyManager(ClassLoader classLoader) throws ClassNotFoundException, NoSuchMethodException {
         var InternationalPolicyManagerClass = classLoader.loadClass("com.miui.server.greeze.InternationalPolicyManager");
         var isPushAppMethod = InternationalPolicyManagerClass.getDeclaredMethod("isPushApp", String.class);
-        // Match the caller by class name rather than by ClassLoader identity:
-        // RETAIN_CLASS_REFERENCE is what forces the walker to resolve and retain the
-        // declaring classes, and it buys nothing here — this hook runs inside
-        // system_server, so no app-supplied frame can ever appear on that stack.
+        // The class name is the fast path; the ClassLoader test behind it is
+        // what 1.8.0 used and what actually has to stay.
+        //
+        // isRestrictNet is not guaranteed to live in this class. Matching only
+        // the name meant that on a build where it moved (another greeze /
+        // system_server class that calls isPushApp) nothing matched and the hook
+        // never fired: the network restriction then applies to GMS as designed,
+        // the long-lived connection dies, and pushes stop arriving — which is
+        // exactly what is seen overnight, when the restriction is in force and
+        // the screen is off. The ClassLoader test covers every class system_server
+        // loaded the same way, so a rename or a move costs nothing.
         final String restrictNetOwner = InternationalPolicyManagerClass.getName();
+        final ClassLoader systemServerCl = InternationalPolicyManagerClass.getClassLoader();
         hookE(isPushAppMethod).intercept(chain -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 try {
                     boolean fromRestrictNet = STACK_WALKER.walk(frames -> frames.anyMatch(frame ->
                             "isRestrictNet".equals(frame.getMethodName())
-                                    && restrictNetOwner.equals(frame.getClassName())));
+                                    && (restrictNetOwner.equals(frame.getClassName())
+                                        || (frame.getDeclaringClass() != null
+                                            && frame.getDeclaringClass().getClassLoader()
+                                                == systemServerCl))));
                     if (fromRestrictNet) {
+                        if (!restrictNetMatchLogged) {
+                            restrictNetMatchLogged = true;
+                            log(Log.INFO, TAG, "isPushApp: caller isRestrictNet matched;"
+                                    + " answering false");
+                        }
                         return false;
                     }
                 } catch (Throwable t) {
@@ -1223,66 +1332,103 @@ public class Hooker extends XposedModule {
         });
     }
 
-    /** How long a "declares a C2DM receiver" answer is reused. */
-    private static final long C2DM_CACHE_TTL_MS = 5L * 60L * 1000L;
+    /** How long a "ships FCM" answer is reused. */
+    private static final long FCM_CACHE_TTL_MS = 5L * 60L * 1000L;
     /** Hard cap on the cache; cleared wholesale when exceeded. */
-    private static final int C2DM_CACHE_MAX = 256;
+    private static final int FCM_CACHE_MAX = 256;
 
-    /** One cached C2DM-receiver answer plus when it was resolved. */
-    private static final class C2dmQuery {
-        final boolean declaresReceiver;
+    /** One cached FCM answer plus when it was resolved. */
+    private static final class FcmQuery {
+        final boolean declares;
         final long checkedAtMs;
 
-        C2dmQuery(boolean declaresReceiver, long checkedAtMs) {
-            this.declaresReceiver = declaresReceiver;
+        FcmQuery(boolean declares, long checkedAtMs) {
+            this.declares = declares;
             this.checkedAtMs = checkedAtMs;
         }
     }
 
-    private final Map<String, C2dmQuery> c2dmReceiverCache = new HashMap<>();
+    private final Map<String, FcmQuery> fcmCache = new HashMap<>();
 
     /**
-     * Whether {@code packageName} declares a C2DM receiver.
+     * Whether {@code packageName} ships any of the four FCM markers — the
+     * Firebase messaging service or instance-id receiver class, or an
+     * intent-filter for {@code MESSAGING_EVENT} / {@code c2dm.intent.RECEIVE}.
      *
      * <p>This is what grants the cleaner exemption, and it is deliberately
      * <em>not</em> narrowed to the user's allowlist: every app that genuinely
-     * ships a push receiver stays protected, which is the historical behaviour and
-     * what a "keep push alive" module is expected to do. The trade-off is that the
-     * action can also be declared purely to opt out of the cleaner; that was
-     * reviewed and accepted on 2026-09-23 — do not "fix" it again without asking,
-     * since tightening it changes behaviour for people who never opened the app.
+     * ships a push component stays protected, which is the historical behaviour
+     * and what a "keep push alive" module is expected to do. The trade-off is
+     * that a marker can also be declared purely to opt out of the cleaner; that
+     * was reviewed and accepted on 2026-09-23 — do not tighten it again without
+     * asking, since it changes behaviour for people who never opened the app.
      *
-     * <p>Answering it needs a PackageManager query, and the cleaner asks far more
+     * <p>Answering it needs PackageManager queries, and the cleaner asks far more
      * often than apps get installed, so answers are reused for a few minutes
      * instead of querying the package manager on every call. An app that only
-     * starts declaring the receiver in an update keeps its old answer for at most
-     * {@link #C2DM_CACHE_TTL_MS}.
+     * starts shipping a marker in an update keeps its old answer for at most
+     * {@link #FCM_CACHE_TTL_MS}.
      */
-    private boolean declaresC2dmReceiver(PackageManager pm, String packageName) {
+    private boolean declaresFcmComponent(PackageManager pm, String packageName) {
         long now = SystemClock.uptimeMillis();
-        synchronized (c2dmReceiverCache) {
-            C2dmQuery cached = c2dmReceiverCache.get(packageName);
-            if (cached != null && now - cached.checkedAtMs < C2DM_CACHE_TTL_MS) {
-                return cached.declaresReceiver;
+        synchronized (fcmCache) {
+            FcmQuery cached = fcmCache.get(packageName);
+            if (cached != null && now - cached.checkedAtMs < FCM_CACHE_TTL_MS) {
+                return cached.declares;
             }
         }
         final boolean declares;
         try {
-            var intent = new Intent(ACTION_REMOTE_INTENT);
-            intent.setPackage(packageName);
-            declares = !pm.queryBroadcastReceivers(intent, 0).isEmpty();
+            declares = declaresFcmUncached(pm, packageName);
         } catch (Throwable t) {
             // Fail safe: when in doubt, let the cleaner keep its own decision.
-            log(Log.ERROR, TAG, "queryBroadcastReceivers failed for " + packageName, t);
+            log(Log.ERROR, TAG, "FCM lookup failed for " + packageName, t);
             return false;
         }
-        synchronized (c2dmReceiverCache) {
-            if (c2dmReceiverCache.size() >= C2DM_CACHE_MAX) {
-                c2dmReceiverCache.clear();
+        synchronized (fcmCache) {
+            if (fcmCache.size() >= FCM_CACHE_MAX) {
+                fcmCache.clear();
             }
-            c2dmReceiverCache.put(packageName, new C2dmQuery(declares, now));
+            fcmCache.put(packageName, new FcmQuery(declares, now));
         }
         return declares;
+    }
+
+    /**
+     * The four markers, cheapest first: the two intent queries are what
+     * Firebase's manifest merge actually writes, so they answer almost every
+     * app; the two class lookups follow for the rest — an app that ships the
+     * class with no matching intent-filter (stripped merge, hand-written entry,
+     * old GCM build) is invisible to the queries above but still FCM-capable.
+     */
+    private static boolean declaresFcmUncached(PackageManager pm, String packageName) {
+        var serviceIntent = new Intent(ACTION_MESSAGING_EVENT);
+        serviceIntent.setPackage(packageName);
+        if (!pm.queryIntentServices(serviceIntent, 0).isEmpty()) {
+            return true;
+        }
+        var receiverIntent = new Intent(ACTION_REMOTE_INTENT);
+        receiverIntent.setPackage(packageName);
+        if (!pm.queryBroadcastReceivers(receiverIntent, 0).isEmpty()) {
+            return true;
+        }
+        try {
+            if (pm.getServiceInfo(
+                    new ComponentName(packageName, FCM_MESSAGING_SERVICE_CLASS), 0) != null) {
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // Not declared: fall through to the receiver class.
+        }
+        try {
+            if (pm.getReceiverInfo(
+                    new ComponentName(packageName, FCM_IID_RECEIVER_CLASS), 0) != null) {
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // Not declared either: no FCM marker at all.
+        }
+        return false;
     }
 
     private void hookProcessCleanerBase(ClassLoader classLoader) throws ClassNotFoundException, NoSuchMethodException, NoSuchFieldException {
@@ -1302,7 +1448,7 @@ public class Hooker extends XposedModule {
                         // finished attaching; reading through it used to NPE.
                         && getInvoker(mGetApplicationInfo).invoke(chain.getArg(0)) instanceof ApplicationInfo info
                         && info.packageName != null
-                        && declaresC2dmReceiver(pm, info.packageName)) {
+                        && declaresFcmComponent(pm, info.packageName)) {
                     // Declares a push receiver: keep the cleaner's hands off it.
                     return false;
                 }

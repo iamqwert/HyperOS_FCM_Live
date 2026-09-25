@@ -1,6 +1,7 @@
 package io.github.howard20181.hyperos.fcmlive;
 
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -27,6 +28,7 @@ import androidx.annotation.NonNull;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -52,6 +54,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             "com.android.permission.GET_INSTALLED_APPS";
     private static final String MIUI_SECURITY_PACKAGE = "com.lbe.security.miui";
     private static final int REQUEST_GET_INSTALLED_APPS = 1001;
+    // The four FCM markers live in Hooker: the module asks the same question
+    // inside system_server, and the two must not drift apart.
     /**
      * Tapping apps one by one into the allowlist looks like this: fill the
      * window with adds, then tell the user the long-press multi-select exists —
@@ -1332,25 +1336,57 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     /**
-     * FCMPushViewer-style detection: scan Manifest receivers for well-known
-     * Firebase / GCM component names.
-     */
-    /**
-     * Packages that declare a C2DM / FCM receiver.
+     * Packages that look FCM-capable: any one of four Manifest markers is
+     * enough.
      *
-     * <p>This is the same question the module asks in system_server
-     * ({@code Hooker#declaresC2dmReceiver}), and asking it the same way is the
+     * <ol>
+     *   <li>{@code com.google.firebase.messaging.FirebaseMessagingService} — a
+     *       declared service (class name).</li>
+     *   <li>{@code com.google.firebase.iid.FirebaseInstanceIdReceiver} — a
+     *       declared receiver (class name).</li>
+     *   <li>{@code com.google.firebase.MESSAGING_EVENT} — an intent-filter
+     *       action, normally on the messaging service.</li>
+     *   <li>{@code com.google.android.c2dm.intent.RECEIVE} — an intent-filter
+     *       action, normally on the instance-id receiver.</li>
+     * </ol>
+     *
+     * <p>The names are {@code Hooker}'s constants, and the module asks the same
+     * four questions in system_server
+     * ({@code Hooker#declaresFcmComponent}) — asking it the same way is the
      * point: the list used to match three hard-coded receiver class names, so an
      * app with its own receiver class was marked unsupported even though the
      * module was already waking it. Since the "supported apps" filter is on by
-     * default, those apps were simply absent from the first screen — the user
-     * could not check the one app they came here for.
+     * default, those apps were simply absent from the first screen.
      *
-     * <p>One query for the whole device, not one per package: the hook caches its
-     * per-package answers for that reason, and a scan is a few hundred packages.
+     * <p>Markers 3 and 4 are what Firebase's manifest merge actually writes, so
+     * two device-wide queries find almost everything and cost one binder round
+     * trip each — a scan walks a few hundred packages. Markers 1 and 2 are
+     * answered per package by {@link #declaresFcmComponent}, for the apps the
+     * queries missed: a manifest merge stripped of its intent-filter, a
+     * hand-written entry with a custom action, or an old GCM build that only
+     * declares the class. The class-name pass therefore only runs for packages
+     * the action pass did not already mark.
      */
-    private static Set<String> queryC2dmPackages(PackageManager pm) {
+    private static Set<String> queryFcmPackages(PackageManager pm,
+                                                Collection<String> candidates) {
         Set<String> packages = new HashSet<>();
+        try {
+            List<android.content.pm.ResolveInfo> services = pm.queryIntentServices(
+                    new Intent(Hooker.ACTION_MESSAGING_EVENT),
+                    PackageManager.ResolveInfoFlags.of(0));
+            if (services != null) {
+                for (android.content.pm.ResolveInfo ri : services) {
+                    // Services resolve into serviceInfo; activityInfo is the
+                    // receiver/activity field and stays null here.
+                    if (ri != null && ri.serviceInfo != null
+                            && ri.serviceInfo.packageName != null) {
+                        packages.add(ri.serviceInfo.packageName);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG_UI, "Failed to query FCM messaging services", t);
+        }
         try {
             List<android.content.pm.ResolveInfo> receivers = pm.queryBroadcastReceivers(
                     new Intent(Hooker.ACTION_REMOTE_INTENT),
@@ -1366,7 +1402,46 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         } catch (Throwable t) {
             Log.w(TAG_UI, "Failed to query C2DM receivers", t);
         }
+        if (candidates != null) {
+            for (String pkg : candidates) {
+                if (pkg == null || packages.contains(pkg)) {
+                    continue;
+                }
+                if (declaresFcmComponent(pm, pkg)) {
+                    packages.add(pkg);
+                }
+            }
+        }
         return packages;
+    }
+
+    /**
+     * Whether {@code pkg} declares either Firebase class under its own name.
+     *
+     * <p>{@code getServiceInfo} / {@code getReceiverInfo} resolve a component
+     * directly, with no intent-filter involved — which is the whole reason this
+     * exists: the action queries above cannot see a class that ships without
+     * one. Absence is reported by {@code NameNotFoundException}, so a throw is
+     * an answer, not a failure.
+     */
+    private static boolean declaresFcmComponent(PackageManager pm, String pkg) {
+        try {
+            if (pm.getServiceInfo(
+                    new ComponentName(pkg, Hooker.FCM_MESSAGING_SERVICE_CLASS), 0) != null) {
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // Not declared (or not visible to us): fall through.
+        }
+        try {
+            if (pm.getReceiverInfo(
+                    new ComponentName(pkg, Hooker.FCM_IID_RECEIVER_CLASS), 0) != null) {
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // Not declared.
+        }
+        return false;
     }
 
     private void initXposedService() {
@@ -1481,11 +1556,18 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                     runOnUiThreadSafe(() -> applyAppSnapshot(selected, false));
                 }
 
-                // No GET_RECEIVERS any more: the C2DM question is answered by one
-                // query below, and without it the scan marshals a lot less.
+                // No GET_RECEIVERS / GET_SERVICES: the FCM question is answered
+                // by two device-wide queries plus a per-package class lookup
+                // below, and without those flags the scan marshals a lot less.
                 List<android.content.pm.PackageInfo> installed =
                         pm.getInstalledPackages(0);
-                final Set<String> c2dmPackages = queryC2dmPackages(pm);
+                List<String> scannedPackages = new ArrayList<>(installed.size());
+                for (android.content.pm.PackageInfo pi : installed) {
+                    if (pi != null && pi.packageName != null) {
+                        scannedPackages.add(pi.packageName);
+                    }
+                }
+                final Set<String> fcmPackages = queryFcmPackages(pm, scannedPackages);
                 List<AppListAdapter.AppEntry> result = new ArrayList<>();
                 for (android.content.pm.PackageInfo pi : installed) {
                     ApplicationInfo ai = pi.applicationInfo;
@@ -1497,7 +1579,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                     }
                     AppListAdapter.AppEntry entry = new AppListAdapter.AppEntry(
                             ai.packageName, ai.loadLabel(pm).toString());
-                    entry.supportFcm = c2dmPackages.contains(ai.packageName);
+                    entry.supportFcm = fcmPackages.contains(ai.packageName);
                     result.add(entry);
                 }
                 for (AppListAdapter.AppEntry app : result) {

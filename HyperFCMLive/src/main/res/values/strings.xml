@@ -128,5 +128,5 @@
     <string name="help_faq_q3">Battery use went up</string>
     <string name="help_faq_a3">That is inherent to the module: it lets push reconnects through and allows apps to be woken. Checking only the apps whose pushes must be instant cuts how often apps are woken from the stopped state, which is where most of the cost is. It does not switch the module off for the rest — GMS and push broadcasts stay protected either way.</string>
     <string name="help_faq_q4">How is “supported apps” decided?</string>
-    <string name="help_faq_a4">It asks the same question the module asks inside the system: does the app declare a receiver for the FCM broadcast (com.google.android.c2dm.intent.RECEIVE)? Whatever its receiver class is called, a yes is marked. The mark only helps you filter; checking an app is never limited by it.</string>
+    <string name="help_faq_a4">An app is marked when any one of four things appears in its Manifest: the FirebaseMessagingService or FirebaseInstanceIdReceiver class, or an intent-filter for com.google.firebase.MESSAGING_EVENT or com.google.android.c2dm.intent.RECEIVE. One hit is enough, whatever the component itself is called. The mark only helps you filter; checking an app is never limited by it.</string>
 </resources>

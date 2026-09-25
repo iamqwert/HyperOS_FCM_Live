@@ -45,7 +45,7 @@ public class AppListAdapter extends BaseAdapter {
         public Drawable icon;
         public volatile boolean iconLoading;
         public boolean checked;
-        /** Manifest receivers suggest the app can take FCM/C2DM pushes. */
+        /** Manifest components (Firebase service / receiver, or their actions). */
         public boolean supportFcm;
 
         public AppEntry(String packageName, String label) {
@@ -164,6 +164,7 @@ public class AppListAdapter extends BaseAdapter {
 
         final String pkg = app.packageName;
         convertView.setOnClickListener(v -> {
+            UiUtils.tapFeedback(v);
             if (multiSelectMode) {
                 toggleSelection(pkg);
                 return;
