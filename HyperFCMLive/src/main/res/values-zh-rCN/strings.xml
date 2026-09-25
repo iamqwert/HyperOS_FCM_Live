@@ -60,7 +60,6 @@
     <string name="license_view_full_text">点击查看全文</string>
     <string name="license_apache_2">Apache License 2.0</string>
     <string name="license_gpl_3">GPL-3.0</string>
-    <string name="license_gpl_2_ce">GPL-2.0 with Classpath Exception</string>
     <string name="hide_launcher_icon">隐藏桌面图标</string>
     <string name="language">语言</string>
     <string name="about_sub_language">调整应用的显示语言</string>
@@ -125,4 +124,35 @@
     <string name="help_faq_a3">这是模块的固有代价——它放行推送重连并允许应用被唤醒。只勾选真正需要即时推送的应用，可以减少应用从「已停止」状态被唤醒的次数，耗电主要就花在这里。但这并不是把模块对其它应用关掉：GMS 与推送广播始终受保护。</string>
     <string name="help_faq_q4">「展示支持应用」是怎么判断的？</string>
     <string name="help_faq_a4">只要在该应用的清单里发现下面任意一项，就标记为支持：FirebaseMessagingService、FirebaseInstanceIdReceiver 这两个组件类，或者 com.google.firebase.MESSAGING_EVENT、com.google.android.c2dm.intent.RECEIVE 这两个意图动作。命中任意一项即算支持，与组件叫什么名字无关。这个标记只是帮你筛选，勾选本身不受它限制。</string>
+
+    <!-- 模块状态页 -->
+    <string name="module_status">模块状态</string>
+    <string name="status_back">返回</string>
+    <string name="status_network_title">推送链路</string>
+    <string name="status_gms">Google Play 服务</string>
+    <string name="status_gms_absent">未安装</string>
+    <string name="status_network_active">当前网络</string>
+    <string name="status_network_wifi">Wi-Fi</string>
+    <string name="status_network_cellular">移动数据</string>
+    <string name="status_network_none">无网络</string>
+    <string name="status_network_other">其他</string>
+    <string name="status_network_cell_hint">在移动数据下，GMS 两次心跳的间隔会长得多，长到空闲连接被丢弃时双方都不会察觉。息屏时保持连接 Wi-Fi，才是推送稳定的关键。</string>
+    <string name="status_hooks_title">Hook 目标</string>
+    <string name="status_group_powerkeeper">电量和性能（PowerKeeper）</string>
+    <string name="status_group_system_server">系统框架（system）</string>
+    <string name="status_probing">检测中…</string>
+    <string name="status_hooks_ok">%2$d 个目标中 %1$d 个可用</string>
+    <string name="status_hooks_missing">%1$d 个缺失 · %2$d/%3$d 可用</string>
+    <string name="status_hooks_unreachable">这些目标都无法在此处读取，请用下面的日志命令确认</string>
+    <string name="status_state_present">可用</string>
+    <string name="status_state_absent_expected">本 ROM 不适用</string>
+    <string name="status_state_absent_unexpected">缺失</string>
+    <string name="status_state_unknown">无法检测</string>
+    <string name="status_note_hyperos3">HyperOS 3</string>
+    <string name="status_note_hyperos4">HyperOS 4</string>
+    <string name="status_note_never">所有已知版本均无</string>
+    <string name="status_note_optional">可选项，缺失时仅降级</string>
+    <string name="status_diag_title">诊断</string>
+    <string name="status_copied">已复制</string>
+    <string name="status_unknown">未知</string>
 </resources>

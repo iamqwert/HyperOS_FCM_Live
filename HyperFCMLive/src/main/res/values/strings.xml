@@ -59,7 +59,6 @@
     <string name="license_view_full_text">Tap to view full text</string>
     <string name="license_apache_2">Apache License 2.0</string>
     <string name="license_gpl_3">GPL-3.0</string>
-    <string name="license_gpl_2_ce">GPL-2.0 with Classpath Exception</string>
     <string name="hide_launcher_icon">Hide desktop icon</string>
     <string name="language">Language</string>
     <string name="about_sub_language">Change the app language</string>
@@ -129,4 +128,35 @@
     <string name="help_faq_a3">That is inherent to the module: it lets push reconnects through and allows apps to be woken. Checking only the apps whose pushes must be instant cuts how often apps are woken from the stopped state, which is where most of the cost is. It does not switch the module off for the rest — GMS and push broadcasts stay protected either way.</string>
     <string name="help_faq_q4">How is “supported apps” decided?</string>
     <string name="help_faq_a4">An app is marked when any one of four things appears in its Manifest: the FirebaseMessagingService or FirebaseInstanceIdReceiver class, or an intent-filter for com.google.firebase.MESSAGING_EVENT or com.google.android.c2dm.intent.RECEIVE. One hit is enough, whatever the component itself is called. The mark only helps you filter; checking an app is never limited by it.</string>
+
+    <!-- Module status screen. -->
+    <string name="module_status">Module status</string>
+    <string name="status_back">Back</string>
+    <string name="status_network_title">Push connection</string>
+    <string name="status_gms">Google Play services</string>
+    <string name="status_gms_absent">Not installed</string>
+    <string name="status_network_active">Active network</string>
+    <string name="status_network_wifi">Wi-Fi</string>
+    <string name="status_network_cellular">Mobile data</string>
+    <string name="status_network_none">None</string>
+    <string name="status_network_other">Other</string>
+    <string name="status_network_cell_hint">On mobile data GMS waits much longer between heartbeats — long enough for an idle connection to be dropped without either side noticing. Keeping Wi-Fi on while the screen is off is what makes push reliable.</string>
+    <string name="status_hooks_title">Hook targets</string>
+    <string name="status_group_powerkeeper">PowerKeeper</string>
+    <string name="status_group_system_server">System framework (system)</string>
+    <string name="status_probing">Checking…</string>
+    <string name="status_hooks_ok">%1$d of %2$d targets present</string>
+    <string name="status_hooks_missing">%1$d missing · %2$d of %3$d present</string>
+    <string name="status_hooks_unreachable">None of these could be reached from here — see the log command below</string>
+    <string name="status_state_present">Present</string>
+    <string name="status_state_absent_expected">Not on this ROM</string>
+    <string name="status_state_absent_unexpected">Missing</string>
+    <string name="status_state_unknown">Not checkable</string>
+    <string name="status_note_hyperos3">HyperOS 3</string>
+    <string name="status_note_hyperos4">HyperOS 4</string>
+    <string name="status_note_never">Not on any known build</string>
+    <string name="status_note_optional">Optional — the hook degrades without it</string>
+    <string name="status_diag_title">Diagnostics</string>
+    <string name="status_copied">Copied</string>
+    <string name="status_unknown">Unknown</string>
 </resources>

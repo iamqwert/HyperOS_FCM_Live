@@ -21,19 +21,21 @@ public class LicensesActivity extends Activity {
     private static final String REPO_URL = "https://github.com/iamqwert/HyperOS_FCM_Live";
     private static final String ANDROIDX_URL = "https://github.com/androidx/androidx";
     private static final String AOSP_URL = "https://android.googlesource.com/platform/frameworks/base";
-    private static final String OPENJDK_URL = "https://github.com/openjdk/jdk";
+    private static final String JSPECIFY_URL = "https://github.com/jspecify/jspecify";
     private static final String MCU_URL =
             "https://github.com/material-foundation/material-color-utilities";
 
     /** name, version ("" if none), license label, project URL. */
     private static final String[][] DEPS = {
             {"AndroidX Annotation", "1.10.0", "Apache License 2.0", ANDROIDX_URL},
+            {"AndroidX Arch Core", "2.0.0", "Apache License 2.0", ANDROIDX_URL},
             {"AndroidX Collection", "1.0.0", "Apache License 2.0", ANDROIDX_URL},
             {"AndroidX Core", "1.1.0", "Apache License 2.0", ANDROIDX_URL},
             {"AndroidX Interpolator", "1.0.0", "Apache License 2.0", ANDROIDX_URL},
             // Build-only stubs vendored under hiddenapi/stubs; kept for attribution.
             {"AOSP Framework Annotations", "", "Apache License 2.0", AOSP_URL},
             {"JetBrains Annotations", "13.0", "Apache License 2.0", "https://github.com/JetBrains/java-annotations"},
+            {"JSpecify", "1.0.0", "Apache License 2.0", JSPECIFY_URL},
             {"Kotlin Stdlib", "2.2.10", "Apache License 2.0", "https://github.com/JetBrains/kotlin"},
             {"libxposed API", "102.0.0", "Apache License 2.0", "https://github.com/libxposed/api"},
             {"libxposed Interface", "102.0.0", "Apache License 2.0", "https://github.com/libxposed"},
@@ -42,7 +44,6 @@ public class LicensesActivity extends Activity {
             {"Lifecycle Runtime", "2.0.0", "Apache License 2.0", ANDROIDX_URL},
             // Vendored source under mcu/ (no Gradle artifact) — listed for attribution.
             {"Material Color Utilities", "", "Apache License 2.0", MCU_URL},
-            {"OpenJDK Unsafe", "", "GPL-2.0 with Classpath Exception", OPENJDK_URL},
             {"SwipeRefreshLayout", "1.2.0", "Apache License 2.0", ANDROIDX_URL},
             {"VersionedParcelable", "1.1.0", "Apache License 2.0", ANDROIDX_URL},
     };
@@ -77,6 +78,9 @@ public class LicensesActivity extends Activity {
         if (list == null) {
             return;
         }
+        // Was applied on every inset dispatch; once is enough — the bottom padding
+        // itself still tracks the navigation mode.
+        list.setClipToPadding(false);
         LayoutInflater inflater = LayoutInflater.from(this);
 
         addSectionHeader(list, inflater, getString(R.string.licenses_section_this_app));
@@ -90,12 +94,10 @@ public class LicensesActivity extends Activity {
         String[] licenseNames = {
                 getString(R.string.license_apache_2),
                 getString(R.string.license_gpl_3),
-                getString(R.string.license_gpl_2_ce),
         };
         int[] licenseRaw = {
                 R.raw.license_apache2,
                 R.raw.license_gpl3,
-                R.raw.license_gpl2ce,
         };
         for (int i = 0; i < licenseNames.length; i++) {
             View row = inflater.inflate(R.layout.item_license_dep, list, false);
@@ -250,40 +252,8 @@ public class LicensesActivity extends Activity {
 
     /** Same top-bar inset as MainActivity; list clears the gesture nav bar. */
     private void applySystemBarInsets() {
-        final View topBar = findViewById(R.id.top_bar);
-        final View list = findViewById(R.id.licenses_list);
-        View root = findViewById(android.R.id.content);
-        if (root == null) {
-            return;
-        }
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
-            int top = UiUtils.topInset(insets);
-            // Union of navigation-bar and gesture insets: correct under gesture
-            // navigation too, where the bar inset alone can be zero and the
-            // home-indicator area is only reported by systemGestures.
-            int bottom = UiUtils.bottomInset(insets);
-            int barPad = dp(12);
-            if (topBar != null) {
-                topBar.setPadding(topBar.getPaddingLeft(), top + barPad,
-                        topBar.getPaddingRight(), barPad);
-            }
-            if (list instanceof android.view.ViewGroup) {
-                list.setPadding(list.getPaddingLeft(), list.getPaddingTop(),
-                        list.getPaddingRight(), bottom + dp(16));
-                ((android.view.ViewGroup) list).setClipToPadding(false);
-            }
-            return insets;
-        });
-        root.requestApplyInsets();
-        int statusBar = statusBarHeight();
-        if (topBar != null && statusBar > 0 && topBar.getPaddingTop() <= statusBar) {
-            topBar.setPadding(topBar.getPaddingLeft(), statusBar + dp(12),
-                    topBar.getPaddingRight(), dp(12));
-        }
-    }
-
-    private int statusBarHeight() {
-        return UiUtils.statusBarHeight(this);
+        UiUtils.applyBarInsets(this, findViewById(R.id.top_bar),
+                findViewById(R.id.licenses_list), 16);
     }
 
     private int dp(int value) {

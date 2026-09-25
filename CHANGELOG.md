@@ -1,25 +1,13 @@
 # Changelog
 
-## 2.0.2 (versionCode 21)
+## 2.1.0
 
-- 修复可能会波及系统框架进程的问题
-- 修复应用列表加载失败时下拉刷新一直转圈的问题
-- 修复方法签名变化时整组钩子连带失效的问题
-- 修复推送广播用组件寻址时，停止态唤醒与省电豁免被静默跳过的问题
-- 修复旋转屏幕或切换主题/语言后，搜索词与多选状态丢失的问题
-- 修复更多选项菜单未随页面销毁关闭导致的内存泄漏
-- 修复搜索结果匹配异常的问题
-- 应用图标改为按列表实际显示尺寸加载
-- FCM 应用的判断改为：命中 `FirebaseMessagingService`、`FirebaseInstanceIdReceiver` 组件类，或 `com.google.firebase.MESSAGING_EVENT`、`com.google.android.c2dm.intent.RECEIVE` 意图动作中的任意一项即算支持
-- 模块内的推送判定同步放宽为上述四个标记
-- 主界面应用卡片、关于页卡片点击增加振动反馈
-- 修复夜间息屏后 FCM 不推送：待机防火墙 `enablemiuistandby` 在 `NetdExecutor#execute` 返回基本类型时被放行
-- 修复 `isRestrictNet` 调用栈匹配过严导致夜间网络限制生效、GMS 长连接被掐断
-- 修复 Doze/进程白名单只返回副本、未写回框架列表的问题
-- 修复导入/导出白名单时外部 URI 缺少路径校验的问题（CodeQL `java/android/unsafe-content-uri-resolution`）
-- 重建时复用已扫描的应用列表
-- 服务回调增加生命周期判断
-- 更新帮助页文案
+- 修复连续下拉刷新时，较早发起但较慢完成的扫描会用旧结果覆盖新列表的问题
+- 新增「模块状态」页
+- 加载「电量和性能」代码时缺少 `CONTEXT_INCLUDE_CODE`
+- 补全 4 个此前遗漏的 hook 目标（`GreezeManagerService#isAllowBroadcast`、`GreezeManagerService#getPackageNameFromUid`、`ActivityManagerService#broadcastIntent*`、`ActivityManagerService#getRecordForApp*`）
+- 模块注入后新增一行汇总日志，便于判断模块是否生效
+- 回调并完善对FCM应用的判断
 
 ## 2.0.1 (versionCode 20)
 

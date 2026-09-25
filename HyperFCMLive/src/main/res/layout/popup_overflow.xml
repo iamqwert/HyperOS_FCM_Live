@@ -77,6 +77,29 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/menu_status"
+        android:layout_width="match_parent"
+        android:layout_height="46dp"
+        android:background="@drawable/bg_popup_item_bg"
+        android:clickable="true"
+        android:clipToOutline="true"
+        android:focusable="true"
+        android:foreground="@drawable/bg_popup_item_ripple"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp">
+
+        <TextView
+            android:id="@+id/menu_status_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/module_status"
+            android:textColor="@color/md_on_surface"
+            android:textSize="15sp" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/menu_about"
         android:layout_width="match_parent"
         android:layout_height="46dp"

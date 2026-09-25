@@ -59,6 +59,8 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.IntConsumer;
+import java.util.function.IntSupplier;
 
 /** About: source, licenses, allowlist backup, update check with red badge. */
 public class AboutActivity extends Activity {
@@ -157,6 +159,24 @@ public class AboutActivity extends Activity {
         };
     }
 
+    /** Wires one settings row: the standard tap feedback, then the action. */
+    private void bindRow(int rowId, Runnable action) {
+        View row = findViewById(rowId);
+        if (row != null) {
+            row.setOnClickListener(rowClick(action));
+        }
+    }
+
+    /** Wires a row whose tap opens one of the appearance popup menus. */
+    private void bindPopupRow(int rowId, int titleRes, int entriesRes,
+                              IntSupplier currentIndex, IntConsumer onPick) {
+        View row = findViewById(rowId);
+        if (row != null) {
+            row.setOnClickListener(rowClick(() -> showPopupMenu(row, titleRes, entriesRes,
+                    currentIndex.getAsInt(), onPick)));
+        }
+    }
+
     private final ArrayList<Long> eggTaps = new ArrayList<>(EGG_TAP_COUNT);
     private long lastEggAtMs;
     private TextView hideIconState;
@@ -207,31 +227,12 @@ public class AboutActivity extends Activity {
             attachTip(help, R.string.help);
         }
 
-        View sourceRow = findViewById(R.id.row_view_source);
-        if (sourceRow != null) {
-            sourceRow.setOnClickListener(rowClick(() -> openUrl(REPO_URL)));
-        }
-
-        View licensesRow = findViewById(R.id.row_open_source_licenses);
-        if (licensesRow != null) {
-            licensesRow.setOnClickListener(rowClick(() ->
-                    startActivity(new Intent(this, LicensesActivity.class))));
-        }
-
-        View exportRow = findViewById(R.id.row_export_allowlist);
-        if (exportRow != null) {
-            exportRow.setOnClickListener(rowClick(this::exportAllowlist));
-        }
-
-        View importRow = findViewById(R.id.row_import_allowlist);
-        if (importRow != null) {
-            importRow.setOnClickListener(rowClick(this::importAllowlist));
-        }
-
-        View updateRow = findViewById(R.id.row_check_update);
-        if (updateRow != null) {
-            updateRow.setOnClickListener(rowClick(this::checkForUpdates));
-        }
+        bindRow(R.id.row_view_source, () -> openUrl(REPO_URL));
+        bindRow(R.id.row_open_source_licenses,
+                () -> startActivity(new Intent(this, LicensesActivity.class)));
+        bindRow(R.id.row_export_allowlist, this::exportAllowlist);
+        bindRow(R.id.row_import_allowlist, this::importAllowlist);
+        bindRow(R.id.row_check_update, this::checkForUpdates);
 
         View versionRow = findViewById(R.id.row_current_version);
         if (versionRow != null) {
@@ -254,29 +255,16 @@ public class AboutActivity extends Activity {
         // The value label keeps no listener of its own: it stays non-clickable
         // so a tap falls through to the row and plays the row's own ripple,
         // exactly like a tap anywhere else on the card.
-        View themeModeRow = findViewById(R.id.row_theme_mode);
-        if (themeModeRow != null) {
-            themeModeRow.setOnClickListener(rowClick(() -> showPopupMenu(themeModeRow,
-                    R.string.theme_mode, R.array.theme_mode_entries,
-                    ThemePrefs.themeMode(this),
-                    index -> ThemePrefs.setThemeMode(this, index))));
-        }
-
-        View paletteRow = findViewById(R.id.row_palette_style);
-        if (paletteRow != null) {
-            paletteRow.setOnClickListener(rowClick(() -> showPopupMenu(paletteRow,
-                    R.string.palette_style, R.array.palette_style_entries,
-                    ThemePrefs.paletteStyle(this).ordinal(),
-                    index -> ThemePrefs.setPaletteStyle(this, variantAt(index)))));
-        }
-
-        View specRow = findViewById(R.id.row_color_spec);
-        if (specRow != null) {
-            specRow.setOnClickListener(rowClick(() -> showPopupMenu(specRow,
-                    R.string.color_spec, R.array.color_spec_entries,
-                    ThemePrefs.specVersion(this),
-                    index -> ThemePrefs.setSpecVersion(this, index))));
-        }
+        bindPopupRow(R.id.row_theme_mode, R.string.theme_mode, R.array.theme_mode_entries,
+                () -> ThemePrefs.themeMode(this),
+                index -> ThemePrefs.setThemeMode(this, index));
+        bindPopupRow(R.id.row_palette_style, R.string.palette_style,
+                R.array.palette_style_entries,
+                () -> ThemePrefs.paletteStyle(this).ordinal(),
+                index -> ThemePrefs.setPaletteStyle(this, variantAt(index)));
+        bindPopupRow(R.id.row_color_spec, R.string.color_spec, R.array.color_spec_entries,
+                () -> ThemePrefs.specVersion(this),
+                index -> ThemePrefs.setSpecVersion(this, index));
 
         // Version name (version code), shown under the "Current version" row.
         TextView version = findViewById(R.id.about_version);
@@ -288,7 +276,7 @@ public class AboutActivity extends Activity {
     }
 
     private void checkForUpdates() {
-        Toast.makeText(this, R.string.update_checking, Toast.LENGTH_SHORT).show();
+        toastShort(R.string.update_checking);
         UpdateChecker.checkAsync(this, new UpdateChecker.Callback() {
             @Override
             public void onResult(boolean available, String latest, String url) {
@@ -344,7 +332,7 @@ public class AboutActivity extends Activity {
         if (eggTaps.size() >= EGG_TAP_COUNT) {
             eggTaps.clear();
             lastEggAtMs = now;
-            Toast.makeText(this, R.string.no_developer_options, Toast.LENGTH_SHORT).show();
+            toastShort(R.string.no_developer_options);
         }
     }
 
@@ -615,7 +603,7 @@ public class AboutActivity extends Activity {
                                java.util.function.IntConsumer onPick) {
         dismissMenu();
         String[] items = getResources().getStringArray(entriesRes);
-        final int checked = Math.max(0, Math.min(current, items.length - 1));
+        final int checked = clamp(current, 0, items.length - 1);
         final AppPalette palette = ThemeEngine.palette(this);
 
         // Content-adaptive width: measure the widest label, add the horizontal
@@ -1035,7 +1023,7 @@ public class AboutActivity extends Activity {
             intent.putExtra(Intent.EXTRA_TITLE, "fcmlive-allowlist.txt");
             startActivityForResult(intent, REQ_EXPORT);
         } catch (Throwable t) {
-            Toast.makeText(this, R.string.allowlist_export_failed, Toast.LENGTH_SHORT).show();
+            toastShort(R.string.allowlist_export_failed);
         }
     }
 
@@ -1047,7 +1035,7 @@ public class AboutActivity extends Activity {
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivityForResult(intent, REQ_IMPORT);
         } catch (Throwable t) {
-            Toast.makeText(this, R.string.allowlist_import_failed, Toast.LENGTH_SHORT).show();
+            toastShort(R.string.allowlist_import_failed);
         }
     }
 
@@ -1121,7 +1109,7 @@ public class AboutActivity extends Activity {
             Toast.makeText(this, getString(R.string.allowlist_export_done, sorted.size()),
                     Toast.LENGTH_SHORT).show();
         } catch (Throwable t) {
-            Toast.makeText(this, R.string.allowlist_export_failed, Toast.LENGTH_SHORT).show();
+            toastShort(R.string.allowlist_export_failed);
         }
     }
 
@@ -1174,11 +1162,11 @@ public class AboutActivity extends Activity {
                 }
             }
         } catch (Throwable t) {
-            Toast.makeText(this, R.string.allowlist_import_failed, Toast.LENGTH_SHORT).show();
+            toastShort(R.string.allowlist_import_failed);
             return;
         }
         if (allow.isEmpty()) {
-            Toast.makeText(this, R.string.allowlist_import_empty, Toast.LENGTH_SHORT).show();
+            toastShort(R.string.allowlist_import_empty);
             return;
         }
         Prefs.writeAllowlist(this, Prefs.remote(), allow);
@@ -1244,7 +1232,7 @@ public class AboutActivity extends Activity {
         popup.setOutsideTouchable(true);
         popup.setFocusable(false);
         popup.setBackgroundDrawable(
-                new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+                new ColorDrawable(Color.TRANSPARENT));
         popup.setOnDismissListener(() -> {
             if (activeTooltip == popup) {
                 activeTooltip = null;
@@ -1314,51 +1302,22 @@ public class AboutActivity extends Activity {
      * background behind it is still full-bleed.
      */
     private void applySystemBarInsets() {
-        final View topBar = findViewById(R.id.top_bar);
-        final View content = findViewById(R.id.about_content);
-        View root = findViewById(android.R.id.content);
-        if (root == null) {
-            return;
-        }
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
-            int top = UiUtils.topInset(insets);
-            int bottom = UiUtils.bottomInset(insets);
-            // Remembered for the menu overlay, which positions itself in screen
-            // coordinates and must stay inside the safe area.
-            insetTop = top;
-            insetBottom = bottom;
-            int barPad = dp(12);
-            if (topBar != null) {
-                topBar.setPadding(topBar.getPaddingLeft(), top + barPad,
-                        topBar.getPaddingRight(), barPad);
-            }
-            if (content != null) {
-                // 16dp of visual breathing room plus the real safe area, so the
-                // padding tracks gesture vs. three-button navigation on its own.
-                content.setPadding(content.getPaddingLeft(), content.getPaddingTop(),
-                        content.getPaddingRight(), dp(16) + bottom);
-            }
-            return insets;
-        });
-        root.requestApplyInsets();
-        // Fallback for ROMs that never dispatch insets to this listener.
-        int statusBar = statusBarHeight();
-        if (statusBar > 0) {
-            if (insetTop <= 0) {
-                insetTop = statusBar;
-            }
-            if (topBar != null && topBar.getPaddingTop() <= statusBar) {
-                topBar.setPadding(topBar.getPaddingLeft(), statusBar + dp(12),
-                        topBar.getPaddingRight(), dp(12));
-            }
+        // The insets are also remembered: the menu overlay positions itself in
+        // screen coordinates and must stay inside the safe area.
+        UiUtils.applyBarInsets(this, findViewById(R.id.top_bar),
+                findViewById(R.id.about_content), 16,
+                (top, bottom) -> {
+                    insetTop = top;
+                    insetBottom = bottom;
+                });
+        // Fallback for ROMs that never dispatch insets to the listener above.
+        int statusBar = UiUtils.statusBarHeight(this);
+        if (statusBar > 0 && insetTop <= 0) {
+            insetTop = statusBar;
         }
     }
 
     private int dp(int value) {
         return UiUtils.dp(this, value);
-    }
-
-    private int statusBarHeight() {
-        return UiUtils.statusBarHeight(this);
     }
 }

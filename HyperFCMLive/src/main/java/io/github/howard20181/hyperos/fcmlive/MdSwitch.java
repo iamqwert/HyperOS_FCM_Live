@@ -80,10 +80,6 @@ public final class MdSwitch extends CompoundButton {
     private boolean mDragging;
     private final int mTouchSlop;
 
-    public MdSwitch(Context context) {
-        this(context, null);
-    }
-
     public MdSwitch(Context context, AttributeSet attrs) {
         super(context, attrs, 0);
         mTouchSlop = ViewConfiguration.get(context).getScaledTouchSlop();

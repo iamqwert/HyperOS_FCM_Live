@@ -58,14 +58,19 @@ public final class Prefs {
 
     /** Package names the user allows FCM to wake / auto-launch. */
     public static Set<String> readAllowlist(SharedPreferences remotePrefs) {
-        Set<String> set = remotePrefs == null
-                ? null : remotePrefs.getStringSet(KEY_ALLOWLIST, Collections.emptySet());
-        return set != null ? new HashSet<>(set) : new HashSet<>();
+        return readSet(remotePrefs);
     }
 
     public static Set<String> readLocalAllowlist(Context context) {
-        Set<String> set = localPrefs(context)
-                .getStringSet(KEY_ALLOWLIST, Collections.emptySet());
+        return readSet(localPrefs(context));
+    }
+
+    /** Copied defensively: callers mutate the result, and the stored set is shared. */
+    private static Set<String> readSet(SharedPreferences prefs) {
+        if (prefs == null) {
+            return new HashSet<>();
+        }
+        Set<String> set = prefs.getStringSet(KEY_ALLOWLIST, Collections.emptySet());
         return set != null ? new HashSet<>(set) : new HashSet<>();
     }
 
@@ -95,6 +100,12 @@ public final class Prefs {
         return context.getSharedPreferences(LOCAL_PREFS, Context.MODE_PRIVATE);
     }
 
+    /** Application context where available: broadcasts must not outlive the caller. */
+    private static Context appContext(Context context) {
+        Context app = context.getApplicationContext();
+        return app != null ? app : context;
+    }
+
     /**
      * Serialises allowlist writes: one background thread, in order, so a burst of
      * taps cannot interleave and lose the last write.
@@ -121,8 +132,7 @@ public final class Prefs {
     public static void writeAllowlist(Context context, SharedPreferences remotePrefs,
                                       Set<String> allowlist) {
         final Set<String> copy = new HashSet<>(allowlist);
-        final Context app = context.getApplicationContext() != null
-                ? context.getApplicationContext() : context;
+        final Context app = appContext(context);
         writeLocalAllowlist(app, copy);
         if (remotePrefs == null) {
             markPendingPush(app);
@@ -150,12 +160,8 @@ public final class Prefs {
      * would otherwise be dropped and appear to need a refresh.
      */
     public static void broadcastAllowlistChanged(Context context) {
-        Context app = context.getApplicationContext() != null
-                ? context.getApplicationContext() : context;
+        Context app = appContext(context);
         app.sendBroadcast(new Intent(ACTION_ALLOWLIST_CHANGED));
-        if (Looper.getMainLooper() == null) {
-            return;
-        }
         Handler handler = new Handler(Looper.getMainLooper());
         handler.postDelayed(() -> app.sendBroadcast(new Intent(ACTION_ALLOWLIST_CHANGED)), 400L);
         handler.postDelayed(() -> app.sendBroadcast(new Intent(ACTION_ALLOWLIST_CHANGED)), 1500L);

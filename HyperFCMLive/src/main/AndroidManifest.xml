@@ -10,6 +10,9 @@
 
     <!-- Update check via GitHub Releases. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Read the active network for the status screen: it decides how long GMS
+         waits between heartbeats, which is what the screen reports. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- MIUI 13 / HyperOS gates getInstalledPackages() behind this runtime
          permission on top of QUERY_ALL_PACKAGES (owner: com.lbe.security.miui). -->
@@ -54,6 +57,9 @@
 
         <activity
             android:name=".AboutActivity"
+            android:exported="false" />
+        <activity
+            android:name=".StatusActivity"
             android:exported="false" />
         <activity
             android:name=".HelpActivity"

@@ -54,19 +54,60 @@ public class Hooker extends XposedModule {
     private static final String GMS_PACKAGE_NAME = "com.google.android.gms";
     private static final String GMS_PERSISTENT_PROCESS_NAME = "com.google.android.gms.persistent";
     private Pair<String, ClassLoader> param;
-    private final Set<String> hookedIds = new HashSet<>();
     private Context systemContext;
+    /**
+     * Counts behind the end-of-install summary line.
+     *
+     * <p>Every hook goes through {@link #hookE}, so "installed" needs no
+     * bookkeeping at the call sites. "Absent" is counted by {@link #logSkip},
+     * which every "this ROM does not have it" path already calls. Both live on
+     * the instance, and there is one instance per process, so system_server and
+     * PowerKeeper each report their own numbers.
+     */
+    private int hooksInstalled;
+    private int hookTargetsAbsent;
 
     private HookBuilder hookE(Executable executable) {
         var builder = hook(executable);
+        hooksInstalled++;
 
         if (getApiVersion() >= 102) {
-            var id = executable.toGenericString();
-            builder.setId(id);
-            hookedIds.add(id);
+            builder.setId(executable.toGenericString());
         }
 
         return builder;
+    }
+
+    /**
+     * Report a hook target this ROM does not have, and count it.
+     *
+     * <p>These are expected, not failures: the module carries hooks for several
+     * PowerKeeper generations and probes each one, so an "absent" here usually
+     * means "written for a different ROM version". Counting them turns that from
+     * a wall of look-alike lines into one number the summary can report — and
+     * the number is what tells a "nothing landed" install apart from a "two of
+     * sixteen targets are for another ROM" one.
+     */
+    private void logSkip(String message) {
+        logSkip(message, Log.INFO);
+    }
+
+    /**
+     * Same as {@link #logSkip}, for targets that ship on another HyperOS
+     * generation or on none at all.
+     *
+     * <p>Still counted, because the summary number is what separates "nothing
+     * landed" from "several targets are for another ROM". Just logged at DEBUG:
+     * on HyperOS 4 these account for ten of the absent targets, and at INFO they
+     * bury the one line that would actually mean something.
+     */
+    private void logSkipOtherGeneration(String message) {
+        logSkip(message, Log.DEBUG);
+    }
+
+    private void logSkip(String message, int level) {
+        hookTargetsAbsent++;
+        log(level, TAG, message);
     }
 
     @Override
@@ -78,6 +119,24 @@ public class Hooker extends XposedModule {
         } catch (Throwable tr) {
             log(Log.ERROR, TAG, "Failed to hook SystemServer", tr);
         }
+        logSummary("system_server");
+    }
+
+    /**
+     * One line saying what landed, so "is the module running at all?" is
+     * answerable without reading everything around it.
+     *
+     * <p>The point is the difference between the two numbers. A healthy install
+     * reports a handful of hooks installed and a handful of targets absent — the
+     * absent ones being hooks written for other ROM generations. Zero installed
+     * means nothing landed and the module is not doing anything; that is the case
+     * worth chasing, and before this line existed it looked exactly like a quiet
+     * successful install, because success is otherwise silent.
+     */
+    private void logSummary(String process) {
+        log(Log.INFO, TAG, "HyperFCMLive active in " + process + ": "
+                + hooksInstalled + " hook(s) installed, "
+                + hookTargetsAbsent + " target(s) absent on this ROM");
     }
 
     private void hookSystemServer(ClassLoader classLoader) {
@@ -144,6 +203,7 @@ public class Hooker extends XposedModule {
         } catch (Throwable tr) {
             log(Log.ERROR, TAG, "Failed to hook package", tr);
         }
+        logSummary(packageName);
     }
 
     private void hookPackage(String packageName, ClassLoader classLoader) {
@@ -172,11 +232,9 @@ public class Hooker extends XposedModule {
 
     @Override
     public void onHotReloaded(@NonNull HotReloadedParam param) {
-        // Clean reload: reset id bookkeeping and remove every previous hook so the
-        // re-setup below starts fresh. Without this, old handles were never unhooked
-        // (hookedIds accumulated across passes) and stacked duplicate hooks made the
-        // reload appear ineffective.
-        hookedIds.clear();
+        // Clean reload: remove every previous hook so the re-setup below starts
+        // fresh. Without this, old handles were never unhooked and stacked
+        // duplicate hooks made the reload appear ineffective.
         param.getOldHookHandles().forEach(h -> {
             try {
                 h.unhook();
@@ -316,7 +374,7 @@ public class Hooker extends XposedModule {
             });
             deoptimize(updateGmsNetStatusMethod);
         } catch (NoSuchMethodException e) {
-            log(Log.INFO, TAG, "GreezeManagerService#updateGmsNetStatus absent, skip");
+            logSkip("GreezeManagerService#updateGmsNetStatus absent, skip");
         }
     }
 
@@ -576,7 +634,7 @@ public class Hooker extends XposedModule {
                 });
                 deoptimize(initGmsChainMethod);
             } catch (NoSuchMethodException e) {
-                log(Log.INFO, TAG, "NetdExecutor#initGmsChain absent, skip");
+                logSkipOtherGeneration("NetdExecutor#initGmsChain absent, skip");
             }
             // HyperOS 3+: never deny GMS DNS (present on 3 and 4).
             try {
@@ -590,7 +648,7 @@ public class Hooker extends XposedModule {
                 });
                 deoptimize(setGmsDnsBlockerStateMethod);
             } catch (NoSuchMethodException e) {
-                log(Log.INFO, TAG, "NetdExecutor#setGmsDnsBlockerState absent, skip");
+                logSkip("NetdExecutor#setGmsDnsBlockerState absent, skip");
             }
             // HyperOS 3: keep the GMS firewall chain enabled (disable = block).
             try {
@@ -605,7 +663,7 @@ public class Hooker extends XposedModule {
                 });
                 deoptimize(setGmsChainStateMethod);
             } catch (NoSuchMethodException e) {
-                log(Log.INFO, TAG, "NetdExecutor#setGmsChainState absent, skip");
+                logSkipOtherGeneration("NetdExecutor#setGmsChainState absent, skip");
             }
             // Defense in depth: force setuiddnsrule → allow; skip enabling standby firewall.
             try {
@@ -621,9 +679,11 @@ public class Hooker extends XposedModule {
                 // "nothing happened" value instead, which skips the command and
                 // still gives the caller a value it can read.
                 Class<?> executeReturn = executeMethod.getReturnType();
+                // Always skippable: skipValueFor covers all eight primitives, and
+                // void / reference returns are satisfied with null. So the "let the
+                // command through" branch that used to guard against a primitive
+                // return can never be taken and is gone.
                 final Object skipValue = skipValueFor(executeReturn);
-                final boolean skippable = skipValue != null
-                        || executeReturn == void.class || !executeReturn.isPrimitive();
                 hookE(executeMethod).intercept(chain -> {
                     var args = chain.getArgs().toArray();
                     if (args.length >= 4 && args[2] instanceof String cmd && args[3] instanceof Object[] cmdArgs) {
@@ -636,18 +696,17 @@ public class Hooker extends XposedModule {
                         if ("enablemiuistandby".equals(cmd) && cmdArgs.length >= 1
                                 && "enable".equals(String.valueOf(cmdArgs[0]))) {
                             // Do not enable the standby firewall chain for GMS.
-                            return skippable ? skipValue : chain.proceed();
+                            return skipValue;
                         }
                     }
                     return chain.proceed();
                 });
                 deoptimize(executeMethod);
                 log(Log.INFO, TAG, "NetdExecutor#execute returns " + executeReturn.getName()
-                        + "; standby-firewall skip " + (skippable
-                        ? "returns " + (skipValue == null ? "null" : skipValue)
-                        : "NOT installed"));
+                        + "; standby-firewall skip returns "
+                        + (skipValue == null ? "null" : skipValue));
             } catch (NoSuchMethodException e) {
-                log(Log.INFO, TAG, "NetdExecutor#execute not found, skip command-level GMS net hooks");
+                logSkip("NetdExecutor#execute not found, skip command-level GMS net hooks");
             }
         } catch (ClassNotFoundException e) {
             log(Log.ERROR, TAG, "Failed to hook NetdExecutor", e);
@@ -656,17 +715,7 @@ public class Hooker extends XposedModule {
             var GmsObserverClass = classLoader.loadClass("com.miui.powerkeeper.utils.GmsObserver");
             // Legacy method names — present on older PowerKeeper only.
             for (String legacyName : new String[]{"updateGmsAlarm", "updateGmsNetWork", "updateGoogleReletivesWakelock"}) {
-                try {
-                    var legacyMethod = GmsObserverClass.getDeclaredMethod(legacyName, boolean.class);
-                    hookE(legacyMethod).intercept(chain -> {
-                        var args = chain.getArgs().toArray();
-                        args[0] = false;
-                        return chain.proceed(args);
-                    });
-                    deoptimize(legacyMethod);
-                } catch (NoSuchMethodException e) {
-                    log(Log.INFO, TAG, "GmsObserver#" + legacyName + " absent, skip");
-                }
+                hookForceFalse(GmsObserverClass, legacyName);
             }
             // GmsObserver can turn Google components off entirely.
             // Never execute the disable path (FCM needs GMS packages alive).
@@ -678,22 +727,12 @@ public class Hooker extends XposedModule {
                     hookE(disableMethod).intercept(chain -> null);
                     deoptimize(disableMethod);
                 } catch (NoSuchMethodException e) {
-                    log(Log.INFO, TAG, "GmsObserver#" + alwaysSkip + " absent, skip");
+                    logSkipOtherGeneration("GmsObserver#" + alwaysSkip + " absent, skip");
                 }
             }
             // HyperOS 3: updateGmsEnabled(true) / updateGmsState(true) apply limits.
             for (String limitFlag : new String[]{"updateGmsEnabled", "updateGmsState", "updateGmsInstalled"}) {
-                try {
-                    var limitMethod = GmsObserverClass.getDeclaredMethod(limitFlag, boolean.class);
-                    hookE(limitMethod).intercept(chain -> {
-                        var args = chain.getArgs().toArray();
-                        args[0] = false;
-                        return chain.proceed(args);
-                    });
-                    deoptimize(limitMethod);
-                } catch (NoSuchMethodException e) {
-                    log(Log.INFO, TAG, "GmsObserver#" + limitFlag + " absent, skip");
-                }
+                hookForceFalse(GmsObserverClass, limitFlag);
             }
             // HyperOS 3+: never apply the framework GMS network limit (4.x path).
             try {
@@ -708,7 +747,7 @@ public class Hooker extends XposedModule {
                 });
                 deoptimize(updateFrameworkGmsNetStatusMethod);
             } catch (NoSuchMethodException e) {
-                log(Log.INFO, TAG, "GmsObserver#updateFrameworkGmsNetStatus absent, skip");
+                logSkip("GmsObserver#updateFrameworkGmsNetStatus absent, skip");
             }
             // Treat Google as always reachable so notifyFrameworkGmsNetworkChanged
             // computes limit = reachable ^ 1 == false.
@@ -722,7 +761,7 @@ public class Hooker extends XposedModule {
                 });
                 deoptimize(onGoogleReachabilityChangedMethod);
             } catch (NoSuchMethodException e) {
-                log(Log.INFO, TAG, "GmsObserver#onGoogleReachabilityChanged absent, skip");
+                logSkip("GmsObserver#onGoogleReachabilityChanged absent, skip");
             }
             // Synthetic bridge c(GmsObserver, boolean) → onGoogleReachabilityChanged.
             try {
@@ -760,7 +799,27 @@ public class Hooker extends XposedModule {
             }
         }
         if (!disconnectHooked) {
-            log(Log.INFO, TAG, "GmsObserver$*#googleNetworkDisconnect absent, skip disconnect rewrite");
+            logSkip("GmsObserver$*#googleNetworkDisconnect absent, skip disconnect rewrite");
+        }
+    }
+
+    /**
+     * Hooks {@code owner#name(boolean)} so the flag always reaches the method as
+     * false: every one of these switches the GMS limit on, which is the one thing
+     * the module never wants applied. An absent name just means it belongs to
+     * another PowerKeeper generation — still counted, like any other skip.
+     */
+    private void hookForceFalse(Class<?> owner, String name) {
+        try {
+            var method = owner.getDeclaredMethod(name, boolean.class);
+            hookE(method).intercept(chain -> {
+                var args = chain.getArgs().toArray();
+                args[0] = false;
+                return chain.proceed(args);
+            });
+            deoptimize(method);
+        } catch (NoSuchMethodException e) {
+            logSkipOtherGeneration("GmsObserver#" + name + " absent, skip");
         }
     }
 
@@ -791,7 +850,7 @@ public class Hooker extends XposedModule {
                         return result;
                     });
                 } catch (NoSuchMethodException e) {
-                    log(Log.INFO, TAG, "GlobalFeatureConfigureHelper#getDozeWhiteListApps(" + argType.getSimpleName() + ") absent, skip");
+                    logSkip("GlobalFeatureConfigureHelper#getDozeWhiteListApps(" + argType.getSimpleName() + ") absent, skip");
                 }
             }
         } catch (ClassNotFoundException e) {

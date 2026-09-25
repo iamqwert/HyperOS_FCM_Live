@@ -43,32 +43,7 @@ public class HelpActivity extends Activity {
      * bottom edge of the screen.
      */
     private void applySystemBarInsets() {
-        final View topBar = findViewById(R.id.top_bar);
-        final View content = findViewById(R.id.help_content);
-        View root = findViewById(android.R.id.content);
-        if (root == null) {
-            return;
-        }
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
-            int top = UiUtils.topInset(insets);
-            int bottom = UiUtils.bottomInset(insets);
-            int barPad = UiUtils.dp(this, 12);
-            if (topBar != null) {
-                topBar.setPadding(topBar.getPaddingLeft(), top + barPad,
-                        topBar.getPaddingRight(), barPad);
-            }
-            if (content != null) {
-                content.setPadding(content.getPaddingLeft(), content.getPaddingTop(),
-                        content.getPaddingRight(), UiUtils.dp(this, 16) + bottom);
-            }
-            return insets;
-        });
-        root.requestApplyInsets();
-        // Fallback for ROMs that never dispatch insets to this listener.
-        int statusBar = UiUtils.statusBarHeight(this);
-        if (topBar != null && statusBar > 0 && topBar.getPaddingTop() <= statusBar) {
-            topBar.setPadding(topBar.getPaddingLeft(), statusBar + UiUtils.dp(this, 12),
-                    topBar.getPaddingRight(), UiUtils.dp(this, 12));
-        }
+        UiUtils.applyBarInsets(this, findViewById(R.id.top_bar),
+                findViewById(R.id.help_content), 16);
     }
 }

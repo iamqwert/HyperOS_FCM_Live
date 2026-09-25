@@ -1,5 +1,6 @@
 package io.github.howard20181.hyperos.fcmlive;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
@@ -78,5 +79,57 @@ public final class UiUtils {
     public static int statusBarHeight(Context context) {
         int id = context.getResources().getIdentifier("status_bar_height", "dimen", "android");
         return id > 0 ? context.getResources().getDimensionPixelSize(id) : 0;
+    }
+
+    /** Extra work a screen needs once its insets are known (FAB margin, cached values). */
+    public interface InsetSink {
+        void onInsets(int top, int bottom);
+    }
+
+    /**
+     * Applies the window insets every screen shares: the top bar is pushed below
+     * the status bar, and {@code content} gets {@code contentBottomExtraDp} plus
+     * the real bottom safe area on top of whatever padding the layout already
+     * declares. {@code sink} — when non-null — runs inside the listener, for the
+     * few screens that need the raw values as well.
+     *
+     * <p>The status-bar fallback at the end is not redundant: some ROMs never
+     * dispatch insets to the listener, and without it the top bar would sit under
+     * the status bar on exactly those devices.
+     */
+    public static void applyBarInsets(Activity activity, View topBar, View content,
+            int contentBottomExtraDp) {
+        applyBarInsets(activity, topBar, content, contentBottomExtraDp, null);
+    }
+
+    public static void applyBarInsets(Activity activity, View topBar, View content,
+            int contentBottomExtraDp, InsetSink sink) {
+        View root = activity.findViewById(android.R.id.content);
+        if (root != null) {
+            root.setOnApplyWindowInsetsListener((v, insets) -> {
+                int top = topInset(insets);
+                int bottom = bottomInset(insets);
+                int barPad = dp(activity, 12);
+                if (topBar != null) {
+                    topBar.setPadding(topBar.getPaddingLeft(), top + barPad,
+                            topBar.getPaddingRight(), barPad);
+                }
+                if (content != null) {
+                    content.setPadding(content.getPaddingLeft(), content.getPaddingTop(),
+                            content.getPaddingRight(), bottom + dp(activity, contentBottomExtraDp));
+                }
+                if (sink != null) {
+                    sink.onInsets(top, bottom);
+                }
+                return insets;
+            });
+            root.requestApplyInsets();
+        }
+        int statusBar = statusBarHeight(activity);
+        if (statusBar > 0 && topBar != null && topBar.getPaddingTop() <= statusBar) {
+            int barPad = dp(activity, 12);
+            topBar.setPadding(topBar.getPaddingLeft(), statusBar + barPad,
+                    topBar.getPaddingRight(), barPad);
+        }
     }
 }

@@ -34,6 +34,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import io.github.libxposed.service.XposedService;
 import io.github.howard20181.hyperos.fcmlive.theme.AppPalette;
@@ -118,6 +119,17 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
      */
     private static volatile List<AppListAdapter.AppEntry> sAppScanCache;
     private static volatile boolean sAppScanCacheShowSystemApps;
+
+    /**
+     * Which scan is the newest one.
+     *
+     * <p>Every {@link #loadApps()} call used to race its own thread, and a slow
+     * earlier scan could finish after a fast later one and overwrite the list
+     * with stale contents — the visible symptom is a refresh that appears to
+     * revert. Each scan now claims a number and anything it posts afterwards is
+     * dropped unless it is still the latest.
+     */
+    private final AtomicInteger appScanGeneration = new AtomicInteger();
 
     private static final String KEY_STATE_QUERY = "state_query";
     private static final String KEY_STATE_SEARCHING = "state_searching";
@@ -679,38 +691,13 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
      * the title too far down).
      */
     private void applySystemBarInsets() {
-        final View root = findViewById(android.R.id.content);
         final View topBar = findViewById(R.id.top_bar);
-        final View list = findViewById(R.id.app_list);
-        final View fab = findViewById(R.id.fab_fcm_diagnostics);
         if (topBar == null) {
             return;
         }
-        if (root != null) {
-            root.setOnApplyWindowInsetsListener((v, insets) -> {
-                int top = UiUtils.topInset(insets);
-                // Union of navigation-bar and gesture insets so the list keeps
-                // clear of the home indicator under gesture navigation as well.
-                int bottom = UiUtils.bottomInset(insets);
-                int barPad = dp(12);
-                topBar.setPadding(topBar.getPaddingLeft(), top + barPad,
-                        topBar.getPaddingRight(), barPad);
-                if (list != null) {
-                    list.setPadding(list.getPaddingLeft(), list.getPaddingTop(),
-                            list.getPaddingRight(), bottom + dp(88));
-                }
-                applyFabBottomMargin(fab, bottom);
-                return insets;
-            });
-            root.requestApplyInsets();
-        }
-        // Fallback if insets never fire on this ROM.
-        int statusBar = statusBarHeight();
-        if (statusBar > 0 && topBar.getPaddingTop() <= statusBar) {
-            int barPad = dp(12);
-            topBar.setPadding(topBar.getPaddingLeft(), statusBar + barPad,
-                    topBar.getPaddingRight(), barPad);
-        }
+        final View fab = findViewById(R.id.fab_fcm_diagnostics);
+        UiUtils.applyBarInsets(this, topBar, findViewById(R.id.app_list), 88,
+                (top, bottom) -> applyFabBottomMargin(fab, bottom));
         applyFabBottomMargin(fab, 0);
     }
 
@@ -746,13 +733,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         return id > 0 ? getResources().getDimensionPixelSize(id) : 0;
     }
 
-    private int statusBarHeight() {
-        int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
-        return id > 0 ? getResources().getDimensionPixelSize(id) : 0;
-    }
-
     private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
+        return UiUtils.dp(this, value);
     }
 
     /** Lighter query hint + no underline so inline search does not shift the bar. */
@@ -1200,6 +1182,16 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             popup.dismiss();
         });
 
+        View rowStatus = content.findViewById(R.id.menu_status);
+        if (rowStatus != null) {
+            rowStatus.getLayoutParams().width = ViewGroup.LayoutParams.MATCH_PARENT;
+            rowStatus.setOnClickListener(v -> {
+                UiUtils.tapFeedback(v);
+                popup.dismiss();
+                startActivity(new Intent(MainActivity.this, StatusActivity.class));
+            });
+        }
+
         View rowAbout = content.findViewById(R.id.menu_about);
         if (rowAbout != null) {
             rowAbout.getLayoutParams().width = ViewGroup.LayoutParams.MATCH_PARENT;
@@ -1528,12 +1520,18 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         Prefs.writeAllowlist(this, remotePrefs(), allowlist);
     }
 
+    /** True while {@code generation} is still the newest scan. */
+    private boolean isLatestScan(int generation) {
+        return appScanGeneration.get() == generation;
+    }
+
     private void loadApps() {
         final boolean showSys = showSystemApps;
         final Set<String> allow = new HashSet<>(allowlist);
         final boolean emptyUi = allApps.isEmpty();
         // Read on this thread: it gates whether the scan may be cached below.
         final boolean readable = isAppListReadable();
+        final int generation = appScanGeneration.incrementAndGet();
         new Thread(() -> {
             PackageManager pm = getPackageManager();
             try {
@@ -1552,7 +1550,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 }
                 selected.sort(MainActivity::compareEntries);
                 // First open only: show allowlisted apps before the full query returns.
-                if (emptyUi && !selected.isEmpty()) {
+                if (emptyUi && !selected.isEmpty() && isLatestScan(generation)) {
                     runOnUiThreadSafe(() -> applyAppSnapshot(selected, false));
                 }
 
@@ -1568,6 +1566,11 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                     }
                 }
                 final Set<String> fcmPackages = queryFcmPackages(pm, scannedPackages);
+                // A newer scan started while this one was querying; its answer
+                // is already on the way, so abandon the rest of the work.
+                if (!isLatestScan(generation)) {
+                    return;
+                }
                 List<AppListAdapter.AppEntry> result = new ArrayList<>();
                 for (android.content.pm.PackageInfo pi : installed) {
                     ApplicationInfo ai = pi.applicationInfo;
@@ -1590,11 +1593,14 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 // scan counts: on HyperOS the first query runs before the
                 // app-list permission is answered and returns almost nothing, and
                 // caching that would make a rotation show an empty list forever.
-                if (readable && !result.isEmpty()) {
+                if (readable && !result.isEmpty() && isLatestScan(generation)) {
                     sAppScanCache = new ArrayList<>(result);
                     sAppScanCacheShowSystemApps = showSys;
                 }
                 runOnUiThreadSafe(() -> {
+                    if (!isLatestScan(generation)) {
+                        return;
+                    }
                     applyAppSnapshot(result, true);
                     // Xposed remote prefs may bind after the first package query;
                     // re-read allowlist so checked apps stay on top after update.
@@ -1609,7 +1615,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 Log.w(TAG_UI, "Failed to load the app list", t);
             } finally {
                 runOnUiThreadSafe(() -> {
-                    if (swipeRefresh != null) {
+                    // A newer scan is still running and owns the spinner.
+                    if (isLatestScan(generation) && swipeRefresh != null) {
                         swipeRefresh.setRefreshing(false);
                     }
                 });
