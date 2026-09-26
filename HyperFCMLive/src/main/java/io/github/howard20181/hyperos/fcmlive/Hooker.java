@@ -9,6 +9,7 @@ import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.SharedPreferences;
 import android.os.Binder;
 import android.os.Build;
 import android.os.Bundle;
@@ -300,11 +301,16 @@ public class Hooker extends XposedModule {
                         }
                     }
                     if (chain.getArg(4) instanceof String action
-                            && ((chain.getArg(1) instanceof String callerPkgName
+                            && (((chain.getArg(1) instanceof String callerPkgName
                             // callerPkgName get from intent or BroadcastRecord.callerPackage,
                             // both are nullable, but they won't become null in FCM broadcasts.
                             && GMS_PACKAGE_NAME.equals(callerPkgName)
                             && ACTION_REMOTE_INTENT.equals(action))
+                            // Strict mode: the callee is the app this broadcast is
+                            // meant for, so it is what decides whether the module
+                            // overrides Greeze here at all. The GMS-side branch
+                            // below is about the transport and is never gated.
+                            && shouldApply(calleePkgName))
                             || ((GMS_PACKAGE_NAME.equals(calleePkgName)
                             || GMS_PERSISTENT_PROCESS_NAME.equals(calleePkgName))
                             && CN_DEFER_BROADCAST.contains(action)))) {
@@ -894,12 +900,24 @@ public class Hooker extends XposedModule {
      */
     private static volatile Set<String> sAllowlist = Collections.emptySet();
 
-    /** Re-read the allowlist from the shared remote preferences. */
+    /**
+     * Strict mode, from the overflow menu. Read in the same pass as the
+     * allowlist: it only ever means anything together with it, and one
+     * cross-process read then refreshes both.
+     *
+     * <p>Off by default, which keeps the historical behaviour for everyone who
+     * never opens the menu — an upgrade must not start leaving unchecked apps to
+     * the system on its own.
+     */
+    private static volatile boolean sStrictMode = false;
+
+    /** Re-read the allowlist and strict mode from the shared remote preferences. */
     private void loadAllowlistFromRemotePrefs() {
         try {
-            Set<String> set = getRemotePreferences(Prefs.GROUP_CONFIG)
-                    .getStringSet(Prefs.KEY_ALLOWLIST, Collections.emptySet());
+            SharedPreferences prefs = getRemotePreferences(Prefs.GROUP_CONFIG);
+            Set<String> set = prefs.getStringSet(Prefs.KEY_ALLOWLIST, Collections.emptySet());
             sAllowlist = set != null ? new HashSet<>(set) : new HashSet<>();
+            sStrictMode = prefs.getBoolean(Prefs.KEY_STRICT_MODE, false);
         } catch (Exception e) {
             log(Log.ERROR, TAG, "Failed to read remote allowlist", e);
         }
@@ -1057,6 +1075,49 @@ public class Hooker extends XposedModule {
     private boolean shouldWake(String targetPackage) {
         Set<String> allowlist = getFcmAllowlist();
         return allowlist.isEmpty() || allowlist.contains(targetPackage);
+    }
+
+    /**
+     * Whether the module may second-guess the system for {@code packageName}.
+     *
+     * <p>This is the strict-mode gate, and it is deliberately narrower than
+     * {@link #shouldWake}: that one decides who gets the *extras* (auto-start,
+     * the stopped-package flag, the power exemption) and already excludes
+     * unchecked apps whenever the list is non-empty. This one decides whether the
+     * module answers at all for an app, and it is what the hooks that protect an
+     * app *from the system* — the force-stop cleaner, the push-app network
+     * restriction, the broadcast allowance — consult before replacing the
+     * system's decision with their own.
+     *
+     * <p>Off (the default, and what every existing install keeps): those hooks
+     * answer for every app that ships a push component, which is the historical
+     * behaviour and stays untouched.
+     *
+     * <p>On, with at least one app checked: an app that is not on the list is
+     * left to the system, so PowerKeeper and the framework decide exactly as they
+     * would with no module installed.
+     *
+     * <p>An empty list stays wide open in both modes. Strict mode is a rule about
+     * apps the user did *not* check, and with nothing checked there are none —
+     * narrowing that case would turn the empty list from "let everything
+     * through" into "let nothing through", which is the opposite of what the
+     * help page promises for it.
+     *
+     * <p>GMS is exempt from the gate rather than left to the list: it carries the
+     * push for the checked apps as well, so gating it would take those apps down
+     * together with the unchecked ones and defeat the point of switching this on.
+     */
+    private boolean shouldApply(String packageName) {
+        if (!sStrictMode) {
+            return true;
+        }
+        Set<String> allowlist = getFcmAllowlist();
+        if (allowlist.isEmpty()) {
+            return true;
+        }
+        return allowlist.contains(packageName)
+                || GMS_PACKAGE_NAME.equals(packageName)
+                || GMS_PERSISTENT_PROCESS_NAME.equals(packageName);
     }
 
     /**
@@ -1367,7 +1428,10 @@ public class Hooker extends XposedModule {
         final String restrictNetOwner = InternationalPolicyManagerClass.getName();
         final ClassLoader systemServerCl = InternationalPolicyManagerClass.getClassLoader();
         hookE(isPushAppMethod).intercept(chain -> {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+                    // Strict mode: an unchecked app keeps whatever network
+                    // restriction the ROM decided on for it.
+                    && shouldApply(chain.getArg(0) instanceof String pkg ? pkg : null)) {
                 try {
                     boolean fromRestrictNet = STACK_WALKER.walk(frames -> frames.anyMatch(frame ->
                             "isRestrictNet".equals(frame.getMethodName())
@@ -1421,6 +1485,10 @@ public class Hooker extends XposedModule {
      * that a marker can also be declared purely to opt out of the cleaner; that
      * was reviewed and accepted on 2026-09-23 — do not tighten it again without
      * asking, since it changes behaviour for people who never opened the app.
+     *
+     * <p>Strict mode is the opt-in exception to that: it narrows the exemption to
+     * the user's own list, but only for someone who switched it on, so the
+     * accepted default above is not what changes.
      *
      * <p>Answering it needs PackageManager queries, and the cleaner asks far more
      * often than apps get installed, so answers are reused for a few minutes
@@ -1507,6 +1575,11 @@ public class Hooker extends XposedModule {
                         // finished attaching; reading through it used to NPE.
                         && getInvoker(mGetApplicationInfo).invoke(chain.getArg(0)) instanceof ApplicationInfo info
                         && info.packageName != null
+                        // Strict mode first: it is the cheap test and in the
+                        // default (off) mode it answers without touching the
+                        // package manager, so the exemption below is only
+                        // looked up for apps that may actually get it.
+                        && shouldApply(info.packageName)
                         && declaresFcmComponent(pm, info.packageName)) {
                     // Declares a push receiver: keep the cleaner's hands off it.
                     return false;

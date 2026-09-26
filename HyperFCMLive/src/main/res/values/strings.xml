@@ -20,7 +20,12 @@
     <string name="installed_apps_permission_denied">App list may be incomplete without this permission</string>
     <string name="show_system_apps">Show system apps</string>
     <string name="show_fcm_supported_apps">Show FCM-supported apps</string>
+    <string name="exclude_mipush_apps">Exclude MiPush apps</string>
+    <string name="mipush_badge">MiPush</string>
+    <string name="strict_mode">Strict mode</string>
     <string name="no_fcm_apps_found">No FCM-supported apps found</string>
+    <!-- Shown when the list is empty and a filter, not the scan, is why. -->
+    <string name="no_apps_found">No apps left with the current filters</string>
     <string name="about">About</string>
     <string name="settings">Settings</string>
     <string name="about_section_display">Display</string>
@@ -113,21 +118,26 @@
          misses those extras. List edits apply at once; enabling or updating the
          module needs one reboot. -->
     <string name="help_section_how">About this app</string>
-    <string name="help_how_body">HyperOS power policy throttles background broadcasts and network access. Push (FCM) works by having GMS deliver a broadcast that wakes the app; if that broadcast is deferred or dropped, the app never sees the message.\n\nThis module changes those decisions inside system_server: it lets the push and reconnect broadcasts through, keeps GMS from being cut off, frozen or blacklisted, and on every push to an app you have checked it grants that app a temporary ~2s power exemption and lets the broadcast reach it even in the stopped state.</string>
+    <string name="help_how_body">HyperOS power policy throttles background broadcasts and network access. Push (FCM) works by having GMS deliver a broadcast that wakes the app; if that broadcast is deferred or dropped, the app never sees the message\n\nThis module changes those decisions inside system_server: it lets the push and reconnect broadcasts through, keeps GMS from being cut off, frozen or blacklisted, and on every push to a checked app it grants that app a temporary ~2s power exemption and lets the broadcast reach it even in the stopped state</string>
     <string name="help_section_allowlist">The allowlist mechanism</string>
     <string name="help_allowlist_empty_title">Nothing checked</string>
-    <string name="help_allowlist_empty_body">Equivalent to letting everything through: any app that receives a push may be auto-started and woken, with no list to maintain. The cost is noticeably higher background battery and memory use than checking only a few apps.</string>
+    <string name="help_allowlist_empty_body">Equivalent to letting everything through: any app that receives a push may be auto-started and woken, with no list to maintain. The cost is noticeably higher background battery and memory use than checking only a few apps</string>
     <string name="help_allowlist_checked_title">Some apps checked</string>
-    <string name="help_allowlist_checked_body">Checked apps get the extra privileges: they may be auto-started, woken from the stopped state, and get a short power exemption on each push. Apps you leave unchecked are still unblocked — their push broadcasts are no longer deferred or dropped and GMS stays reachable — they just do not get those extras, so a push can arrive late or only once you open the app. The list is therefore a way to spend battery where it matters, not a switch that turns the module off for everything else.</string>
+    <string name="help_allowlist_checked_body">Checked apps get the extra privileges: they may be auto-started, woken from the stopped state, and get a short power exemption on each push\nApps left unchecked are still unblocked — their push broadcasts are no longer deferred or dropped and GMS stays reachable — they just do not get those extras, so a push can arrive late or only when the app is opened</string>
+    <string name="help_section_strict">Strict mode</string>
+    <string name="help_strict_on_title">What changes when it is on</string>
+    <string name="help_strict_on_body">Once at least one app is checked, the module applies itself to <b>the checked apps only</b>. Apps left unchecked fall back to the default system decision and behave exactly as they would with no module installed. In any case, Google Play services itself always stays protected</string>
+    <string name="help_strict_unchanged_title">What it does not change</string>
+    <string name="help_strict_unchanged_body">An empty list behaves as before: with nothing checked there is no unchecked app either, so everything still gets through</string>
     <string name="help_section_faq">Troubleshooting</string>
     <string name="help_faq_q1">I checked an app but pushes still do not arrive</string>
-    <string name="help_faq_a1">Check in order: (1) the module is enabled in LSPosed and its scope includes System Framework; (2) the device was rebooted once after enabling or updating the module; (3) the app really uses FCM; (4) use FCM Diagnostics to check the GMS connection state.</string>
-    <string name="help_faq_q2">Do I need to reboot after editing the list?</string>
-    <string name="help_faq_a2">No. The change notifies the module inside the system immediately and it re-reads the list (as long as the module is enabled with the right scope). Only the first enable — or an update of the module — needs one reboot.</string>
-    <string name="help_faq_q3">Battery use went up</string>
-    <string name="help_faq_a3">That is inherent to the module: it lets push reconnects through and allows apps to be woken. Checking only the apps whose pushes must be instant cuts how often apps are woken from the stopped state, which is where most of the cost is. It does not switch the module off for the rest — GMS and push broadcasts stay protected either way.</string>
-    <string name="help_faq_q4">How is “supported apps” decided?</string>
-    <string name="help_faq_a4">An app is marked when any one of four things appears in its Manifest: the FirebaseMessagingService or FirebaseInstanceIdReceiver class, or an intent-filter for com.google.firebase.MESSAGING_EVENT or com.google.android.c2dm.intent.RECEIVE. One hit is enough, whatever the component itself is called. The mark only helps you filter; checking an app is never limited by it.</string>
+    <string name="help_faq_a1">Check in order: (1) the module is enabled in LSPosed and its scope includes System Framework; (2) the device was rebooted once after enabling or updating the module; (3) the app really uses FCM; (4) use FCM Diagnostics to check the GMS connection state</string>
+    <string name="help_faq_q2">Battery use went up</string>
+    <string name="help_faq_a2">That is inherent to the module: it lets push reconnects through and allows apps to be woken. Checking only the apps whose pushes must be instant cuts how often apps are woken from the stopped state, which is where most of the cost is. It does not switch the module off for the rest — GMS and push broadcasts stay protected either way</string>
+    <string name="help_faq_q3">How is “supported apps” decided?</string>
+    <string name="help_faq_a3">An app is marked when any of these appears in its Manifest:\nFirebaseMessagingService\nFirebaseInstanceIdReceiver\ncom.google.firebase.MESSAGING_EVENT\ncom.google.android.c2dm.intent.RECEIVE</string>
+    <string name="help_faq_q4">How is a MiPush app identified?</string>
+    <string name="help_faq_a4">Its Manifest declares com.xiaomi.push.service.XMPushService</string>
 
     <!-- Module status screen. -->
     <string name="module_status">Module status</string>
@@ -136,18 +146,20 @@
     <string name="status_gms">Google Play services</string>
     <string name="status_gms_absent">Not installed</string>
     <string name="status_network_active">Active network</string>
+    <string name="status_strict_mode">Strict mode</string>
+    <string name="status_yes">Yes</string>
+    <string name="status_no">No</string>
     <string name="status_network_wifi">Wi-Fi</string>
     <string name="status_network_cellular">Mobile data</string>
     <string name="status_network_none">None</string>
     <string name="status_network_other">Other</string>
-    <string name="status_network_cell_hint">On mobile data GMS waits much longer between heartbeats — long enough for an idle connection to be dropped without either side noticing. Keeping Wi-Fi on while the screen is off is what makes push reliable.</string>
     <string name="status_hooks_title">Hook targets</string>
-    <string name="status_group_powerkeeper">PowerKeeper</string>
+    <string name="status_group_powerkeeper">Battery and performance (PowerKeeper)</string>
     <string name="status_group_system_server">System framework (system)</string>
     <string name="status_probing">Checking…</string>
     <string name="status_hooks_ok">%1$d of %2$d targets present</string>
     <string name="status_hooks_missing">%1$d missing · %2$d of %3$d present</string>
-    <string name="status_hooks_unreachable">None of these could be reached from here — see the log command below</string>
+    <string name="status_hooks_unreachable">None of these could be read from here — confirm with the log command below</string>
     <string name="status_state_present">Present</string>
     <string name="status_state_absent_expected">Not on this ROM</string>
     <string name="status_state_absent_unexpected">Missing</string>

@@ -21,7 +21,12 @@
     <string name="installed_apps_permission_denied">未授权时应用列表可能不完整</string>
     <string name="show_system_apps">显示系统应用</string>
     <string name="show_fcm_supported_apps">展示支持应用</string>
+    <string name="exclude_mipush_apps">排除MiPush应用</string>
+    <string name="mipush_badge">MiPush</string>
+    <string name="strict_mode">严格模式</string>
     <string name="no_fcm_apps_found">未发现支持FCM的应用</string>
+    <!-- 列表为空且原因是筛选（而非扫描失败）时的提示。 -->
+    <string name="no_apps_found">当前筛选条件下没有可显示的应用</string>
     <string name="about">关于</string>
     <string name="settings">设置</string>
     <string name="about_section_display">显示</string>
@@ -109,21 +114,26 @@
          空名单放行全部、非空名单只放行名单内、命中时临时豁免 2000ms 并补
          FLAG_INCLUDE_STOPPED_PACKAGES；改名单立即生效，启用/更新模块后需重启。 -->
     <string name="help_section_how">应用介绍</string>
-    <string name="help_how_body">澎湃的省电策略会限制后台应用的广播与网络。谷歌推送（FCM）靠 GMS 发一条广播把应用叫醒，这条广播一旦被延后或拦下，应用就收不到推送。\n\n本模块在系统框架里改掉这套判定：放行谷歌推送与重连相关的广播，不让 GMS 断网、被冻结或被拉黑；收到推送时还会为你勾选的应用申请约 2 秒的临时省电豁免，并让它即使在「已停止」状态下也能收到这条广播。</string>
+    <string name="help_how_body">澎湃的省电策略会限制后台应用的广播与网络。谷歌推送（FCM）靠 GMS 发一条广播把应用叫醒，这条广播一旦被延后或拦下，应用就收不到推送\n\n本模块在系统框架里改掉这套判定：放行谷歌推送与重连相关的广播，不让 GMS 断网、被冻结或被拉黑；收到推送时还会为勾选的应用申请约 2 秒的临时省电豁免，并让它即使在「已停止」状态下也能收到这条广播</string>
     <string name="help_section_allowlist">白名单机制介绍</string>
     <string name="help_allowlist_empty_title">一个都不勾选</string>
-    <string name="help_allowlist_empty_body">相当于全部放行：任何收到谷歌推送的应用都会被允许自启动并被叫醒，不需要逐个维护名单。代价是后台耗电和内存占用会比只勾选若干应用上升更明显。</string>
+    <string name="help_allowlist_empty_body">相当于全部放行：任何收到谷歌推送的应用都会被允许自启动并被叫醒，不需要逐个维护名单。代价是后台耗电和内存占用会比只勾选若干应用上升更明显</string>
     <string name="help_allowlist_checked_title">勾选了若干应用</string>
-    <string name="help_allowlist_checked_body">勾选的应用会拿到额外权限：允许被推送自启动、从「已停止」状态被唤醒，并在每次推送时获得一小段省电豁免。没勾选的应用同样不再被拦截——它们的推送广播不会被延后或丢弃，GMS 也保持可达——只是拿不到这几项额外权限，所以推送可能到得晚一些，或要等你打开应用才送达。因此名单是「把耗电花在刀刃上」的开关，而不是把模块对其它应用关掉。</string>
+    <string name="help_allowlist_checked_body">勾选的应用会拿到额外权限：允许被推送自启动、从「已停止」状态被唤醒，并在每次推送时获得一小段省电豁免\n没勾选的应用同样不再被拦截——它们的推送广播不会被延后或丢弃，GMS 也保持可达——只是拿不到这几项额外权限，所以推送可能到得晚一些，或要应用打开时才送达</string>
+    <string name="help_section_strict">严格模式</string>
+    <string name="help_strict_on_title">开启后的变化</string>
+    <string name="help_strict_on_body">只要勾选了至少一个应用，模块就<b>只对勾选的应用生效</b>。未勾选的应用会还原系统默认判定行为，与未装模块时的表现一致。无论如何，Google Play 服务本身始终受到保护</string>
+    <string name="help_strict_unchanged_title">不受影响的部分</string>
+    <string name="help_strict_unchanged_body">一个都不勾选时行为不变：既然没有勾选任何应用，也就不存在「未勾选的应用」，仍然全部放行</string>
     <string name="help_section_faq">常见问题</string>
     <string name="help_faq_q1">勾选了应用还是不推送？</string>
-    <string name="help_faq_a1">依次检查：① LSPosed 里模块已启用、作用域包含「系统框架」；② 模块首次启用或更新后重启过一次设备；③ 该应用确实支持 FCM；④ 用「FCM 诊断」看 GMS 的连接状态。</string>
-    <string name="help_faq_q2">改名单要重启吗？</string>
-    <string name="help_faq_a2">不用。改动会立刻通知系统里的模块重新读取名单（前提是模块已启用、作用域正确）。只有首次启用或更新模块之后需要重启一次设备。</string>
-    <string name="help_faq_q3">耗电变多了？</string>
-    <string name="help_faq_a3">这是模块的固有代价——它放行推送重连并允许应用被唤醒。只勾选真正需要即时推送的应用，可以减少应用从「已停止」状态被唤醒的次数，耗电主要就花在这里。但这并不是把模块对其它应用关掉：GMS 与推送广播始终受保护。</string>
-    <string name="help_faq_q4">「展示支持应用」是怎么判断的？</string>
-    <string name="help_faq_a4">只要在该应用的清单里发现下面任意一项，就标记为支持：FirebaseMessagingService、FirebaseInstanceIdReceiver 这两个组件类，或者 com.google.firebase.MESSAGING_EVENT、com.google.android.c2dm.intent.RECEIVE 这两个意图动作。命中任意一项即算支持，与组件叫什么名字无关。这个标记只是帮你筛选，勾选本身不受它限制。</string>
+    <string name="help_faq_a1">依次检查：① LSPosed 里模块已启用、作用域包含「系统框架」；② 模块首次启用或更新后重启过一次设备；③ 该应用确实支持 FCM；④ 用「FCM 诊断」看 GMS 的连接状态</string>
+    <string name="help_faq_q2">耗电变多了？</string>
+    <string name="help_faq_a2">这是模块的固有代价——它放行推送重连并允许应用被唤醒。只勾选真正需要即时推送的应用，可以减少应用从「已停止」状态被唤醒的次数，耗电主要就花在这里。但这并不是把模块对其它应用关掉：GMS 与推送广播始终受保护</string>
+    <string name="help_faq_q3">「展示支持应用」是怎么判断的？</string>
+    <string name="help_faq_a3">只要在该应用的清单里发现下面任意一项，就标记为支持：\nFirebaseMessagingService\nFirebaseInstanceIdReceiver\ncom.google.firebase.MESSAGING_EVENT\ncom.google.android.c2dm.intent.RECEIVE</string>
+    <string name="help_faq_q4">如何界定 MiPush 应用？</string>
+    <string name="help_faq_a4">应用的清单里声明了 com.xiaomi.push.service.XMPushService</string>
 
     <!-- 模块状态页 -->
     <string name="module_status">模块状态</string>
@@ -132,11 +142,13 @@
     <string name="status_gms">Google Play 服务</string>
     <string name="status_gms_absent">未安装</string>
     <string name="status_network_active">当前网络</string>
+    <string name="status_strict_mode">严格模式</string>
+    <string name="status_yes">是</string>
+    <string name="status_no">否</string>
     <string name="status_network_wifi">Wi-Fi</string>
     <string name="status_network_cellular">移动数据</string>
     <string name="status_network_none">无网络</string>
     <string name="status_network_other">其他</string>
-    <string name="status_network_cell_hint">在移动数据下，GMS 两次心跳的间隔会长得多，长到空闲连接被丢弃时双方都不会察觉。息屏时保持连接 Wi-Fi，才是推送稳定的关键。</string>
     <string name="status_hooks_title">Hook 目标</string>
     <string name="status_group_powerkeeper">电量和性能（PowerKeeper）</string>
     <string name="status_group_system_server">系统框架（system）</string>

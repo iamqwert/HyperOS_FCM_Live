@@ -47,6 +47,11 @@ public class AppListAdapter extends BaseAdapter {
         public boolean checked;
         /** Manifest components (Firebase service / receiver, or their actions). */
         public boolean supportFcm;
+        /**
+         * Declares the MiPush service: the app has its own system-channel push
+         * route, so waking FCM for it is usually unnecessary. Shown as a tag.
+         */
+        public boolean supportMiPush;
 
         public AppEntry(String packageName, String label) {
             this.packageName = packageName;
@@ -137,6 +142,8 @@ public class AppListAdapter extends BaseAdapter {
             holder.label = convertView.findViewById(R.id.app_label);
             holder.pkg = convertView.findViewById(R.id.app_pkg);
             holder.status = convertView.findViewById(R.id.app_status);
+            holder.mipushBadge = convertView.findViewById(R.id.app_mipush_badge);
+            holder.titleRow = convertView.findViewById(R.id.app_title_row);
             convertView.setTag(holder);
         } else {
             holder = (ViewHolder) convertView.getTag();
@@ -152,6 +159,7 @@ public class AppListAdapter extends BaseAdapter {
         }
 
         bindStatus(holder.status, app.checked);
+        bindMiPushTag(holder, app.supportMiPush);
         clearIconTooltip(convertView);
         clearIconTooltip(holder.icon);
         clearIconTooltip(holder.status);
@@ -260,6 +268,49 @@ public class AppListAdapter extends BaseAdapter {
         status.setColorFilter(checked ? enabledColor : disabledColor, PorterDuff.Mode.SRC_IN);
     }
 
+    /**
+     * Shows the MiPush tag beside the app name — and pays for it, because the
+     * two pull against each other.
+     *
+     * <p>The name has to be wrap_content for the tag to sit against it, but a
+     * wrap_content child is measured before the view behind it and takes what is
+     * left of the row: a long name then claims the whole line and the tag is
+     * clipped away, which is worse than a name without a tag. Giving the name a
+     * ceiling of "row minus tag" restores the ellipsis it already asks for with
+     * {@code maxLines} and {@code ellipsize}.
+     *
+     * <p>The width has to come from the row itself, so a row that has not been
+     * laid out yet keeps no ceiling for one pass; every later bind (a scroll, or
+     * any {@code notifyDataSetChanged}) sets it.
+     */
+    private void bindMiPushTag(ViewHolder holder, boolean visible) {
+        if (holder.mipushBadge == null || holder.label == null) {
+            return;
+        }
+        holder.mipushBadge.setVisibility(visible ? View.VISIBLE : View.GONE);
+        int rowWidth = holder.titleRow != null ? holder.titleRow.getWidth() : 0;
+        if (!visible || rowWidth <= 0) {
+            holder.label.setMaxWidth(Integer.MAX_VALUE);
+            return;
+        }
+        if (holder.tagWidth == 0) {
+            holder.tagWidth = measureWidth(holder.mipushBadge, rowWidth) + startMargin(holder.mipushBadge);
+        }
+        holder.label.setMaxWidth(Math.max(0, rowWidth - holder.tagWidth));
+    }
+
+    private static int measureWidth(View view, int available) {
+        view.measure(View.MeasureSpec.makeMeasureSpec(available, View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        return view.getMeasuredWidth();
+    }
+
+    private static int startMargin(View view) {
+        ViewGroup.LayoutParams lp = view.getLayoutParams();
+        return lp instanceof ViewGroup.MarginLayoutParams
+                ? ((ViewGroup.MarginLayoutParams) lp).getMarginStart() : 0;
+    }
+
     private void loadIcon(final AppEntry app) {
         if (app.iconLoading) {
             return;
@@ -346,5 +397,10 @@ public class AppListAdapter extends BaseAdapter {
         TextView label;
         TextView pkg;
         ImageView status;
+        TextView mipushBadge;
+        /** Name row, whose measured width is what the name gets capped against. */
+        View titleRow;
+        /** Cached tag width (its own + its start margin); it never changes here. */
+        int tagWidth;
     }
 }

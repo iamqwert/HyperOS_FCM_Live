@@ -97,6 +97,18 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private boolean showSystemApps = false;
     /** Overflow: when true, list only apps whose Manifest has FCM-style receivers. */
     private boolean showFcmSupportedOnly = false;
+    /**
+     * Overflow: when true, apps that carry MiPush are left out of the list.
+     * Purely a filter, like {@link #showFcmSupportedOnly} — it decides what is
+     * offered, never what the module does with an app the user already checked.
+     */
+    private boolean excludeMiPushApps = false;
+    /**
+     * Overflow: when true, the module leaves unchecked apps to the system once
+     * at least one app is checked ({@code Hooker#shouldApply}). Read from the
+     * local mirror here; the live copy the hooks read lives in remote prefs.
+     */
+    private boolean strictMode = false;
     private XposedService xposedService;
     private PopupWindow activeTooltip;
     /** Overflow menu, dismissed on destroy so a rotation cannot leak the window. */
@@ -139,6 +151,14 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     /** Typing is coalesced over this window: one filter pass per burst, not per key. */
     private static final long FILTER_DEBOUNCE_MS = 150L;
 
+    /**
+     * The service the MiPush SDK merges into the host Manifest. Its presence —
+     * enabled or not — is the MiPush test: no device-wide query can see it (it
+     * declares no intent-filter), so packages are asked one by one in
+     * {@link #declaresMiPushService}, with disabled components included.
+     */
+    private static final String MIPUSH_SERVICE_CLASS = "com.xiaomi.push.service.XMPushService";
+
     @Override
     protected void attachBaseContext(Context newBase) {
         super.attachBaseContext(ThemeSupport.attach(newBase));
@@ -172,6 +192,14 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         // toggles the overflow option, their stored preference wins.
         showFcmSupportedOnly = getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
                 .getBoolean(Prefs.KEY_SHOW_FCM_ONLY, true);
+        // Off by default: an existing install must not start leaving unchecked
+        // apps to the system just because it was upgraded.
+        strictMode = Prefs.readLocalStrictMode(this);
+        // Off by default for the same reason, and because the point of the
+        // MiPush tag is to be seen — a filter that is on from the start hides
+        // the very apps it is meant to explain.
+        excludeMiPushApps = getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
+                .getBoolean(Prefs.KEY_EXCLUDE_MIPUSH, false);
 
         initXposedService();
 
@@ -1088,18 +1116,23 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         View content = getLayoutInflater().inflate(R.layout.popup_overflow, null);
         ImageView sysCheck = content.findViewById(R.id.menu_show_system_check);
         ImageView fcmCheck = content.findViewById(R.id.menu_show_fcm_check);
+        ImageView mipushCheck = content.findViewById(R.id.menu_exclude_mipush_check);
+        ImageView strictCheck = content.findViewById(R.id.menu_strict_mode_check);
         bindMd3Check(sysCheck, showSystemApps);
         bindMd3Check(fcmCheck, showFcmSupportedOnly);
+        bindMd3Check(mipushCheck, excludeMiPushApps);
+        bindMd3Check(strictCheck, strictMode);
 
-        // Line the two check boxes up on one vertical line. Each row lays out as
+        // Line the check boxes up on one vertical line. Each row lays out as
         // [label][12dp][check box], so a wrap_content label parks its check box
         // wherever the text happens to end — invisible while both Chinese labels
         // are the same length, but "Show system apps" and "Show FCM supported
-        // apps" differ in English and the boxes drifted apart. Giving both
-        // labels the width of the wider one fixes that; in Chinese the two
-        // labels already measure the same, so nothing moves there. Done before
-        // the measure pass so the popup width stays exactly what it was.
-        int[] labelIds = {R.id.menu_show_system_label, R.id.menu_show_fcm_label};
+        // apps" differ in English and the boxes drifted apart. All four
+        // toggle labels get the width of the widest one, which fixes that; in
+        // Chinese they already measure alike, so nothing moves there. Done
+        // before the measure pass so the popup width stays exactly what it was.
+        int[] labelIds = {R.id.menu_show_system_label, R.id.menu_show_fcm_label,
+                R.id.menu_exclude_mipush_label, R.id.menu_strict_mode_label};
         int widestLabel = 0;
         for (int id : labelIds) {
             TextView label = content.findViewById(id);
@@ -1182,11 +1215,43 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             popup.dismiss();
         });
 
+        View rowMiPush = content.findViewById(R.id.menu_exclude_mipush);
+        rowMiPush.getLayoutParams().width = ViewGroup.LayoutParams.MATCH_PARENT;
+        rowMiPush.setOnClickListener(v -> {
+            excludeMiPushApps = !excludeMiPushApps;
+            bindMd3Check(mipushCheck, excludeMiPushApps);
+            getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(Prefs.KEY_EXCLUDE_MIPUSH, excludeMiPushApps)
+                    .apply();
+            // Filter only — the package scan stands, and so does every
+            // allowlist entry: this toggle decides what is offered, not what the
+            // module already does for an app.
+            filterApps(currentQuery);
+            popup.dismiss();
+        });
+
+        View rowStrict = content.findViewById(R.id.menu_strict_mode);
+        rowStrict.getLayoutParams().width = ViewGroup.LayoutParams.MATCH_PARENT;
+        rowStrict.setOnClickListener(v -> {
+            strictMode = !strictMode;
+            bindMd3Check(strictCheck, strictMode);
+            // Written to the remote group the hooks read, then announced with
+            // the same broadcast as a list edit, so it is live at once. Nothing
+            // in the list changes: the toggle only decides what the module does
+            // for apps that are not checked.
+            Prefs.writeStrictMode(this, remotePrefs(), strictMode);
+            popup.dismiss();
+        });
+
         View rowStatus = content.findViewById(R.id.menu_status);
         if (rowStatus != null) {
             rowStatus.getLayoutParams().width = ViewGroup.LayoutParams.MATCH_PARENT;
             rowStatus.setOnClickListener(v -> {
-                UiUtils.tapFeedback(v);
+                // No haptic here: this row navigates away, and the buzz it used
+                // to fire read as a stray vibration before the next screen
+                // appeared. The "设置" row below starts an activity the same way
+                // and never had one.
                 popup.dismiss();
                 startActivity(new Intent(MainActivity.this, StatusActivity.class));
             });
@@ -1253,8 +1318,16 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         String lower = query != null && query.length() > 0
                 ? query.toLowerCase(Locale.ROOT) : null;
         boolean fcmOnly = showFcmSupportedOnly;
+        boolean dropMiPush = excludeMiPushApps;
         for (AppListAdapter.AppEntry app : allApps) {
             if (fcmOnly && !app.supportFcm) {
+                continue;
+            }
+            // Already checked apps stay: dropping them would hide a choice the
+            // user has already made — it would remain in the allowlist, still
+            // costing what the filter is meant to save, with no row left to undo
+            // it from. They keep the tag, so the reason to uncheck them shows.
+            if (dropMiPush && app.supportMiPush && !app.checked) {
                 continue;
             }
             if (lower == null
@@ -1269,9 +1342,12 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         maybeToastNoFcmApps();
     }
 
-    /** Empty FCM-only list after a full package scan (no search query). */
+    /**
+     * Empty list after a full package scan (no search query), where one of the
+     * two overflow filters is what emptied it.
+     */
     private void maybeToastNoFcmApps() {
-        if (!showFcmSupportedOnly || !packagesReady) {
+        if (!packagesReady) {
             return;
         }
         if (currentQuery != null && currentQuery.length() > 0) {
@@ -1280,7 +1356,12 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         if (!filteredApps.isEmpty()) {
             return;
         }
-        // Empty only means "no FCM apps" when the package list itself was
+        // With both filters off an empty list means the scan found nothing, and
+        // blaming a filter for that would be wrong.
+        if (!showFcmSupportedOnly && !excludeMiPushApps) {
+            return;
+        }
+        // Empty only means "the filter hid them" when the package list itself was
         // readable. On HyperOS the very first launch scans while the app-list
         // permission is still unanswered, the query returns almost nothing, and
         // saying "no supported apps" then would blame the device for a question
@@ -1288,7 +1369,11 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         if (!isAppListReadable()) {
             return;
         }
-        Toast.makeText(this, R.string.no_fcm_apps_found, Toast.LENGTH_SHORT).show();
+        // The FCM wording stays for the case that existed before; the excluded
+        // one names the filters, since either can be what emptied the list.
+        Toast.makeText(this, showFcmSupportedOnly
+                ? R.string.no_fcm_apps_found : R.string.no_apps_found,
+                Toast.LENGTH_SHORT).show();
     }
 
     private void openFcmDiagnostics() {
@@ -1322,9 +1407,22 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         return c != 0 ? c : a.packageName.compareTo(b.packageName);
     }
 
+    /**
+     * An app the user cannot remove: preinstalled on the system image.
+     *
+     * <p>{@code FLAG_SYSTEM} alone is the whole test. An updated system app is
+     * still a system app — updating it only replaces its APK under /data, and
+     * it stays uninstallable; "uninstall updates" only takes it back to the
+     * factory version. So {@code FLAG_UPDATED_SYSTEM_APP} is deliberately not
+     * excluded here. Excluding it used to hide the contradiction, until the
+     * Play Store family made it visible: Google Play services and Google Play
+     * Store are preinstalled and update themselves, so they carried the flag
+     * and showed up with system apps hidden — while the preinstalled apps the
+     * user never touched stayed hidden. Treating "was updated" as "became a
+     * user app" inverts what people expect this toggle to mean.
+     */
     private boolean isSystemApp(ApplicationInfo ai) {
-        return (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0
-                && (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0;
+        return (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
     }
 
     /**
@@ -1358,10 +1456,16 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
      * hand-written entry with a custom action, or an old GCM build that only
      * declares the class. The class-name pass therefore only runs for packages
      * the action pass did not already mark.
+     *
+     * <p>The same pass also answers the MiPush question for every package, in
+     * the same loop: the answer is a single component lookup, and walking the
+     * installed set a second time to ask it would double the binder calls of
+     * the most expensive thing this screen does.
      */
-    private static Set<String> queryFcmPackages(PackageManager pm,
-                                                Collection<String> candidates) {
-        Set<String> packages = new HashSet<>();
+    private static PushSupport scanPushSupport(PackageManager pm,
+                                               Collection<String> candidates) {
+        PushSupport support = new PushSupport();
+        Set<String> packages = support.fcm;
         try {
             List<android.content.pm.ResolveInfo> services = pm.queryIntentServices(
                     new Intent(Hooker.ACTION_MESSAGING_EVENT),
@@ -1396,15 +1500,61 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         }
         if (candidates != null) {
             for (String pkg : candidates) {
-                if (pkg == null || packages.contains(pkg)) {
+                if (pkg == null) {
                     continue;
                 }
-                if (declaresFcmComponent(pm, pkg)) {
+                if (!packages.contains(pkg) && declaresFcmComponent(pm, pkg)) {
                     packages.add(pkg);
+                }
+                if (declaresMiPushService(pm, pkg)) {
+                    support.miPush.add(pkg);
                 }
             }
         }
-        return packages;
+        return support;
+    }
+
+    /**
+     * Whether {@code pkg} ships MiPush: it declares the SDK's push service.
+     *
+     * <p>MiPush is a system-channel push, so an app that has it does not need
+     * this module to keep a second (FCM) route alive — the list tags those apps
+     * and the overflow menu can leave them out. The class name is the one the
+     * MiPush SDK merges into every host Manifest, and, as with
+     * {@link #declaresFcmComponent}, a direct component lookup is the only way
+     * to see it: the service carries no intent-filter, so no device-wide query
+     * can find it.
+     *
+     * <p>The lookup has to ask for disabled components, because on MIUI /
+     * HyperOS a disabled {@code XMPushService} means the opposite of what it
+     * looks like. (Both disabled states are asked for: whichever one the system
+     * used to stop the service, the answer we want is the same — it is there.) MiPush is not an SDK that keeps its own connection: the app
+     * calls register once, the system takes the delivery over, and once it has,
+     * the app's own service is stopped and disabled — the system keeps one
+     * shared connection for every app instead of one each. So the disabled
+     * state is the sign that MiPush is <em>live</em> for that app, and the
+     * enabled state only means it has not registered yet. A lookup without
+     * {@link PackageManager#MATCH_DISABLED_COMPONENTS} therefore finds exactly
+     * the apps that are not using MiPush — never-opened ones — and misses the
+     * registered ones, which is backwards.
+     */
+    private static boolean declaresMiPushService(PackageManager pm, String pkg) {
+        try {
+            return pm.getServiceInfo(new ComponentName(pkg, MIPUSH_SERVICE_CLASS),
+                    PackageManager.MATCH_DISABLED_COMPONENTS
+                            | PackageManager.MATCH_DISABLED_UNTIL_USED_COMPONENTS) != null;
+        } catch (Throwable ignored) {
+            // Not declared (or not visible to us): no MiPush.
+            return false;
+        }
+    }
+
+    /** One package scan: which packages carry which push route. */
+    private static final class PushSupport {
+        /** FCM-capable: any of the four Firebase markers. */
+        final Set<String> fcm = new HashSet<>();
+        /** Declares {@link #MIPUSH_SERVICE_CLASS}. */
+        final Set<String> miPush = new HashSet<>();
     }
 
     /**
@@ -1479,6 +1629,12 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         if (prefs == null) {
             // Keep local cache if remote is not ready yet.
             return;
+        }
+        // Same repair as the allowlist below, for the strict-mode flag: a toggle
+        // made before the service bound lives only in the mirror, and adopting
+        // the older remote value here would silently revert it.
+        if (Prefs.hasPendingStrictPush(this)) {
+            Prefs.writeStrictMode(this, prefs, strictMode);
         }
         if (Prefs.hasPendingPush(this)) {
             // A check made before the service bound is newer than the remote set:
@@ -1565,7 +1721,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                         scannedPackages.add(pi.packageName);
                     }
                 }
-                final Set<String> fcmPackages = queryFcmPackages(pm, scannedPackages);
+                final PushSupport support = scanPushSupport(pm, scannedPackages);
                 // A newer scan started while this one was querying; its answer
                 // is already on the way, so abandon the rest of the work.
                 if (!isLatestScan(generation)) {
@@ -1582,7 +1738,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                     }
                     AppListAdapter.AppEntry entry = new AppListAdapter.AppEntry(
                             ai.packageName, ai.loadLabel(pm).toString());
-                    entry.supportFcm = fcmPackages.contains(ai.packageName);
+                    entry.supportFcm = support.fcm.contains(ai.packageName);
+                    entry.supportMiPush = support.miPush.contains(ai.packageName);
                     result.add(entry);
                 }
                 for (AppListAdapter.AppEntry app : result) {
@@ -1677,6 +1834,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             AppListAdapter.AppEntry y = b.get(i);
             if (!x.packageName.equals(y.packageName) || x.checked != y.checked
                     || x.supportFcm != y.supportFcm
+                    || x.supportMiPush != y.supportMiPush
                     || !x.label.equals(y.label)) {
                 return false;
             }

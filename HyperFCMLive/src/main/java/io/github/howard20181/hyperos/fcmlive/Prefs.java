@@ -35,6 +35,22 @@ public final class Prefs {
     private static final String KEY_PENDING_PUSH = "allowlist_pending_push";
     /** UI-only: overflow menu "Show FCM-supported apps". */
     public static final String KEY_SHOW_FCM_ONLY = "show_fcm_supported_only";
+    /**
+     * UI-only: overflow menu "Exclude MiPush apps". Kept next to
+     * {@link #KEY_SHOW_FCM_ONLY} because it is the same kind of setting — a
+     * question about what the list offers, not about what the hooks do, so it
+     * stays out of {@link #GROUP_CONFIG} and needs no broadcast.
+     */
+    public static final String KEY_EXCLUDE_MIPUSH = "exclude_mipush_apps";
+    /**
+     * Remote + local: overflow menu "Strict mode". Unlike
+     * {@link #KEY_SHOW_FCM_ONLY} this one decides what the hooks do, so it sits
+     * in {@link #GROUP_CONFIG} next to the allowlist and is re-read by the same
+     * broadcast; the local mirror only carries the answer before libxposed binds.
+     */
+    public static final String KEY_STRICT_MODE = "strict_mode";
+    /** UI-only: set while the mirror holds a strict-mode change the module never saw. */
+    private static final String KEY_STRICT_PENDING_PUSH = "strict_mode_pending_push";
     /** Action the app broadcasts after writing, to refresh system_server. */
     public static final String ACTION_ALLOWLIST_CHANGED = MODULE_PKG + ".ALLOWLIST_CHANGED";
 
@@ -96,6 +112,48 @@ public final class Prefs {
         localPrefs(context).edit().putBoolean(KEY_PENDING_PUSH, false).apply();
     }
 
+    /** Strict mode as the UI last left it; the mirror is what the settings screen shows. */
+    public static boolean readLocalStrictMode(Context context) {
+        return localPrefs(context).getBoolean(KEY_STRICT_MODE, false);
+    }
+
+    /** Strict-mode counterpart of {@link #hasPendingPush}. */
+    public static boolean hasPendingStrictPush(Context context) {
+        return localPrefs(context).getBoolean(KEY_STRICT_PENDING_PUSH, false);
+    }
+
+    /**
+     * Write strict mode and make it live.
+     *
+     * <p>Same shape as {@link #writeAllowlist}: the remote boolean is what the
+     * hooks read, and {@link #broadcastAllowlistChanged} is what makes them
+     * re-read it — they load the whole {@link #GROUP_CONFIG} group in one go, so
+     * one broadcast refreshes the allowlist and this flag together. When the
+     * module service is not bound yet the change stays in the mirror and is
+     * flagged, so the next bind pushes it up instead of dropping it.
+     */
+    public static void writeStrictMode(Context context, SharedPreferences remotePrefs,
+                                       boolean enabled) {
+        final Context app = appContext(context);
+        localPrefs(app).edit().putBoolean(KEY_STRICT_MODE, enabled).apply();
+        if (remotePrefs == null) {
+            localPrefs(app).edit().putBoolean(KEY_STRICT_PENDING_PUSH, true).apply();
+            broadcastAllowlistChanged(app);
+            return;
+        }
+        localPrefs(app).edit().putBoolean(KEY_STRICT_PENDING_PUSH, false).apply();
+        WRITER.execute(() -> {
+            try {
+                remotePrefs.edit().putBoolean(KEY_STRICT_MODE, enabled).commit();
+            } catch (Throwable t) {
+                // As with the allowlist: a failed write must not pass for a live
+                // change, so the next bind pushes the mirror up again.
+                localPrefs(app).edit().putBoolean(KEY_STRICT_PENDING_PUSH, true).apply();
+            }
+            broadcastAllowlistChanged(app);
+        });
+    }
+
     private static SharedPreferences localPrefs(Context context) {
         return context.getSharedPreferences(LOCAL_PREFS, Context.MODE_PRIVATE);
     }
@@ -154,10 +212,14 @@ public final class Prefs {
     }
 
     /**
-     * Ask system_server to re-read the allowlist. Sent three times over ~1.5s
-     * because the receiver there is installed by a retry loop shortly after boot
-     * ({@code Hooker.installAllowlistReceiverAsync}): a change made in that window
-     * would otherwise be dropped and appear to need a refresh.
+     * Ask system_server to re-read the shared config group. Sent three times
+     * over ~1.5s because the receiver there is installed by a retry loop shortly
+     * after boot ({@code Hooker.installAllowlistReceiverAsync}): a change made
+     * in that window would otherwise be dropped and appear to need a refresh.
+     *
+     * <p>Despite the name it is not allowlist-only: the receiver reloads
+     * {@link #GROUP_CONFIG} wholesale, so this also carries a strict-mode change
+     * (see {@link #writeStrictMode}) — which is why the two share one action.
      */
     public static void broadcastAllowlistChanged(Context context) {
         Context app = appContext(context);

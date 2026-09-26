@@ -62,6 +62,17 @@ public class StatusActivity extends Activity {
     private final ExecutorService probeExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
+    /**
+     * Every other screen does this and this one did not, which is why switching
+     * the in-app language repainted the rest of the app and left this page —
+     * top bar included — on the device language. Same rewrite also carries the
+     * light/dark override, so a forced dark screen used to come out light here.
+     */
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        super.attachBaseContext(ThemeSupport.attach(newBase));
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -78,6 +89,11 @@ public class StatusActivity extends Activity {
         if (content == null) {
             return;
         }
+        // Three sections in the same shape: a heading, then what belongs to it.
+        // "Push connection" used to be the title *inside* the first card, which
+        // made it read as one card's label rather than as the section sitting
+        // level with "Hook targets" below it.
+        content.addView(sectionLabel(getString(R.string.status_network_title), false));
         content.addView(networkCard());
         content.addView(hookSection());
         content.addView(sectionLabel(getString(R.string.status_diag_title), true));
@@ -99,20 +115,30 @@ public class StatusActivity extends Activity {
     }
 
     /**
-     * Current network, because it decides the GMS heartbeat interval — the thing
-     * most often behind "push stopped while the screen was off".
+     * Current network and strict mode, because together they decide most of
+     * "push stopped while the screen was off": the network sets how long GMS
+     * waits between heartbeats, and strict mode decides whether the app is
+     * being woken at all.
      */
     private View networkCard() {
         LinearLayout card = card();
-        card.addView(cardTitle(getString(R.string.status_network_title)));
         card.addView(keyValue(R.string.status_gms, describeGms()));
         card.addView(keyValue(R.string.status_network_active, describeNetwork()));
-        // Wi-Fi is the good case and needs no advice; only the case that costs
-        // the user push reliability earns a line.
-        if (isOnCellular()) {
-            card.addView(cardBody(getString(R.string.status_network_cell_hint)));
-        }
+        card.addView(keyValue(R.string.status_strict_mode, describeStrictMode()));
         return card;
+    }
+
+    /**
+     * Strict mode as the module will apply it: the value the settings screen
+     * wrote, which is the same one system_server reads back from the shared
+     * prefs. Worth a row next to the network because "this app gets no push"
+     * is answered by this switch about as often as by the connection — with it
+     * on, an app left unchecked is meant to be left alone.
+     */
+    private String describeStrictMode() {
+        return getString(Prefs.readLocalStrictMode(this)
+                ? R.string.status_yes
+                : R.string.status_no);
     }
 
     /** GMS is the thing being kept alive; if it is not installed, nothing below matters. */
@@ -132,7 +158,9 @@ public class StatusActivity extends Activity {
         wrapper.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        wrapper.addView(sectionLabel(getString(R.string.status_hooks_title), false));
+        // No longer the first section on the page: it follows the network card,
+        // so it takes the extra margin like Diagnostics does.
+        wrapper.addView(sectionLabel(getString(R.string.status_hooks_title), true));
 
         hookSummary = new TextView(this);
         hookSummary.setText(getString(R.string.status_probing));
@@ -247,6 +275,12 @@ public class StatusActivity extends Activity {
         state.setText(stateText(item));
         state.setTextSize(12f);
         state.setTextColor(stateColor(item));
+        // The state words are several times longer in English than in Chinese,
+        // and the names they sit next to are monospaced identifiers that are
+        // long to begin with. Capping this column keeps a long state wrapping
+        // inside its own space instead of squeezing the name out of the row.
+        state.setMaxWidth(screenWidth() * 45 / 100);
+        state.setGravity(Gravity.END);
         row.addView(state);
         return row;
     }
@@ -366,27 +400,8 @@ public class StatusActivity extends Activity {
         return card;
     }
 
-    private TextView cardTitle(String text) {
-        TextView tv = new TextView(this);
-        tv.setText(text);
-        tv.setTextSize(16f);
-        tv.setTypeface(Typeface.create("sans-medium", Typeface.NORMAL));
-        tv.setTextColor(getColor(R.color.md_on_surface));
-        tv.setPadding(0, 0, 0, dp(10));
-        return tv;
-    }
-
-    private TextView cardBody(String text) {
-        TextView tv = new TextView(this);
-        tv.setText(text);
-        tv.setTextSize(12f);
-        tv.setTextColor(getColor(R.color.md_on_surface_variant));
-        tv.setPadding(0, dp(8), 0, 0);
-        return tv;
-    }
-
     /**
-     * A section heading, so the two sections below the cards read as sections
+     * A section heading, so the three parts below the top bar read as sections
      * rather than as more cards. The first one keeps the top margin; anything
      * that follows gets extra space above it so it is not read as a continuation
      * of the list it sits under.
@@ -435,9 +450,16 @@ public class StatusActivity extends Activity {
         val.setTextSize(14f);
         val.setTextColor(getColor(R.color.md_on_surface));
         val.setTypeface(Typeface.create("sans-medium", Typeface.NORMAL));
+        // Both halves share the row. A wrap_content value would claim the whole
+        // width first — an English label ("Google Play services") next to a long
+        // value (a full GMS version string) then leaves nothing for the label —
+        // so the two split the row evenly and each wraps instead.
+        LinearLayout.LayoutParams valLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        val.setGravity(Gravity.END);
 
         row.addView(key, keyLp);
-        row.addView(val);
+        row.addView(val, valLp);
         return row;
     }
 
@@ -450,25 +472,6 @@ public class StatusActivity extends Activity {
         lp.setMarginEnd(dp(16));
         v.setLayoutParams(lp);
         return v;
-    }
-
-    private boolean isOnCellular() {
-        try {
-            ConnectivityManager cm = getSystemService(ConnectivityManager.class);
-            if (cm == null) {
-                return false;
-            }
-            Network network = cm.getActiveNetwork();
-            if (network == null) {
-                return false;
-            }
-            NetworkCapabilities caps = cm.getNetworkCapabilities(network);
-            return caps != null
-                    && caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-                    && !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
-        } catch (Throwable t) {
-            return false;
-        }
     }
 
     private String describeNetwork() {
@@ -499,5 +502,9 @@ public class StatusActivity extends Activity {
 
     private int dp(int value) {
         return UiUtils.dp(this, value);
+    }
+
+    private int screenWidth() {
+        return getResources().getDisplayMetrics().widthPixels;
     }
 }

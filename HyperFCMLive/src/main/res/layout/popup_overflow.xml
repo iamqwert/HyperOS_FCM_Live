@@ -77,6 +77,68 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/menu_exclude_mipush"
+        android:layout_width="wrap_content"
+        android:layout_height="46dp"
+        android:background="@drawable/bg_popup_item_bg"
+        android:clickable="true"
+        android:clipToOutline="true"
+        android:focusable="true"
+        android:foreground="@drawable/bg_popup_item_ripple"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp">
+
+        <TextView
+            android:id="@+id/menu_exclude_mipush_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/exclude_mipush_apps"
+            android:textColor="@color/md_on_surface"
+            android:textSize="15sp" />
+
+        <ImageView
+            android:id="@+id/menu_exclude_mipush_check"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_marginStart="12dp"
+            android:contentDescription="@null"
+            android:src="@drawable/md3_check_off" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/menu_strict_mode"
+        android:layout_width="wrap_content"
+        android:layout_height="46dp"
+        android:background="@drawable/bg_popup_item_bg"
+        android:clickable="true"
+        android:clipToOutline="true"
+        android:focusable="true"
+        android:foreground="@drawable/bg_popup_item_ripple"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp">
+
+        <TextView
+            android:id="@+id/menu_strict_mode_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/strict_mode"
+            android:textColor="@color/md_on_surface"
+            android:textSize="15sp" />
+
+        <ImageView
+            android:id="@+id/menu_strict_mode_check"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_marginStart="12dp"
+            android:contentDescription="@null"
+            android:src="@drawable/md3_check_off" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/menu_status"
         android:layout_width="match_parent"
         android:layout_height="46dp"

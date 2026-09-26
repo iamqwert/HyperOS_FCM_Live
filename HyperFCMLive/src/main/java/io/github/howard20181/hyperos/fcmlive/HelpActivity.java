@@ -13,7 +13,8 @@ import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport;
  * <p>It is static text on purpose: everything it claims is behaviour that lives
  * in {@code Hooker} — the allowlist semantics (an empty list lets every app
  * through, a non-empty one only the listed apps), what a wake actually does to
- * the target app, and the rules around enabling the module and rebooting.
+ * the target app, what strict mode does to an app left unchecked
+ * ({@code Hooker#shouldApply}), and the rules around enabling the module.
  * Keep this text in sync when those hooks change.
  */
 public class HelpActivity extends Activity {

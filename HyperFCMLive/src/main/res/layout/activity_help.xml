@@ -167,6 +167,61 @@
                 android:paddingTop="28dp"
                 android:paddingEnd="8dp"
                 android:paddingBottom="12dp"
+                android:text="@string/help_section_strict"
+                android:textColor="@color/md_primary"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-medium"
+                    android:text="@string/help_strict_on_title"
+                    android:textColor="@color/md_on_surface"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:lineSpacingExtra="4dp"
+                    android:text="@string/help_strict_on_body"
+                    android:textColor="@color/md_on_surface_variant"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:fontFamily="sans-medium"
+                    android:text="@string/help_strict_unchanged_title"
+                    android:textColor="@color/md_on_surface"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:lineSpacingExtra="4dp"
+                    android:text="@string/help_strict_unchanged_body"
+                    android:textColor="@color/md_on_surface_variant"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-medium"
+                android:paddingStart="8dp"
+                android:paddingTop="28dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="12dp"
                 android:text="@string/help_section_faq"
                 android:textColor="@color/md_primary"
                 android:textSize="14sp" />

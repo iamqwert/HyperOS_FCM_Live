@@ -1,11 +1,19 @@
 # Changelog
+## 2.3.0
+
+-  精简「帮助页」文案
+- 新增「严格模式」，只要勾选了至少一个应用，模块就**只对勾选的应用生效**
+- 完善「模块状态」页下的英文界面翻译
+- 删除更多选项多余的振动反馈
+- 新增「排除 MiPush 应用」选项
+- 修正「显示系统应用」的判定
 
 ## 2.1.0
 
 - 修复连续下拉刷新时，较早发起但较慢完成的扫描会用旧结果覆盖新列表的问题
 - 新增「模块状态」页
-- 加载「电量和性能」代码时缺少 `CONTEXT_INCLUDE_CODE`
-- 补全 4 个此前遗漏的 hook 目标（`GreezeManagerService#isAllowBroadcast`、`GreezeManagerService#getPackageNameFromUid`、`ActivityManagerService#broadcastIntent*`、`ActivityManagerService#getRecordForApp*`）
+- 加载「电量和性能」代码时缺少 CONTEXT_INCLUDE_CODE
+- 补全 4 个此前遗漏的 hook 目标（GreezeManagerService#isAllowBroadcast、GreezeManagerService#getPackageNameFromUid、ActivityManagerService#broadcastIntent*、ActivityManagerService#getRecordForApp*）
 - 模块注入后新增一行汇总日志，便于判断模块是否生效
 - 回调并完善对FCM应用的判断
 
