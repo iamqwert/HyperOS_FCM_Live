@@ -43,3 +43,6 @@ docs/*报告*
 docs/internal/
 docs/private/
 docs/sensitive/
+
+# Windows folder customization
+desktop.ini
