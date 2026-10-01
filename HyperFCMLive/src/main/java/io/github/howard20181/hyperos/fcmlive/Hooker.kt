@@ -27,6 +27,7 @@ import io.github.libxposed.api.XposedModuleInterface
 import java.lang.reflect.Executable
 import java.lang.reflect.Field
 import java.lang.reflect.Method
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -1192,10 +1193,13 @@ class Hooker : XposedModule() {
         deoptimize(applyMethod)
         log(Log.INFO, TAG, "Sleep-mode network whitelist hooked: GMS will stay online overnight")
 
-        // Belt and braces: if GMS did lose its connection overnight (older ROM
+        // Belt and braces: if GMS lost its connection overnight (older ROM
         // without the whitelist hook above, or the rule never reached netd),
         // the socket is stale by the time the chain comes down. Nudge GMS to
         // drop it and reconnect instead of waiting for the next heartbeat.
+        // Gated by sGmsKeptOnSleepWhitelist: when the whitelist kept GMS online
+        // all night, the nudge would only tear down a healthy MCS, so it is
+        // skipped and a log line records the decision instead.
         val chainMethod = try {
             serviceClass.getDeclaredMethod(
                 "enableSleepModeChain", Boolean::class.javaPrimitiveType
@@ -1221,19 +1225,38 @@ class Hooker : XposedModule() {
             }
             chain.proceed()
             if (!enabling) {
-                log(Log.INFO, TAG, "Sleep mode exited: network restored, nudging GMS to reconnect")
-                val context = getSystemContext()
-                if (context != null) {
-                    // Sample before the nudge: those broadcasts make GMS drop its
-                    // current MCS connection, so the pre-nudge state is what tells
-                    // us whether the nudge broke a connection that was still alive.
-                    probeGmsTraffic("before sleep-exit nudge")
-                    Thread { recoverGmsConnection(context) }.start()
-                    probeBackgroundHandler().postDelayed(
-                        { probeGmsTraffic("after sleep-exit nudge") },
-                        GMS_TRAFFIC_NUDGE_RESAMPLE_MS
+                if (sGmsKeptOnSleepWhitelist) {
+                    // GMS was on the sleep whitelist, so it stayed online and its
+                    // MCS connection is healthy. The recovery broadcasts make GMS
+                    // drop its current MCS — sending them here would tear down the
+                    // very connection the whitelist protected all night.
+                    log(
+                        Log.INFO, TAG,
+                        "Sleep mode exited: GMS was kept on the whitelist, " +
+                            "skipping recovery nudge (MCS untouched)"
                     )
+                } else {
+                    log(
+                        Log.INFO, TAG,
+                        "Sleep mode exited: GMS not whitelisted (network was cut), " +
+                            "nudging GMS to reconnect"
+                    )
+                    val context = getSystemContext()
+                    if (context != null) {
+                        // Sample before the nudge: those broadcasts make GMS drop its
+                        // current MCS connection, so the pre-nudge state is what tells
+                        // us whether the nudge broke a connection that was still alive.
+                        probeGmsTraffic("before sleep-exit nudge")
+                        Thread { recoverGmsConnection(context) }.start()
+                        probeBackgroundHandler().postDelayed(
+                            { probeGmsTraffic("after sleep-exit nudge") },
+                            GMS_TRAFFIC_NUDGE_RESAMPLE_MS
+                        )
+                    }
                 }
+                // Next session starts from a clean slate: the flag must reflect
+                // what happens in *that* session, not a stale previous one.
+                sGmsKeptOnSleepWhitelist = false
             }
         }
         deoptimize(chainMethod)
@@ -1247,6 +1270,7 @@ class Hooker : XposedModule() {
     private fun addGmsToSleepModeWhitelist(whitelistField: Field, owner: Any) {
         val raw = whitelistField.get(owner)
         if (raw !is MutableCollection<*>) {
+            sGmsKeptOnSleepWhitelist = false
             log(
                 Log.WARN, TAG,
                 "Sleep mode entering: whitelist field is ${raw?.javaClass?.name ?: "null"}, " +
@@ -1258,6 +1282,7 @@ class Hooker : XposedModule() {
         val whitelist = raw as MutableCollection<Any?>
         val uid = gmsUid()
         if (uid == null) {
+            sGmsKeptOnSleepWhitelist = false
             log(
                 Log.WARN, TAG,
                 "Sleep mode entering: GMS uid unresolved, GMS not added"
@@ -1265,6 +1290,7 @@ class Hooker : XposedModule() {
             return
         }
         if (whitelist.add(uid)) {
+            sGmsKeptOnSleepWhitelist = true
             log(
                 Log.INFO, TAG,
                 "Sleep mode entering: kept GMS (uid $uid) on the network whitelist"
@@ -1272,6 +1298,7 @@ class Hooker : XposedModule() {
         } else {
             // Already present: either the ROM populated the set itself (which the
             // static analysis says it never does) or a previous pass left it there.
+            sGmsKeptOnSleepWhitelist = true
             log(
                 Log.INFO, TAG,
                 "Sleep mode entering: GMS (uid $uid) already whitelisted, size ${whitelist.size}"
@@ -1373,14 +1400,33 @@ class Hooker : XposedModule() {
                         @Suppress("UNCHECKED_CAST")
                         val cmdArgs = args[3] as Array<Any?>
                         if ("setuiddnsrule" == cmd && cmdArgs.size >= 2) {
-                            val rewritten = cmdArgs.copyOf()
-                            rewritten[1] = "allow"
-                            args[3] = rewritten
-                            return@intercept chain.proceed(args)
+                            // Gate by uid, never rewrite blind. On this ROM the
+                            // only PowerKeeper caller is the GMS-only wrapper
+                            // setGmsDnsBlockerState(IZ), so the gate is pure
+                            // future-proofing: a ROM generation that adds
+                            // callers for other uids passes through untouched
+                            // instead of having its rule silently flipped to
+                            // "allow". Unparseable uid also passes through —
+                            // never rewrite what cannot be proven to be GMS.
+                            val uid = cmdArgs[0]?.toString()?.toIntOrNull() ?: -1
+                            if (isGmsUid(uid)) {
+                                val rewritten = cmdArgs.copyOf()
+                                rewritten[1] = "allow"
+                                args[3] = rewritten
+                                return@intercept chain.proceed(args)
+                            }
+                            return@intercept chain.proceed()
                         }
                         if ("enablemiuistandby" == cmd && cmdArgs.isNotEmpty() &&
                             "enable" == cmdArgs[0].toString()
                         ) {
+                            val skipped = ++standbyFirewallSkipCount
+                            if (skipped == 1 || skipped % 10 == 0) {
+                                log(
+                                    Log.INFO, TAG,
+                                    "standby-firewall: suppressed 'enablemiuistandby enable' #$skipped"
+                                )
+                            }
                             return@intercept skipValue
                         }
                     }
@@ -1454,7 +1500,16 @@ class Hooker : XposedModule() {
                     chain.proceed(args)
                 }
                 deoptimize(bridgeMethod)
+                // Install confirmation on purpose: "c" is an obfuscated name
+                // that drifts across ROM generations, and a silent failure here
+                // would look identical to the hook working. This line is the
+                // drift alarm — its absence after a ROM update is a finding.
+                log(
+                    Log.INFO, TAG,
+                    "GmsObserver#c (obfuscated connected-bridge) hooked, forced connected=true"
+                )
             } catch (ignored: NoSuchMethodException) {
+                logSkip("GmsObserver#c (obfuscated connected-bridge) absent, skip")
             }
         } catch (e: ClassNotFoundException) {
             log(Log.ERROR, TAG, "Failed to hook GmsObserver", e)
@@ -2109,10 +2164,35 @@ class Hooker : XposedModule() {
         try {
             val prefs = getRemotePreferences(Prefs.GROUP_CONFIG)
             val set = prefs.getStringSet(Prefs.KEY_ALLOWLIST, emptySet())
-            sAllowlist = if (set != null) HashSet(set) else HashSet()
-            sStrictMode = prefs.getBoolean(Prefs.KEY_STRICT_MODE, false)
+            val loaded = if (set != null) HashSet(set) else HashSet()
+            val strict = prefs.getBoolean(Prefs.KEY_STRICT_MODE, false)
+            if (loaded != sAllowlist || strict != sStrictMode) {
+                // Log on content change, not on every read: the stale-path reload
+                // would otherwise repeat an identical line every ALLOWLIST_STALE_MS.
+                log(
+                    Log.INFO, TAG,
+                    "allowlist loaded: ${loaded.size} pkg(s), strict=$strict"
+                )
+            }
+            sAllowlist = loaded
+            sStrictMode = strict
+            sAllowlistFreshMs = SystemClock.uptimeMillis()
+            sAllowlistFailureStreak = 0
         } catch (e: Exception) {
             log(Log.ERROR, TAG, "Failed to read remote allowlist", e)
+            // A failed read must not push the next lazy retry a full
+            // ALLOWLIST_STALE_MS into the future ("failure delays retry").
+            // Backdate the freshness stamp so getFcmAllowlist() retries after an
+            // exponentially growing backoff (1s, 2s, 4s ... capped at
+            // ALLOWLIST_STALE_MS). sAllowlistReadMs keeps the real attempt time,
+            // so requestAllowlistReload() still throttles repeated reads.
+            val streak = ++sAllowlistFailureStreak
+            val backoffMs = minOf(
+                ALLOWLIST_FAILURE_BACKOFF_BASE_MS shl (streak - 1).coerceAtMost(4),
+                ALLOWLIST_STALE_MS
+            )
+            sAllowlistFreshMs =
+                SystemClock.uptimeMillis() - ALLOWLIST_STALE_MS + backoffMs
         }
         sAllowlistReadMs = SystemClock.uptimeMillis()
     }
@@ -2129,6 +2209,14 @@ class Hooker : XposedModule() {
 
     @Volatile
     private var sAllowlistReadMs = 0L
+
+    /** Last SUCCESSFUL allowlist read; drives the lazy stale check in [getFcmAllowlist]. */
+    @Volatile
+    private var sAllowlistFreshMs = 0L
+
+    /** Consecutive failed allowlist reads; grows the retry backoff, reset on success. */
+    @Volatile
+    private var sAllowlistFailureStreak = 0
 
     @Volatile
     private var allowlistHandler: Handler? = null
@@ -2190,7 +2278,7 @@ class Hooker : XposedModule() {
     private fun getFcmAllowlist(): Set<String> {
         registerAllowlistReceiver()
         if (!allowlistReceiverRegistered &&
-            SystemClock.uptimeMillis() - sAllowlistReadMs >= ALLOWLIST_STALE_MS
+            SystemClock.uptimeMillis() - sAllowlistFreshMs >= ALLOWLIST_STALE_MS
         ) {
             requestAllowlistReload()
         }
@@ -2597,18 +2685,55 @@ class Hooker : XposedModule() {
      *     measured hit rate of zero for GMS on this ROM.
      */
     private fun startGmsTrafficProbe() {
+        // Claim the latest chain generation before scheduling: on every hot
+        // reload hookPackage re-runs and a fresh module classloader brings a
+        // fresh companion, so a plain field cannot be seen by chains scheduled
+        // by earlier instances. The counter therefore lives in
+        // System.getProperties() — a boot-classloader object that is shared
+        // across module reloads within the same host process. A stale chain
+        // detects the mismatch in run() and retires instead of stacking yet
+        // another parallel 30-min chain (observed overnight: three chains
+        // interleaving after two reloads).
+        val generation = claimTrafficProbeGeneration()
         probeBackgroundHandler().post { probeGmsTraffic("startup") }
         probeBackgroundHandler().postDelayed(object : Runnable {
             override fun run() {
+                if (latestTrafficProbeGeneration() != generation) {
+                    log(
+                        Log.INFO, TAG,
+                        "gms traffic probe: chain generation $generation superseded, " +
+                            "retire without rescheduling"
+                    )
+                    return
+                }
                 probeGmsTraffic("periodic")
                 probeBackgroundHandler().postDelayed(this, GMS_TRAFFIC_PROBE_INTERVAL_MS)
             }
         }, GMS_TRAFFIC_PROBE_INTERVAL_MS)
         log(
             Log.INFO, TAG,
-            "gms traffic probe: scheduled every ${GMS_TRAFFIC_PROBE_INTERVAL_MS / 60_000} min (read-only)"
+            "gms traffic probe: scheduled every ${GMS_TRAFFIC_PROBE_INTERVAL_MS / 60_000} min " +
+                "(read-only, generation $generation)"
         )
     }
+
+    /**
+     * Claims a new traffic-probe chain generation, monotonically increasing
+     * per host process. Java-level [System] properties only — nothing here
+     * touches android.os.SystemProperties or crosses SELinux.
+     */
+    private fun claimTrafficProbeGeneration(): Long {
+        val props = System.getProperties()
+        return synchronized(props) {
+            val next = (props.getProperty(TRAFFIC_PROBE_GENERATION_KEY)?.toLongOrNull() ?: 0L) + 1
+            props.setProperty(TRAFFIC_PROBE_GENERATION_KEY, next.toString())
+            next
+        }
+    }
+
+    /** Reads the latest claimed chain generation; superseded chains see a mismatch. */
+    private fun latestTrafficProbeGeneration(): Long =
+        System.getProperties().getProperty(TRAFFIC_PROBE_GENERATION_KEY)?.toLongOrNull() ?: 0L
 
     private fun probeGmsTraffic(reason: String) {
         val uid = gmsUid()
@@ -2715,11 +2840,31 @@ class Hooker : XposedModule() {
                 val reached = ++wakePathReachedCount
                 if (java.lang.Boolean.FALSE == result) {
                     val denied = ++wakePathDeniedCount
+                    val caller = readCallerPkg(chain, callerPkgField)
                     if (denied <= 10) {
                         log(
                             Log.INFO, TAG,
                             "wake-path probe: checkWakePath DENIED #$denied " +
-                                "(callerPkg=${readCallerPkg(chain, callerPkgField)})"
+                                "(callerPkg=$caller)"
+                        )
+                    }
+                    // Aggregate per caller so an overnight window stays attributable
+                    // after the first 10 detailed lines. Bounded: once 32 distinct
+                    // callers are seen, new ones are not recorded.
+                    val prev = wakePathDeniedByCaller[caller]
+                    if (prev != null || wakePathDeniedByCaller.size < 32) {
+                        wakePathDeniedByCaller[caller] = (prev ?: 0) + 1
+                    }
+                    // The heartbeat lives on the ALLOWED branch; a window where every
+                    // entry is denied would never print the aggregation. Time-throttle
+                    // a dedicated denied summary instead.
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - wakePathDeniedSummaryAt >= WAKE_PATH_HEARTBEAT_MIN_MS) {
+                        wakePathDeniedSummaryAt = now
+                        log(
+                            Log.INFO, TAG,
+                            "wake-path probe: denied summary denied=$wakePathDeniedCount " +
+                                "top=${wakePathTopCallers()}"
                         )
                     }
                 } else {
@@ -2735,6 +2880,7 @@ class Hooker : XposedModule() {
                             Log.INFO, TAG,
                             "wake-path probe: heartbeat reached=$reached " +
                                 "denied=$wakePathDeniedCount gap=$gap " +
+                                "top=${wakePathTopCallers()} " +
                                 "(callerPkg=${readCallerPkg(chain, callerPkgField)})"
                         )
                     }
@@ -2757,6 +2903,13 @@ class Hooker : XposedModule() {
             "?"
         }
     }
+
+    /** Gate-W: top denied callers, "pkg:count" pairs, for overnight attribution. */
+    private fun wakePathTopCallers(): String =
+        wakePathDeniedByCaller.entries
+            .sortedByDescending { it.value }
+            .take(3)
+            .joinToString(",", prefix = "[", postfix = "]") { "${it.key}:${it.value}" }
 
     private fun skipValueFor(returnType: Class<*>): Any? {
         if (returnType == Void.TYPE || !returnType.isPrimitive) {
@@ -2797,6 +2950,16 @@ class Hooker : XposedModule() {
     @Volatile
     private var wakePathDeniedCount = 0
 
+    /** Gate-W: denial counts per waking caller, keyed by callerPkg ("?" if unknown). */
+    private val wakePathDeniedByCaller = ConcurrentHashMap<String, Int>()
+
+    /** Gate-W: elapsedRealtime of the last time-throttled denied-summary line. */
+    @Volatile
+    private var wakePathDeniedSummaryAt = 0L
+
+    /** Count of suppressed `enablemiuistandby enable` commands (standby firewall chain). */
+    private var standbyFirewallSkipCount = 0
+
     /** Gate-W: how many times `checkWakePath` was entered at all. */
     @Volatile
     private var wakePathReachedCount = 0
@@ -2824,6 +2987,19 @@ class Hooker : XposedModule() {
     /** Guards userTable write-back against re-entry via hooked config writers. */
     @Volatile
     private var userTableReassertInFlight = false
+
+    /**
+     * True when GMS was successfully added to the sleep-mode network whitelist
+     * during the current sleep session.
+     *
+     * When set, sleep exit skips the P4 recovery nudge: GMS stayed online all
+     * night, so its MCS connection is healthy by construction and the recovery
+     * broadcasts would only tear it down. Stays false when the whitelist path
+     * failed (old ROM fallback / uid unresolved / rules never ran), which is
+     * exactly the case the nudge was written for.
+     */
+    @Volatile
+    private var sGmsKeptOnSleepWhitelist = false
 
     /**
      * `InternationalPolicyManager#isPushApp` — kept as is, and deliberately
@@ -3001,6 +3177,9 @@ class Hooker : XposedModule() {
         private const val GMS_TRAFFIC_PROBE_INTERVAL_MS = 30 * 60_000L
         private const val GMS_TRAFFIC_NUDGE_RESAMPLE_MS = 15_000L
 
+        /** java.util.System property key holding the latest probe chain generation. */
+        private const val TRAFFIC_PROBE_GENERATION_KEY = "hyperfcmlive.trafficProbe.generation"
+
         /**
          * Gate-W heartbeat floor. The gate is reached thousands of times a night,
          * and a fixed every-Nth log buries everything else in modules_*.log.
@@ -3044,6 +3223,7 @@ class Hooker : XposedModule() {
         private const val CHIMERA_PROVIDER_URI = "content://com.google.android.gms.chimera"
 
         private const val ALLOWLIST_STALE_MS = 10_000L
+        private const val ALLOWLIST_FAILURE_BACKOFF_BASE_MS = 1_000L
         private const val ALLOWLIST_RELOAD_MIN_MS = 500L
         private const val ALLOWLIST_REGISTER_RETRY_MS = 1_000L
         private const val ALLOWLIST_REGISTER_MAX_ATTEMPTS = 120
