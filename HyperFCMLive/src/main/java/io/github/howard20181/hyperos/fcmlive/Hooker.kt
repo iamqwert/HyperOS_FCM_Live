@@ -494,6 +494,11 @@ class Hooker : XposedModule() {
             } catch (t: Throwable) {
                 log(Log.ERROR, TAG, "Failed to hook ScenarioCompiler", t)
             }
+            try {
+                hookWechatBatteryShield(classLoader)
+            } catch (t: Throwable) {
+                log(Log.ERROR, TAG, "Failed to hook WeChat battery shield", t)
+            }
         }
     }
 
@@ -1319,6 +1324,97 @@ class Hooker : XposedModule() {
         }
     }
 
+    /**
+     * Experiment (default off): stop PowerKeeper from silently rewriting
+     * WeChat's battery policy to "no restrict".
+     *
+     * ROM forensics (OS4 V816, PowerSaveConfigureManager): the AIDL getter
+     * `getPowerSaveAppConfigure` embeds a promotion write — when the package
+     * answers `PowerManager.isIgnoringBatteryOptimizations == true` and its
+     * userTable.bgControl is still "miuiAuto", the getter composes a Bundle
+     * with AppConfigure="no_restrict" and calls `setPowerSaveAppConfigure`
+     * from inside itself. Combined with the cloud-tended doze whitelist
+     * (cloud feature "doze_whitelist_apps" → GlobalFeatureConfigureHelper →
+     * DeviceIdlePolicyHelper; WeChat observed on-device in the user section
+     * of `dumpsys deviceidle whitelist`), this is the loop that keeps
+     * reverting WeChat to 无限制 after the user picks a stricter policy.
+     *
+     * The hook passes every call through except the exact promotion write
+     * for WeChat. Manual writes from the settings UI have no getter frame in
+     * the call stack and still work — including a manual "no restrict"; the
+     * switch only stops the *automatic* rewrite. The stack check runs after
+     * the cheap gates (switch off → pass, other package → pass, other value
+     * → pass), so its cost is bounded by how rarely those match.
+     */
+    private fun hookWechatBatteryShield(classLoader: ClassLoader) {
+        val managerClass = classLoader.loadClass(
+            "com.miui.powerkeeper.provider.PowerSaveConfigureManager"
+        )
+        val setMethod = try {
+            managerClass.getDeclaredMethod("setPowerSaveAppConfigure", Bundle::class.java)
+        } catch (e: NoSuchMethodException) {
+            logSkip("PowerSaveConfigureManager#setPowerSaveAppConfigure absent, wechat-shield skip")
+            return
+        }
+        val skipValue = skipValueFor(setMethod.returnType)
+        hookE(setMethod).intercept { chain: XposedInterface.Chain ->
+            val bundle = chain.getArg(0) as? Bundle
+            if (bundle == null || !isWechatShieldEnabled()) {
+                return@intercept chain.proceed()
+            }
+            if (WECHAT_PACKAGE_NAME != bundle.getString("App")) {
+                return@intercept chain.proceed()
+            }
+            if ("no_restrict" != bundle.getString("AppConfigure")) {
+                return@intercept chain.proceed()
+            }
+            var fromGetter = false
+            for (frame in Thread.currentThread().stackTrace) {
+                if (frame.className == WECHAT_SHIELD_OWNER_CLASS &&
+                    "getPowerSaveAppConfigure" == frame.methodName
+                ) {
+                    fromGetter = true
+                    break
+                }
+            }
+            if (!fromGetter) {
+                return@intercept chain.proceed()
+            }
+            val blocked = ++wechatShieldBlockCount
+            if (blocked == 1L || blocked % 10L == 0L) {
+                log(
+                    Log.INFO, TAG,
+                    "wechat-shield: blocked auto no_restrict promotion #$blocked"
+                )
+            }
+            skipValue
+        }
+        deoptimize(setMethod)
+        log(
+            Log.INFO, TAG,
+            "PowerSaveConfigureManager#setPowerSaveAppConfigure hooked (wechat-shield, default off)"
+        )
+    }
+
+    /**
+     * The shield flag lives in the shared config group, but unlike the
+     * system_server hooks there is no broadcast receiver in the PowerKeeper
+     * process — read it lazily at each qualifying call instead. The reads
+     * only happen after the package/value gates match, so the frequency is
+     * that of WeChat promotion attempts, not of battery-policy traffic.
+     */
+    private fun isWechatShieldEnabled(): Boolean {
+        return try {
+            getRemotePreferences(Prefs.GROUP_CONFIG)
+                .getBoolean(Prefs.KEY_WECHAT_SHIELD, false)
+        } catch (ignored: Throwable) {
+            // Fail open: an unreadable switch must not start rewriting
+            // system behavior — the feature is opt-in, a failed read keeps
+            // it off.
+            false
+        }
+    }
+
     private fun hookForceFalse(owner: Class<*>, name: String) {
         try {
             val method = owner.getDeclaredMethod(name, Boolean::class.javaPrimitiveType)
@@ -1628,6 +1724,20 @@ class Hooker : XposedModule() {
         }
     }
 
+    /**
+     * doze-wl-sentinel observability. The hook itself only preserves the
+     * status quo (GMS is already in the doze whitelist on this device), so
+     * without these two signals the hook would be unverifiable: "reached"
+     * proves the hook is alive on every boot (PowerKeeperAppConfigure
+     * assembly always calls through), the inject counter proves the
+     * injection path works when the cloud ever drops GMS.
+     */
+    @Volatile
+    private var sDozeSentinelReachedLogged = false
+
+    @Volatile
+    private var sDozeSentinelInjectCount = 0
+
     private fun hookGlobalFeatureConfigureHelper(classLoader: ClassLoader) {
         try {
             val GlobalFeatureConfigureHelperClass = classLoader.loadClass(
@@ -1642,12 +1752,33 @@ class Hooker : XposedModule() {
                     hookE(getDozeWhiteListAppsMethod).intercept { chain: XposedInterface.Chain ->
                         val result = chain.proceed()
                         try {
-                            if (result is List<*> && !result.contains(GMS_PACKAGE_NAME)) {
-                                val source = result
-                                val whiteList = ArrayList<Any?>(source)
-                                whiteList.add(GMS_PACKAGE_NAME)
-                                addIfAbsentInPlace(source, GMS_PACKAGE_NAME)
-                                return@intercept whiteList
+                            if (result is List<*>) {
+                                val hasGms = result.contains(GMS_PACKAGE_NAME)
+                                if (!sDozeSentinelReachedLogged) {
+                                    sDozeSentinelReachedLogged = true
+                                    log(
+                                        Log.INFO, TAG,
+                                        "doze-wl-sentinel: reached (arg=${argType.simpleName}), " +
+                                            "size=${result.size}, hasGms=$hasGms"
+                                    )
+                                }
+                                if (!hasGms) {
+                                    sDozeSentinelInjectCount++
+                                    if (sDozeSentinelInjectCount == 1 ||
+                                        sDozeSentinelInjectCount % 10 == 0
+                                    ) {
+                                        log(
+                                            Log.INFO, TAG,
+                                            "doze-wl-sentinel: GMS missing from doze whitelist, " +
+                                                "injected #$sDozeSentinelInjectCount (size ${result.size})"
+                                        )
+                                    }
+                                    val source = result
+                                    val whiteList = ArrayList<Any?>(source)
+                                    whiteList.add(GMS_PACKAGE_NAME)
+                                    addIfAbsentInPlace(source, GMS_PACKAGE_NAME)
+                                    return@intercept whiteList
+                                }
                             }
                         } catch (t: Throwable) {
                             log(Log.ERROR, TAG, "Failed to extend doze white list", t)
@@ -2159,6 +2290,10 @@ class Hooker : XposedModule() {
     @Volatile
     private var sStrictMode = false
 
+    /** Blocked auto-promotions since this classloader loaded (wechat-shield). */
+    @Volatile
+    private var wechatShieldBlockCount = 0L
+
 
     private fun loadAllowlistFromRemotePrefs() {
         try {
@@ -2515,6 +2650,9 @@ class Hooker : XposedModule() {
                                         targetPackage,
                                         102,
                                         "GOOGLE_C2DM",
+                                        // 2s: verified sufficient end-to-end
+                                        // (528-561ms cold start; diagnostics show
+                                        // LoginRequest->Connected 0.4-1.4s).
                                         2000
                                     )
                                 }
@@ -3173,6 +3311,9 @@ class Hooker : XposedModule() {
             "com.google.firebase.iid.FirebaseInstanceIdReceiver"
         private const val GMS_PACKAGE_NAME = "com.google.android.gms"
         private const val GMS_PERSISTENT_PROCESS_NAME = "com.google.android.gms.persistent"
+        private const val WECHAT_PACKAGE_NAME = "com.tencent.mm"
+        private const val WECHAT_SHIELD_OWNER_CLASS =
+            "com.miui.powerkeeper.provider.PowerSaveConfigureManager"
 
         private const val GMS_TRAFFIC_PROBE_INTERVAL_MS = 30 * 60_000L
         private const val GMS_TRAFFIC_NUDGE_RESAMPLE_MS = 15_000L

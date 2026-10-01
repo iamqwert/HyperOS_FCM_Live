@@ -50,6 +50,15 @@ object Prefs {
     const val KEY_STRICT_MODE = "strict_mode"
     /** UI-only: set while the mirror holds a strict-mode change the module never saw. */
     private const val KEY_STRICT_PENDING_PUSH = "strict_mode_pending_push"
+    /**
+     * Remote + local: "WeChat battery shield" experiment. Same shape as
+     * [KEY_STRICT_MODE] — it decides what the hooks do, so it rides in
+     * [GROUP_CONFIG] and is re-read by the same broadcast. Default off: the
+     * hook must not touch anyone's WeChat unless it is asked to.
+     */
+    const val KEY_WECHAT_SHIELD = "wechat_battery_shield"
+    /** UI-only: set while the mirror holds a shield change the module never saw. */
+    private const val KEY_WECHAT_SHIELD_PENDING_PUSH = "wechat_battery_shield_pending_push"
     /** Action the app broadcasts after writing, to refresh system_server. */
     const val ACTION_ALLOWLIST_CHANGED = MODULE_PKG + ".ALLOWLIST_CHANGED"
 
@@ -123,6 +132,51 @@ object Prefs {
     @JvmStatic
     fun hasPendingStrictPush(context: Context): Boolean {
         return localPrefs(context).getBoolean(KEY_STRICT_PENDING_PUSH, false)
+    }
+
+    /** WeChat-shield value as the UI last left it; the mirror is what the experiment screen shows. */
+    @JvmStatic
+    fun readLocalWechatShield(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_WECHAT_SHIELD, false)
+    }
+
+    /** WeChat-shield counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingWechatShieldPush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_WECHAT_SHIELD_PENDING_PUSH, false)
+    }
+
+    /**
+     * Write the WeChat-shield flag and make it live.
+     *
+     * Same shape as [writeStrictMode]: the remote boolean is what the hook in
+     * the PowerKeeper process reads, and [broadcastAllowlistChanged] is what
+     * makes it re-read. The hook reads the remote value lazily at each
+     * qualifying call, so no process restart is needed. When [remotePrefs] is
+     * null the change stays in the mirror and is flagged for the next bind.
+     */
+    @JvmStatic
+    fun writeWechatShield(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean
+    ) {
+        val app = appContext(context)
+        localPrefs(app).edit().putBoolean(KEY_WECHAT_SHIELD, enabled).apply()
+        if (remotePrefs == null) {
+            localPrefs(app).edit().putBoolean(KEY_WECHAT_SHIELD_PENDING_PUSH, true).apply()
+            broadcastAllowlistChanged(app)
+            return
+        }
+        localPrefs(app).edit().putBoolean(KEY_WECHAT_SHIELD_PENDING_PUSH, false).apply()
+        WRITER.execute {
+            try {
+                remotePrefs.edit().putBoolean(KEY_WECHAT_SHIELD, enabled).commit()
+            } catch (t: Throwable) {
+                localPrefs(app).edit().putBoolean(KEY_WECHAT_SHIELD_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+        }
     }
 
     /**

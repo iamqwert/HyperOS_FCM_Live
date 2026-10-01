@@ -52,11 +52,15 @@ jobs:
         # 单独的 Debug 变体（未混淆、体积更大）没有分发价值。
         run: |
           export GRADLE_OPTS="-Xmx4g"
-          if [ -z "${{ secrets.SIGNING_KEY }}" ]; then
+          # 判据是「keystore 是否真的写下来了」而不是「secret 是否为空」：
+          # pull_request 事件下 Write key 被跳过（条件限 main），若此处只看
+          # secret，PR 构建会走正式签名分支却在无 keystore 的 runner 上被
+          # 签名守卫拒绝。按文件存在性分流对一切事件类型都成立。
+          if [ -f key.jks ] && grep -q "^storeFile=" local.properties; then
+            ./gradlew --no-daemon :HyperFCMLive:assembleRelease
+          else
             echo "::warning::未配置 SIGNING_KEY，本次产物使用 debug 签名，仅适合内部测试"
             ./gradlew --no-daemon -PallowDebugSignedRelease :HyperFCMLive:assembleRelease
-          else
-            ./gradlew --no-daemon :HyperFCMLive:assembleRelease
           fi
 
       - name: Upload release artifact

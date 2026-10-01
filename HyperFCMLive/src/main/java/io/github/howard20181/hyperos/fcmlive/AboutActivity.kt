@@ -140,6 +140,9 @@ class AboutActivity : AppCompatActivity() {
         bindRow(R.id.row_export_allowlist, this::exportAllowlist)
         bindRow(R.id.row_import_allowlist, this::importAllowlist)
         bindRow(R.id.row_check_update, this::checkForUpdates)
+        bindRow(R.id.row_experiment) {
+            startActivity(Intent(this, ExperimentActivity::class.java))
+        }
         bindCurrentVersion()
 
         hideIconState = findViewById(R.id.about_hide_icon_state)

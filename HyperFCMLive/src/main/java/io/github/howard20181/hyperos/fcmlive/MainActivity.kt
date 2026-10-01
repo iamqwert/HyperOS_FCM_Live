@@ -1385,6 +1385,11 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
         if (Prefs.hasPendingStrictPush(this)) {
             Prefs.writeStrictMode(this, prefs, strictMode)
         }
+        if (Prefs.hasPendingWechatShieldPush(this)) {
+            // Same repair for the WeChat-shield flag: a toggle made before the
+            // service bound lives only in the local mirror.
+            Prefs.writeWechatShield(this, prefs, Prefs.readLocalWechatShield(this))
+        }
         if (Prefs.hasPendingPush(this)) {
             // A check made before the service bound is newer than the remote set:
             // push it up (the write broadcasts, so system_server re-reads too)
