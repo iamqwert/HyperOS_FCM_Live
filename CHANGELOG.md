@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.5.1
+
+🚀 推送修复
+
+- 修复原先退出睡眠模式后会向 GMS 发重连广播，导致当前的 MCS 长连接被拆（在 FCM 诊断里留下 Close 记录），与保连接的初衷相反的问题。现仅当 GMS 未被成功留在睡眠白名单、退出时确有断网风险时才触发
+- `setuiddnsrule` 的 DNS 规则改写增加 uid 门控：仅当目标是 GMS 时才改写为「allow」，其他应用的规则原样透传
+
+🔍 诊断
+
+- 热重载后旧一代探针自动退役（`superseded, retire`），不再多代并行采样
+- allowlist 读取拆分「新鲜度 / 成功读取」两个时间戳，并对持续失败加指数退避（1s×2ⁿ 封顶 10s），远端读取失败时不再高频重试
+- doze 白名单钩补充可验证性日志：每次开机装配必打一条 `reached`（证明钩子存活），云控将 GMS 移出 doze 白名单时会出现 `injected` 计数（首条 + 每 10 条）
+- 睡眠防火墙跳过计数（首条 + 每 10 条）、wake-path 拒绝按调用方聚合汇总（30 分钟节流）、`GmsObserver#c` 安装确认日志
+
+🧪 实验
+
+- 设置页新增「实验与调试」分组，分组新增「禁止系统恢复微信省电策略」选项
+
 ## 3.5.0
 
 🔍 诊断
@@ -112,7 +130,7 @@
 
 ## 2.3.0
 
--  精简「帮助页」文案
+- 精简「帮助页」文案
 - 新增「严格模式」，只要勾选了至少一个应用，模块就**只对勾选的应用生效**
 - 完善「模块状态」页下的英文界面翻译
 - 删除更多选项多余的振动反馈
@@ -124,7 +142,7 @@
 - 修复连续下拉刷新时，较早发起但较慢完成的扫描会用旧结果覆盖新列表的问题
 - 新增「模块状态」页
 - 加载「电量和性能」代码时缺少 CONTEXT_INCLUDE_CODE
-- 补全 4 个此前遗漏的 hook 目标（GreezeManagerService#isAllowBroadcast、GreezeManagerService#getPackageNameFromUid、ActivityManagerService#broadcastIntent*、ActivityManagerService#getRecordForApp*）
+- 补全 4 个此前遗漏的 hook 目标（GreezeManagerService#isAllowBroadcast、GreezeManagerService#getPackageNameFromUid、ActivityManagerService#broadcastInten&#x74;*、ActivityManagerService#getRecordForApp*）
 - 模块注入后新增一行汇总日志，便于判断模块是否生效
 - 回调并完善对FCM应用的判断
 
@@ -153,8 +171,8 @@
 
 - 新增关于页，完善开放源代码许可清单
 - 启动时自动检查更新（每 24 小时一次，亦可手动检查）
-- 尝试兼容 HyperOS 3「电量和性能」Hook 策略，参考 [zuohl/HyperOS_FCM_Live](https://github.com/zuohl/HyperOS_FCM_Live)
-- 完善应用列表权限获取，参考 [250king/HyperOS_FCM_Live#1](https://github.com/250king/HyperOS_FCM_Live/pull/1)
+- 尝试兼容 HyperOS 3「电量和性能」Hook 策略，参考 [zuohl/HyperOS\_FCM\_Live](https://github.com/zuohl/HyperOS_FCM_Live)
+- 完善应用列表权限获取，参考 [250king/HyperOS\_FCM\_Live#1](https://github.com/250king/HyperOS_FCM_Live/pull/1)
 - 优化更多选项菜单配色
 - 桌面图标更名为「FCM 唤醒名单」
 - 未找到支持 FCM 的应用时显示 Toast
@@ -166,10 +184,10 @@
 - 更多选项新增「展示支持应用」（参考 FCMPushViewer 的 Receiver 检测）；首次启动默认开启，用户更改后持久化
 - 长按图标 Tooltip 自定义定位，避免遮挡控件
 - 修复多选点击时整屏涟漪异常
-- 接入 HyperOS `GET_INSTALLED_APPS` 运行时权限申请（思路参考 [250king/HyperOS_FCM_Live#1](https://github.com/250king/HyperOS_FCM_Live/pull/1)），避免应用列表被过滤得不全
+- 接入 HyperOS `GET_INSTALLED_APPS` 运行时权限申请（思路参考 [250king/HyperOS\_FCM\_Live#1](https://github.com/250king/HyperOS_FCM_Live/pull/1)），避免应用列表被过滤得不全
 
 ## 1.5.1 (versionCode 15)
 
-###紧急修复，建议更新至本版本
--修复'1.5.0.14'无法隐藏桌面图标的问题
+###紧急修复，建议更新至本版本  
+-修复'1.5.0.14'无法隐藏桌面图标的问题  
 -界面深浅取色跟随系统

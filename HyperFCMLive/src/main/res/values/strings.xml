@@ -32,6 +32,8 @@
     <string name="about_section_display">显示</string>
     <string name="about_section_theme">主题</string>
     <string name="about_section_backup">备份与恢复</string>
+    <string name="about_section_experiment">实验与调试</string>
+    <string name="about_sub_experiment">实验性开关与调试入口，默认不启用</string>
     <string name="about_section_privacy">隐私与权限</string>
     <string name="about_section_project">关于</string>
     <string name="privacy_perm_query_all">读取应用列表</string>
@@ -122,6 +124,13 @@
     <!-- 帮助内容已迁出应用：唯一来源是仓库根目录的 HELP.md（在线文档）。
          帮助图标与「帮助」快捷方式都用浏览器打开 AboutActivity.HELP_URL。
          动了 Hooker 的行为时同步改 HELP.md，不要在这里补回帮助文案。 -->
+
+    <!-- 实验功能页：危险开关集中在此，主界面只留入口 -->
+    <string name="experiment">实验功能</string>
+    <string name="experiment_section_battery">电池</string>
+    <string name="experiment_wechat_shield">禁止系统恢复微信省电策略</string>
+    <string name="experiment_wechat_shield_on">已拦截自动改写为无限制</string>
+    <string name="experiment_wechat_shield_desc">启用后，微信的省电策略将由你指定，需自行前往手机管家「省电策略」及 AOSP「电池优化」调整选项，系统将无法恢复微信默认的省电策略；除非你清楚自己在做什么，否则请保持禁用</string>
 
     <!-- 模块状态页 -->
     <string name="status_yes">是</string>
