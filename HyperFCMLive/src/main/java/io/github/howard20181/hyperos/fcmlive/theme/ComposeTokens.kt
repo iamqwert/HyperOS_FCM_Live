@@ -1,3 +1,23 @@
+/*
+ * UI red lines for this module — each one cost a rebuild to discover.
+ *
+ * - This file is the single definition of the app's type / shape / motion
+ *   scale. Add or change a scale here, never at a call site.
+ * - Compose: `.clip(shape)` must come **before** `.clickable`, or the ripple
+ *   spills outside the shape.
+ * - A FAB needs an explicit FAB_CLEARANCE (88.dp) above the list; the
+ *   scaffold does not reserve it.
+ * - material3 is pinned to 1.5.0-alpha27, which does not accept
+ *   `menuAnchorPosition`: right-aligned dropdowns are done with
+ *   `matchParentSize().wrapContentSize(BottomEnd)` instead.
+ * - Icons: official Material Symbols/SVG only
+ *   (`curl cdn.jsdelivr.net/npm/@material-design-icons/svg@latest/filled/<name>.svg`).
+ *   Hand-drawn or approximate icons are not acceptable, and neither is
+ *   substituting a look-alike glyph.
+ * - Shared screen furniture lives in ui/ScreenParts.kt; cards are
+ *   `Surface(color = surfaceContainerLowest, shape = AppShapes.card)`.
+ */
+
 package io.github.howard20181.hyperos.fcmlive.theme
 
 import androidx.compose.foundation.shape.CornerBasedShape

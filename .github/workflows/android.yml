@@ -1,3 +1,20 @@
+# 发版流程（2026-10-03 实测）：main 是保护分支，直接 `git push origin main` 会被拒
+# （GH006 … Required status check "build" is expected），必须走「分支 → PR → 等 check → 合并 → dispatch」：
+#   ① 本地 commit → `git branch release/<ver>` → `push -u`
+#   ② 开 PR：本机无 gh，用
+#      printf "protocol=https\nhost=github.com\n\n" | git credential fill | sed -n 's/^password=//p'
+#      取 token，再 curl GitHub API（POST /repos/<o>/<r>/pulls）
+#   ③ 轮询 GET /repos/<o>/<r>/commits/<sha>/check-runs，等 name == "build" 的 conclusion == success
+#   ④ PUT /repos/<o>/<r>/pulls/<n>/merge  {"merge_method":"merge"}
+#   ⑤ POST /repos/<o>/<r>/actions/workflows/android.yml/dispatches
+#      {"ref":"main","inputs":{"publish_release":true}}
+# 沙箱会吞 env：每个联网命令都要包 ( unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; … )。
+# origin 指向 fork（iamqwert），不是上游；推送后用 `git rev-parse origin/main` 核对。
+# 未经用户点头不提交、不推送。
+#
+# tag / release name 由 APK 文件名推出（见 release job，tag = v<versionName.versionCode>）；
+# 发行说明 = CHANGELOG.md 的 `## <versionName>` 小节 + .github/release-notes.md
+# ⇒ 改 CHANGELOG 就等于改发行说明。无 SIGNING_KEY secret 时自动 -PallowDebugSignedRelease（warning 级）。
 name: Android CI
 
 on:

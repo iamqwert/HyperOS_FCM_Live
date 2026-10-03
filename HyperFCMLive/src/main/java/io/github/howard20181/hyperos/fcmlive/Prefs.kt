@@ -22,6 +22,27 @@ import java.util.concurrent.Executors
  *
  * A local private-prefs mirror is kept so the settings UI can sort allowlisted
  * apps to the top immediately on launch, before libxposed finishes binding.
+ *
+ * ## Master / sub switch rule (read before adding any new pair)
+ *
+ * A sub switch is rendered inside `AnimatedVisibility(visible = <master>)`, so
+ * it is **invisible but not inert** when the master is off — the pref keeps its
+ * last value and a hook that reads only the sub key would still act. Any new
+ * master/sub pair therefore has to be checked in three places, not one:
+ *
+ *  1. every hook read site **ANDs the master flag** (including secondary gates
+ *     shared by both branches) — see `isSleepKeepaliveDataEnabled()` /
+ *     `isSleepKeepaliveChargingOnlyEnabled()` in Hooker.kt;
+ *  2. the UI keeps the sub switch inside the *same* `AnimatedVisibility` as the
+ *     master;
+ *  3. the key is added to `MainActivity.reloadAllowlist`'s pending-repair set,
+ *     so a value the module never saw gets pushed again.
+ *
+ * The current pair is `sleep_keepalive` ⊃ `…_data` / `…_charging_only`. The
+ * WeChat pair was removed with the shield (see HOOKS_AND_DIAGNOSTICS.md §4.8).
+ *
+ * Rare paths need an explicit "applied / handed back to the ROM" log line:
+ * **never infer that a hook worked from the absence of a log line.**
  */
 object Prefs {
     const val MODULE_PKG = "io.github.howard20181.hyperos.fcmlive"
@@ -51,17 +72,6 @@ object Prefs {
     /** UI-only: set while the mirror holds a strict-mode change the module never saw. */
     private const val KEY_STRICT_PENDING_PUSH = "strict_mode_pending_push"
     /**
-     * Remote + local: "WeChat battery shield" experiment — the sub-switch of
-     * [KEY_WECHAT_DOZE_KEEPOUT], which is the master of the pair. Same shape as
-     * [KEY_STRICT_MODE]: it decides what the hooks do, so it rides in
-     * [GROUP_CONFIG] and is re-read by the same broadcast. Default off: the
-     * hook must not touch anyone's WeChat unless it is asked to.
-     */
-    const val KEY_WECHAT_SHIELD = "wechat_battery_shield"
-    /** UI-only: set while the mirror holds a shield change the module never saw. */
-    private const val KEY_WECHAT_SHIELD_PENDING_PUSH = "wechat_battery_shield_pending_push"
-
-    /**
      * Remote + local: "keep WiFi up during sleep" experiment — the master
      * switch.
      *
@@ -77,7 +87,7 @@ object Prefs {
      * that actually costs power. A night with no WiFi gets nothing out of
      * this switch — that is what the sub-switch is for.
      *
-     * Default **off**, like [KEY_WECHAT_SHIELD] and every other experiment:
+     * Default **off**, like every other experiment:
      * keeping a radio up all night defeats the power saving the user turned
      * sleep mode on for, and the effect is device-wide rather than scoped to
      * the apps the module watches. It is opt-in on the experiment screen,
@@ -139,9 +149,6 @@ object Prefs {
      * written back until the switch is turned off), and the whitelist already
      * holds WeChat today — the hook prevents the next write, it does not
      * clear the stored one.
-     *
-     * Master switch of the WeChat pair: [KEY_WECHAT_SHIELD] is its sub-switch
-     * and only arms while this is on, both on screen and in the hook.
      */
     const val KEY_WECHAT_DOZE_KEEPOUT = "wechat_doze_keepout"
     /** UI-only: set while the mirror holds a keepout change the module never saw. */
@@ -221,51 +228,6 @@ object Prefs {
         return localPrefs(context).getBoolean(KEY_STRICT_PENDING_PUSH, false)
     }
 
-    /** WeChat-shield value as the UI last left it; the mirror is what the experiment screen shows. */
-    @JvmStatic
-    fun readLocalWechatShield(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_WECHAT_SHIELD, false)
-    }
-
-    /** WeChat-shield counterpart of [hasPendingPush]. */
-    @JvmStatic
-    fun hasPendingWechatShieldPush(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_WECHAT_SHIELD_PENDING_PUSH, false)
-    }
-
-    /**
-     * Write the WeChat-shield flag and make it live.
-     *
-     * Same shape as [writeStrictMode]: the remote boolean is what the hook in
-     * the PowerKeeper process reads, and [broadcastAllowlistChanged] is what
-     * makes it re-read. The hook reads the remote value lazily at each
-     * qualifying call, so no process restart is needed. When [remotePrefs] is
-     * null the change stays in the mirror and is flagged for the next bind.
-     */
-    @JvmStatic
-    fun writeWechatShield(
-        context: Context,
-        remotePrefs: SharedPreferences?,
-        enabled: Boolean
-    ) {
-        val app = appContext(context)
-        localPrefs(app).edit().putBoolean(KEY_WECHAT_SHIELD, enabled).apply()
-        if (remotePrefs == null) {
-            localPrefs(app).edit().putBoolean(KEY_WECHAT_SHIELD_PENDING_PUSH, true).apply()
-            broadcastAllowlistChanged(app)
-            return
-        }
-        localPrefs(app).edit().putBoolean(KEY_WECHAT_SHIELD_PENDING_PUSH, false).apply()
-        WRITER.execute {
-            try {
-                remotePrefs.edit().putBoolean(KEY_WECHAT_SHIELD, enabled).commit()
-            } catch (t: Throwable) {
-                localPrefs(app).edit().putBoolean(KEY_WECHAT_SHIELD_PENDING_PUSH, true).apply()
-            }
-            broadcastAllowlistChanged(app)
-        }
-    }
-
     /** Sleep-keepalive value as the UI last left it; the mirror is what the experiment screen shows. */
     @JvmStatic
     fun readLocalSleepKeepalive(context: Context): Boolean {
@@ -281,7 +243,7 @@ object Prefs {
     /**
      * Write the sleep-keepalive flag and make it live.
      *
-     * Same shape as [writeWechatShield]. The hook lives in the PowerKeeper
+     * Same shape as [writeStrictMode]. The hook lives in the PowerKeeper
      * process and reads the remote value lazily at each qualifying call, so
      * flipping this takes effect on the next sleep entry without a reboot.
      */
@@ -414,7 +376,7 @@ object Prefs {
     /**
      * Write the WeChat-doze-keepout flag and make it live.
      *
-     * Same shape as [writeWechatShield]. The hook lives in the PowerKeeper
+     * Same shape as [writeStrictMode]. The hook lives in the PowerKeeper
      * process and reads the remote value lazily at each qualifying call, so
      * flipping this takes effect on the next whitelist write without a reboot.
      */

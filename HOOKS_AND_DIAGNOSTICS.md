@@ -403,6 +403,87 @@ sleep-mode sentinel: legacy path FIRED — #enableSleepModeChain ran on this ROM
 
 ---
 
+### 4.8 「电量与性能」省电策略的自动升格（ROM 原生，2026-10-03 取证）
+
+这一节与模块无关，记录的是 PowerKeeper 自己的行为：一个应用在省电策略里被设成「智能限制」（`miuiAuto`）后，**会不会自己跳到「无限制」（`noRestrict`）**。素材 `D:/Dev/pk/dis.txt`（= `PowerKeeper.apk` 的 classes.dex dump，与 §4.5 同源）。
+
+**结论：会跳，但只在「这个 userId+pkg 第一次被读取」时发生一次。**之后永久保持当前值，用户手动改的选择不会被覆盖，除非这个组合退出 visited 集合。
+
+#### 存储与默认值
+
+`userTable` 建表 SQL 明写默认值，且安装应用时 `PowerKeeperConfigureManager$5.onPackageAdded` 会立即 [`2675d8`] 以 `bgControl="miuiAuto"` 建行（经 `UserConfigure.CONTENT_URI` insert）：
+
+```sql
+CREATE TABLE IF NOT EXISTS userTable (
+  _id INTEGER PRIMARY KEY AUTOINCREMENT, userId INTEGER NOT NULL DEFAULT 0,
+  pkgName TEXT NOT NULL, lastConfigured INTEGER,
+  bgControl TEXT NOT NULL DEFAULT 'miuiAuto', bgLocation TEXT,
+  UNIQUE (userId, pkgName) ON CONFLICT REPLACE );
+```
+
+四档取值与对外名由 `getInterfaceConfigureValue` [`26dca8`] / `getUserConfigureValue` [`26dd18`] 成对映射：`miuiAuto↔miui_auto`、`noRestrict↔no_restrict`、`restrictBg↔restrict_bg`、`noBg↔no_bg`。**所以 ROM 侧「智能限制」确实就是 `miuiAuto`**，并且是所有已安装应用的出厂默认值。
+
+#### 唯一的自写点
+
+`setPowerSaveAppConfigure` 全 ROM 仅 2 个调用点：`200080`（Binder 外部入口 `PowerKeeperManager`）与 `26da36`——后者位于 **`getPowerSaveAppConfigure` 内部** [`26d8ac`]，即"读"的时候偷偷写。 polarity 三次反闸门串起来才是条件：
+
+```
+0090  sHasVisited.contains(<userId><pkg>)   → 0096 if-nez  ⇒ 已访问过 ⇒ 跳 00c2，不升级
+009a  getBgControl().equals("miuiAuto")     → 009e if-eqz  ⇒ 不是 miuiAuto ⇒ 跳 00c2
+00aa  PowerManager.isIgnoringBatteryOptimizations(pkg)
+                                            → 00ae if-eqz  ⇒ 未免电池优化 ⇒ 跳 00c2
+00ba  bundle.putString("AppConfigure", "no_restrict")
+00bd  setPowerSaveAppConfigure(bundle)      ← 写入 userTable，升级到无限制
+00c2  sHasVisited.add(<userId><pkg>) → storeList()   ← 无论是否升级，读一次即打标
+```
+
+三个条件全部成立才会改写：**① 未 visited ∧ ② 当前是 `miuiAuto` ∧ ③ 该包处于电池优化豁免名单（deviceidle 白名单）**。
+
+#### visited 的持久化与唯一的重置路径
+
+`sHasVisited` 不是内存缓存：`<clinit>` [`26dd88`] 从 `SimpleSettings$Misc.getStringForUser(ctx, "s_has_visited", …)` 用 Gson 反序列化读入（日志 `init from database => …`），`storeList()` [`26de4c`] 再 JSON 存回（日志 `dump to database -> …`）。⇒ **跨进程重启、跨 reboot 都保留。**
+
+唯一把条目移出集合的地方是 `PowerKeeperConfigureManager$5.onPackageRemoved` [`2676ba` → `2676dc` remove → `storeList`]。也就是说：**卸载并重装该应用，会让这次自动升级重新获得一次机会**（升级写下的 `no_restrict` 会在重装后被再次安排上）。
+
+#### 谁会触发这次读取（未闭环）
+
+整套符号在 `miui-services.jar`(2 dex) / `services.jar`(4 dex) / `miui-framework.jar` 的 dex 字符串池里**零命中** `getPowerSaveAppConfigure`；`PowerKeeper.apk` 内部除 AIDL 桩（`IPowerKeeper$Proxy` `1fdd38`）与 `PowerKeeperManager` 转发外也无调用者。⇒ **调用方不在系统层，是上层 App（设置 / 手机管家的省电详情页之类）**。手上无这两个 APK，未做闭环；待设备上 `logcat -s PowerSaveConfigureManager` 抓一次实际调用以确认触发时机。
+
+#### 判定表
+
+| 场景 | 是否自动升到「无限制」 | 依据 |
+| --- | --- | --- |
+| 新装应用，从未被任何客户端读过配置 | **会**，在第一次被读的瞬间 | 三个条件齐备（默认值 `miuiAuto` + 若在白名单） |
+| 已读过一次（无论那次是否真的升级） | 不会，`00c2` 处直接跳过 | visited 已持久化，无法再用"没跳"反推条件不成立 |
+| 用户在 UI 手动改回「智能限制」后 | 不会自动改回 | 手动改走 Binder 的 `set`，**不 touch `sHasVisited`** [`26daac`] |
+| 卸载微信后重装 | **会**，`onPackageRemoved` 摘掉标记出 recharge | `2676ba` |
+| **应用内版本更新**（覆盖安装） | **不会**，不摘标记 | 见下 |
+| 应用不在电池优化豁免名单 | 永远不跳 | 条件 ③ 是硬门槛 |
+
+#### 版本更新不摘标记（2026-10-03 补）
+
+链路：`PowerKeeperPackageManager$MyPackageMonitor extends com.android.internal.content.PackageMonitor`，覆写 `onPackageAdded` [`2e201c`]→合成桥 `d` [`2e2548`]→`addPackage`、`onPackageRemoved` [`2e206c`]→合成桥 `g` [`2e2578`]→`removePackage`、`onPackageRemovedAllUsers` [`2e2088`]→`j`+`g`、`onPackageUpdateFinished` [`2e20b0`]→`d`→`addPackage`。**未覆写 `onPackageUpdateStarted`**，而 `onPackageUpdateFinished` 被覆写成 addPackage ⇒ 基类在 `EXTRA_REPLACING=true` 时走的是 update 分支（否则覆写 finished 无意义），即覆盖安装不落到 `onPackageRemoved`。
+
+`addPackage` 内部 [`2e2870`~`2e28e8`] 也有一处 `notifyPackageRemoved`，但条件是**该 uid 下 uid 值发生变化**（`00bd` 取旧 uid 比较），覆盖安装 uid 不变 ⇒ 不触发。⇒ **微信版本更新不会重置熔断，只有卸载重装会。**
+
+#### 模块决策：`wechat_battery_shield` 已移除（3.5.3 之后）
+
+该实验开关曾拦 `PowerSaveConfigureManager.setPowerSaveAppConfigure` 里那次自动升格写。因熔断持久（跨重启）、手动改回走 `set` 不 touch 集合、覆盖安装又不摘标记 ⇒ **对已装微信而言升格只发生一次，开关挡的是"一次已被消耗的机会"**，故删除，仅保留 AOSP 侧 `wechat_doze_keepout`（拦 `addPowerSaveWhitelistApps`，那一条是每次电源模式变化都重写的，无熔断）。残留风险只有"卸载重装"与"`s_has_visited` 丢失"两条，均不值得保留一个默认关闭、命中率极低的钩子。
+
+#### 与另一套机制的区别（勿混）
+
+这里的 `userTable.bgControl` 是**电量与性能里的省电策略档位**；记忆里 `DeviceIdleController$1` 的 `sAlwaysWhiteApps` 写的是** deviceidle.xml（AOSP「电池优化」未优化名单）**。两套互不相干，但条件 ③ 读的正是后者——**这也是为什么"ROM 自己把某应用加进电池优化白名单"会连带把它的省电策略顶到无限制**。
+
+#### 待补的设备侧验证（设备离线，未做）
+
+```
+adb logcat -v time -s PowerSaveConfigureManager        # 抓 init from database / return configure / setPowerSaveAppConfigure success pkg=…
+adb shell settings get system s_has_visited            # 看 "0com.tencent.mm" 是否已在集合里
+adb shell dumpsys deviceidle whitelist | grep tencent  # 条件 ③ 是否成立
+```
+
+---
+
 ## 5. 诊断体系
 
 ### 5.1 三条设计原则
@@ -482,6 +563,19 @@ WhetstoneActivityManager (client, static) ──AIDL "whetstone.activity"──�
 | `adb shell dumpsys deviceidle`                           | doze 白名单各段是否含 GMS                             |
 | `settings system MILLET_NO_RESTRICT_APP`                 | 验证 P1 的写入是否落地                                 |
 | PowerKeeper 私有 ContentProvider `.../SimpleSettings/misc` | 睡眠开关的真实存储位置（不在 Settings 三个命名空间里）              |
+| `adb shell dumpsys network_management`                 | netd 的 `UID firewall dozable rule`（`uid:1`=ALLOW / `2`=DENY），夜间真正生效的那一层              |
+| `adb shell dumpsys activity service com.google.android.gms/.gcm.GcmService` | **FCM 链路的首选诊断源**：connects / failedLogins / bad_heartbeat_count、`Failed to broadcast to stopped app`（=stopped）、`No response to broadcast … time=Nms priority=NORMAL`（广播没把目标进程拉起来） |
+| `adb logcat -s MIPOWERHALSERVICE-NETLINK`              | 小时级流量采样（`uid=10133 … dev=wlan0`），补流量探针夜间被 suspend 推迟的盲区 |
+
+**长时取证必须逐行刷盘（2026-10-03 实测）**：`logcat -f` 走的是块缓冲，小流量下可能整夜不 flush，第二天拿到的是空文件。必须：
+
+```sh
+adb shell "logcat -s LSPosedLogDaemon | awk '/fcmlive,HyperGreeze/ {print; fflush()}' >> /data/local/tmp/fcmlive-night.log"
+```
+
+- toybox 的 awk **支持 `fflush()`**（无参即 flush 全部输出流），这是本机唯一可用的逐行刷盘手段；`--line-buffered` / `sed -u` / `stdbuf` 在本机均不存在。
+- 想让它熬过物理拔线：`setsid nohup <script> </dev/null >/dev/null 2>&1 &` 已实测有效。断线后无法验证它是否仍在跑（adbd 退出时可能清理子进程），这是残余风险，不是可消除项。
+- **c2dm 不可伪造**：receiver 声明 `com.google.android.c2dm.permission.SEND`，AMS 在 enqueue 阶段就对非 GMS 发送方抛 Permission Denial（shell uid 2000 一样被踢）⇒ 只能等真实投递。自然样本首选 Play Store；Telegram 已在唤醒白名单里，对它的 P2 分支永不触发，别拿它当阴性证据。
 
 **取证规则（踩过坑换来的）**：
 
@@ -501,6 +595,12 @@ WhetstoneActivityManager (client, static) ──AIDL "whetstone.activity"──�
 | `dexdump … \| awk … \| head -N` | `head` 到量后 SIGPIPE 终止上游，"扫描完整个 dex 没找到"是假结论                                                       | 涉及"没找到"的取证禁止用 `head` 截断管道         |
 | Git Bash 路径转换                   | `adb shell ls /system/...` 被静默转成本机路径，输出为空                                                         | `export MSYS_NO_PATHCONV=1`       |
 | 零触发 ≠ 无用                        | 一个晚上的阴性只能证明"本轮未观测到触发"；触发面为 0 样本时否定兜底逻辑是循环论证                                                       | 显式写明"未验证"而非"不需要"                  |
+| `/proc/net/tcp` 的 uid 列           | uid 在第 **8** 列且是**十进制**（不是常见的十六进制写法），按十六进制读会得到完全不同的 uid                                          | 按列号 8、十进制解析                       |
+| Doze `IDLE_MAINTENANCE`           | 每次进入维护窗都会调 `NetworkPolicyManager.setDeviceIdleMode(false)` ⇒ dozable 链临时停用、全网临时可联网，看起来像"策略失效" | 判"某应用为何能联网"先看 `dumpsys deviceidle` 的 `Idling history` |
+| 自研流量探针夜间读数                    | 靠 system_server 的定时器，夜间被 suspend 大幅推迟 ⇒ 时间戳不可信，也不能只凭它下结论                                       | 用 GMS 心跳行连续性交叉验证：约 **3m51s** 一条，看有无 **>8 分钟** 断档 |
+| `am start` / `cmd activity start` | 本 ROM 抛 `IllegalStateException: Already in the pool!`，shell 拉不起 Activity，容易误判为"模块坏了"          | 改用 `monkey -p <pkg> -c android.intent.category.LAUNCHER 1`（有时可用） |
+| 两条 wake-path 探针混淆               | 广播闸门与 service/activity 闸门不是一条路，混着读会把结论张冠李戴                                                       | 广播=`WakePathChecker#checkBroadcastWakePath`；service/activity=`ActivityManagerServiceImpl#checkWakePath` |
+| 热重载后的首条日志                     | 更新后第一次加载会打**旧实例**的文案（`onHotReloading`），据此判断改动没生效是错的                                          | 以 run-id / 安装时间为准，不以首条文案为准     |
 
 ### 5.8 睡眠链判定表
 
@@ -626,6 +726,31 @@ chain.proceed()      // 或返回已计算的结果
 - stopped 标记的清除点：`AMS#addAppLocked`、`ActiveServices#bringUpServiceInnerLocked`（⇒ 点一次图标即恢复）。**不建议走的路**：主动写 false、钩 `PackageManagerService#isPackageStoppedForUser` 返 false（只读欺骗，牵连 `AppWidgetServiceImpl`）、跳过 `AMS#forceStopPackage`、拒 `IPackageManager#setPackageStoppedState(true)`——根因在严格模式收窄（见 4.5 D1 与 §四 口径）。
 - `immobulus_mode_switch_restrict` 实测值包含 `com.google.android.gms`。
 
+### 7.6 收口面与粒度（勿重复造轮子）
+
+**UID 层收口天然存在，不要自建防火墙。** 已否决方案：自建 netd 链 + 仅 allow GMS。理由——系统本就有两个收口层，实测 GMS 在两层都已放行：
+
+| 层                                        | 读法                                                     | GMS 实测             |
+| ---------------------------------------- | ------------------------------------------------------ | ------------------ |
+| netd dozable 链                           | `dumpsys network_management` 的 `UID firewall dozable rule`（1=ALLOW / 2=DENY），**只在 Doze idle 期间 enabled** | 放行                 |
+| netpolicy 策略                             | `dumpsys netpolicy` 的 `policy=`                          | `4`                |
+| 待机桶                                      | standby bucket                                          | `5 (ACTIVE)`       |
+| deviceidle 名单                            | `dumpsys deviceidle whitelist`（user / system / system-excidle 三段） | 三段全在              |
+| 自启动 AppOps                               | `cmd appops get <pkg>` 的 `MIUIOP(10008)`                | `allow`             |
+| 免限名单                                    | `settings system MILLET_NO_RESTRICT_APP`                 | 含 GMS              |
+| 冻结面                                      | `dumpsys greezer` 的 per-uid 记账                          | `frozen=0s`、不进冻结路径 |
+| 声明面                                      | `declaresFcmComponent(GMS)`                              | `true`（声明 c2dm RECEIVE + RECEIVE_DIRECT_BOOT）⇒ 强停防护对 GMS 实际生效 |
+
+**两份"白名单"实测不等价**（2026-10-03）：设置里看到的「电池优化」= `dumpsys deviceidle whitelist`，真正掐网的是 netd dozable 链，两者交集 41 项、dozable 独有 11 项、白名单独有 12 项。所以**判"某应用能否收到消息"不能只看名单**：中国银行 `com.chinamworld.bocmbci`（uid 10319）在两份名单里都零命中、夜间无进程，仍照样收到 4 点的推送。
+
+四套互不相同的存储，勿混为一谈：自启动 = AppOps `10008`；电池策略 = powerkeeper `userTable.bgControl`；睡眠网络白名单 = `sleep_mode_network_white_apps`（**V816 上无效**，见 4.6）；GMS 限制 = powerkeeper `gms_control`。
+
+**粒度判据（限定了开关能表达什么）**：睡眠断网是整机物理级（直接 `setWifiEnabled(false)` / `setDataEnabled(false)`），**没有应用维度** ⇒「只保 GMS 不保其他应用」在睡眠面上不可实现（按 uid 裁剪必须叠加自建 netd 链，已否决）。省电只能二选一：只保 WiFi，或完全不保、靠 FCM 重连补投。
+
+**第三方推送不归本模块管**：国产推送栈（Mi Push / 个推 / HMS / 荣耀）由宿主 `com.xiaomi.xmsf`（uid 10206，已在 deviceidle user 白名单）承载，与 c2dm 不同构，四项 Firebase 检测不匹配——这是设计如此，不是漏检。
+
+**3.5.3 之后须重新实测**：现役实现是「ROM 走完整路径 + 下游精确拦截」，旧的「整夜 5h40m 无断档」是 flag 捷径实现的成绩，不能直接沿用到新实现上。
+
 ---
 
 ## 8. 数据流转
@@ -723,6 +848,8 @@ PhoneSleepModeController#broadcastSleepState(state=1)
 ### 9.2 装机验证（每次改动后必做）
 
 1. 构建 → `adb install -r`；
+   - 快速查看：`adb logcat -d -s LSPosedLogDaemon | grep HyperGreeze`
+   - **整宿留存源**是 LSPosed 管理器导出的 `modules_*.log`（主 logcat 缓冲会被白天日志冲掉）
 2. 触发热重载（不需要重启）；
 3. 在 `modules_*.log` 中确认两个域的摘要行：
    - `HyperFCMLive active in system_server: N hook(s) installed, M target(s) absent`
