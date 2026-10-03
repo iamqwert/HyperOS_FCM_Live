@@ -40,6 +40,22 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - Hook callbacks run in system_server / PowerKeeper: never throw out of them,
  *   never block the main thread, never switch to coroutines.
  * - The four FCM marker constants are shared with the settings list.
+ *
+ * Scope limits this module stays inside:
+ * - Root is not module privilege. No `su`/`exec su` from a hook (watchdog risk),
+ *   no SELinux changes, no injection into GMS or into a target app, no cloud
+ *   (云控) countermeasures, no global writes upstream of this module's own
+ *   three documented write sites.
+ *
+ * Defence placement, which decides whether a hook is worth having:
+ * - A live path whose current branch does not hit GMS → keep a **sentinel**
+ *   hook, and word the user-facing copy as "armed", never as "took effect",
+ *   until it is confirmed at runtime.
+ * - A mechanism that is dead end-to-end → do not add a hook; use cheap
+ *   observation instead.
+ * - **A behaviour change that has not been confirmed at runtime is not made.**
+ *   When in doubt, ship one log line that states the assumption instead — a
+ *   guess you can read beats a change you cannot verify.
  */
 @SuppressLint("PrivateApi")
 class Hooker : XposedModule() {
@@ -515,11 +531,6 @@ class Hooker : XposedModule() {
                 log(Log.ERROR, TAG, "Failed to hook ScenarioCompiler", t)
             }
             try {
-                hookWechatBatteryShield(classLoader)
-            } catch (t: Throwable) {
-                log(Log.ERROR, TAG, "Failed to hook WeChat battery shield", t)
-            }
-            try {
                 hookWechatDozeKeepout(classLoader)
             } catch (t: Throwable) {
                 log(Log.ERROR, TAG, "Failed to hook WeChat doze keepout", t)
@@ -568,6 +579,37 @@ class Hooker : XposedModule() {
         }
     }
 
+    /**
+     * greeze (`com.miui.server.greeze.GreezeManagerService`): the ROM's freeze /
+     * broadcast-policy engine, and this module's largest system_server surface.
+     *
+     * The findings every decision below rests on (OS4 V816, each one read back
+     * from the running device, not from the disassembly alone):
+     *
+     * - `adb shell dumpsys greezer` is the one command worth running first: it
+     *   prints the live Settings (enable / fz_timeout / monitor),
+     *   `mCurrentCNPolicy`, `mGmsLimitEnabled`, the frozen process list, the
+     *   greeze history, **and the real contents of `mBroadcastTargetWhiteList`**
+     *   — 8 entries on this device, all Tencent / Feishu / Rimet. GMS is not one
+     *   of them, which is the whole reason the broadcast gates below exist.
+     * - Policy dispatch is Domestic here (`mCurrentCNPolicy: 1`, region CN), so
+     *   `InternationalPolicyManager#isPushApp` is dead code on this device, and
+     *   `isPushApp == true` means *restrict* that app's network — the opposite of
+     *   what the name suggests.
+     * - GMS does not enter the freeze path at all: per-uid accounting reads
+     *   `uid=10133 frozen=0s` after 15h and `noControl` reports
+     *   `no_freeze:invisible`. The network hooks in this file are therefore
+     *   defence in depth, not the fix — see [hookDomesticRestrictNet].
+     * - The real MIUI network engine is netd's
+     *   `OemNetdListener.setMiuiFirewallRule` (0 rules installed at runtime
+     *   here). The older `enablemiuistandby enable` standby chain is a dead
+     *   letter on this ROM — dnsproxyd answers `500 Command not recognized` — and
+     *   is intercepted only as an OTA hedge.
+     *
+     * A quiet night proves nothing on its own; HOOKS_AND_DIAGNOSTICS.md §10.5
+     * fixes the wording for that case ("not observed in this window", never
+     * "not needed").
+     */
     private fun hookGreezeManagerService(classLoader: ClassLoader) {
         val GreezeManagerServiceClass =
             classLoader.loadClass("com.miui.server.greeze.GreezeManagerService")
@@ -1536,106 +1578,6 @@ class Hooker : XposedModule() {
     }
 
     /**
-     * Experiment (default off): stop PowerKeeper from silently rewriting
-     * WeChat's battery policy to "no restrict".
-     *
-     * ROM forensics (OS4 V816, PowerSaveConfigureManager): the AIDL getter
-     * `getPowerSaveAppConfigure` embeds a promotion write — when the package
-     * answers `PowerManager.isIgnoringBatteryOptimizations == true` and its
-     * userTable.bgControl is still "miuiAuto", the getter composes a Bundle
-     * with AppConfigure="no_restrict" and calls `setPowerSaveAppConfigure`
-     * from inside itself. Combined with the cloud-tended doze whitelist
-     * (cloud feature "doze_whitelist_apps" → GlobalFeatureConfigureHelper →
-     * DeviceIdlePolicyHelper; WeChat observed on-device in the user section
-     * of `dumpsys deviceidle whitelist`), this is the loop that keeps
-     * reverting WeChat to 无限制 after the user picks a stricter policy.
-     *
-     * The hook passes every call through except the exact promotion write
-     * for WeChat. Manual writes from the settings UI have no getter frame in
-     * the call stack and still work — including a manual "no restrict"; the
-     * switch only stops the *automatic* rewrite. The stack check runs after
-     * the cheap gates (switch off → pass, other package → pass, other value
-     * → pass), so its cost is bounded by how rarely those match.
-     */
-    private fun hookWechatBatteryShield(classLoader: ClassLoader) {
-        val managerClass = classLoader.loadClass(
-            "com.miui.powerkeeper.provider.PowerSaveConfigureManager"
-        )
-        val setMethod = try {
-            managerClass.getDeclaredMethod("setPowerSaveAppConfigure", Bundle::class.java)
-        } catch (e: NoSuchMethodException) {
-            logSkip("PowerSaveConfigureManager#setPowerSaveAppConfigure absent, wechat-shield skip")
-            return
-        }
-        val skipValue = skipValueFor(setMethod.returnType)
-        hookE(setMethod).intercept { chain: XposedInterface.Chain ->
-            val bundle = chain.getArg(0) as? Bundle
-            if (bundle == null || !isWechatShieldEnabled()) {
-                return@intercept chain.proceed()
-            }
-            if (WECHAT_PACKAGE_NAME != bundle.getString("App")) {
-                return@intercept chain.proceed()
-            }
-            if ("no_restrict" != bundle.getString("AppConfigure")) {
-                return@intercept chain.proceed()
-            }
-            var fromGetter = false
-            for (frame in Thread.currentThread().stackTrace) {
-                if (frame.className == WECHAT_SHIELD_OWNER_CLASS &&
-                    "getPowerSaveAppConfigure" == frame.methodName
-                ) {
-                    fromGetter = true
-                    break
-                }
-            }
-            if (!fromGetter) {
-                return@intercept chain.proceed()
-            }
-            val blocked = ++wechatShieldBlockCount
-            if (blocked == 1L || blocked % 10L == 0L) {
-                log(
-                    Log.INFO, TAG,
-                    "wechat-shield: blocked auto no_restrict promotion #$blocked"
-                )
-            }
-            skipValue
-        }
-        deoptimize(setMethod)
-        log(
-            Log.INFO, TAG,
-            "PowerSaveConfigureManager#setPowerSaveAppConfigure hooked (wechat-shield, " +
-                "sub-switch gated by doze-keepout, default off)"
-        )
-    }
-
-    /**
-     * The shield flag lives in the shared config group, but unlike the
-     * system_server hooks there is no broadcast receiver in the PowerKeeper
-     * process — read it lazily at each qualifying call instead. The reads
-     * only happen after the package/value gates match, so the frequency is
-     * that of WeChat promotion attempts, not of battery-policy traffic.
-     *
-     * The doze-keepout switch is the master of this pair, so the shield is
-     * armed only while keepout is on as well. The experiment screen already
-     * hides the sub-switch behind the master; gating here keeps the two in
-     * step, or turning the master off would leave a hook acting behind a
-     * control the user can no longer see. The stored shield value is not
-     * cleared, so turning the master back on restores the last choice.
-     */
-    private fun isWechatShieldEnabled(): Boolean {
-        return try {
-            val config = getRemotePreferences(Prefs.GROUP_CONFIG)
-            config.getBoolean(Prefs.KEY_WECHAT_DOZE_KEEPOUT, false) &&
-                config.getBoolean(Prefs.KEY_WECHAT_SHIELD, false)
-        } catch (ignored: Throwable) {
-            // Fail open: an unreadable switch must not start rewriting
-            // system behavior — the feature is opt-in, a failed read keeps
-            // it off.
-            false
-        }
-    }
-
-    /**
      * Experiment (default off): keep WeChat out of the AOSP battery-optimization
      * whitelist — the Doze "user" section Settings shows as 未优化, persisted
      * to /data/system/deviceidle.xml.
@@ -1715,18 +1657,17 @@ class Hooker : XposedModule() {
 
     /**
      * The keepout flag lives in the shared config group and is read lazily at
-     * each qualifying call, like the shield's — the PowerKeeper process has no
-     * broadcast receiver, and the reads only happen after the package gate
-     * matches, so the frequency is that of whitelist writes, not of general
-     * battery traffic.
+     * each qualifying call: the PowerKeeper process has no broadcast receiver,
+     * and the reads only happen after the package gate matches, so the
+     * frequency is that of whitelist writes, not of general battery traffic.
      */
     private fun isWechatDozeKeepoutEnabled(): Boolean {
         return try {
             getRemotePreferences(Prefs.GROUP_CONFIG)
                 .getBoolean(Prefs.KEY_WECHAT_DOZE_KEEPOUT, false)
         } catch (ignored: Throwable) {
-            // Fail closed, same as the shield: an unreadable switch must not
-            // start deciding where the system puts an app.
+            // Fail closed: an unreadable switch must not start deciding
+            // where the system puts an app.
             false
         }
     }
@@ -2010,9 +1951,9 @@ class Hooker : XposedModule() {
     }
 
     /**
-     * Keepalive switch, read lazily like the WeChat shield's.
+     * Keepalive switch, read lazily like the WeChat keepout's.
      *
-     * Fails to *disabled*, same as the shield: this is an opt-in experiment
+     * Fails to *disabled*: this is an opt-in experiment
      * that overrides a power-saving decision the user asked for, so an
      * unreadable switch must leave sleep mode alone rather than quietly
      * keeping both radios up all night.
@@ -2745,6 +2686,14 @@ class Hooker : XposedModule() {
      * userTable.bgControl back to "noRestrict" so the source row matches.
      * After a repair, triggers P4 recovery so an already-frozen GMS gets a
      * chance to reconnect.
+     *
+     * Write-surface audit (2026-10-03): this is one of only **three** places in
+     * the module that persists anything outside its own prefs — this one,
+     * [ensureGmsUserTableBgControl], and the WeChat doze keepout (default off).
+     * All three widen a restriction; none can blacklist an app, and there is no
+     * path that leaves an app worse off after uninstalling the module than it
+     * was before installing it. Keep it that way: a new write has to justify
+     * itself against this list.
      */
     private fun ensureGmsInMilletSetting() {
         ensureGmsUserTableBgControl()
@@ -3108,10 +3057,6 @@ class Hooker : XposedModule() {
 
     @Volatile
     private var sStrictMode = false
-
-    /** Blocked auto-promotions since this classloader loaded (wechat-shield). */
-    @Volatile
-    private var wechatShieldBlockCount = 0L
 
     /** Whitelist writes this process has seen WeChat dropped from (doze-keepout). */
     private var wechatDozeKeepoutCount = 0L
@@ -4268,6 +4213,32 @@ class Hooker : XposedModule() {
         }
     }
 
+    /**
+     * MIUI force-stop ("clean") protection: answer false from
+     * `ProcessCleanerBase#isForceStopEnable` for apps that declare an FCM
+     * component, so the ROM's cleaner leaves them alone.
+     *
+     * The tier matters more than the return value. This gate is [Tier.STRICT],
+     * so the allowlist narrows it **only** under strict mode — verified
+     * 2026-10-03 with googlequicksearchbox:
+     *
+     *  - strict mode **off** (the default): every app declaring an FCM component
+     *    is protected. That is the module's whole-device posture, and it is why
+     *    the default install needs no per-app selection.
+     *  - strict mode **on**: protection narrows to the allowlist, and an
+     *    unselected app is exposed to MIUI force-stop again. That is the
+     *    complete explanation for `No response to broadcast …` and
+     *    `Failed to broadcast to stopped app` in an unselected app's log:
+     *    nothing regressed, the user narrowed the module.
+     *
+     * So **turning strict mode on can never rescue an app that is not on the
+     * list** — the list is the only thing that helps an app. The two rules are
+     * restated for users in HELP §5 and §9.
+     *
+     * `policy == 13` is passed through untouched: that is the one code this hook
+     * never overrides, because overriding it would fight an explicit stop
+     * request rather than a background policy.
+     */
     private fun hookProcessCleanerBase(classLoader: ClassLoader) {
         val ProcessCleanerBaseClass =
             classLoader.loadClass("com.android.server.am.ProcessCleanerBase")
@@ -4308,6 +4279,23 @@ class Hooker : XposedModule() {
 
     private val fcmCache = HashMap<String, FcmQuery>()
 
+    /**
+     * The four FCM markers the module recognises: a `FirebaseMessagingService`
+     * subclass, a `FirebaseInstanceIdReceiver` subclass, and the
+     * `MESSAGING_EVENT` / `RECEIVE` intent actions (direct-boot included).
+     * The same four drive the "FCM-supported" filter in the app list.
+     *
+     * Scope, recorded so it stops being re-litigated: this matches Firebase Cloud
+     * Messaging only. The domestic push stacks (Mi Push, GeTui, HMS, Honor) are
+     * carried by their own host — `com.xiaomi.xmsf`, uid 10206, already on the
+     * deviceidle user whitelist — and never travel over c2dm, so an app that
+     * relies on them scores false here and is correctly out of scope. Worked
+     * example: `com.chinamworld.bocmbci` (uid 10319) contains no Firebase or
+     * c2dm component, appears in neither the deviceidle whitelist nor the netd
+     * dozable chain, has no process running overnight — and still receives its
+     * 04:00 push. "The module does not list this app" is therefore not evidence
+     * that the app cannot be reached.
+     */
     private fun declaresFcmComponent(pm: PackageManager, packageName: String): Boolean {
         val now = SystemClock.uptimeMillis()
         synchronized(fcmCache) {
@@ -4375,8 +4363,6 @@ class Hooker : XposedModule() {
         private const val GMS_PACKAGE_NAME = "com.google.android.gms"
         private const val GMS_PERSISTENT_PROCESS_NAME = "com.google.android.gms.persistent"
         private const val WECHAT_PACKAGE_NAME = "com.tencent.mm"
-        private const val WECHAT_SHIELD_OWNER_CLASS =
-            "com.miui.powerkeeper.provider.PowerSaveConfigureManager"
 
         /**
          * OS4/V816 sleep mode lives here, in the PowerKeeper process — not in

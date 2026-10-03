@@ -964,15 +964,9 @@ class MainActivity : AppCompatActivity() {
         if (Prefs.hasPendingStrictPush(this)) {
             Prefs.writeStrictMode(this, prefs, strictMode)
         }
-        if (Prefs.hasPendingWechatShieldPush(this)) {
-            // Same repair for the WeChat-shield flag: a toggle made before the
-            // service bound lives only in the local mirror.
-            Prefs.writeWechatShield(this, prefs, Prefs.readLocalWechatShield(this))
-        }
         if (Prefs.hasPendingWechatDozeKeepoutPush(this)) {
-            // And for the WeChat keepout switch, which is the master of the
-            // pair above — a master flip lost here would take its sub-switch
-            // down with it at the next bind.
+            // And for the WeChat keepout switch: a flip made before the
+            // service bound lives only in the local mirror.
             Prefs.writeWechatDozeKeepout(
                 this, prefs, Prefs.readLocalWechatDozeKeepout(this)
             )

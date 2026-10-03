@@ -70,7 +70,6 @@ private fun ExperimentBody(
     val context = LocalContext.current
     // Read once per screen: the hook side owns the live value, and the mirror
     // is only the answer the UI last left behind.
-    var wechatShield by remember { mutableStateOf(Prefs.readLocalWechatShield(context)) }
     var wechatDozeKeepout by remember { mutableStateOf(Prefs.readLocalWechatDozeKeepout(context)) }
     var sleepKeepalive by remember { mutableStateOf(Prefs.readLocalSleepKeepalive(context)) }
     var sleepKeepaliveData by remember {
@@ -99,29 +98,6 @@ private fun ExperimentBody(
                     wechatDozeKeepout = checked
                 }
             )
-            // The shield switch is the sub-switch of this pair: its hook reads
-            // the keepout flag too, so on its own it does nothing at all. The
-            // master reveals it rather than leaving a control that has no
-            // effect sitting on screen.
-            AnimatedVisibility(
-                visible = wechatDozeKeepout,
-                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
-            ) {
-                Column {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    SettingsSwitchCard(
-                        iconRes = R.drawable.ic_lock_open,
-                        title = stringResource(R.string.experiment_wechat_shield),
-                        description = stringResource(R.string.experiment_wechat_shield_desc),
-                        checked = wechatShield,
-                        onCheckedChange = { checked ->
-                            Prefs.writeWechatShield(context, Prefs.remote(), checked)
-                            wechatShield = checked
-                        }
-                    )
-                }
-            }
         }
         item {
             SectionTitle(R.string.experiment_section_sleep)

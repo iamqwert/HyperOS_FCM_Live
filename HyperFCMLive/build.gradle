@@ -1,3 +1,27 @@
+// Build facts that are easy to lose and expensive to rediscover:
+//
+// - Release APK (debug-signed, directly installable):
+//     ./gradlew --no-daemon -PallowDebugSignedRelease :HyperFCMLive:assembleRelease
+//     adb install -r HyperFCMLive/build/outputs/apk/release/*.apk
+//   Without -PallowDebugSignedRelease a real keystore in local.properties is
+//   required — the guard at the bottom of this file refuses to sign a release
+//   with the public debug key (anyone can sign with it and install over us).
+// - A code change only counts as done after rebuilding and `adb install -r`:
+//   the module hot-reloads, and the run-id changing in the log is what proves
+//   the new code is the code running. Markdown-only changes need no rebuild.
+// - AGP resource merging is sticky. After renaming or deleting a res directory
+//   or a qualifier, clear the intermediates before rebuilding or the old names
+//   keep resolving: merged_res, packaged_res, incremental/*/{merge,package}*
+//   Resources, compile_and_runtime_r_class_jar, *_symbol_list,
+//   merged_res_blame_folder.
+// - Deleting a drawable: remove the *attribute* first, then the colour. The
+//   other order leaves a dangling reference and AAPT2 fails with
+//   "resource color/X not found".
+// - res/xml/data_extraction_rules.xml must stay explicitly declared.
+// - Forensics trap: aapt output shortens resource paths (e.g. res/FK.xml), so
+//   `xmltree` reports "not found" for them — match on
+//   `^resource 0x… (type)/name$` instead of on the path.
+
 plugins {
     id 'com.android.application'
     // Compose compiler for Kotlin 2.2.10 (matches the stdlib already on the classpath).
@@ -24,8 +48,8 @@ android {
         targetSdkVersion 37
         // Fixed (bumped by hand each release) so LSPosed update checks never treat
         // this fork as older than upstream builds that inherit a low jgit commitCount.
-        versionCode 37
-        versionName "3.5.3"
+        versionCode 38
+        versionName "3.5.4"
 
         // HyperOS modules ship arm64 only; drop armv7a / x86 / x86_64 natives.
         ndk {

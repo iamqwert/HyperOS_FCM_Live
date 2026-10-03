@@ -791,7 +791,7 @@ private fun AboutScreenPreview() {
                     onHelp = {},
                     onCheckUpdate = {},
                     onUpdateOpen = {},
-                    versionLine = "当前版本 3.5.3 (37)",
+                    versionLine = "当前版本 3.5.4 (38)",
                     onAppearanceChange = {}
                 )
             )

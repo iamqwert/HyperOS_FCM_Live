@@ -1,4 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  文案红线：改文案前先整段读一遍，不要回写旧版本。本文件是用户向文案的唯一来源；
+  帮助页正文在 HELP.md。
+  1. 只有中文 values/strings.xml，不维护第二语言。
+  2. 不用第二人称（"等你要""你需要"），段末不加句号，冒号后逐行展开。
+  3. 「白名单」必须分清三种：本应用的「FCM 唤醒白名单」/ 手机管家「省电策略」/
+     AOSP「电池优化」，它们不是一回事。
+  4. 钩子返回值是 ROM 的读取值，不是「请求」；值 = 1 表示 ROM 内建的「需保持可达」，
+     不要写成「不限网」。
+  5. 睡眠相关一律写「进入或退出」睡眠模式，不要只写「进入」。
+  6. powerkeeper 的中文正式名是「电量与性能」。
+  7. 用户向文案不提地震预警：实现里读的那个开关对用户不可见。
+  8. 实验性开关默认全部关闭，且只描述功能，不附加「已开启／已关闭」这类状态描述。
+  9. 危险开关只放在 ExperimentActivity。
+-->
 <resources>
     <string name="app_name">修复澎湃系统谷歌推送重连</string>
     <string name="launcher_name">HyperGreeze</string>
@@ -125,8 +140,6 @@
     <!-- 实验功能页：危险开关集中在此，主界面只留入口 -->
     <string name="experiment">实验功能</string>
     <string name="experiment_section_battery">电池</string>
-    <string name="experiment_wechat_shield">禁止系统恢复微信省电策略</string>
-    <string name="experiment_wechat_shield_desc">仅在上一项开启时生效；阻止手机管家改写微信的省电策略为「无限制」，需自行前往手机管家调整相关选项</string>
     <string name="experiment_wechat_doze_keepout">禁止系统将微信写回电池未优化名单</string>
     <string name="experiment_wechat_doze_keepout_desc">启用后，将阻止微信进入 AOSP 电池优化中的「未优化」名单，需自行调整为优化</string>
 
