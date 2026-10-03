@@ -51,14 +51,101 @@ object Prefs {
     /** UI-only: set while the mirror holds a strict-mode change the module never saw. */
     private const val KEY_STRICT_PENDING_PUSH = "strict_mode_pending_push"
     /**
-     * Remote + local: "WeChat battery shield" experiment. Same shape as
-     * [KEY_STRICT_MODE] — it decides what the hooks do, so it rides in
+     * Remote + local: "WeChat battery shield" experiment — the sub-switch of
+     * [KEY_WECHAT_DOZE_KEEPOUT], which is the master of the pair. Same shape as
+     * [KEY_STRICT_MODE]: it decides what the hooks do, so it rides in
      * [GROUP_CONFIG] and is re-read by the same broadcast. Default off: the
      * hook must not touch anyone's WeChat unless it is asked to.
      */
     const val KEY_WECHAT_SHIELD = "wechat_battery_shield"
     /** UI-only: set while the mirror holds a shield change the module never saw. */
     private const val KEY_WECHAT_SHIELD_PENDING_PUSH = "wechat_battery_shield_pending_push"
+
+    /**
+     * Remote + local: "keep WiFi up during sleep" experiment — the master
+     * switch.
+     *
+     * On OS4/V816 the sleep mode does *not* filter per uid:
+     * `PhoneSleepModeController#applySleepConfig` turns WiFi **and** mobile
+     * data off outright, so no per-app whitelist can save the FCM channel —
+     * measured 01:38:00→07:08:57 with no network at all.
+     *
+     * This switch stops the WiFi cutoff. Mobile data is a separate decision
+     * ([KEY_SLEEP_KEEPALIVE_DATA]) and stays on the system's own policy by
+     * default, because WiFi-only is the cheaper half: an unattended phone at
+     * home is on WiFi anyway, and holding the cellular radio open is the part
+     * that actually costs power. A night with no WiFi gets nothing out of
+     * this switch — that is what the sub-switch is for.
+     *
+     * Default **off**, like [KEY_WECHAT_SHIELD] and every other experiment:
+     * keeping a radio up all night defeats the power saving the user turned
+     * sleep mode on for, and the effect is device-wide rather than scoped to
+     * the apps the module watches. It is opt-in on the experiment screen,
+     * where the cost is spelled out.
+     */
+    const val KEY_SLEEP_KEEPALIVE = "sleep_keepalive"
+    /** UI-only: set while the mirror holds a keepalive change the module never saw. */
+    private const val KEY_SLEEP_KEEPALIVE_PENDING_PUSH = "sleep_keepalive_pending_push"
+
+    /**
+     * Remote + local: "keep mobile data up during sleep" sub-switch.
+     *
+     * Only consulted while [KEY_SLEEP_KEEPALIVE] is on; on its own it does
+     * nothing at all, which is why the experiment screen only reveals it once
+     * the master switch is on. With it on, the pair behaves like a single
+     * "keep the whole network up" switch: both radios survive the night, at a
+     * higher cost.
+     *
+     * Default **off**, same reasoning as the master switch — ask before
+     * holding a radio open overnight.
+     */
+    const val KEY_SLEEP_KEEPALIVE_DATA = "sleep_keepalive_data"
+    /** UI-only: set while the mirror holds a data-keepalive change the module never saw. */
+    private const val KEY_SLEEP_KEEPALIVE_DATA_PENDING_PUSH = "sleep_keepalive_data_pending_push"
+
+    /**
+     * Remote + local: "only while charging" sub-switch of the sleep keepalive.
+     *
+     * The master switch holds a radio open for the whole night, and that only
+     * earns its cost when the battery is not what is being spent — i.e. when
+     * the phone sits on the charger. With this on, the cutoff hooks stand down
+     * whenever the device is not charging and the ROM cuts the network exactly
+     * as it would have: an unplugged night keeps the power saving, a charging
+     * night keeps the FCM channel.
+     *
+     * Applies to both radios, so it is a sibling of [KEY_SLEEP_KEEPALIVE_DATA]
+     * rather than nested under it. Only consulted while [KEY_SLEEP_KEEPALIVE]
+     * is on, like the data sub-switch. Default **off**: it narrows a switch
+     * the user deliberately turned on, and narrowing is still a change to what
+     * they asked for.
+     */
+    const val KEY_SLEEP_KEEPALIVE_CHARGING = "sleep_keepalive_charging_only"
+    /** UI-only: set while the mirror holds a charging-only change the module never saw. */
+    private const val KEY_SLEEP_KEEPALIVE_CHARGING_PENDING_PUSH =
+        "sleep_keepalive_charging_only_pending_push"
+
+    /**
+     * Remote + local: "WeChat doze keepout" experiment.
+     *
+     * The PowerKeeper process hardcodes WeChat into its domestic
+     * always-white set (`DeviceIdleController$1`) and re-adds it to the AOSP
+     * battery-optimization whitelist on every power-mode change — through the
+     * single funnel `CommonAdapter.addPowerSaveWhitelistApps`, which is also
+     * what persists /data/system/deviceidle.xml. This switch drops WeChat
+     * from that call's argument list.
+     *
+     * Default **off**, like every other experiment: it overwrites where the
+     * system puts WeChat, the effect outlives the process (the entry is not
+     * written back until the switch is turned off), and the whitelist already
+     * holds WeChat today — the hook prevents the next write, it does not
+     * clear the stored one.
+     *
+     * Master switch of the WeChat pair: [KEY_WECHAT_SHIELD] is its sub-switch
+     * and only arms while this is on, both on screen and in the hook.
+     */
+    const val KEY_WECHAT_DOZE_KEEPOUT = "wechat_doze_keepout"
+    /** UI-only: set while the mirror holds a keepout change the module never saw. */
+    private const val KEY_WECHAT_DOZE_KEEPOUT_PENDING_PUSH = "wechat_doze_keepout_pending_push"
     /** Action the app broadcasts after writing, to refresh system_server. */
     const val ACTION_ALLOWLIST_CHANGED = MODULE_PKG + ".ALLOWLIST_CHANGED"
 
@@ -174,6 +261,182 @@ object Prefs {
                 remotePrefs.edit().putBoolean(KEY_WECHAT_SHIELD, enabled).commit()
             } catch (t: Throwable) {
                 localPrefs(app).edit().putBoolean(KEY_WECHAT_SHIELD_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+        }
+    }
+
+    /** Sleep-keepalive value as the UI last left it; the mirror is what the experiment screen shows. */
+    @JvmStatic
+    fun readLocalSleepKeepalive(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_SLEEP_KEEPALIVE, false)
+    }
+
+    /** Sleep-keepalive counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingSleepKeepalivePush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_SLEEP_KEEPALIVE_PENDING_PUSH, false)
+    }
+
+    /**
+     * Write the sleep-keepalive flag and make it live.
+     *
+     * Same shape as [writeWechatShield]. The hook lives in the PowerKeeper
+     * process and reads the remote value lazily at each qualifying call, so
+     * flipping this takes effect on the next sleep entry without a reboot.
+     */
+    @JvmStatic
+    fun writeSleepKeepalive(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean
+    ) {
+        val app = appContext(context)
+        localPrefs(app).edit().putBoolean(KEY_SLEEP_KEEPALIVE, enabled).apply()
+        if (remotePrefs == null) {
+            localPrefs(app).edit().putBoolean(KEY_SLEEP_KEEPALIVE_PENDING_PUSH, true).apply()
+            broadcastAllowlistChanged(app)
+            return
+        }
+        localPrefs(app).edit().putBoolean(KEY_SLEEP_KEEPALIVE_PENDING_PUSH, false).apply()
+        WRITER.execute {
+            try {
+                remotePrefs.edit().putBoolean(KEY_SLEEP_KEEPALIVE, enabled).commit()
+            } catch (t: Throwable) {
+                localPrefs(app).edit().putBoolean(KEY_SLEEP_KEEPALIVE_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+        }
+    }
+
+    /** Sleep-keepalive data sub-switch value as the UI last left it. */
+    @JvmStatic
+    fun readLocalSleepKeepaliveData(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_SLEEP_KEEPALIVE_DATA, false)
+    }
+
+    /** Sleep-keepalive data counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingSleepKeepaliveDataPush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_SLEEP_KEEPALIVE_DATA_PENDING_PUSH, false)
+    }
+
+    /**
+     * Write the sleep-keepalive data sub-switch and make it live.
+     *
+     * Same shape as [writeSleepKeepalive]. The hook in the PowerKeeper process
+     * reads the remote value lazily at each qualifying call, so flipping this
+     * takes effect on the next sleep entry without a reboot.
+     */
+    @JvmStatic
+    fun writeSleepKeepaliveData(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean
+    ) {
+        val app = appContext(context)
+        localPrefs(app).edit().putBoolean(KEY_SLEEP_KEEPALIVE_DATA, enabled).apply()
+        if (remotePrefs == null) {
+            localPrefs(app).edit().putBoolean(KEY_SLEEP_KEEPALIVE_DATA_PENDING_PUSH, true).apply()
+            broadcastAllowlistChanged(app)
+            return
+        }
+        localPrefs(app).edit().putBoolean(KEY_SLEEP_KEEPALIVE_DATA_PENDING_PUSH, false).apply()
+        WRITER.execute {
+            try {
+                remotePrefs.edit().putBoolean(KEY_SLEEP_KEEPALIVE_DATA, enabled).commit()
+            } catch (t: Throwable) {
+                localPrefs(app).edit()
+                    .putBoolean(KEY_SLEEP_KEEPALIVE_DATA_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+        }
+    }
+
+    /** Sleep-keepalive charging-only value as the UI last left it. */
+    @JvmStatic
+    fun readLocalSleepKeepaliveCharging(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_SLEEP_KEEPALIVE_CHARGING, false)
+    }
+
+    /** Sleep-keepalive charging-only counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingSleepKeepaliveChargingPush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_SLEEP_KEEPALIVE_CHARGING_PENDING_PUSH, false)
+    }
+
+    /**
+     * Write the sleep-keepalive charging-only sub-switch and make it live.
+     *
+     * Same shape as [writeSleepKeepalive]: the hook in the PowerKeeper process
+     * reads the remote value lazily at each qualifying call, so flipping this
+     * takes effect on the next sleep entry without a reboot.
+     */
+    @JvmStatic
+    fun writeSleepKeepaliveCharging(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean
+    ) {
+        val app = appContext(context)
+        localPrefs(app).edit().putBoolean(KEY_SLEEP_KEEPALIVE_CHARGING, enabled).apply()
+        if (remotePrefs == null) {
+            localPrefs(app).edit()
+                .putBoolean(KEY_SLEEP_KEEPALIVE_CHARGING_PENDING_PUSH, true).apply()
+            broadcastAllowlistChanged(app)
+            return
+        }
+        localPrefs(app).edit()
+            .putBoolean(KEY_SLEEP_KEEPALIVE_CHARGING_PENDING_PUSH, false).apply()
+        WRITER.execute {
+            try {
+                remotePrefs.edit().putBoolean(KEY_SLEEP_KEEPALIVE_CHARGING, enabled).commit()
+            } catch (t: Throwable) {
+                localPrefs(app).edit()
+                    .putBoolean(KEY_SLEEP_KEEPALIVE_CHARGING_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+        }
+    }
+
+    /** WeChat-doze-keepout value as the UI last left it; the mirror is what the experiment screen shows. */
+    @JvmStatic
+    fun readLocalWechatDozeKeepout(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_WECHAT_DOZE_KEEPOUT, false)
+    }
+
+    /** WeChat-doze-keepout counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingWechatDozeKeepoutPush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_WECHAT_DOZE_KEEPOUT_PENDING_PUSH, false)
+    }
+
+    /**
+     * Write the WeChat-doze-keepout flag and make it live.
+     *
+     * Same shape as [writeWechatShield]. The hook lives in the PowerKeeper
+     * process and reads the remote value lazily at each qualifying call, so
+     * flipping this takes effect on the next whitelist write without a reboot.
+     */
+    @JvmStatic
+    fun writeWechatDozeKeepout(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean
+    ) {
+        val app = appContext(context)
+        localPrefs(app).edit().putBoolean(KEY_WECHAT_DOZE_KEEPOUT, enabled).apply()
+        if (remotePrefs == null) {
+            localPrefs(app).edit().putBoolean(KEY_WECHAT_DOZE_KEEPOUT_PENDING_PUSH, true).apply()
+            broadcastAllowlistChanged(app)
+            return
+        }
+        localPrefs(app).edit().putBoolean(KEY_WECHAT_DOZE_KEEPOUT_PENDING_PUSH, false).apply()
+        WRITER.execute {
+            try {
+                remotePrefs.edit().putBoolean(KEY_WECHAT_DOZE_KEEPOUT, enabled).commit()
+            } catch (t: Throwable) {
+                localPrefs(app).edit().putBoolean(KEY_WECHAT_DOZE_KEEPOUT_PENDING_PUSH, true).apply()
             }
             broadcastAllowlistChanged(app)
         }

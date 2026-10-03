@@ -23,6 +23,9 @@ local.properties
 # WorkBuddy local data (internal notes / scratch) - never publish
 .workbuddy/
 
+# Local pre-change backups (scratch, never publish)
+/.backup/
+
 # 技术分析报告 / 内部日志 / 敏感报告等内部材料 - 仅本地，禁止入库
 # （README、CHANGELOG、.github/release-notes 等公开文档不受影响）
 *分析报告*

@@ -1,0 +1,13 @@
+# Human-readable baseline profile, compiled into the APK by AGP and remapped
+# through R8. minSdk is 35, so the platform installs it automatically at / on
+# first launch after dexopt — no androidx.profileinstaller dependency needed
+# (that library only matters below Android 12).
+#
+# Scope: this app's own hot path, which is startup + first frame. MainActivity
+# builds the theme engine (palette parsing, M3 scheme, shapes) before the first
+# Compose frame, then reads preferences and drives the app-list pipeline.
+# AndroidX/Compose ship their own baseline profiles inside their AARs and AGP
+# merges them — only this package's classes are missing from that set.
+# Hooker.kt classes are included by the wildcard but never load in this
+# process; they cost nothing here.
+HSPLio/github/howard20181/hyperos/fcmlive/**->**(**)**

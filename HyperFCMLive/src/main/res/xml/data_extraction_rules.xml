@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Backup and device-transfer rules.
+
+  `android:allowBackup="false"` has not covered device-to-device transfer since
+  Android 12: it still switches cloud backup off, but a phone-to-phone migration
+  copies app data unless this file says otherwise. Left unset, the module's
+  SharedPreferences — one switch per hook — would ride along to the new device
+  even though the module has to be re-authorised in LSPosed there anyway.
+
+  So only `sharedpref` is carried over. Naming it is enough: a domain that is
+  neither included nor excluded is not extracted, which is why there is no
+  matching `exclude`. The cloud-backup block restates the same scope for
+  symmetry; with `allowBackup="false"` it is inert.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="sharedpref" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="sharedpref" path="." />
+    </device-transfer>
+</data-extraction-rules>

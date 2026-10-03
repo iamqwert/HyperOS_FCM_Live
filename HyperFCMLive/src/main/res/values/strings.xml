@@ -4,7 +4,7 @@
     <string name="launcher_name">HyperGreeze</string>
     <string name="back">返回</string>
     <string name="help">帮助</string>
-    <string name="xposed_description">去除澎湃系统对谷歌推送连接相关广播的限制。启用模块后，系统耗电可能会增加。</string>
+    <string name="xposed_description">去除澎湃系统对谷歌推送连接相关广播的限制。启用模块后，系统耗电可能会增加</string>
     <string name="settings_title">FCM 唤醒白名单</string>
     <string name="select_all">全选</string>
     <string name="deselect_all">取消全选</string>
@@ -27,13 +27,12 @@
     <string name="no_fcm_apps_found">未发现支持FCM的应用</string>
     <!-- 列表为空且原因是筛选（而非扫描失败）时的提示。 -->
     <string name="no_apps_found">当前筛选条件下没有可显示的应用</string>
-    <string name="about">关于</string>
     <string name="settings">设置</string>
     <string name="about_section_display">显示</string>
     <string name="about_section_theme">主题</string>
     <string name="about_section_backup">备份与恢复</string>
-    <string name="about_section_experiment">实验与调试</string>
-    <string name="about_sub_experiment">实验性开关与调试入口，默认不启用</string>
+    <string name="about_section_experiment">实验</string>
+    <string name="about_sub_experiment">实验性开关入口，默认不启用</string>
     <string name="about_section_privacy">隐私与权限</string>
     <string name="about_section_project">关于</string>
     <string name="privacy_perm_query_all">读取应用列表</string>
@@ -43,7 +42,6 @@
     <string name="privacy_perm_internet">网络访问</string>
     <string name="privacy_perm_internet_desc">android.permission.INTERNET：仅用于从 GitHub 检查更新</string>
     <string name="privacy_commitment_desc">不收集、不上传个人数据；白名单与设置仅保存在本机；无统计分析、无广告、无追踪 SDK；代码开源可审计</string>
-    <string name="no_developer_options">这里没有开发者选项</string>
     <string name="about_sub_hide_icon_on">已隐藏，可从 LSPosed 打开</string>
     <string name="about_sub_hide_icon_off">已显示，点击后隐藏</string>
     <string name="about_sub_check_update">当前版本 %1$s (%2$d)</string>
@@ -74,13 +72,12 @@
     <string name="licenses_section_deps">依赖</string>
     <string name="licenses_section_refs">参考项目</string>
     <string name="licenses_section_licenses">许可证</string>
-    <string name="licenses_section_this_app">本项目</string>
     <string name="license_view_full_text">点击查看全文</string>
     <string name="license_apache_2">Apache License 2.0</string>
     <string name="license_gpl_3">GPL-3.0</string>
     <string name="license_mit">MIT License</string>
     <string name="hide_launcher_icon">隐藏桌面图标</string>
-    <!-- 语言名一律用原文，两个语言文件里保持完全一致，不要在翻译时改写。 -->    <string name="theme_mode">主题模式</string>
+    <string name="theme_mode">主题模式</string>
     <string name="palette_style">调色风格</string>
     <string name="color_spec">颜色规格</string>
     <string name="about_sub_theme_mode">调整应用的主题模式</string>
@@ -115,7 +112,7 @@
     <string name="show_icon_toast">桌面图标已恢复</string>
     <string name="more_menu">更多选项</string>
     <string name="fcm_diagnostics">FCM 诊断</string>
-    <string name="fcm_diagnostics_not_found">当前设备无法打开 FCM 诊断界面。</string>
+    <string name="fcm_diagnostics_not_found">当前设备无法打开 FCM 诊断界面</string>
     <string name="shortcut_settings">设置</string>
     <string name="shortcut_settings_long">打开模块设置</string>
     <string name="shortcut_help_long">在浏览器中查看帮助</string>
@@ -129,8 +126,17 @@
     <string name="experiment">实验功能</string>
     <string name="experiment_section_battery">电池</string>
     <string name="experiment_wechat_shield">禁止系统恢复微信省电策略</string>
-    <string name="experiment_wechat_shield_on">已拦截自动改写为无限制</string>
-    <string name="experiment_wechat_shield_desc">启用后，微信的省电策略将由你指定，需自行前往手机管家「省电策略」及 AOSP「电池优化」调整选项，系统将无法恢复微信默认的省电策略；除非你清楚自己在做什么，否则请保持禁用</string>
+    <string name="experiment_wechat_shield_desc">仅在上一项开启时生效；阻止手机管家改写微信的省电策略为「无限制」，需自行前往手机管家调整相关选项</string>
+    <string name="experiment_wechat_doze_keepout">禁止系统将微信写回电池未优化名单</string>
+    <string name="experiment_wechat_doze_keepout_desc">启用后，将阻止微信进入 AOSP 电池优化中的「未优化」名单，需自行调整为优化</string>
+
+    <string name="experiment_section_sleep">睡眠模式</string>
+    <string name="experiment_sleep_keepalive">保护 WiFi 不断网</string>
+    <string name="experiment_sleep_keepalive_desc">启用后，进入睡眠模式时 WiFi 保持开启，FCM 通道不会整夜中断；夜间耗电增加</string>
+    <string name="experiment_sleep_keepalive_data">保护移动数据不断网</string>
+    <string name="experiment_sleep_keepalive_data_desc">启用后，移动数据与 WiFi 均保持整夜不断网；夜间耗电更多</string>
+    <string name="experiment_sleep_keepalive_charging">仅在充电时不断网</string>
+    <string name="experiment_sleep_keepalive_charging_desc">启用后，夜间未充电时将保持系统原有的睡眠断网策略以省电</string>
 
     <!-- 模块状态页 -->
     <string name="status_yes">是</string>
@@ -138,4 +144,7 @@
     <string name="app_list_refreshed">应用列表已刷新</string>
     <string name="a11y_allowlist_on">已在白名单</string>
     <string name="a11y_allowlist_off">不在白名单</string>
+    <!-- 多选行状态，拼进整行的无障碍描述里 -->
+    <string name="row_selected">已选中</string>
+    <string name="row_unselected">未选中</string>
 </resources>

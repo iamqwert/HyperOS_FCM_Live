@@ -2,7 +2,9 @@
 <resources>
     <!--
       Dark counterpart of values/colors.xml. Resolved when the user forces dark
-      (ThemeSupport.attach rewrites uiMode).
+      (ThemeSupport.attach rewrites uiMode) and when the system is dark itself.
+      Like the light file this is now the only definition of these names — the
+      former `values-night-v31` Monet overrides are gone.
     -->
     <color name="md_primary">#E8B4C0</color>
     <color name="md_on_primary">#4A0F22</color>
@@ -40,18 +42,4 @@
 
     <!-- Page background: one step deeper than the cards so they stand out. -->
     <color name="md_page_bg">#0E0E10</color>
-    <color name="md_card">#121212</color>
-    <color name="md_icon_tint">#E0C8CE</color>
-    <color name="md_hint_light">#9A8288</color>
-
-    <!-- Inverse: light bubble on dark surface. -->
-    <color name="md_tooltip_bg">#FF1C1B1F</color>
-    <color name="md_tooltip_text">#FFFFFFFF</color>
-
-    <!-- Overflow menu: the page colour. -->
-    <color name="md_popup_menu_bg">#0E0E10</color>
-    <color name="md_popup_item_ripple">#29FFFFFF</color>
-
-    <!-- Hover state layer: on-surface at 8%. -->
-    <color name="md_state_hover">#14F1E4E7</color>
 </resources>

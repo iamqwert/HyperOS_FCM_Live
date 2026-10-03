@@ -1,23 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Batch remove: three horizontal strokes — top-right, middle, bottom-left. -->
+<!-- Official Material icon glyph, verbatim path. Source: https://fonts.google.com/icons / github.com/google/material-design-icons (Apache-2.0) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:pathData="M10,6 H20"
-        android:strokeColor="@android:color/white"
-        android:strokeLineCap="round"
-        android:strokeWidth="2.2" />
-    <path
-        android:pathData="M7,12 H17"
-        android:strokeColor="@android:color/white"
-        android:strokeLineCap="round"
-        android:strokeWidth="2.2" />
-    <path
-        android:pathData="M4,18 H14"
-        android:strokeColor="@android:color/white"
-        android:strokeLineCap="round"
-        android:strokeWidth="2.2" />
+        android:fillColor="@android:color/white"
+        android:pathData="M14,10H3v2h11V10z M14,6H3v2h11V6z M3,16h7v-2H3V16z M14.41,22L17,19.41L19.59,22L21,20.59L18.41,18L21,15.41L19.59,14 L17,16.59L14.41,14L13,15.41L15.59,18L13,20.59L14.41,22z" />
 </vector>

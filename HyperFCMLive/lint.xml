@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Lint configuration.
+
+  UseKtx is off on purpose, not by neglect. Every one of its suggestions asks
+  for an androidx.core-ktx extension at a call site that already works without
+  it, and this module keeps its dependency list as short as the platform
+  allows — adding core-ktx to satisfy a style rule is the wrong trade.
+
+  Left at warning level those ~35 entries are most of the report, and the
+  point of a report is that a real error is findable in it.
+
+  The remaining warnings are NOT silenced, because each one is a real question
+  somebody has to answer:
+  - ApplySharedPref (Prefs.kt): `commit` on purpose — the write broadcasts to
+    system_server, so it has to have landed before the broadcast leaves.
+  - DiscouragedPrivateApi (Hooker.kt): the whole module is reflection into
+    ROM-private APIs; that is what it is for.
+  - IconMissingDensityFolder: only the three shortcut PNGs are density-specific
+    (xxhdpi); every other drawable is a vector, so the missing folders are not a
+    gap in coverage.
+
+  Two groups that used to be reported here were removed rather than silenced,
+  because what they described no longer exists:
+  - UnusedResources: the XML token layer (`type.xml`, `shape.xml`, `dimens.xml`,
+    `motion.xml`, `m3_emphasized_accelerate.xml`) restated the M3 type / shape /
+    motion scale with no runtime consumer, so it only shipped a second copy of
+    values `ComposeTokens.kt` already defines. Deleted once the last View screen
+    became Compose.
+  - ObsoleteSdkInt: version guards that minSdk 35 had made always-true. Each
+    branch was folded into its single reachable path.
+-->
+<lint>
+    <issue id="UseKtx" severity="ignore" />
+</lint>

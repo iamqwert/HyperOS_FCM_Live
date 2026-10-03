@@ -1,25 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Official Material icon glyph, verbatim path. Source: https://fonts.google.com/icons / github.com/google/material-design-icons (Apache-2.0) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
-    android:viewportHeight="24"
-    android:tint="@color/md_icon_tint">
+    android:viewportHeight="24">
     <path
         android:fillColor="@android:color/white"
-        android:pathData="M12,2.5L2.5,7.25L12,12L21.5,7.25L12,2.5z" />
-    <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M2.5,12L12,16.75L21.5,12"
-        android:strokeColor="@android:color/white"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="2" />
-    <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M2.5,16.75L12,21.5L21.5,16.75"
-        android:strokeColor="@android:color/white"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="2" />
+        android:pathData="M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z" />
 </vector>
