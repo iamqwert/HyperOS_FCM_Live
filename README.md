@@ -4,7 +4,7 @@
 
 **本模块使用 AI 辅助**
 
-[使用帮助](HELP.md) · [更新日志](CHANGELOG.md) · [下载](https://github.com/iamqwert/HyperOS_FCM_Live/releases)
+[使用帮助](HELP.md) · [技术文档](HOOKS_AND_DIAGNOSTICS.md) · [更新日志](CHANGELOG.md) · [下载](https://github.com/iamqwert/HyperOS_FCM_Live/releases)
 
 ---
 
