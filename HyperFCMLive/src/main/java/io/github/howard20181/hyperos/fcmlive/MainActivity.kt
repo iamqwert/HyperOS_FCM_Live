@@ -1,5 +1,11 @@
 package io.github.howard20181.hyperos.fcmlive
 
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.ComposeView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.ComponentName
@@ -8,8 +14,6 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
-import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -17,50 +21,80 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
-import android.util.TypedValue
-import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.FrameLayout
-import android.widget.ImageButton
-import android.widget.ImageView
-import android.widget.ListView
-import android.widget.PopupWindow
-import android.widget.SearchView
-import android.widget.TextView
-import android.widget.Toast
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import io.github.howard20181.hyperos.fcmlive.theme.AppPalette
+import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport
-import io.github.howard20181.hyperos.fcmlive.ui.WavySwipeRefreshLayout
+import io.github.howard20181.hyperos.fcmlive.ui.AppListStore
+import io.github.howard20181.hyperos.fcmlive.ui.MainActions
+import io.github.howard20181.hyperos.fcmlive.ui.MainScreen
+import io.github.howard20181.hyperos.fcmlive.ui.MainTopBarState
+import io.github.howard20181.hyperos.fcmlive.ui.OverflowState
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * Settings screen: pick which apps FCM may wake / auto-launch.
  * MD3-inspired card list; search + overflow (system apps / hide icon) in the
  * top bar; FAB opens GMS FCM diagnostics.
  */
-class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
+class MainActivity : AppCompatActivity() {
 
-    private val allApps = ArrayList<AppListAdapter.AppEntry>()
-    private val filteredApps = ArrayList<AppListAdapter.AppEntry>()
+    private val allApps = ArrayList<AppListStore.AppEntry>()
+    /**
+     * What the list draws. A snapshot list rather than a plain ArrayList: the
+     * rows are composed from it, so the mutations here are what recomposes them.
+     */
+    private val filteredApps = mutableStateListOf<AppListStore.AppEntry>()
     private var allowlist: Set<String> = HashSet()
-    private var adapter: AppListAdapter? = null
-    private var titleView: TextView? = null
-    private var searchView: SearchView? = null
-    private var btnSearch: ImageButton? = null
-    private var btnBack: ImageButton? = null
-    private var btnMore: ImageButton? = null
-    private var btnBatchAdd: ImageButton? = null
-    private var btnBatchRemove: ImageButton? = null
-    private var btnSelectAll: ImageButton? = null
-    private var swipeRefresh: WavySwipeRefreshLayout? = null
+
+    /** Row icons: the only piece of the old adapter that survived. */
+    private var store: AppListStore? = null
+
+    /** Multi-select staging set. Applied to the allowlist only on a batch action. */
+    private val selectedPkgs = LinkedHashSet<String>()
+
+    /** Compose reads these; every UI change goes through [pushUiState]. */
+    private var topBarState by mutableStateOf(MainTopBarState(title = ""))
+    private var multiSelectUi by mutableStateOf(false)
+    private var selectedUi by mutableStateOf<Set<String>>(emptySet())
+
+    /**
+     * The M3 feedback line. Owned here because every message on this screen
+     * originates here; handed to the tree, which is what actually draws it.
+     */
+    private val snackbarHostState = SnackbarHostState()
+
+    /**
+     * Scope for the one asynchronous thing this screen owns outside the tree:
+     * showing a message. Cancelled with the Activity, so a line that is still
+     * queued cannot outlive the window it was going to be drawn in.
+     */
+    private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /** Pull-to-refresh is showing its indicator; the scan owns when it stops. */
+    private var refreshing by mutableStateOf(false)
+
+    /**
+     * The live search text. Compose state, not a plain field: the search field
+     * reads it directly, so the text survives the field leaving composition —
+     * which is what exit and multi-select do — and a restore re-composes the
+     * field already holding it. Clearing it is just an assignment.
+     */
+    private var currentQuery by mutableStateOf("")
+    /** The Compose host; TalkBack announcements need a real View. */
+    private var appListHost: View? = null
     private var backInvokedCallback: OnBackInvokedCallback? = null
     private var searching = false
     private var multiSelectMode = false
@@ -78,23 +112,22 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
 
     /** True only after the first full package scan — blocks empty-list toasts while loading. */
     private var packagesReady = false
-    private var currentQuery = ""
     private var showSystemApps = false
 
-    /** Empty-list toast is delayed and cancelled if a rescan fills the list. */
-    private val emptyListToastRunnable = Runnable {
-        emptyListToastRunnablePosted = false
+    /** Empty-list message is delayed and cancelled if a rescan fills the list. */
+    private val emptyListMessageRunnable = Runnable {
+        emptyListMessagePosted = false
         if (!packagesReady || currentQuery.isNotEmpty()) return@Runnable
         if (filteredApps.isNotEmpty() || allApps.isEmpty()) return@Runnable
         if (!showFcmSupportedOnly && !excludeMiPushApps) return@Runnable
         if (!isAppListReadable()) return@Runnable
-        Toast.makeText(
-            this,
-            if (showFcmSupportedOnly) R.string.no_fcm_apps_found else R.string.no_apps_found,
-            Toast.LENGTH_SHORT
-        ).show()
+        showMessage(
+            getString(
+                if (showFcmSupportedOnly) R.string.no_fcm_apps_found else R.string.no_apps_found
+            )
+        )
     }
-    private var emptyListToastRunnablePosted = false
+    private var emptyListMessagePosted = false
 
     /** Overflow: when true, list only apps whose Manifest has FCM-style receivers. */
     private var showFcmSupportedOnly = false
@@ -108,17 +141,11 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
 
     /**
      * Overflow: when true, the module leaves unchecked apps to the system once
-     * at least one app is checked (`Hooker#shouldApply`). Read from the
+     * at least one app is checked (`Hooker#moduleAppliesTo`). Read from the
      * local mirror here; the live copy the hooks read lives in remote prefs.
      */
     private var strictMode = false
     private var xposedService: XposedService? = null
-    private var activeTooltip: PopupWindow? = null
-
-    /** Overflow menu, dismissed on destroy so a rotation cannot leak the window. */
-    private var activeOverflowMenu: PopupWindow? = null
-    private val dismissTooltipRunnable = Runnable { dismissActiveTooltip() }
-
     /** Palette this activity was painted with; a mismatch on resume = repaint. */
     private var appliedPalette: AppPalette? = null
 
@@ -145,9 +172,7 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
     private val requestInstalledAppsLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (!granted) {
-                Toast.makeText(
-                    this, R.string.installed_apps_permission_denied, Toast.LENGTH_LONG
-                ).show()
+                showMessage(getString(R.string.installed_apps_permission_denied))
             }
             loadApps()
         }
@@ -160,18 +185,10 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
         super.onCreate(savedInstanceState)
         ThemeSupport.onCreate(this)
         appliedPalette = ThemeEngine.palette(this)
-        try {
-            setContentView(R.layout.activity_main)
-        } catch (t: Throwable) {
-            Log.e(TAG_UI, "setContentView failed", t)
-            finish()
-            return
-        }
-
-        applySystemBarInsets()
-
-        titleView = findViewById<TextView?>(R.id.toolbar_title)?.also {
-            it.setText(R.string.settings_title)
+        // Row icons are loaded off-thread by the store; when a batch lands it
+        // re-emits the visible list so the rows recompose with their icons.
+        store = AppListStore(this) {
+            runOnUiThreadSafe { refreshVisibleRows() }
         }
 
         // Seed UI order from the local cache so allowlisted apps sit on top
@@ -199,104 +216,10 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
         // Launcher long-press shortcuts (see res/xml/shortcuts.xml).
         handleShortcutIntent(intent)
 
-        adapter = AppListAdapter(this, filteredApps, object : AppListAdapter.OnCardListener {
-            override fun onToggleAllowlist(packageName: String, checked: Boolean) {
-                if (checked) {
-                    allowlist = HashSet(allowlist).also { it.add(packageName) }
-                    perhapsAdvertiseMultiSelect()
-                } else {
-                    allowlist = HashSet(allowlist).also { it.remove(packageName) }
-                }
-                updateAllowlist()
-                // Stay in place on tap. Order refreshes on pull-to-refresh / reopen.
-                for (app in allApps) {
-                    if (app.packageName == packageName) {
-                        app.checked = checked
-                        break
-                    }
-                }
-            }
-
-            override fun onEnterMultiSelect(packageName: String) {
-                enterMultiSelect(packageName)
-            }
-
-            override fun onSelectionChanged(count: Int) {
-                if (multiSelectMode) {
-                    updateSelectionTitle(count)
-                    updateSelectAllIcon()
-                }
-            }
-        })
-
-        searchView = findViewById<SearchView?>(R.id.search_view)?.also {
-            it.setOnQueryTextListener(this)
-            styleSearchView(it)
-        }
-        btnBack = findViewById(R.id.btn_back)
-        btnSearch = findViewById(R.id.btn_search)
-        btnMore = findViewById(R.id.btn_more)
-        btnBatchAdd = findViewById(R.id.btn_batch_add)
-        btnBatchRemove = findViewById(R.id.btn_batch_remove)
-        btnSelectAll = findViewById(R.id.btn_select_all)
-        btnSearch?.let {
-            it.setOnClickListener { enterSearch() }
-            attachTip(it, R.string.tooltip_search)
-        }
-        btnBack?.let {
-            it.setOnClickListener {
-                if (multiSelectMode) exitMultiSelect() else exitSearch()
-            }
-            attachTip(it, R.string.exit_search)
-        }
-        btnMore?.let {
-            it.setOnClickListener(this::showOverflowMenu)
-            attachTip(it, R.string.more_menu)
-        }
-        btnBatchAdd?.let {
-            it.setOnClickListener { applyBatchAllowlist(true) }
-            attachTip(it, R.string.batch_add_allowlist)
-        }
-        btnBatchRemove?.let {
-            it.setOnClickListener { applyBatchAllowlist(false) }
-            attachTip(it, R.string.batch_remove_allowlist)
-        }
-        btnSelectAll?.let {
-            it.setOnClickListener { toggleSelectAllVisible() }
-            attachTip(it, R.string.select_all)
-        }
-
-        // Material / Android standard pull-to-refresh (SwipeRefreshLayout),
-        // with the M3 Expressive LoadingIndicator standing in for the stock
-        // spinner. Both are tinted with the accent so they match the page.
-        swipeRefresh = findViewById<WavySwipeRefreshLayout?>(R.id.refresh_layout)?.also {
-            try {
-                val palette = ThemeEngine.palette(this)
-                // The stock spinner is never drawn, but its colour is kept in
-                // sync so any stock behaviour that reads it stays consistent.
-                it.setColorSchemeColors(palette.primary)
-                // Contained loading indicator: a plate in primaryContainer with
-                // the ring in onPrimaryContainer, per the M3 spec.
-                it.setIndicatorColors(palette.primaryContainer, palette.scheme.onPrimaryContainer)
-            } catch (ignored: Throwable) {
-            }
-            it.setOnRefreshListener { loadApps() }
-            // Only at the top of the list; default Material trigger distance.
-            it.isEnabled = true
-        }
-
-        findViewById<View>(R.id.fab_fcm_diagnostics)?.let {
-            it.setOnClickListener { openFcmDiagnostics() }
-            attachTip(it, R.string.fcm_diagnostics)
-        }
-
-        val list = findViewById<View>(R.id.app_list)
-        // Stretch overscroll (Android 12+): pull past the edge and the list
-        // itself bends — never a glow that fights the page background.
-        list?.overScrollMode = View.OVER_SCROLL_ALWAYS
-        if (list is ListView) {
-            list.adapter = adapter
-        }
+        installContent()
+        // The bar used to get its title from the layout; nothing paints it until
+        // the first state push, so do that before anything can be drawn empty.
+        pushUiState()
 
         // Idle at startup, so this is a no-op; kept for symmetry with the state
         // changes below (enterSearch / enterMultiSelect ...).
@@ -315,7 +238,197 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
         startUpdateCheck()
     }
 
-    /** Launch-time update check: Toast only (About keeps its badge). */
+    /**
+     * Host the whole page in one Compose tree.
+     *
+     * Everything it shows comes from state and everything it does comes back
+     * through these callbacks — so none of the multi-select / search logic
+     * below had to change to feed it. The search text is `currentQuery` itself:
+     * the field reads it, and every keystroke lands back in [onQueryTextChange].
+     *
+     * The list's `LazyListState` is deliberately not built here. Compose only
+     * saves what a composition created, so a state handed in from the outside
+     * is never restored — the list came back at the top after a rotation, the
+     * opposite of what building it here was meant to achieve. The screen
+     * remembers its own.
+     */
+    private fun installContent() {
+        val host = ComposeView(this)
+        appListHost = host
+        setContentView(host)
+        host.setContent {
+            HyperFCMLiveTheme {
+                MainScreen(
+                    topBarState = topBarState,
+                    actions = MainActions(
+                        onBack = { if (multiSelectMode) exitMultiSelect() else exitSearch() },
+                        onSearch = { enterSearch() },
+                        onBatchAdd = { applyBatchAllowlist(true) },
+                        onBatchRemove = { applyBatchAllowlist(false) },
+                        onSelectAll = { toggleSelectAllVisible() },
+                        onAbout = { startActivity(Intent(this, AboutActivity::class.java)) },
+                        onToggleShowSystemApps = { toggleOverflowShowSystemApps() },
+                        onToggleShowFcmOnly = { toggleOverflowShowFcmOnly() },
+                        onToggleExcludeMiPush = { toggleOverflowExcludeMiPush() },
+                        onToggleStrictMode = { toggleOverflowStrictMode() }
+                    ),
+                    // The field reads the query from this state, so no view
+                    // hand-off is needed: whatever currentQuery holds when the
+                    // bar composes (including a restore across a rotation) is
+                    // what it shows.
+                    query = currentQuery,
+                    onQueryChange = { onQueryTextChange(it) },
+                    apps = filteredApps,
+                    multiSelect = multiSelectUi,
+                    selected = selectedUi,
+                    onRowClick = { handleRowTap(it) },
+                    onRowLongClick = { handleRowLongPress(it) },
+                    loadIcon = { store?.loadIcon(it) },
+                    refreshing = refreshing,
+                    onRefresh = { refreshing = true; loadApps() },
+                    onDiagnostics = { openFcmDiagnostics() },
+                    snackbarHostState = snackbarHostState
+                )
+            }
+        }
+    }
+
+    /**
+     * One transient line of feedback, in the M3 way.
+     *
+     * Every message this screen produced used to be a `Toast`: a second
+     * feedback stack that no theme could reach, raised outside this window and
+     * invisible to the tree around it. A snackbar is drawn by the page it
+     * belongs to and follows that page's palette, which is the whole point.
+     */
+    private fun showMessage(text: String) {
+        uiScope.launch {
+            // A burst of taps replaces the line rather than queueing behind it.
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(text)
+        }
+    }
+
+    /**
+     * Publish everything the Compose half reads, after every change to the flags
+     * below. Replaces what used to be per-View visibility calls: one state
+     * object now decides what the bar looks like.
+     */
+    private fun pushUiState() {
+        multiSelectUi = multiSelectMode
+        selectedUi = HashSet(selectedPkgs)
+        topBarState = MainTopBarState(
+            title = if (multiSelectMode) {
+                getString(R.string.selected_count, selectedPkgs.size)
+            } else {
+                getString(R.string.settings_title)
+            },
+            searching = searching,
+            multiSelect = multiSelectMode,
+            allVisibleSelected = isAllVisibleSelected(),
+            overflow = OverflowState(
+                showSystemApps, showFcmSupportedOnly, excludeMiPushApps, strictMode
+            )
+        )
+    }
+
+    /**
+     * Re-emit the visible rows so they recompose with the icons that just landed.
+     * `AppEntry.icon` is a plain field, so nothing else can tell the rows it
+     * changed — this replaces the `notifyDataSetChanged` the adapter used to send.
+     */
+    private fun refreshVisibleRows() {
+        if (filteredApps.isEmpty()) {
+            return
+        }
+        val snapshot = filteredApps.toList()
+        filteredApps.clear()
+        filteredApps.addAll(snapshot)
+    }
+
+    /** Normal-mode tap toggles the allowlist; a multi-select tap only stages. */
+    private fun handleRowTap(app: AppListStore.AppEntry) {
+        if (multiSelectMode) {
+            toggleSelected(app.packageName)
+            return
+        }
+        val next = !app.checked
+        app.checked = next
+        refreshVisibleRows()
+        A11yUtils.announce(
+            appListHost,
+            getText(if (next) R.string.status_yes else R.string.status_no)
+        )
+        if (next) {
+            allowlist = HashSet(allowlist).also { it.add(app.packageName) }
+            perhapsAdvertiseMultiSelect()
+        } else {
+            allowlist = HashSet(allowlist).also { it.remove(app.packageName) }
+        }
+        updateAllowlist()
+        // Stay in place on tap. Order refreshes on pull-to-refresh / reopen.
+        for (item in allApps) {
+            if (item.packageName == app.packageName) {
+                item.checked = next
+                break
+            }
+        }
+    }
+
+    private fun handleRowLongPress(app: AppListStore.AppEntry) {
+        if (multiSelectMode) {
+            toggleSelected(app.packageName)
+        } else {
+            enterMultiSelect(app.packageName)
+        }
+    }
+
+    private fun toggleSelected(packageName: String) {
+        if (!selectedPkgs.add(packageName)) {
+            selectedPkgs.remove(packageName)
+        }
+        pushUiState()
+    }
+
+    private fun toggleOverflowShowSystemApps() {
+        showSystemApps = !showSystemApps
+        pushUiState()
+        loadApps()
+    }
+
+    private fun toggleOverflowShowFcmOnly() {
+        showFcmSupportedOnly = !showFcmSupportedOnly
+        getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
+            .edit()
+            .putBoolean(Prefs.KEY_SHOW_FCM_ONLY, showFcmSupportedOnly)
+            .apply()
+        // Filter only — keep package scan; toggle just hides non-FCM rows.
+        filterApps(currentQuery)
+    }
+
+    private fun toggleOverflowExcludeMiPush() {
+        excludeMiPushApps = !excludeMiPushApps
+        getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
+            .edit()
+            .putBoolean(Prefs.KEY_EXCLUDE_MIPUSH, excludeMiPushApps)
+            .apply()
+        // Filter only — the package scan stands, and so does every allowlist
+        // entry: this toggle decides what is offered, not what the module
+        // already does for an app.
+        filterApps(currentQuery)
+    }
+
+    private fun toggleOverflowStrictMode() {
+        strictMode = !strictMode
+        // Written to the remote group the hooks read, then announced with the
+        // same broadcast as a list edit, so it is live at once. Nothing in the
+        // list changes: the toggle only decides what the module does for apps
+        // that are not checked.
+        Prefs.writeStrictMode(this, remotePrefs(), strictMode)
+        pushUiState()
+    }
+
+    /** Launch-time update check: a line of feedback only (About keeps its badge). */
     private fun startUpdateCheck() {
         UpdateChecker.checkAutoAsync(this, object : UpdateChecker.Callback {
             override fun onResult(
@@ -325,11 +438,7 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
             ) {
                 if (updateAvailable) {
                     runOnUiThreadSafe {
-                        Toast.makeText(
-                            this@MainActivity,
-                            getString(R.string.update_found, latestVersion),
-                            Toast.LENGTH_LONG
-                        ).show()
+                        showMessage(getString(R.string.update_found, latestVersion))
                     }
                 }
             }
@@ -382,146 +491,6 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
     }
 
     /**
-     * Long-press tooltip that never covers the anchor icon.
-     * HyperOS (and some AOSP builds) place the system bubble on top of the
-     * control; we show a custom MD-style popup with an explicit gap instead.
-     */
-    private fun attachTip(view: View?, tooltipRes: Int) {
-        if (view == null) {
-            return
-        }
-        val tip: CharSequence = getText(tooltipRes)
-        view.contentDescription = tip
-        // Suppress framework / HyperOS bubbles that sit on the icon.
-        view.tooltipText = null
-        view.isLongClickable = true
-        view.setOnLongClickListener { v ->
-            showAnchorTooltip(v, tip)
-            true
-        }
-    }
-
-    /** Show a short bubble below (or above when needed) the given anchor. */
-    private fun showAnchorTooltip(anchor: View?, text: CharSequence?) {
-        dismissActiveTooltip()
-        if (anchor == null || text.isNullOrEmpty() || isFinishing) {
-            return
-        }
-
-        // HyperOS may re-surface contentDescription as a covering bubble on
-        // long-press. Hide it while our offset tooltip is visible, restore for
-        // accessibility after dismiss.
-        val restoredCd: CharSequence = anchor.contentDescription ?: text
-        anchor.contentDescription = null
-
-        val tipView = TextView(this)
-        tipView.text = text
-        A11yUtils.markTooltip(tipView, text)
-        val tooltipPalette = ThemeEngine.palette(this)
-        tipView.setTextColor(tooltipPalette.tooltipText)
-        tipView.setTextAppearance(R.style.TextAppearance_HyperFCMLive_BodySmall)
-        tipView.gravity = Gravity.CENTER
-        tipView.background = ThemeSupport.cardBackground(this, tooltipPalette.tooltipBg, 4f)
-        val padH = dp(12)
-        val padV = dp(6)
-        tipView.setPadding(padH, padV, padH, padV)
-        tipView.setSingleLine(true)
-        tipView.includeFontPadding = false
-
-        val screenW = resources.displayMetrics.widthPixels
-        val screenH = resources.displayMetrics.heightPixels
-        val maxTextW = Math.max(dp(64), Math.min(dp(240), screenW - dp(48)))
-        tipView.maxWidth = maxTextW
-        tipView.measure(
-            View.MeasureSpec.makeMeasureSpec(maxTextW, View.MeasureSpec.AT_MOST),
-            View.MeasureSpec.makeMeasureSpec(dp(64), View.MeasureSpec.AT_MOST)
-        )
-        val tipW = Math.max(tipView.measuredWidth, padH * 2 + dp(24))
-        val tipH = Math.max(tipView.measuredHeight, dp(28))
-
-        val popup = PopupWindow(tipView, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        popup.contentView = tipView
-        popup.width = tipW
-        popup.height = tipH
-        popup.isOutsideTouchable = true
-        popup.isFocusable = false
-        popup.isTouchable = true
-        popup.isClippingEnabled = true
-        try {
-            popup.elevation = dp(6).toFloat()
-        } catch (ignored: Throwable) {
-        }
-        // Transparent so the rounded shape is not clipped by a default frame.
-        popup.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        popup.setOnDismissListener {
-            tipView.removeCallbacks(dismissTooltipRunnable)
-            if (activeTooltip === popup) {
-                activeTooltip = null
-            }
-            try {
-                anchor.contentDescription = restoredCd
-            } catch (ignored: Throwable) {
-            }
-        }
-
-        val loc = IntArray(2)
-        anchor.getLocationInWindow(loc)
-        val gap = dp(8)
-        val edge = dp(8)
-        // Freeform / split-screen: clamp against the window, not the display.
-        val windowW = window.decorView.width
-        val windowH = window.decorView.height
-
-        // Horizontal: center on the anchor, then clamp into the window.
-        var screenX = loc[0] + (anchor.width - tipW) / 2
-        if (screenX < edge) {
-            screenX = edge
-        }
-        if (windowW > 0 && screenX + tipW > windowW - edge) {
-            screenX = Math.max(edge, windowW - edge - tipW)
-        }
-
-        // Vertical: prefer a clear gap under the icon; flip above when tight
-        // (toolbar icons near the status bar, FAB near the nav bar).
-        val yBelow = loc[1] + anchor.height + gap
-        val yAbove = loc[1] - gap - tipH
-        val roomBelow = (if (windowH > 0) windowH else screenH) - edge - (loc[1] + anchor.height)
-        val roomAbove = loc[1] - edge
-        val fitsBelow = roomBelow >= tipH + gap
-        val fitsAbove = roomAbove >= tipH + gap
-        var screenY = when {
-            fitsBelow -> yBelow
-            fitsAbove -> yAbove
-            roomBelow >= roomAbove -> Math.min(yBelow, (if (windowH > 0) windowH else screenH) - edge - tipH)
-            else -> Math.max(yAbove, edge)
-        }
-        if (screenY < edge) {
-            screenY = edge
-        }
-        if (windowH > 0 && screenY + tipH > windowH - edge) {
-            screenY = Math.max(edge, windowH - edge - tipH)
-        }
-
-        try {
-            popup.showAtLocation(anchor, Gravity.NO_GRAVITY, screenX, screenY)
-            activeTooltip = popup
-            tipView.postDelayed(dismissTooltipRunnable, 2200)
-        } catch (ignored: Throwable) {
-        }
-    }
-
-    private fun dismissActiveTooltip() {
-        val popup = activeTooltip
-        activeTooltip = null
-        if (popup != null) {
-            try {
-                popup.dismiss()
-            } catch (ignored: Throwable) {
-            }
-        }
-    }
-
-    /**
      * Predictive back (Android 13+, opt-in via enableOnBackInvokedCallback):
      * register only while there is an internal state to unwind. In the idle
      * state no callback is registered, which is what lets the system run its
@@ -565,11 +534,15 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
     override fun onResume() {
         super.onResume()
         // Appearance settings may have changed while the settings screen was
-        // on top (palette style, theme mode, seed color...). ThemeEngine was
-        // invalidated there, so a fresh instance here means we are showing
-        // stale colors: rebuild the whole activity to repaint everything.
-        if (appliedPalette != null && ThemeEngine.palette(this) !== appliedPalette) {
-            recreate()
+        // on top (palette style, theme mode, seed color...). The Compose tree
+        // follows ThemeEngine's generation counter and re-skins on its own;
+        // what recomposes nowhere is the View-side window chrome. Repaint that
+        // here instead of rebuilding the whole activity — the old `recreate()`
+        // read as a jump on return from the settings screen.
+        val palette = ThemeEngine.palette(this)
+        if (appliedPalette != null && palette !== appliedPalette) {
+            ThemeSupport.reapplyWindow(this)
+            appliedPalette = palette
         }
     }
 
@@ -579,11 +552,8 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
         outState.putBoolean(KEY_STATE_SEARCHING, searching)
         outState.putBoolean(KEY_STATE_MULTI_SELECT, multiSelectMode)
         outState.putBoolean(KEY_STATE_SHOW_SYSTEM, showSystemApps)
-        if (multiSelectMode && adapter != null) {
-            outState.putStringArrayList(
-                KEY_STATE_SELECTION,
-                ArrayList(adapter!!.getSelectedPackages())
-            )
+        if (multiSelectMode) {
+            outState.putStringArrayList(KEY_STATE_SELECTION, ArrayList(selectedPkgs))
         }
     }
 
@@ -601,18 +571,18 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
         currentQuery = saved.getString(KEY_STATE_QUERY) ?: ""
         if (saved.getBoolean(KEY_STATE_MULTI_SELECT, false)) {
             enterMultiSelect(null)
-            val selection = saved.getStringArrayList(KEY_STATE_SELECTION)
-            val ad = adapter
-            if (ad != null && selection != null) {
-                ad.setSelectedPackages(HashSet(selection))
-                updateSelectionTitle(ad.getSelectedPackages().size)
-                updateSelectAllIcon()
+            saved.getStringArrayList(KEY_STATE_SELECTION)?.let { selection ->
+                // Restored whole, as before: the list has not been scanned yet at
+                // this point, so filtering by "is it loaded" would drop the
+                // selection outright.
+                selectedPkgs.clear()
+                selectedPkgs.addAll(selection)
             }
+            pushUiState()
             return
         }
         if (saved.getBoolean(KEY_STATE_SEARCHING, false)) {
             enterSearch()
-            searchView?.setQuery(currentQuery, false)
         }
         filterApps(currentQuery)
     }
@@ -649,14 +619,13 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
     }
 
     override fun onDestroy() {
-        dismissActiveTooltip()
-        dismissOverflowMenu()
-        cancelEmptyListToast()
+        cancelEmptyListMessage()
+        uiScope.cancel()
         pendingFilter?.let {
             uiHandler.removeCallbacks(it)
             pendingFilter = null
         }
-        adapter?.shutdown()
+        store?.shutdown()
         if (isFinishing) {
             // Leaving for real rather than being rebuilt: drop the scan cache so
             // the icons it pins are released with the screen.
@@ -671,133 +640,23 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
         super.onDestroy()
     }
 
-    /**
-     * Pad the top bar by the real window inset so it sits just below the status
-     * bar (no fitsSystemWindows — that stacked with dimen padding and pushed
-     * the title too far down).
-     */
-    private fun applySystemBarInsets() {
-        val topBar = findViewById<View>(R.id.top_bar) ?: return
-        val fab = findViewById<View>(R.id.fab_fcm_diagnostics)
-        UiUtils.applyBarInsets(this, topBar, findViewById(R.id.app_list), 88) { _, bottom ->
-            applyFabBottomMargin(fab, bottom)
-        }
-        applyFabBottomMargin(fab, 0)
-    }
-
-    /**
-     * Keep a fixed visual gap under the FAB: at least `base` dp from the
-     * window bottom, or nav-bar height + extra when a system bar occupies the
-     * edge — so large-corner devices are not clipped, without leaving a huge
-     * hole on small-corner screens.
-     */
-    private fun applyFabBottomMargin(fab: View?, systemBottomInset: Int) {
-        if (fab == null || fab.layoutParams !is FrameLayout.LayoutParams) {
-            return
-        }
-        val base = dp(26)
-        val extra = dp(14)
-        var margin = Math.max(base, systemBottomInset + extra)
-        // If insets missing, still lift a bit on gesture/button nav devices.
-        if (systemBottomInset <= 0) {
-            val nav = navigationBarHeight()
-            margin = Math.max(base, nav + extra)
-        }
-        val lp = fab.layoutParams as FrameLayout.LayoutParams
-        if (lp.bottomMargin != margin) {
-            lp.bottomMargin = margin
-            lp.rightMargin = dp(20)
-            fab.layoutParams = lp
-        }
-    }
-
-    private fun navigationBarHeight(): Int {
-        val id = resources.getIdentifier("navigation_bar_height", "dimen", "android")
-        return if (id > 0) resources.getDimensionPixelSize(id) else 0
-    }
-
-    private fun dp(value: Int): Int = UiUtils.dp(this, value)
-
-    /** Lighter query hint + no underline so inline search does not shift the bar. */
-    private fun styleSearchView(sv: SearchView?) {
-        if (sv == null) {
-            return
-        }
-        sv.setBackgroundColor(Color.TRANSPARENT)
-        val hintColor = getColor(R.color.md_hint_light)
-        val textColor = getColor(R.color.md_on_surface)
-        val ids = intArrayOf(
-            resources.getIdentifier("search_src_text", "id", "android"),
-            resources.getIdentifier("search_edit_text", "id", "android"),
-        )
-        for (id in ids) {
-            if (id == 0) continue
-            val inner = sv.findViewById<View>(id)
-            if (inner is TextView) {
-                inner.setHintTextColor(hintColor)
-                inner.setTextColor(textColor)
-                inner.setBackgroundColor(Color.TRANSPARENT)
-                inner.setSingleLine(true)
-            }
-        }
-        for (name in arrayOf("search_plate", "search_edit_frame", "search_bar")) {
-            val id = resources.getIdentifier(name, "id", "android")
-            if (id == 0) continue
-            val plate = sv.findViewById<View>(id)
-            if (plate != null) {
-                plate.background = null
-                plate.setBackgroundColor(Color.TRANSPARENT)
-            }
-        }
-    }
-
-    /** Title becomes an inline search field; more-menu stays visible. */
+    /** Title becomes an inline search field; everything else is state-driven. */
     private fun enterSearch() {
         if (multiSelectMode) {
             exitMultiSelect()
         }
-        dismissActiveTooltip()
         searching = true
         updateBackCallback()
-        // Keep ListView height stable so the scrollbar does not jump when IME opens.
+        // Keep list height stable so the scrollbar does not jump when IME opens.
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN)
-        titleView?.visibility = View.GONE
-        searchView?.let {
-            it.visibility = View.VISIBLE
-            it.isIconified = false
-            it.requestFocus()
-        }
-        btnSearch?.visibility = View.GONE
-        btnBack?.let {
-            it.visibility = View.VISIBLE
-            attachTip(it, R.string.exit_search)
-        }
-        btnMore?.visibility = View.VISIBLE
-        btnBatchAdd?.visibility = View.GONE
-        btnBatchRemove?.visibility = View.GONE
-        btnSelectAll?.visibility = View.GONE
+        pushUiState()
     }
 
     private fun exitSearch() {
-        dismissActiveTooltip()
         searching = false
         updateBackCallback()
-        searchView?.let {
-            it.setQuery("", false)
-            it.clearFocus()
-            it.visibility = View.GONE
-        }
-        titleView?.let {
-            it.visibility = View.VISIBLE
-            if (!multiSelectMode) {
-                it.setText(R.string.settings_title)
-            }
-        }
-        btnSearch?.visibility = View.VISIBLE
-        btnBack?.visibility = View.GONE
-        btnBatchAdd?.visibility = View.GONE
-        btnBatchRemove?.visibility = View.GONE
-        btnSelectAll?.visibility = View.GONE
+        // Leaving search disposes the field, which drops focus and lowers the
+        // IME on its own; clearing the state is all that is left to do.
         currentQuery = ""
         filterApps("")
     }
@@ -821,89 +680,41 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
         rapidCheckCount++
         if (rapidCheckCount >= RAPID_CHECK_HINT_AT) {
             multiSelectKnown = true
-            Toast.makeText(this, R.string.multi_select_tip, Toast.LENGTH_LONG).show()
+            showMessage(getString(R.string.multi_select_tip))
         }
     }
 
     private fun enterMultiSelect(firstPackage: String?) {
         // The gesture is known from here on: stop advertising it.
         multiSelectKnown = true
-        dismissActiveTooltip()
         if (searching) {
             searching = false
-            searchView?.let {
-                it.setQuery("", false)
-                it.clearFocus()
-                it.visibility = View.GONE
-            }
             currentQuery = ""
             filterApps("")
         }
         multiSelectMode = true
         updateBackCallback()
-        adapter?.let {
-            it.setMultiSelectMode(true)
-            val seed = HashSet<String>()
-            if (firstPackage != null) {
-                seed.add(firstPackage)
-            }
-            it.setSelectedPackages(seed)
+        selectedPkgs.clear()
+        if (firstPackage != null) {
+            selectedPkgs.add(firstPackage)
         }
-        applyMultiSelectBar()
+        pushUiState()
     }
 
     private fun exitMultiSelect() {
         multiSelectMode = false
         updateBackCallback()
-        adapter?.setMultiSelectMode(false)
-        titleView?.let {
-            it.visibility = View.VISIBLE
-            it.setText(R.string.settings_title)
-        }
-        searchView?.visibility = View.GONE
-        btnSearch?.visibility = View.VISIBLE
-        btnBack?.visibility = View.GONE
-        btnMore?.visibility = View.VISIBLE
-        btnBatchAdd?.visibility = View.GONE
-        btnBatchRemove?.visibility = View.GONE
-        btnSelectAll?.visibility = View.GONE
-    }
-
-    private fun applyMultiSelectBar() {
-        if (!multiSelectMode) {
-            return
-        }
-        titleView?.visibility = View.VISIBLE
-        searchView?.visibility = View.GONE
-        btnBack?.let {
-            it.visibility = View.VISIBLE
-            attachTip(it, R.string.exit_multi_select)
-        }
-        btnSearch?.visibility = View.GONE
-        btnMore?.visibility = View.GONE
-        btnBatchAdd?.visibility = View.VISIBLE
-        btnBatchRemove?.visibility = View.VISIBLE
-        btnSelectAll?.visibility = View.VISIBLE
-        val count = adapter?.getSelectedPackages()?.size ?: 0
-        updateSelectionTitle(count)
-        updateSelectAllIcon()
-    }
-
-    private fun updateSelectionTitle(count: Int) {
-        if (titleView != null && multiSelectMode) {
-            titleView!!.text = getString(R.string.selected_count, count)
-        }
+        selectedPkgs.clear()
+        pushUiState()
     }
 
     /** All currently visible (filtered) rows are selected → show deselect-all icon. */
     private fun isAllVisibleSelected(): Boolean {
-        val ad = adapter ?: return false
         if (filteredApps.isEmpty()) {
             return false
         }
-        val selected = ad.getSelectedPackages()
         for (app in filteredApps) {
-            if (!selected.contains(app.packageName)) {
+            if (!selectedPkgs.contains(app.packageName)) {
                 return false
             }
         }
@@ -911,36 +722,24 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
     }
 
     /**
-     * One control, two states: select-all icon → tap selects every visible row;
-     * when all are selected the icon flips to deselect-all.
+     * One control, two states: select-all → tap selects every visible row; when
+     * all are selected the icon flips to deselect-all. Both the icon and its
+     * description come from `allVisibleSelected` in [MainTopBarState].
      */
-    private fun updateSelectAllIcon() {
-        if (btnSelectAll == null || !multiSelectMode) {
-            return
-        }
-        val all = isAllVisibleSelected()
-        btnSelectAll!!.setImageResource(if (all) R.drawable.ic_deselect_all else R.drawable.ic_select_all)
-        attachTip(btnSelectAll, if (all) R.string.deselect_all else R.string.select_all)
-    }
-
     private fun toggleSelectAllVisible() {
-        if (!multiSelectMode || adapter == null) {
+        if (!multiSelectMode) {
             return
         }
-        val ad = adapter!!
-        val next = HashSet(ad.getSelectedPackages())
         if (isAllVisibleSelected()) {
             for (app in filteredApps) {
-                next.remove(app.packageName)
+                selectedPkgs.remove(app.packageName)
             }
         } else {
             for (app in filteredApps) {
-                next.add(app.packageName)
+                selectedPkgs.add(app.packageName)
             }
         }
-        ad.setSelectedPackages(next)
-        updateSelectionTitle(ad.getSelectedPackages().size)
-        updateSelectAllIcon()
+        pushUiState()
     }
 
     /**
@@ -948,12 +747,12 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
      * the whitelist only changes when the user taps a batch action.
      */
     private fun applyBatchAllowlist(add: Boolean) {
-        if (!multiSelectMode || adapter == null) {
+        if (!multiSelectMode) {
             return
         }
-        val selected = adapter!!.getSelectedPackages()
+        val selected = HashSet(selectedPkgs)
         if (selected.isEmpty()) {
-            Toast.makeText(this, R.string.batch_nothing_selected, Toast.LENGTH_SHORT).show()
+            showMessage(getString(R.string.batch_nothing_selected))
             return
         }
         var changed = false
@@ -976,49 +775,18 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
             allowlist = newAllow
             updateAllowlist()
         }
-        adapter?.notifyDataSetChanged()
-        Toast.makeText(this, R.string.batch_added, Toast.LENGTH_SHORT).show()
+        refreshVisibleRows()
+        showMessage(getString(R.string.batch_added))
         exitMultiSelect()
     }
 
-    /** Close the overflow menu if one is showing; safe to call at any time. */
-    private fun dismissOverflowMenu() {
-        val popup = activeOverflowMenu
-        activeOverflowMenu = null
-        if (popup != null) {
-            try {
-                popup.dismiss()
-            } catch (ignored: Throwable) {
-            }
-        }
-    }
-
     /**
-     * Paint the overflow MD3 checks from the live palette. setImageResource
-     * creates a fresh drawable after inflation, so ThemeFactory never recolors
-     * these — without this the box stays on the static fallback primary.
+     * The search field's text callback. Coalesce: one pass walks every app
+     * twice, and the list cannot usefully change faster than the user reads
+     * it, so a burst of keystrokes costs one filter instead of one per
+     * character.
      */
-    private fun bindMd3Check(box: ImageView?, checked: Boolean) {
-        if (box == null) {
-            return
-        }
-        val palette = ThemeEngine.palette(this)
-        box.setImageResource(if (checked) R.drawable.md3_check_on else R.drawable.md3_check_off)
-        val drawable = box.drawable?.mutate() ?: return
-        if (drawable is android.graphics.drawable.LayerDrawable) {
-            val fill = drawable.getDrawable(0)
-            if (fill is android.graphics.drawable.GradientDrawable) {
-                fill.setColor(palette.primary)
-            }
-            drawable.getDrawable(1)?.setTint(palette.onPrimary)
-        } else if (drawable is android.graphics.drawable.GradientDrawable) {
-            drawable.setStroke(dp(2), palette.outline)
-        }
-    }
-
-    override fun onQueryTextSubmit(query: String?): Boolean = false
-
-    override fun onQueryTextChange(newText: String?): Boolean {
+    private fun onQueryTextChange(newText: String?) {
         currentQuery = newText ?: ""
         // Coalesce: one pass walks every app twice, and the list cannot usefully
         // change faster than the user reads it, so a burst of keystrokes costs
@@ -1031,196 +799,6 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
         }
         pendingFilter = filter
         uiHandler.postDelayed(filter, FILTER_DEBOUNCE_MS)
-        return true
-    }
-
-    private fun showOverflowMenu(anchor: View) {
-        dismissActiveTooltip()
-        dismissOverflowMenu()
-        val content = layoutInflater.inflate(R.layout.popup_overflow, null)
-        A11yUtils.announceWindowOpened(content, getString(R.string.more_menu))
-        val sysCheck = content.findViewById<ImageView>(R.id.menu_show_system_check)
-        val fcmCheck = content.findViewById<ImageView>(R.id.menu_show_fcm_check)
-        val mipushCheck = content.findViewById<ImageView>(R.id.menu_exclude_mipush_check)
-        val strictCheck = content.findViewById<ImageView>(R.id.menu_strict_mode_check)
-        bindMd3Check(sysCheck, showSystemApps)
-        bindMd3Check(fcmCheck, showFcmSupportedOnly)
-        bindMd3Check(mipushCheck, excludeMiPushApps)
-        bindMd3Check(strictCheck, strictMode)
-        A11yUtils.markDecorative(sysCheck)
-        A11yUtils.markDecorative(fcmCheck)
-        A11yUtils.markDecorative(mipushCheck)
-        A11yUtils.markDecorative(strictCheck)
-
-        // Line the check boxes up on one vertical line. Each row lays out as
-        // [label][12dp][check box], so a wrap_content label parks its check box
-        // wherever the text happens to end — invisible while both Chinese labels
-        // are the same length, but "Show system apps" and "Show FCM supported
-        // apps" differ in English and the boxes drifted apart. All four
-        // toggle labels get the width of the widest one, which fixes that; in
-        // Chinese they already measure alike, so nothing moves there. Done
-        // before the measure pass so the popup width stays exactly what it was.
-        val labelIds = intArrayOf(
-            R.id.menu_show_system_label, R.id.menu_show_fcm_label,
-            R.id.menu_exclude_mipush_label, R.id.menu_strict_mode_label
-        )
-        var widestLabel = 0
-        for (id in labelIds) {
-            val label = content.findViewById<TextView>(id)
-            if (label != null) {
-                label.measure(0, 0)
-                widestLabel = Math.max(widestLabel, label.measuredWidth)
-            }
-        }
-        if (widestLabel > 0) {
-            for (id in labelIds) {
-                val label = content.findViewById<View>(id)
-                label?.layoutParams?.width = widestLabel
-            }
-        }
-
-        val popup = PopupWindow(
-            content,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            true
-        )
-        // Tracked so a rotation or a back press while it is open cannot leave the
-        // window attached to a destroyed activity (WindowLeaked).
-        activeOverflowMenu = popup
-        popup.setOnDismissListener {
-            if (activeOverflowMenu === popup) {
-                activeOverflowMenu = null
-            }
-        }
-        popup.elevation = dp(6).toFloat()
-        popup.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        popup.isOutsideTouchable = true
-        popup.isFocusable = true
-        popup.isTouchable = true
-
-        // TalkBack: one stop per row with explicit checked state.
-        A11yUtils.applyMenuRow(
-            content.findViewById(R.id.menu_show_system),
-            getString(R.string.show_system_apps),
-            showSystemApps
-        )
-        A11yUtils.applyMenuRow(
-            content.findViewById(R.id.menu_show_fcm),
-            getString(R.string.show_fcm_supported_apps),
-            showFcmSupportedOnly
-        )
-        A11yUtils.applyMenuRow(
-            content.findViewById(R.id.menu_exclude_mipush),
-            getString(R.string.exclude_mipush_apps),
-            excludeMiPushApps
-        )
-        A11yUtils.applyMenuRow(
-            content.findViewById(R.id.menu_strict_mode),
-            getString(R.string.strict_mode),
-            strictMode
-        )
-
-        // Measure wrap_content only — NEVER force a fixed width.
-        // Width = padding + longest(label + 12dp + checkbox); no right void,
-        // and checkbox stays ~12dp from the text (no layout_weight).
-        content.measure(
-            View.MeasureSpec.makeMeasureSpec(
-                resources.displayMetrics.widthPixels, View.MeasureSpec.AT_MOST
-            ),
-            View.MeasureSpec.makeMeasureSpec(
-                resources.displayMetrics.heightPixels, View.MeasureSpec.AT_MOST
-            )
-        )
-        val popupW = content.measuredWidth
-        val popupH = content.measuredHeight
-        if (popupW > 0) {
-            popup.width = popupW
-        }
-        if (popupH > 0) {
-            popup.height = popupH
-        }
-
-        val rowSystem = content.findViewById<View>(R.id.menu_show_system)
-        // All rows must fill the popup width so the ripple covers the full
-        // clickable area; wrap_content rows would stop at their own content
-        // width and leave a gap on the right.
-        rowSystem.layoutParams.width = ViewGroup.LayoutParams.MATCH_PARENT
-        rowSystem.setOnClickListener {
-            showSystemApps = !showSystemApps
-            bindMd3Check(sysCheck, showSystemApps)
-            loadApps()
-            popup.dismiss()
-        }
-
-        val rowFcm = content.findViewById<View>(R.id.menu_show_fcm)
-        rowFcm.layoutParams.width = ViewGroup.LayoutParams.MATCH_PARENT
-        rowFcm.setOnClickListener {
-            showFcmSupportedOnly = !showFcmSupportedOnly
-            bindMd3Check(fcmCheck, showFcmSupportedOnly)
-            getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
-                .edit()
-                .putBoolean(Prefs.KEY_SHOW_FCM_ONLY, showFcmSupportedOnly)
-                .apply()
-            // Filter only — keep package scan; toggle just hides non-FCM rows.
-            filterApps(currentQuery)
-            popup.dismiss()
-        }
-
-        val rowMiPush = content.findViewById<View>(R.id.menu_exclude_mipush)
-        rowMiPush.layoutParams.width = ViewGroup.LayoutParams.MATCH_PARENT
-        rowMiPush.setOnClickListener {
-            excludeMiPushApps = !excludeMiPushApps
-            bindMd3Check(mipushCheck, excludeMiPushApps)
-            getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
-                .edit()
-                .putBoolean(Prefs.KEY_EXCLUDE_MIPUSH, excludeMiPushApps)
-                .apply()
-            // Filter only — the package scan stands, and so does every
-            // allowlist entry: this toggle decides what is offered, not what the
-            // module already does for an app.
-            filterApps(currentQuery)
-            popup.dismiss()
-        }
-
-        val rowStrict = content.findViewById<View>(R.id.menu_strict_mode)
-        rowStrict.layoutParams.width = ViewGroup.LayoutParams.MATCH_PARENT
-        rowStrict.setOnClickListener {
-            strictMode = !strictMode
-            bindMd3Check(strictCheck, strictMode)
-            // Written to the remote group the hooks read, then announced with
-            // the same broadcast as a list edit, so it is live at once. Nothing
-            // in the list changes: the toggle only decides what the module does
-            // for apps that are not checked.
-            Prefs.writeStrictMode(this, remotePrefs(), strictMode)
-            popup.dismiss()
-        }
-
-        val rowAbout = content.findViewById<View>(R.id.menu_about)
-        if (rowAbout != null) {
-            rowAbout.layoutParams.width = ViewGroup.LayoutParams.MATCH_PARENT
-            rowAbout.setOnClickListener {
-                popup.dismiss()
-                startActivity(Intent(this, AboutActivity::class.java))
-            }
-        }
-
-        // Keep the popup fully inside the window. Freeform / split-screen
-        // windows are narrower than the display: screen coordinates and
-        // displayMetrics.widthPixels would slide the menu toward the middle.
-        val loc = IntArray(2)
-        anchor.getLocationInWindow(loc)
-        val windowW = window.decorView.width
-        val margin = dp(8)
-        var xOff = anchor.width - popupW
-        if (windowW > 0) {
-            val minOff = margin - loc[0]
-            val maxOff = windowW - margin - popupW - loc[0]
-            if (minOff <= maxOff) {
-                xOff = xOff.coerceIn(minOff, maxOff)
-            }
-        }
-        popup.showAsDropDown(anchor, xOff, dp(4))
     }
 
     private fun filterApps(query: String?) {
@@ -1248,8 +826,9 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
                 filteredApps.add(app)
             }
         }
-        adapter?.notifyDataSetChanged()
-        maybeToastNoFcmApps()
+        // filteredApps is a snapshot list: this is what recomposes the rows.
+        maybeShowNoFcmApps()
+        pushUiState()
     }
 
     /**
@@ -1260,8 +839,8 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
      * query first, and saying "no FCM apps" then would fire before the real
      * list lands. Cancelled when a later snapshot fills the list.
      */
-    private fun maybeToastNoFcmApps() {
-        cancelEmptyListToast()
+    private fun maybeShowNoFcmApps() {
+        cancelEmptyListMessage()
         if (!packagesReady) {
             return
         }
@@ -1279,14 +858,14 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
         if (!isAppListReadable()) {
             return
         }
-        emptyListToastRunnablePosted = true
-        uiHandler.postDelayed(emptyListToastRunnable, 1500)
+        emptyListMessagePosted = true
+        uiHandler.postDelayed(emptyListMessageRunnable, 1500)
     }
 
-    private fun cancelEmptyListToast() {
-        if (emptyListToastRunnablePosted) {
-            uiHandler.removeCallbacks(emptyListToastRunnable)
-            emptyListToastRunnablePosted = false
+    private fun cancelEmptyListMessage() {
+        if (emptyListMessagePosted) {
+            uiHandler.removeCallbacks(emptyListMessageRunnable)
+            emptyListMessagePosted = false
         }
     }
 
@@ -1303,7 +882,7 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
                 fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(fallback)
             } catch (t2: Throwable) {
-                Toast.makeText(this, R.string.fcm_diagnostics_not_found, Toast.LENGTH_LONG).show()
+                showMessage(getString(R.string.fcm_diagnostics_not_found))
             }
         }
     }
@@ -1390,6 +969,32 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
             // service bound lives only in the local mirror.
             Prefs.writeWechatShield(this, prefs, Prefs.readLocalWechatShield(this))
         }
+        if (Prefs.hasPendingWechatDozeKeepoutPush(this)) {
+            // And for the WeChat keepout switch, which is the master of the
+            // pair above — a master flip lost here would take its sub-switch
+            // down with it at the next bind.
+            Prefs.writeWechatDozeKeepout(
+                this, prefs, Prefs.readLocalWechatDozeKeepout(this)
+            )
+        }
+        if (Prefs.hasPendingSleepKeepalivePush(this)) {
+            // Same repair for the sleep-keepalive switch, which the experiment
+            // screen owns; without this a flip made before the service bound
+            // would be reverted here rather than pushed up.
+            Prefs.writeSleepKeepalive(this, prefs, Prefs.readLocalSleepKeepalive(this))
+        }
+        if (Prefs.hasPendingSleepKeepaliveDataPush(this)) {
+            // And for its mobile-data sub-switch.
+            Prefs.writeSleepKeepaliveData(
+                this, prefs, Prefs.readLocalSleepKeepaliveData(this)
+            )
+        }
+        if (Prefs.hasPendingSleepKeepaliveChargingPush(this)) {
+            // And for its charging-only sub-switch.
+            Prefs.writeSleepKeepaliveCharging(
+                this, prefs, Prefs.readLocalSleepKeepaliveCharging(this)
+            )
+        }
         if (Prefs.hasPendingPush(this)) {
             // A check made before the service bound is newer than the remote set:
             // push it up (the write broadcasts, so system_server re-reads too)
@@ -1446,14 +1051,14 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
         Thread {
             val pm = packageManager
             try {
-                val selected = ArrayList<AppListAdapter.AppEntry>()
+                val selected = ArrayList<AppListStore.AppEntry>()
                 for (pkg in allow) {
                     val ai = try {
                         pm.getApplicationInfo(pkg, 0)
                     } catch (e: PackageManager.NameNotFoundException) {
                         continue
                     }
-                    val entry = AppListAdapter.AppEntry(pkg, ai.loadLabel(pm).toString())
+                    val entry = AppListStore.AppEntry(pkg, ai.loadLabel(pm).toString())
                     entry.checked = true
                     selected.add(entry)
                 }
@@ -1477,7 +1082,7 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
                 if (!isLatestScan(generation)) {
                     return@Thread
                 }
-                val result = ArrayList<AppListAdapter.AppEntry>()
+                val result = ArrayList<AppListStore.AppEntry>()
                 for (pi in installed) {
                     val ai = pi.applicationInfo
                     if (ai == null || ai.packageName == packageName) {
@@ -1486,7 +1091,7 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
                     if (!showSys && isSystemApp(ai)) {
                         continue
                     }
-                    val entry = AppListAdapter.AppEntry(ai.packageName, ai.loadLabel(pm).toString())
+                    val entry = AppListStore.AppEntry(ai.packageName, ai.loadLabel(pm).toString())
                     entry.supportFcm = support.fcm.contains(ai.packageName)
                     entry.supportMiPush = support.miPush.contains(ai.packageName)
                     result.add(entry)
@@ -1521,9 +1126,9 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
                 Log.w(TAG_UI, "Failed to load the app list", t)
             } finally {
                 runOnUiThreadSafe {
-                    // A newer scan is still running and owns the spinner.
-                    if (isLatestScan(generation) && swipeRefresh != null) {
-                        swipeRefresh!!.isRefreshing = false
+                    // A newer scan is still running and owns the indicator.
+                    if (isLatestScan(generation)) {
+                        refreshing = false
                     }
                 }
             }
@@ -1531,19 +1136,13 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
     }
 
     /**
-     * Swap the visible list once. Skips notify when nothing changed, and keeps
-     * scroll position so refresh does not "flash" or jump.
+     * Swap the visible list once. Skips pushing when nothing changed, so a
+     * refresh does not recompose — and therefore does not "flash" — for nothing.
+     *
+     * Scroll position needs no restoring here: rows are keyed by package name,
+     * so Compose keeps the place even though a check may have moved a row.
      */
-    private fun applyAppSnapshot(next: List<AppListAdapter.AppEntry>, stopRefresh: Boolean) {
-        val listView = findViewById<ListView>(R.id.app_list)
-        var firstPos = 0
-        var firstTop = 0
-        if (listView != null) {
-            firstPos = listView.firstVisiblePosition
-            val child = listView.getChildAt(0)
-            firstTop = child?.top ?: 0
-        }
-
+    private fun applyAppSnapshot(next: List<AppListStore.AppEntry>, stopRefresh: Boolean) {
         // Always re-sync from the live allowlist — loadApps may have started
         // before libxposed bound and read remote prefs.
         val live = allowlist
@@ -1561,15 +1160,14 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
             allApps.clear()
             allApps.addAll(ordered)
             filterApps(currentQuery)
-            listView?.setSelectionFromTop(firstPos, firstTop)
         } else if (stopRefresh) {
-            maybeToastNoFcmApps()
+            maybeShowNoFcmApps()
         }
 
-        if (stopRefresh && swipeRefresh != null) {
-            swipeRefresh!!.isRefreshing = false
-            // TalkBack: pull-to-refresh spinner is visual-only.
-            A11yUtils.announce(listView, getString(R.string.app_list_refreshed))
+        if (stopRefresh) {
+            refreshing = false
+            // TalkBack: the pull-to-refresh indicator is visual-only.
+            A11yUtils.announce(appListHost, getString(R.string.app_list_refreshed))
         }
     }
 
@@ -1618,12 +1216,12 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
          * the icons it pins go with it and a fresh open always re-scans.
          */
         @Volatile
-        private var sAppScanCache: List<AppListAdapter.AppEntry>? = null
+        private var sAppScanCache: List<AppListStore.AppEntry>? = null
 
         @Volatile
         private var sAppScanCacheShowSystemApps = false
 
-        private fun compareEntries(a: AppListAdapter.AppEntry, b: AppListAdapter.AppEntry): Int {
+        private fun compareEntries(a: AppListStore.AppEntry, b: AppListStore.AppEntry): Int {
             if (a.checked != b.checked) {
                 return if (a.checked) -1 else 1
             }
@@ -1743,8 +1341,8 @@ class MainActivity : AppCompatActivity(), SearchView.OnQueryTextListener {
         }
 
         private fun sameAppSnapshot(
-            a: List<AppListAdapter.AppEntry>,
-            b: List<AppListAdapter.AppEntry>
+            a: List<AppListStore.AppEntry>,
+            b: List<AppListStore.AppEntry>
         ): Boolean {
             if (a.size != b.size) {
                 return false

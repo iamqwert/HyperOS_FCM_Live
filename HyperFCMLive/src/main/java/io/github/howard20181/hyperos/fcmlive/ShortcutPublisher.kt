@@ -6,11 +6,13 @@ import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
 import android.graphics.drawable.Icon
 import android.net.Uri
-import android.os.Build
 
 /**
  * Push launcher shortcuts from code so icon/label updates reach the
  * launcher without relying only on static res/xml/shortcuts.xml caches.
+ *
+ * Every entry point here is API 25+, and minSdk is 35, so there is no version
+ * gate: the guard that used to return early below N_MR1 could never fire.
  */
 object ShortcutPublisher {
 
@@ -20,7 +22,6 @@ object ShortcutPublisher {
 
     @JvmStatic
     fun publish(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1) return
         try {
             val sm = context.getSystemService(ShortcutManager::class.java) ?: return
             val settings = ShortcutInfo.Builder(context, ID_SETTINGS)

@@ -6,8 +6,7 @@
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="960"
-    android:viewportHeight="960"
-    android:tint="@color/md_icon_tint">
+    android:viewportHeight="960">
     <group android:translateY="960">
         <path
             android:fillColor="@android:color/white"

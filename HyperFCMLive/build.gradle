@@ -24,8 +24,8 @@ android {
         targetSdkVersion 37
         // Fixed (bumped by hand each release) so LSPosed update checks never treat
         // this fork as older than upstream builds that inherit a low jgit commitCount.
-        versionCode 36
-        versionName "3.5.1"
+        versionCode 37
+        versionName "3.5.3"
 
         // HyperOS modules ship arm64 only; drop armv7a / x86 / x86_64 natives.
         ndk {
@@ -108,8 +108,15 @@ dependencies {
     compileOnly 'androidx.annotation:annotation:1.11.0'
     // Material Design 3 components, theme, typography and shape tokens.
     implementation 'androidx.appcompat:appcompat:1.8.0'
-    // 1.13.0+ is required for LoadingIndicator (M3 Expressive), which drives
-    // the pull-to-refresh spinner.
+    // Declared for the ActivityResultContracts import in MainActivity. Resolves
+    // at 1.8.2 through appcompat today; declaring it explicitly means Dependabot
+    // tracks it instead of the version silently riding along.
+    implementation 'androidx.activity:activity:1.8.2'
+    // Material Views: two real consumers keep this here — the
+    // `Theme.Material3.DayNight.NoActionBar` parent the app theme inherits from,
+    // and DynamicColors (wallpaper accent) in theme/ThemeSupport.kt. The
+    // inflation-time role painter that used to come with it is gone: there is no
+    // XML left to inflate.
     implementation 'com.google.android.material:material:1.14.0'
     // Jetpack Compose (View-compatible). Theme bridge lives in theme/ComposeTheme.kt.
     def composeBom = platform('androidx.compose:compose-bom:2026.09.00')
@@ -117,18 +124,21 @@ dependencies {
     implementation 'androidx.compose.ui:ui'
     implementation 'androidx.compose.ui:ui-android'
     implementation 'androidx.compose.foundation:foundation'
-    implementation 'androidx.compose.material3:material3'
+    // Pinned above what composeBom 2026.09.00 resolves (1.4.0): 1.4.0 ships
+    // every Expressive component — LoadingIndicator, SplitButton, ButtonGroup,
+    // FloatingToolbar, MaterialShapes, MotionScheme.expressive() — but declares
+    // them Kotlin-internal, so none of it compiles against. 1.5.0-alpha is the
+    // first line that exposes them. Verified: compiles, and passes R8 release.
+    implementation 'androidx.compose.material3:material3:1.5.0-alpha27'
+    // Since material3 1.4.0 the icon packs are no longer pulled in transitively,
+    // so Icons.* fails to resolve without this. Version comes from the BOM.
+    implementation 'androidx.compose.material:material-icons-core'
     implementation 'androidx.compose.ui:ui-tooling-preview'
     debugImplementation 'androidx.compose.ui:ui-tooling'
-    // Standard Material/Android pull-to-refresh (SwipeRefreshLayout).
-    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.2.0'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
     // Compile-time hidden-API signatures (not packaged in the APK).
     compileOnly project(":hiddenapi:stubs")
-
-    // JVM unit tests (no device / ADB).
-    testImplementation 'junit:junit:4.13.2'
 }
 
 // Refuse to produce a release artifact without a real keystore. The AOSP debug

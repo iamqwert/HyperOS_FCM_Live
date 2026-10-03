@@ -1,6 +1,7 @@
 package io.github.howard20181.hyperos.fcmlive.theme
 
 import android.content.Context
+import androidx.compose.runtime.mutableIntStateOf
 import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
 
 /**
@@ -19,11 +20,25 @@ object ThemeEngine {
     @Volatile
     private var sCacheKey: String? = null
 
+    /**
+     * Compose-visible bump counter. [invalidate] increments it, so a theme
+     * switch re-skins the UI in place — composables keyed on this value
+     * recompute their palette without the Activity being recreated. Before
+     * this existed the only way to push a new palette was `recreate()`, which
+     * rebuilt the whole window and read as a jarring jump on every menu pick.
+     */
+    private val _generation = mutableIntStateOf(0)
+
+    /** Read inside composition to re-skin on [invalidate]. */
+    val generation: Int
+        get() = _generation.intValue
+
     /** Drop the cached palette; call after any appearance setting changes. */
     @JvmStatic
     fun invalidate() {
         sCached = null
         sCacheKey = null
+        _generation.intValue++
     }
 
     @JvmStatic

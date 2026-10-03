@@ -9,8 +9,11 @@
       colour comes from windowBackground plus the per-screen inset handling
       (ThemeSupport.applyWindow, UiUtils.topInset / bottomInset).
 
-      Color roles map 1:1 onto the runtime AppPalette (ThemeEngine / mcu), so
-      Material3 components and the hand-tuned layouts share one palette.
+      Color roles map 1:1 onto the runtime AppPalette (ThemeEngine / mcu), so the
+      framework's own widgets — the system file picker's chrome, a dialog the
+      platform raises — land on the same palette the Compose tree is drawn with.
+      The five screens themselves read no `@color/`: they are painted from
+      `MaterialTheme.colorScheme`, which ComposeTheme maps from AppPalette.
     -->
     <style name="Theme.HyperFCMLive" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:windowActionBar">false</item>

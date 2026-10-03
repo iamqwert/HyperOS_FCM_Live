@@ -1,11 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      Light fallback when Monet (API 31+) is unavailable.
+      The app's static M3 color roles, light — and the single definition of
+      these names. There is no `values-v31` override any more, so every
+      supported API level starts from the brand rose below and only diverges
+      when ThemeSupport.applyDynamicColors repaints the *theme attributes* on
+      top of it (Material You wallpaper accent, or a content-based seed).
 
-      These are M3 color roles. Runtime values are painted from AppPalette /
-      ThemeEngine (mcu Scheme). Aliases keep one source of truth with the
-      older md_* names still referenced by layouts and drawables.
+      Runtime values for the five screens are painted from AppPalette /
+      ThemeEngine (mcu Scheme). The app theme in themes.xml is the only thing
+      left that names these; the five screens read no `@color/` at all — they
+      are painted from `MaterialTheme.colorScheme`, which ComposeTheme maps
+      from AppPalette rather than from here. The `ic_*` vectors used to carry
+      `android:tint="@color/md_icon_tint"`. That never took effect — every call
+      site draws through Compose `Icon`, whose colour filter supersedes the
+      painter's intrinsic one — so the attribute and the colour are both gone.
+      Those glyphs are white templates and are coloured by their callers.
     -->
     <color name="md_primary">#8B4A5A</color>
     <color name="md_on_primary">#FFFFFF</color>
@@ -44,19 +54,4 @@
 
     <!-- Page background: one step deeper than the cards so they stand out. -->
     <color name="md_page_bg">#F2F2F3</color>
-    <color name="md_card">#FFFFFF</color>
-    <color name="md_icon_tint">#6B5158</color>
-    <!-- Darkened for WCAG AA (>=4.5:1 on card/page). -->
-    <color name="md_hint_light">#7A656A</color>
-
-    <!-- Tooltips: light mode uses the pale bubble (former dark-mode style). -->
-    <color name="md_tooltip_bg">#FFE6E0E5</color>
-    <color name="md_tooltip_text">#FF322F37</color>
-
-    <!-- Overflow menu: the page colour, so the menu and the page agree. -->
-    <color name="md_popup_menu_bg">#F2F2F3</color>
-    <color name="md_popup_item_ripple">#29000000</color>
-
-    <!-- Hover state layer: on-surface at 8%. -->
-    <color name="md_state_hover">#1423191B</color>
 </resources>

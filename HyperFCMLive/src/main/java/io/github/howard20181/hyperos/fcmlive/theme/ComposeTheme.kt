@@ -1,12 +1,18 @@
 package io.github.howard20181.hyperos.fcmlive.theme
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalOverscrollFactory
+import androidx.compose.foundation.rememberPlatformOverscrollFactory
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
 
 /**
@@ -14,21 +20,70 @@ import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
  *
  * Colors are **not** taken from Compose's own dynamic-color helpers. They are
  * mapped from [ThemeEngine]/[AppPalette] so the in-app palette style
- * (Tonal spot, Monochrome, …) and color spec stay identical to the View layer
- * driven by [ThemeFactory].
+ * (Tonal spot, Monochrome, …) and colour spec are the ones the settings page
+ * offers, derived by the same Material colour utilities.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
     // isSystemInDarkTheme is only a fallback when no palette is applied yet;
     // ThemeEngine.palette already resolves the user's theme mode.
-    val palette = androidx.compose.ui.platform.LocalContext.current.let { context ->
-        remember(context) { ThemeEngine.palette(context) }
+    // Keying on ThemeEngine.generation is what makes an in-place theme switch
+    // work: invalidate() bumps the counter, this composable re-executes, and
+    // the palette recomputes — no Activity recreate, no window jump.
+    val palette = LocalContext.current.let { context ->
+        remember(context, ThemeEngine.generation) {
+            // Preview never has a usable Context behind it: no SharedPreferences
+            // and no real resources. Falling back to the stock light scheme is
+            // what keeps @Preview renderable — without it every annotated
+            // function fails to inflate and the whole tool becomes useless.
+            try {
+                ThemeEngine.palette(context)
+            } catch (t: Throwable) {
+                null
+            }
+        }
     }
-    val colorScheme = remember(palette) { palette.toComposeColorScheme() }
+    val colorScheme = remember(palette) { palette?.toComposeColorScheme() ?: lightColorScheme() }
+    // Which Material generation we are dressing as. Driven by the colour spec
+    // rather than a second preference: "Material You (2021)" and "Expressive
+    // (2025)" differ in motion and shape as much as in colour, and letting them
+    // disagree is what makes one generation feel like a skin over the other.
+    val expressive = remember(palette) {
+        palette?.scheme?.spec == Scheme.Spec.SPEC_2025
+    }
+    val motionScheme = remember(expressive) { motionSchemeFor(expressive) }
+    val appShapes = remember(expressive) { appShapesFor(expressive) }
+    // The edge effect: the platform `EdgeEffect` — stretch on API 31 and up, a
+    // glow below that. Built as a factory rather than through the
+    // (now deprecated) `LocalOverscrollConfiguration`, so the effect does not
+    // depend on foundation resolving a default value for us: if that chain ever
+    // yields null, every list in the app silently loses its overscroll, which
+    // is exactly the symptom this line exists to prevent. The glow colour is
+    // the accent, so the pre-31 fallback still reads as part of the theme.
+    // Keyed via [key]: the factory internally remembers itself, so without a
+    // key a theme switch would leave the pre-31 glow (and the cached factory)
+    // in the old palette while everything else re-skins.
+    val overscrollFactory = key(colorScheme.primary) {
+        rememberPlatformOverscrollFactory(
+            glowColor = colorScheme.primary
+        )
+    }
+    // Typescale comes from ComposeTokens.kt, which is the single definition of
+    // the app's type scale — there is no second copy left for it to drift from.
     MaterialTheme(
         colorScheme = colorScheme,
-        content = content
-    )
+        typography = HyperFCMLiveTypography,
+        shapes = HyperFCMLiveShapes,
+        motionScheme = motionScheme,
+    ) {
+        CompositionLocalProvider(
+            LocalAppShapes provides appShapes,
+            LocalOverscrollFactory provides overscrollFactory
+        ) {
+            content()
+        }
+    }
 }
 
 /** Map the runtime [AppPalette] (full [Scheme]) onto Compose Material 3. */
