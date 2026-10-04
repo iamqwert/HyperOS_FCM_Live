@@ -92,6 +92,7 @@ import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppShapes
+import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
 
 /**
  * Compose half of the settings screen: the top bar and the app list.
@@ -282,7 +283,12 @@ private fun DiagnosticsFab(onClick: () -> Unit) {
             Icon(
                 painter = painterResource(R.drawable.ic_fcm_diagnostics),
                 contentDescription = label,
-                modifier = Modifier.size(24.dp)
+                // 28dp, not the 24dp an icon defaults to: `build` is a thin
+                // glyph that draws well inside its box, so at 24dp the wrench
+                // sat in a pool of empty plate and read small next to the
+                // top-bar icons. Larger glyph, same 56dp container — the plate
+                // is what the target size is measured on, not the ink.
+                modifier = Modifier.size(28.dp)
             )
         }
     }
@@ -388,6 +394,12 @@ fun MainTopBar(
  * for every icon. Same reason to exist (HyperOS puts its own bubble *on* the
  * control) and same gesture, but positioned by the toolkit instead of by
  * measured arithmetic that had to be re-clamped against every freeform window.
+ *
+ * These stay bare `IconButton`s on purpose, and the home bar is excluded from
+ * every "fill the leading control" change: only the back control of a secondary
+ * page wears a plate (`ui/AppTopBar.kt`). Here the icons are a row of peers over
+ * a list — plating them would turn four tool icons into four buttons competing
+ * with the content, and the bar has no leading control to single out.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -549,6 +561,8 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
                 .width(IntrinsicSize.Max)
                 .defaultMinSize(minWidth = MENU_OVERFLOW_MIN_WIDTH),
             shape = shapes.menu,
+            // Popup level, as every dropdown — see LocalAppSurfaces.
+            containerColor = LocalAppSurfaces.current.popup,
             offset = DpOffset(x = -MENU_EDGE_INSET, y = 0.dp)
         ) {
             MenuItemRow(
@@ -692,6 +706,27 @@ private fun LazyItemScope.AppRow(
 ) {
     val cardSelected = multiSelect && rowSelected
     val shape = LocalAppShapes.current.card
+    // A selected row is `primaryContainer`, so all three foregrounds on it have
+    // to come from that role's pair. `onSurface`, `onSurfaceVariant` and
+    // `primary` each read fine on the card and each disappear here: MONOCHROME's
+    // `primaryContainer` is tone 25 (#3B3B3B), `onSurface` is tone 10 and
+    // `primary` tone 0. The on/off of the allowlist stays legible because the
+    // glyph itself differs — the tint's job under selection is contrast.
+    val labelColor = if (cardSelected) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val supportingColor = if (cardSelected) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val statusTint = when {
+        cardSelected -> MaterialTheme.colorScheme.onPrimaryContainer
+        checked -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
     val view = LocalView.current
     val interactionSource = remember { MutableInteractionSource() }
     val allowlistState = stringResource(
@@ -744,7 +779,7 @@ private fun LazyItemScope.AppRow(
         color = if (cardSelected) {
             MaterialTheme.colorScheme.primaryContainer
         } else {
-            MaterialTheme.colorScheme.surfaceContainerLowest
+            LocalAppSurfaces.current.card
         }
     ) {
         Row(
@@ -763,7 +798,7 @@ private fun LazyItemScope.AppRow(
                     Text(
                         text = label,
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = labelColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
@@ -775,7 +810,7 @@ private fun LazyItemScope.AppRow(
                 Text(
                     text = packageName,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = supportingColor
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
@@ -784,18 +819,21 @@ private fun LazyItemScope.AppRow(
                     if (checked) R.drawable.ic_status_enabled else R.drawable.ic_status_disabled
                 ),
                 contentDescription = null,
-                tint = if (checked) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                tint = statusTint,
                 modifier = Modifier.size(28.dp)
             )
         }
     }
 }
 
-/** The MiPush chip: primary-container fill at the small corner radius. */
+/**
+ * The MiPush chip: primary-container fill at the small corner radius, so the
+ * label takes that fill's own partner (`onPrimaryContainer`). It used to be
+ * `primary`, which is the *plate's* partner only when the plate is a handle —
+ * on MONOCHROME that was #000000 on a #3B3B3B fill. In a selected row the chip's
+ * fill and the row's fill are the same role, so the plate merges with the row;
+ * the label still reads, which is the part that matters.
+ */
 @Composable
 private fun MiPushBadge(text: String, modifier: Modifier = Modifier) {
     val fill = MaterialTheme.colorScheme.primaryContainer
@@ -803,7 +841,7 @@ private fun MiPushBadge(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
         style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.onPrimaryContainer,
         maxLines = 1,
         modifier = modifier
             .padding(start = 6.dp)

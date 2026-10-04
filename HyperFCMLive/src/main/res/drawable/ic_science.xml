@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Official Material icon glyph, verbatim path. Source: https://fonts.google.com/icons / github.com/google/material-design-icons (Apache-2.0) -->
+<!-- Material Symbols "science" (fill1, outlined family). Path data verbatim
+     from fonts.gstatic.com (Apache-2.0); the source canvas is 960x960 with a
+     -960 y origin, shifted down via the group.
+     -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -8,6 +11,6 @@
     <group android:translateY="960">
         <path
             android:fillColor="@android:color/white"
-            android:pathData="M200-120q-51 0-72.5-45.5T138-250l222-270v-240h-80v-80h400v80h-80v240l222 270q32 39 10.5 84.5T760-120H200Z" />
+            android:pathData="M200-120q-51 0-72.5-45.5T138-250l222-270v-240h-40q-17 0-28.5-11.5T280-800q0-17 11.5-28.5T320-840h320q17 0 28.5 11.5T680-800q0 17-11.5 28.5T640-760h-40v240l222 270q32 39 10.5 84.5T760-120H200Z" />
     </group>
 </vector>

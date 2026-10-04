@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Official Material icon glyph, verbatim path. Source: https://fonts.google.com/icons / github.com/google/material-design-icons (Apache-2.0) -->
+<!-- Material Symbols "save" (fill1, outlined family) — the export-config row.
+     Path data verbatim from fonts.gstatic.com (Apache-2.0); the source canvas
+     is 960x960 with a -960 y origin, shifted down via the group.
+     -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:fillColor="@android:color/white"
-        android:pathData="M5,20h14v-2H5V20z M5,10h4v6h6v-6h4l-7-7L5,10z" />
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M840-680v480q0 33-23.5 56.5T760-120H200q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h480l160 160ZM565-275q35-35 35-85t-35-85q-35-35-85-35t-85 35q-35 35-35 85t35 85q35 35 85 35t85-35ZM240-560h360v-160H240v160Z" />
+    </group>
 </vector>

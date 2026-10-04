@@ -10,8 +10,8 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.ContentResolver
 import android.content.pm.ResolveInfo
-import android.os.BatteryManager
 import android.os.Binder
+import android.os.IBinder
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
@@ -31,6 +31,7 @@ import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Xposed module entry: keeps FCM / GMS wake paths alive on HyperOS.
@@ -199,6 +200,11 @@ class Hooker : XposedModule() {
             hookAlarmGate(classLoader)
         } catch (t: Throwable) {
             log(Log.ERROR, TAG, "Failed to hook alarm gate", t)
+        }
+        try {
+            hookWifiWeakSignalSwitch(classLoader)
+        } catch (t: Throwable) {
+            log(Log.ERROR, TAG, "Failed to hook wifi weak-signal switch", t)
         }
         try {
             probeWakePath(classLoader)
@@ -1605,6 +1611,303 @@ class Hooker : XposedModule() {
      * gates (switch off → pass, WeChat not in the array → pass), so its cost
      * is bounded by how rarely powerkeeper touches the whitelist at all.
      */
+    /**
+     * Relaxed WiFi weak-signal switch, hooked in system_server.
+     *
+     * What the ROM does without us (measured on-device, V816, see
+     * HOOKS_AND_DIAGNOSTICS.md §5.9.2): `AmlMiuiThirdPartScorer` keeps a legacy
+     * score in `mLegacyIntScore` and turns it into a usable/unusable verdict at
+     * a **hardcoded** 50 inside `notifyScoreAndIsUsable()`. A single call there
+     * publishes everything outward — `notifyScoreUpdate(sessionId, score)` for
+     * the value and `notifyStatusUpdate(sessionId, isUsable)` for the verdict —
+     * so a score below 50 reaches `WifiScoreReport` as "not usable", which sets
+     * the network `+EXITING` and moves the default network to cellular for 30 s.
+     * Both write paths into `mLegacyIntScore` converge on that one method, so
+     * it is the cheapest point at which the verdict can be withheld.
+     *
+     * What this hook changes, and what it deliberately does not:
+     * - the clamp exists only for the lifetime of the call; the field is
+     *   restored in a `finally`, so the class's own state machine still sees
+     *   the real reading and nothing is persisted anywhere — this is why it
+     *   replaces the earlier idea of lowering the `cloud_min_rssi_*` settings
+     *   keys (those survive in `settings_system.xml` after an uninstall, and
+     *   their direction turned out to be unproven anyway);
+     * - the score value published upstream is what decides whether WiFi stays
+     *   the default network, so reporting the floor *is* the intervention;
+     * - a real failure that does not travel through this scorer — WiFi leaving,
+     *   carrier or UI decisions, validation failures — is untouched;
+     * - how far down it reaches is the user's call, not ours. Scores below
+     *   [Prefs.KEY_WIFI_WEAK_SIGNAL_FLOOR] go through unmodified, so a link bad
+     *   enough to be past saving is still handed to a mechanism that can pick
+     *   another network. Every rescue is conditional on that floor, and the
+     *   master switch must be on for it to be consulted at all.
+     *
+     * Known uncovered exit, deliberately not handled yet: the ROM also calls
+     * `notifySwitchNetworkByOtherStrategies type = 1003`, which bypasses this
+     * score channel entirely. It was observed 27 times in one gaming window
+     * without ever causing a switch, so it is a watch item and not a fixed
+     * gap — if a switch is later reported while every sub-floor score stayed
+     * unflipped, check that call first before suspecting this hook. See
+     * HOOKS_AND_DIAGNOSTICS §7.5.
+     *
+     * Class resolution note, which is the reason this one is not a plain
+     * `classLoader.loadClass`: the class is **not reachable from system_server's
+     * own classloader**. `miui-wifi-service.jar` is loaded separately (the build
+     * that runs it is the one whose logcat emits `AmlMiuiThirdPartScorer` from
+     * the system_server pid), so both call sites below return ClassNotFound
+     * while the class is plainly live in the process — the first attempt at this
+     * hook reported "absent" on a ROM where the class was demonstrably running.
+     * The fallback therefore walks to the loader that did load it, through the
+     * binder of a service whose implementation comes from the same jar.
+     */
+    private val wifiScorerResolved = AtomicBoolean(false)
+    // Two throttles, not one: clamping and handing back are opposite verdicts,
+    // and sharing a window between them lets whichever is louder starve the
+    // other — which would leave the rarer one looking like it never happened.
+    private val lastWifiScoreClampLogMs = AtomicLong(0L)
+    private val lastWifiScoreSkipLogMs = AtomicLong(0L)
+
+    private fun hookWifiWeakSignalSwitch(classLoader: ClassLoader) {
+        if (tryHookWifiScorer(classLoader)) {
+            return
+        }
+        // Nothing to hook yet: at system_server start the WiFi service has not
+        // been published, so there is no loader to borrow. Retry off-thread
+        // instead of giving up — the summary line below is printed before this
+        // resolves, so its counts describe the synchronous phase only.
+        val waiter = Thread({
+            for (attempt in 1..40) {
+                try {
+                    Thread.sleep(3000L)
+                } catch (ignored: InterruptedException) {
+                    return@Thread
+                }
+                if (tryHookWifiScorer(classLoader)) {
+                    return@Thread
+                }
+            }
+            logSkipOtherGeneration(
+                "AmlMiuiThirdPartScorer unreachable after retry, wifi-weak-signal switch skip"
+            )
+        }, "fcmlive-wifi-scorer")
+        waiter.isDaemon = true
+        waiter.start()
+    }
+
+    /** Installs the scorer hook if the class can be reached this time. */
+    private fun tryHookWifiScorer(classLoader: ClassLoader): Boolean {
+        if (wifiScorerResolved.get()) {
+            return true
+        }
+        val scorerClass = resolveWifiScorerClass(classLoader) ?: return false
+        val notifyMethod = try {
+            scorerClass.getDeclaredMethod(WIFI_SCORER_NOTIFY_METHOD)
+        } catch (t: Throwable) {
+            logSkip("AmlMiuiThirdPartScorer#notifyScoreAndIsUsable absent, wifi-weak-signal switch skip")
+            wifiScorerResolved.set(true)
+            return true
+        }
+        val scoreField = try {
+            scorerClass.getDeclaredField(WIFI_SCORER_SCORE_FIELD)
+        } catch (t: Throwable) {
+            logSkip("AmlMiuiThirdPartScorer#mLegacyIntScore absent, wifi-weak-signal switch skip")
+            wifiScorerResolved.set(true)
+            return true
+        }
+        notifyMethod.isAccessible = true
+        scoreField.isAccessible = true
+        hookE(notifyMethod).intercept { chain: XposedInterface.Chain ->
+            if (!isWifiWeakSignalSwitchRelaxed()) {
+                chain.proceed()
+            } else {
+                // Read here rather than outside, which is also what gates it:
+                // this branch only runs while the master switch is on, so the
+                // sub-option cannot survive its parent being turned off.
+                val floor = readWifiWeakSignalFloor()
+                val self = chain.thisObject
+                var reported = 0
+                var read = false
+                var clamped = false
+                try {
+                    reported = scoreField.getInt(self)
+                    read = true
+                    // Both halves are load-bearing. `reported < WIFI_SCORE_USABLE_MIN`
+                    // is the ROM's own verdict — nothing above it needs saving,
+                    // and rewriting it would invent a decision the ROM did not
+                    // make. `reported >= floor` is how deep the user lets this
+                    // reach; below that the score goes through untouched, which
+                    // is why there is no third branch.
+                    if (reported < WIFI_SCORE_USABLE_MIN && reported >= floor) {
+                        scoreField.setInt(self, WIFI_SCORE_CLAMP_TARGET)
+                        clamped = true
+                    }
+                } catch (ignored: Throwable) {
+                    // Fail closed for the intervention and never for the call:
+                    // the ROM's own verdict goes through untouched.
+                }
+                if (clamped) {
+                    noteWifiScoreClamp(reported, floor)
+                } else if (read && reported < WIFI_SCORE_USABLE_MIN) {
+                    // Handing back is a decision too, and one that later looks
+                    // like "the hook missed it". Say so while it happens. The
+                    // upper bound matters as much as the lower one: most scores
+                    // a healthy link gets are above the floor already, and those
+                    // were never ours to hand back — logging them would read as
+                    // an intervention every thirty seconds on a quiet day.
+                    noteWifiScoreSkip(reported, floor)
+                }
+                try {
+                    chain.proceed()
+                } finally {
+                    if (clamped) {
+                        try {
+                            scoreField.setInt(self, reported)
+                        } catch (ignored: Throwable) {
+                            log(Log.WARN, TAG, "wifi-weak-signal: score restore failed")
+                        }
+                    }
+                }
+            }
+        }
+        deoptimize(notifyMethod)
+        wifiScorerResolved.set(true)
+        // Sentinel wording, same discipline as doze-keepout: hooked is not
+        // active, and active is not the same as "the ROM would have switched".
+        log(
+            Log.INFO, TAG,
+            "AmlMiuiThirdPartScorer#notifyScoreAndIsUsable hooked (wifi-weak-signal " +
+                "switch, default off): idle until the experiment switch is on, then " +
+                "scores from the chosen floor up to $WIFI_SCORE_USABLE_MIN are " +
+                "reported as usable; deeper ones are left to the ROM"
+        )
+        return true
+    }
+
+    /**
+     * The class lives outside the process' main classpath, so ask the loaders
+     * that could plausibly own it: our own, the system one, and — the one that
+     * actually works here — the loader of any registered service whose
+     * implementation ships in the same jar.
+     */
+    private fun resolveWifiScorerClass(classLoader: ClassLoader): Class<*>? {
+        val candidates = mutableListOf<ClassLoader>(classLoader)
+        try {
+            candidates.add(ClassLoader.getSystemClassLoader())
+        } catch (ignored: Throwable) {
+        }
+        for (service in WIFI_SCORER_CLASS_LOADER_SERVICES) {
+            val impl = serviceBinder(service) ?: continue
+            val owner = impl.javaClass.classLoader ?: continue
+            if (!candidates.contains(owner)) {
+                candidates.add(owner)
+            }
+        }
+        for (candidate in candidates) {
+            try {
+                return candidate.loadClass(WIFI_SCORER_CLASS)
+            } catch (ignored: Throwable) {
+            }
+        }
+        return null
+    }
+
+    /**
+     * Local (raw) binder of a service, or null before it is published. From
+     * inside system_server `getService` returns the implementation object, so
+     * its class carries the loader we need; the reflection keeps this off the
+     * hidden-API surface the module would otherwise depend on at compile time.
+     */
+    private fun serviceBinder(name: String): IBinder? {
+        return try {
+            val manager = Class.forName("android.os.ServiceManager")
+            val binder = manager.getMethod("getService", String::class.java)
+                .invoke(null, name)
+            binder as? IBinder
+        } catch (ignored: Throwable) {
+            null
+        }
+    }
+
+    /**
+     * Throttled trace of an actual intervention. The ROM re-scores on its own
+     * cadence, so an unthrottled line here would be the noisiest thing the
+     * module does; 30 s keeps one line per visible link-quality episode while
+     * still proving the hook had something to do. The score is printed because
+     * it is the only value that says *how far* below the ROM's own 50 the link
+     * was judged — without it, "it fired" and "it fired at 49" look alike, and
+     * those mean very different things for deciding whether to keep the switch.
+     */
+    private fun noteWifiScoreClamp(actual: Int, floor: Int) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastWifiScoreClampLogMs.get() < WIFI_SCORE_CLAMP_LOG_INTERVAL_MS) {
+            return
+        }
+        lastWifiScoreClampLogMs.set(now)
+        log(
+            Log.INFO, TAG,
+            "wifi-weak-signal: reported $actual met the chosen floor $floor but would " +
+                "have failed the ROM's $WIFI_SCORE_USABLE_MIN; reported as usable instead"
+        )
+    }
+
+    /**
+     * The same trace for the opposite verdict. Without it, "the network went to
+     * cellular anyway" reads as a hook that failed to fire when in fact it
+     * fired and chose not to act — and since [Prefs.KEY_WIFI_WEAK_SIGNAL_FLOOR]
+     * is what decides, the line names the floor rather than leaving it to be
+     * guessed from the score.
+     */
+    private fun noteWifiScoreSkip(actual: Int, floor: Int) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastWifiScoreSkipLogMs.get() < WIFI_SCORE_CLAMP_LOG_INTERVAL_MS) {
+            return
+        }
+        lastWifiScoreSkipLogMs.set(now)
+        log(
+            Log.INFO, TAG,
+            "wifi-weak-signal: reported $actual is below the chosen floor $floor; " +
+                "left to the ROM's own policy"
+        )
+    }
+
+    /**
+     * The flag lives in the shared config group and is read lazily at each
+     * score update: the class has no broadcast receiver, and updates arrive on
+     * its own handler thread, so the read frequency is that of score updates,
+     * not of general connectivity traffic.
+     */
+    private fun isWifiWeakSignalSwitchRelaxed(): Boolean {
+        return try {
+            getRemotePreferences(Prefs.GROUP_CONFIG)
+                .getBoolean(Prefs.KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED, false)
+        } catch (ignored: Throwable) {
+            // Fail closed: an unreadable switch must not start deciding how the
+            // ROM judges its own WiFi link.
+            false
+        }
+    }
+
+    /**
+     * The floor the sub-option chose, read at the same lazy cadence as the
+     * master flag.
+     *
+     * Unreadable or off-list both land on the default — the narrowest floor
+     * rather than the widest. The two failures are the opposite direction to
+     * guess in, and only one of them is recoverable by reading it again; if the
+     * list ever loses a value, an unrestorable read here means the module
+     * quietly starts covering depths nobody chose.
+     */
+    private fun readWifiWeakSignalFloor(): Int {
+        return try {
+            Prefs.sanitizeWeakSignalFloor(
+                getRemotePreferences(Prefs.GROUP_CONFIG)
+                    .getInt(Prefs.KEY_WIFI_WEAK_SIGNAL_FLOOR, Prefs.WIFI_WEAK_SIGNAL_FLOOR_DEFAULT)
+            )
+        } catch (ignored: Throwable) {
+            Prefs.WIFI_WEAK_SIGNAL_FLOOR_DEFAULT
+        }
+    }
+
     private fun hookWechatDozeKeepout(classLoader: ClassLoader) {
         val adapterClass = try {
             classLoader.loadClass("com.miui.powerkeeper.utils.CommonAdapter")
@@ -1725,32 +2028,29 @@ class Hooker : XposedModule() {
      * block runs, not because we chose it.
      *
      * Policy — WiFi stays up whenever the master switch is on; mobile data
-     * follows `Prefs.KEY_SLEEP_KEEPALIVE_DATA`; both are narrowed by
-     * `Prefs.KEY_SLEEP_KEEPALIVE_CHARGING`, which asks the device to actually
-     * be on the charger. All three are read lazily at each cutoff call, so a
-     * flip lands on the next sleep entry without a reboot, and the two
-     * sub-switches are gated by the master so the set cannot drift. Who may
-     * actually use the restored network is still decided by Doze's per-uid
+     * follows `Prefs.KEY_SLEEP_KEEPALIVE_DATA`. Both are read lazily at each
+     * cutoff call, so a flip lands on the next sleep entry without a reboot,
+     * and the sub-switch is gated by the master so the set cannot drift. Who
+     * may actually use the restored network is still decided by Doze's per-uid
      * chain, which this hook leaves alone.
      *
-     * The charging gate is the one part of this that needs the hosting process
-     * rather than a setting: it reads the sticky ACTION_BATTERY_CHANGED
-     * broadcast through ActivityThread.currentApplication(). Every failure path
-     * answers "not charging", so the ROM cuts as usual — this switch exists to
-     * save power, and a guess the other way would drain a battery all night to
-     * honour a setting it could not confirm.
-     *
      * Two limits are stated here rather than left to be discovered:
-     *  - The gate is sampled once per radio, at the cutoff call. Unplugging the
-     *    charger mid-sleep does not re-cut the network until the next sleep
-     *    entry. No battery-state listener is registered for it, deliberately: a
-     *    receiver held by a system process for a comfort switch costs more than
-     *    the night's WiFi it would save.
-     *  - On the degraded path ([hookSleepModeEarthquakeFlag]) the charging gate
-     *    cannot apply at all — that branch skips the whole cutoff block, so
-     *    there is no per-radio decision left to narrow. It is only reachable
-     *    when one of the two cutoff methods cannot be hooked, and the
-     *    install-time log says so outright.
+     *  - On the degraded path ([hookSleepModeEarthquakeFlag]) neither cutoff
+     *    interceptor runs at all — that branch skips the whole cutoff block.
+     *    It is only reachable when one of the two cutoff methods cannot be
+     *    hooked, and the install-time log says so outright.
+     *  - Both interceptors require the stack to carry
+     *    [SLEEP_CONTROLLER_CLASS]`#applySleepConfig` / `#restoreSleepConfig`
+     *    ([calledFromSleepApply] / [calledFromSleepConfig]), and that class is
+     *    the OS4/V816 home of sleep mode. On a ROM whose sleep mode lives
+     *    elsewhere — OS3 goes through system_server's per-uid chain, which is
+     *    what the legacy arms below exist for — the predicate can never match,
+     *    so this switch intercepts nothing and the radios are cut exactly as if
+     *    it were off. That is a **silent no-op, not a failure**: both hooks are
+     *    installed and the install log says so, so never read a healthy-looking
+     *    log as "the switch is doing something". Which side of the fork a
+     *    device is on comes from the `Sleep-mode legacy per-uid chain armed: …`
+     *    line and the two `legacy path FIRED` sentinels, not from this switch.
      */
     private fun hookSleepModeNetworkKeepalive(classLoader: ClassLoader) {
         val wifiMethod = try {
@@ -1783,8 +2083,7 @@ class Hooker : XposedModule() {
                 Log.INFO, TAG,
                 "Sleep-mode network keepalive: cutoff hooks incomplete, degraded " +
                     "to PowerKeeper's own no-cutoff branch (both radios stay up " +
-                    "for the whole night; the charging-only gate cannot apply " +
-                    "on this path)"
+                    "for the whole night)"
             )
             return
         }
@@ -1802,11 +2101,6 @@ class Hooker : XposedModule() {
                     Log.INFO, TAG,
                     "sleep-mode: WiFi left to the ROM policy (keepalive master switch off)"
                 )
-                return@intercept chain.proceed()
-            }
-            // Charging-only narrows the master; like the master it gets its own
-            // line, so a night's log never has to be read by absence.
-            if (chargingGateBlocks("WiFi")) {
                 return@intercept chain.proceed()
             }
             log(
@@ -1843,11 +2137,6 @@ class Hooker : XposedModule() {
                 )
                 return@intercept chain.proceed()
             }
-            // Same charging-only narrowing as the WiFi side, with its own lines
-            // for the same reason.
-            if (chargingGateBlocks("mobile data")) {
-                return@intercept chain.proceed()
-            }
             // No pairing rule with the WiFi hook: each radio follows its own
             // switch, and a night where only one of them is kept up is a
             // configuration the user can now ask for.
@@ -1867,8 +2156,7 @@ class Hooker : XposedModule() {
             "Sleep-mode network keepalive hooked: idle until the experiment " +
                 "switch is on, then WiFi stays up for the whole night and mobile " +
                 "data follows its sub-switch; the ROM runs its full cutoff path " +
-                "so SleepState still records what to restore; charging-only gate " +
-                "reads " + (readChargingState()?.let { "charging=$it" } ?: "unreadable")
+                "so SleepState still records what to restore."
         )
     }
 
@@ -1991,107 +2279,6 @@ class Hooker : XposedModule() {
         } catch (ignored: Throwable) {
             false
         }
-    }
-
-    /**
-     * Charging-only sub-switch, read lazily like the other two sleep flags.
-     *
-     * It applies to both radios, so it gates the master rather than the data
-     * sub-switch. Master-first: with the master off this answers false and the
-     * stored value is never consulted, so the same rule that keeps the data
-     * sub-switch honest keeps this one honest too.
-     *
-     * Fails to *false* (= "do not narrow"), the opposite of what the charging
-     * read itself does: an unreadable preference must leave the master switch
-     * working at the width the user chose, not silently shrink it.
-     */
-    private fun isSleepKeepaliveChargingOnlyEnabled(): Boolean {
-        return try {
-            val config = getRemotePreferences(Prefs.GROUP_CONFIG)
-            config.getBoolean(Prefs.KEY_SLEEP_KEEPALIVE, false) &&
-                config.getBoolean(Prefs.KEY_SLEEP_KEEPALIVE_CHARGING, false)
-        } catch (ignored: Throwable) {
-            false
-        }
-    }
-
-    /** Application context of the hosting process; null until a successful lookup. */
-    @Volatile
-    private var hostAppContext: Context? = null
-
-    /**
-     * Charging state for the charging-only gate, or null when it cannot be read.
-     *
-     * The PowerKeeper process is never handed a Context, so one is taken from
-     * `ActivityThread.currentApplication()` and cached. The value itself comes
-     * from the sticky `ACTION_BATTERY_CHANGED` broadcast — the receiver argument
-     * is null, so nothing is registered, nothing leaks, and no receiver is left
-     * behind in a system process. It runs once per radio per sleep entry, which
-     * is the frequency of sleep mode, not of battery traffic.
-     *
-     * Null is returned rather than false so the caller and the install-time log
-     * can tell "not charging" from "could not tell" — those two look identical
-     * in a boolean, and only one of them is worth investigating.
-     * [chargingGateBlocks] keeps that apart in what it logs; the install-time
-     * line prints the raw reading for the same reason.
-     */
-    private fun readChargingState(): Boolean? {
-        return try {
-            val context = hostAppContext ?: (
-                Class.forName("android.app.ActivityThread")
-                    .getMethod("currentApplication")
-                    .invoke(null) as? Context
-                )?.also { hostAppContext = it } ?: return null
-            val status = context.registerReceiver(
-                null,
-                IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-            )?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-            when (status) {
-                BatteryManager.BATTERY_STATUS_CHARGING,
-                BatteryManager.BATTERY_STATUS_FULL -> true
-                BatteryManager.BATTERY_STATUS_DISCHARGING,
-                BatteryManager.BATTERY_STATUS_NOT_CHARGING -> false
-                else -> null
-            }
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "charging state unreadable; treating as not charging", t)
-            null
-        }
-    }
-
-    /**
-     * The charging-only gate both sleep-cutoff hooks share.
-     *
-     * Answers true when this sleep entry must be left to the ROM — the device is
-     * not charging, or its charging state could not be read — and logs which of
-     * the two it was, naming the radio. False means the caller may go on and hold
-     * its radio open.
-     *
-     * The unreadable case cuts the network too: this switch exists to save power,
-     * and guessing "charging" would spend a battery all night to honour a setting
-     * it could not confirm. But it is *reported* apart from "not charging",
-     * because the two look identical in a boolean and only one of them is worth
-     * investigating — the distinction [readChargingState] goes out of its way to
-     * preserve, and which the caller used to fold away before logging.
-     */
-    private fun chargingGateBlocks(radio: String): Boolean {
-        if (!isSleepKeepaliveChargingOnlyEnabled()) {
-            return false
-        }
-        when (readChargingState()) {
-            true -> return false
-            false -> log(
-                Log.INFO, TAG,
-                "sleep-mode: $radio left to the ROM policy " +
-                    "(charging-only keepalive, device not charging)"
-            )
-            else -> log(
-                Log.INFO, TAG,
-                "sleep-mode: $radio left to the ROM policy " +
-                    "(charging-only keepalive, charging state unreadable)"
-            )
-        }
-        return true
     }
 
     /**
@@ -4371,6 +4558,53 @@ class Hooker : XposedModule() {
          */
         private const val SLEEP_CONTROLLER_CLASS =
             "com.miui.powerkeeper.statemachine.PhoneSleepModeController"
+
+        /**
+         * WiFi scorer behind the relaxed weak-signal switch.
+         *
+         * It lives in `/system_ext/framework/miui-wifi-service.jar`, not in
+         * services.jar, and NetworkBoost.jar only reaches it by reflection — so
+         * to re-verify on another generation, grep across the framework jars
+         * rather than trusting the presence of NetworkBoost.jar.
+         *
+         * The 50 is the ROM's own constant (`const/16 v2, #int 50` a few
+         * instructions above the `if-ge` that decides `isUsable`); it is not a
+         * tunable this module owns, and a *higher* floor would invent a verdict
+         * stricter than the ROM's.
+         */
+        private const val WIFI_SCORER_CLASS =
+            "com.android.server.wifi.global.global_scorer.AmlMiuiThirdPartScorer"
+        private const val WIFI_SCORER_NOTIFY_METHOD = "notifyScoreAndIsUsable"
+        private const val WIFI_SCORER_SCORE_FIELD = "mLegacyIntScore"
+        /**
+         * The ROM's own verdict threshold, not a tunable this module owns: a
+         * *higher* one would invent a verdict stricter than the ROM's.
+         */
+        private const val WIFI_SCORE_USABLE_MIN = 50
+        /**
+         * What the score is rewritten to, deliberately one whole point above
+         * [WIFI_SCORE_USABLE_MIN] rather than equal to it.
+         *
+         * Equal also works today, because the ROM asks `< 50` and 50 clears
+         * that. It stops working the day a generation asks `<= 50`, and it
+         * would then stop silently — the log still says "reported as usable
+         * instead" while the ROM quietly disagrees. One point costs nothing
+         * here, since nothing downstream reads this field during the call we
+         * are inside, and it keeps the verdict on the far side of either
+         * comparison.
+         */
+        private const val WIFI_SCORE_CLAMP_TARGET = WIFI_SCORE_USABLE_MIN + 1
+        private const val WIFI_SCORE_CLAMP_LOG_INTERVAL_MS = 30_000L
+        /**
+         * Services whose implementation ships in the same jar as the scorer, so
+         * their binder's loader can resolve it. Order does not matter; any one
+         * of them being published is enough.
+         */
+        private val WIFI_SCORER_CLASS_LOADER_SERVICES = arrayOf(
+            "MiuiWifiService",
+            "AmlConnectivityService",
+            "MiuiNetPathOptimizerService"
+        )
         private const val SLEEP_APPLY_METHOD = "applySleepConfig"
         private const val SLEEP_RESTORE_METHOD = "restoreSleepConfig"
 

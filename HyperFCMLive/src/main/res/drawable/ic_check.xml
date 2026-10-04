@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Material Symbols "layers" (fill1, outlined family). Path data verbatim
+<!-- Material Symbols "check" (fill1, outlined family). Path data verbatim
      from fonts.gstatic.com (Apache-2.0); the source canvas is 960x960 with a
      -960 y origin, shifted down via the group.
+     The stroke-like glyph inside the switch thumb: 16dp on screen, so it has
+     to be the plain tick, not a boxed or circled one.
      -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -11,6 +13,6 @@
     <group android:translateY="960">
         <path
             android:fillColor="@android:color/white"
-            android:pathData="M480-118 120-398l66-50 294 228 294-228 66 50-360 280Zm0-202L120-600l360-280 360 280-360 280Z" />
+            android:pathData="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z" />
     </group>
 </vector>

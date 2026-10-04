@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Material Symbols "water_drop" (outlined): a stroked droplet with a small
-     shine mark. Path data verbatim from Google Fonts (Apache-2.0); the source
-     canvas is 960x960 with a -960 y origin, shifted down via the group. -->
+<!-- Material Symbols "palette" (fill1, outlined family). Path data verbatim
+     from fonts.gstatic.com (Apache-2.0); the source canvas is 960x960 with a
+     -960 y origin, shifted down via the group.
+     The painter's palette, not the droplet: dynamic colour is a palette
+     choice, and the style icon next to it already owns the shard mark.
+     -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -10,6 +13,6 @@
     <group android:translateY="960">
         <path
             android:fillColor="@android:color/white"
-            android:pathData="M491,-200q12,-1 20.5,-9.5T520,-230q0,-14 -9,-22.5t-23,-7.5q-41,3 -87,-22.5T343,-375q-2,-11 -10.5,-18t-19.5,-7q-14,0 -23,10.5t-6,24.5q17,91 80,130t127,35ZM251.5,-174Q160,-268 160,-408q0,-100 79.5,-217.5T480,-880q161,137 240.5,254.5T800,-408q0,140 -91.5,234T480,-80q-137,0 -228.5,-94ZM652,-230.5Q720,-301 720,-408q0,-73 -60.5,-165T480,-774Q361,-665 300.5,-573T240,-408q0,107 68,177.5T480,-160q104,0 172,-70.5Z" />
+            android:pathData="M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 32.5-156t88-127Q256-817 330-848.5T488-880q80 0 151 27.5t124.5 76q53.5 48.5 85 115T880-518q0 115-70 176.5T640-280h-74q-9 0-12.5 5t-3.5 11q0 12 15 34.5t15 51.5q0 50-27.5 74T480-80ZM303-457q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120-160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm200 0q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120 160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Z" />
     </group>
 </vector>

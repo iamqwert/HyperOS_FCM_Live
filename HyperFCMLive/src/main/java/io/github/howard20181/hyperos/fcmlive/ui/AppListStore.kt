@@ -9,7 +9,6 @@ import android.os.Handler
 import android.os.Looper
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import kotlin.math.roundToInt
 
 /**
  * What a row of the app list is made of, plus the one thing the rows cannot

@@ -971,6 +971,23 @@ class MainActivity : AppCompatActivity() {
                 this, prefs, Prefs.readLocalWechatDozeKeepout(this)
             )
         }
+        if (Prefs.hasPendingWifiWeakSignalSwitchRelaxedPush(this)) {
+            // And for the relaxed WiFi weak-signal switch, which the experiment
+            // screen owns: a flip made before the service bound lives only in
+            // the local mirror.
+            Prefs.writeWifiWeakSignalSwitchRelaxed(
+                this, prefs, Prefs.readLocalWifiWeakSignalSwitchRelaxed(this)
+            )
+        }
+        if (Prefs.hasPendingWifiWeakSignalFloorPush(this)) {
+            // Same repair for that switch's floor. Without it a choice made
+            // before the service bound would stay local forever, and the hook
+            // would go on using the default — silently wider or narrower than
+            // what the screen says it is using.
+            Prefs.writeWifiWeakSignalFloor(
+                this, prefs, Prefs.readLocalWifiWeakSignalFloor(this)
+            )
+        }
         if (Prefs.hasPendingSleepKeepalivePush(this)) {
             // Same repair for the sleep-keepalive switch, which the experiment
             // screen owns; without this a flip made before the service bound
@@ -981,12 +998,6 @@ class MainActivity : AppCompatActivity() {
             // And for its mobile-data sub-switch.
             Prefs.writeSleepKeepaliveData(
                 this, prefs, Prefs.readLocalSleepKeepaliveData(this)
-            )
-        }
-        if (Prefs.hasPendingSleepKeepaliveChargingPush(this)) {
-            // And for its charging-only sub-switch.
-            Prefs.writeSleepKeepaliveCharging(
-                this, prefs, Prefs.readLocalSleepKeepaliveCharging(this)
             )
         }
         if (Prefs.hasPendingPush(this)) {

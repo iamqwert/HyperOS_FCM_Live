@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +31,13 @@ import io.github.howard20181.hyperos.fcmlive.R
  * puts the status bar back on top of it. The earlier 76dp sat one step above
  * the spec and read as dead air between the status bar, the title and the body
  * — the bar now hugs both, the same way [MainTopBar] does on the home page.
+ *
+ * The leading control is a **filled icon button**, and it is deliberately the
+ * only one: the home page's own bar icons stay bare (`MainScreen.TopBarIconButton`)
+ * and are never to be brought in line with this. A secondary page has one way
+ * out and the plate is what makes it a 48dp target the eye finds; the home bar
+ * is a row of peers sitting over a list, where four plates would read as four
+ * buttons competing with the content underneath.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,7 +62,7 @@ fun AppTopBar(
             TooltipBox(
                 modifier = Modifier
                     // TopAppBar pads the nav-icon slot 4dp from the edge and
-                    // the tonal button centers its 40dp plate in a 48dp touch
+                    // the button centers its 40dp plate in a 48dp touch
                     // target — another 4dp. 4 + 8 + 4 = 16dp: the plate's left
                     // edge lands exactly on the cards' left edge below. The
                     // end padding puts the title a standard 8dp off the plate
@@ -71,16 +78,24 @@ fun AppTopBar(
                 tooltip = { PlainTooltip { Text(text = description) } },
                 state = rememberTooltipState(),
                 content = {
-                    // Contained icon button: a circular tonal plate under the
-                    // glyph, the way M3 Expressive toolbars dress their
-                    // leading control. The container is the neutral container
-                    // step, not the accent — the back arrow leads the page but
-                    // is not its primary action.
-                    FilledTonalIconButton(
+                    // A filled icon button: circular plate under the glyph, the
+                    // way M3 Expressive toolbars dress their leading control.
+                    //
+                    // The fill is `surfaceContainerHighest` at 60%, and that is
+                    // both reference apps to the letter — InstallerX's
+                    // `ExpressiveBackButton` is this very line, and DPIS
+                    // hand-rolls the same role and the same alpha behind a
+                    // transparent `IconButton`. It is neither the accent (the
+                    // arrow leads the page but is not its primary action) nor
+                    // the card role: a card is the surface the *content* sits
+                    // on, and this plate is chrome drawn over it, so borrowing
+                    // the card's fill made the two read as one material.
+                    FilledIconButton(
                         onClick = onBack,
                         shape = CircleShape,
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                                .copy(alpha = 0.6f),
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     ) {

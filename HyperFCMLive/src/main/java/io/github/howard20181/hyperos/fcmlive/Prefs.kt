@@ -31,15 +31,26 @@ import java.util.concurrent.Executors
  * master/sub pair therefore has to be checked in three places, not one:
  *
  *  1. every hook read site **ANDs the master flag** (including secondary gates
- *     shared by both branches) — see `isSleepKeepaliveDataEnabled()` /
- *     `isSleepKeepaliveChargingOnlyEnabled()` in Hooker.kt;
+ *     shared by both branches) — see `isSleepKeepaliveDataEnabled()` in
+ *     Hooker.kt;
  *  2. the UI keeps the sub switch inside the *same* `AnimatedVisibility` as the
  *     master;
  *  3. the key is added to `MainActivity.reloadAllowlist`'s pending-repair set,
  *     so a value the module never saw gets pushed again.
  *
- * The current pair is `sleep_keepalive` ⊃ `…_data` / `…_charging_only`. The
- * WeChat pair was removed with the shield (see HOOKS_AND_DIAGNOSTICS.md §4.8).
+ * A sub-option that is not a boolean follows the same three, with one
+ * relaxation: `wifi_weak_signal_floor` is reached only inside the branch its
+ * master already opened, so the AND is structural and needs no extra flag. It
+ * still has to sit in the master's `AnimatedVisibility` and still has to be
+ * sanitized — a value from a retired option list would otherwise read as a
+ * depth nobody offers any more.
+ *
+ * The current pair is `sleep_keepalive` ⊃ `…_data`. A `…_charging_only` sibling
+ * used to live beside them and was removed on 2026-10-04 — see
+ * HOOKS_AND_DIAGNOSTICS.md §4.6.1 for why ("only while charging" narrowed the
+ * master and could never widen it, and the premise it was justified by turned
+ * out to be false). The WeChat pair was removed with the shield (see
+ * HOOKS_AND_DIAGNOSTICS.md §4.8).
  *
  * Rare paths need an explicit "applied / handed back to the ROM" log line:
  * **never infer that a hook worked from the absence of a log line.**
@@ -114,27 +125,6 @@ object Prefs {
     private const val KEY_SLEEP_KEEPALIVE_DATA_PENDING_PUSH = "sleep_keepalive_data_pending_push"
 
     /**
-     * Remote + local: "only while charging" sub-switch of the sleep keepalive.
-     *
-     * The master switch holds a radio open for the whole night, and that only
-     * earns its cost when the battery is not what is being spent — i.e. when
-     * the phone sits on the charger. With this on, the cutoff hooks stand down
-     * whenever the device is not charging and the ROM cuts the network exactly
-     * as it would have: an unplugged night keeps the power saving, a charging
-     * night keeps the FCM channel.
-     *
-     * Applies to both radios, so it is a sibling of [KEY_SLEEP_KEEPALIVE_DATA]
-     * rather than nested under it. Only consulted while [KEY_SLEEP_KEEPALIVE]
-     * is on, like the data sub-switch. Default **off**: it narrows a switch
-     * the user deliberately turned on, and narrowing is still a change to what
-     * they asked for.
-     */
-    const val KEY_SLEEP_KEEPALIVE_CHARGING = "sleep_keepalive_charging_only"
-    /** UI-only: set while the mirror holds a charging-only change the module never saw. */
-    private const val KEY_SLEEP_KEEPALIVE_CHARGING_PENDING_PUSH =
-        "sleep_keepalive_charging_only_pending_push"
-
-    /**
      * Remote + local: "WeChat doze keepout" experiment.
      *
      * The PowerKeeper process hardcodes WeChat into its domestic
@@ -153,6 +143,72 @@ object Prefs {
     const val KEY_WECHAT_DOZE_KEEPOUT = "wechat_doze_keepout"
     /** UI-only: set while the mirror holds a keepout change the module never saw. */
     private const val KEY_WECHAT_DOZE_KEEPOUT_PENDING_PUSH = "wechat_doze_keepout_pending_push"
+
+    /**
+     * Remote + local: "relaxed WiFi weak-signal switch" experiment.
+     *
+     * Background, measured on-device (HyperOS V816, see Hooks doc §5.9.2):
+     * `AmlMiuiThirdPartScorer` turns `mLegacyIntScore` into a usable/unusable
+     * verdict at a hardcoded threshold of 50, and reports it outward once per
+     * update through `notifyScoreAndIsUsable()`. A score below 50 makes
+     * `WifiScoreReport` mark the network `+EXITING`, and ConnectivityService
+     * then moves the default network to cellular for 30 s. The hook clamps the
+     * score to 50 for the duration of that one call, so the weak-signal verdict
+     * is never published.
+     *
+     * Scope of the change, which is why it belongs in this file's experiment
+     * set rather than near the FCM allowlist:
+     * - the clamp lives in the arguments of a single in-flight call; nothing is
+     *   written to disk, to Settings, or anywhere else upstream, so turning the
+     *   switch off — or uninstalling — leaves no residue;
+     * - the real score is restored on the way out, so mechanism that does not
+     *   go through the scorer (carrier/UI decisions, WiFi actually leaving) is
+     *   untouched.
+     *
+     * Default **off**, like every other experiment: it deliberately keeps the
+     * device on a WiFi link the ROM judged too weak, which is a quality-of-
+     * service trade, not a repair.
+     */
+    const val KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED = "wifi_weak_signal_switch_relaxed"
+    /** UI-only: set while the mirror holds a relaxed-switch change the module never saw. */
+    private const val KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED_PENDING_PUSH =
+        "wifi_weak_signal_switch_relaxed_pending_push"
+
+    /**
+     * Remote + local: how weak a WiFi link may get before this switch stops
+     * covering it — the sub-option of [KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED].
+     *
+     * The master switch on its own rescues *every* score below the ROM's floor,
+     * however far below: a link scored 33 gets exactly the treatment one scored
+     * 49 does. Only consulted while the master is on, so it can narrow but
+     * never widen the master, and it needs no other gate — the hook reaches it
+     * only inside the branch the master already opened.
+     *
+     * Below the chosen value the score is handed to the ROM untouched, so the
+     * network moves to cellular exactly as it would without the module. That is
+     * the trade being offered: the switch exists to stop needless switching,
+     * and there is a depth past which staying is worse than the switch it was
+     * trying to avoid. Nothing is gained by pretending otherwise, and the
+     * description on screen says so.
+     *
+     * The four values step by five. The ROM's own floor is 50; around 45 is the
+     * marginal band that produced the recovery decisions in the V816 samples —
+     * one gaming window (1409 samples) reached 33 with only four samples below
+     * 35, and another (1245 samples) never went below 44 — so 30 is offered
+     * rather than proved, as the far end of a scale the middle of which is
+     * where the measurement actually sits.
+     *
+     * Default **45**: the narrowest rescue, so switching the master on changes
+     * the least. Anything deeper is a deliberate widening, not a default.
+     */
+    const val KEY_WIFI_WEAK_SIGNAL_FLOOR = "wifi_weak_signal_floor"
+    /** UI-only: set while the mirror holds a floor change the module never saw. */
+    private const val KEY_WIFI_WEAK_SIGNAL_FLOOR_PENDING_PUSH =
+        "wifi_weak_signal_floor_pending_push"
+    /** Offered floors, narrowest first. */
+    val WIFI_WEAK_SIGNAL_FLOORS: IntArray = intArrayOf(45, 40, 35, 30)
+    /** Default floor: see [KEY_WIFI_WEAK_SIGNAL_FLOOR]. */
+    const val WIFI_WEAK_SIGNAL_FLOOR_DEFAULT = 45
     /** Action the app broadcasts after writing, to refresh system_server. */
     const val ACTION_ALLOWLIST_CHANGED = MODULE_PKG + ".ALLOWLIST_CHANGED"
 
@@ -315,52 +371,6 @@ object Prefs {
         }
     }
 
-    /** Sleep-keepalive charging-only value as the UI last left it. */
-    @JvmStatic
-    fun readLocalSleepKeepaliveCharging(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_SLEEP_KEEPALIVE_CHARGING, false)
-    }
-
-    /** Sleep-keepalive charging-only counterpart of [hasPendingPush]. */
-    @JvmStatic
-    fun hasPendingSleepKeepaliveChargingPush(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_SLEEP_KEEPALIVE_CHARGING_PENDING_PUSH, false)
-    }
-
-    /**
-     * Write the sleep-keepalive charging-only sub-switch and make it live.
-     *
-     * Same shape as [writeSleepKeepalive]: the hook in the PowerKeeper process
-     * reads the remote value lazily at each qualifying call, so flipping this
-     * takes effect on the next sleep entry without a reboot.
-     */
-    @JvmStatic
-    fun writeSleepKeepaliveCharging(
-        context: Context,
-        remotePrefs: SharedPreferences?,
-        enabled: Boolean
-    ) {
-        val app = appContext(context)
-        localPrefs(app).edit().putBoolean(KEY_SLEEP_KEEPALIVE_CHARGING, enabled).apply()
-        if (remotePrefs == null) {
-            localPrefs(app).edit()
-                .putBoolean(KEY_SLEEP_KEEPALIVE_CHARGING_PENDING_PUSH, true).apply()
-            broadcastAllowlistChanged(app)
-            return
-        }
-        localPrefs(app).edit()
-            .putBoolean(KEY_SLEEP_KEEPALIVE_CHARGING_PENDING_PUSH, false).apply()
-        WRITER.execute {
-            try {
-                remotePrefs.edit().putBoolean(KEY_SLEEP_KEEPALIVE_CHARGING, enabled).commit()
-            } catch (t: Throwable) {
-                localPrefs(app).edit()
-                    .putBoolean(KEY_SLEEP_KEEPALIVE_CHARGING_PENDING_PUSH, true).apply()
-            }
-            broadcastAllowlistChanged(app)
-        }
-    }
-
     /** WeChat-doze-keepout value as the UI last left it; the mirror is what the experiment screen shows. */
     @JvmStatic
     fun readLocalWechatDozeKeepout(context: Context): Boolean {
@@ -399,6 +409,123 @@ object Prefs {
                 remotePrefs.edit().putBoolean(KEY_WECHAT_DOZE_KEEPOUT, enabled).commit()
             } catch (t: Throwable) {
                 localPrefs(app).edit().putBoolean(KEY_WECHAT_DOZE_KEEPOUT_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+        }
+    }
+
+    /** Relaxed WiFi weak-signal switch value as the UI last left it. */
+    @JvmStatic
+    fun readLocalWifiWeakSignalSwitchRelaxed(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED, false)
+    }
+
+    /** Relaxed WiFi weak-signal switch counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingWifiWeakSignalSwitchRelaxedPush(context: Context): Boolean {
+        return localPrefs(context)
+            .getBoolean(KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED_PENDING_PUSH, false)
+    }
+
+    /**
+     * Write the relaxed WiFi weak-signal flag and make it live.
+     *
+     * Same shape as [writeWechatDozeKeepout]. The hook lives in system_server
+     * and reads the remote value lazily at each qualifying call, so flipping
+     * this takes effect on the next score update without a reboot.
+     */
+    @JvmStatic
+    fun writeWifiWeakSignalSwitchRelaxed(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean
+    ) {
+        val app = appContext(context)
+        localPrefs(app).edit().putBoolean(KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED, enabled).apply()
+        if (remotePrefs == null) {
+            localPrefs(app).edit()
+                .putBoolean(KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED_PENDING_PUSH, true).apply()
+            broadcastAllowlistChanged(app)
+            return
+        }
+        localPrefs(app).edit()
+            .putBoolean(KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED_PENDING_PUSH, false).apply()
+        WRITER.execute {
+            try {
+                remotePrefs.edit()
+                    .putBoolean(KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED, enabled).commit()
+            } catch (t: Throwable) {
+                localPrefs(app).edit()
+                    .putBoolean(KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+        }
+    }
+
+    /** True when [value] is one of the offered floors. */
+    @JvmStatic
+    fun isValidWeakSignalFloor(value: Int): Boolean {
+        for (floor in WIFI_WEAK_SIGNAL_FLOORS) {
+            if (floor == value) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Fall back to the default rather than acting on an unknown value: a floor
+     * left over from a wider list of options would otherwise be read as a
+     * depth nobody offers any more, and the two failures look alike.
+     */
+    @JvmStatic
+    fun sanitizeWeakSignalFloor(value: Int): Int {
+        return if (isValidWeakSignalFloor(value)) value else WIFI_WEAK_SIGNAL_FLOOR_DEFAULT
+    }
+
+    /** Weak-signal floor as the UI last left it, sanitized the same way the hook does. */
+    @JvmStatic
+    fun readLocalWifiWeakSignalFloor(context: Context): Int {
+        return sanitizeWeakSignalFloor(
+            localPrefs(context).getInt(KEY_WIFI_WEAK_SIGNAL_FLOOR, WIFI_WEAK_SIGNAL_FLOOR_DEFAULT)
+        )
+    }
+
+    /** Weak-signal floor counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingWifiWeakSignalFloorPush(context: Context): Boolean {
+        return localPrefs(context)
+            .getBoolean(KEY_WIFI_WEAK_SIGNAL_FLOOR_PENDING_PUSH, false)
+    }
+
+    /**
+     * Write the floor and make it live. Integer rather than boolean, otherwise
+     * identical to [writeWifiWeakSignalSwitchRelaxed]; the hook reads it at the
+     * same lazily-refreshed call, so a change lands on the next score update.
+     */
+    @JvmStatic
+    fun writeWifiWeakSignalFloor(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        floor: Int
+    ) {
+        val value = sanitizeWeakSignalFloor(floor)
+        val app = appContext(context)
+        localPrefs(app).edit().putInt(KEY_WIFI_WEAK_SIGNAL_FLOOR, value).apply()
+        if (remotePrefs == null) {
+            localPrefs(app).edit()
+                .putBoolean(KEY_WIFI_WEAK_SIGNAL_FLOOR_PENDING_PUSH, true).apply()
+            broadcastAllowlistChanged(app)
+            return
+        }
+        localPrefs(app).edit()
+            .putBoolean(KEY_WIFI_WEAK_SIGNAL_FLOOR_PENDING_PUSH, false).apply()
+        WRITER.execute {
+            try {
+                remotePrefs.edit().putInt(KEY_WIFI_WEAK_SIGNAL_FLOOR, value).commit()
+            } catch (t: Throwable) {
+                localPrefs(app).edit()
+                    .putBoolean(KEY_WIFI_WEAK_SIGNAL_FLOOR_PENDING_PUSH, true).apply()
             }
             broadcastAllowlistChanged(app)
         }

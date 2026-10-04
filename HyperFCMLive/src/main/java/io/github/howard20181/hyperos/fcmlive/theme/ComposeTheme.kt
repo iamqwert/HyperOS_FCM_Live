@@ -45,6 +45,15 @@ fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
         }
     }
     val colorScheme = remember(palette) { palette?.toComposeColorScheme() ?: lightColorScheme() }
+    // The raised container. `AppPalette` owns the value; without a palette
+    // (preview, no usable Context) fall back to the stock scheme's `surface`,
+    // which is the same near-neutral tone the light palette would hand over.
+    val appSurfaces = remember(palette, colorScheme) {
+        AppSurfaces(
+            card = palette?.let { Color(it.cardBg) } ?: colorScheme.surface,
+            popup = palette?.let { Color(it.popupBg) } ?: colorScheme.surface
+        )
+    }
     // Which Material generation we are dressing as. Driven by the colour spec
     // rather than a second preference: "Material You (2021)" and "Expressive
     // (2025)" differ in motion and shape as much as in colour, and letting them
@@ -79,6 +88,7 @@ fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
     ) {
         CompositionLocalProvider(
             LocalAppShapes provides appShapes,
+            LocalAppSurfaces provides appSurfaces,
             LocalOverscrollFactory provides overscrollFactory
         ) {
             content()
@@ -86,23 +96,27 @@ fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
     }
 }
 
-/** Map the runtime [AppPalette] (full [Scheme]) onto Compose Material 3. */
+/**
+ * Map the runtime [AppPalette] (full [Scheme]) onto Compose Material 3.
+ *
+ * Every role is mapped verbatim. App-side surface policy — the AMOLED
+ * near-black ramp, and the three-level page/card/popup mapping — lives in
+ * [AppPalette], so this bridge stays a translation table instead of a second
+ * place the palette is decided. The raised container and the popup level travel
+ * beside the scheme through [LocalAppSurfaces] (see [AppSurfaces] for why the
+ * AMOLED ramp keeps them outside the roles).
+ */
 fun AppPalette.toComposeColorScheme(): ColorScheme {
     val s = scheme
     val surface = Color(pageBg)
     val onSurface = Color(this.onSurface)
-    // `background` carries pageBg, whose dark tone is derived from
-    // surfaceContainerLowest — mapping that role verbatim would paint the
-    // cards the same colour as the page. Cards take the `card` alias instead,
-    // which always stays one step above the page in both modes.
-    val cardColor = Color(card)
     return if (dark) {
         darkColorScheme(
             primary = Color(primary),
             onPrimary = Color(onPrimary),
             primaryContainer = Color(primaryContainer),
             onPrimaryContainer = Color(s.onPrimaryContainer),
-            inversePrimary = Color(s.inverseSurface),
+            inversePrimary = Color(s.inversePrimary),
             secondary = Color(s.secondary),
             onSecondary = Color(s.onSecondary),
             secondaryContainer = Color(s.secondaryContainer),
@@ -131,9 +145,9 @@ fun AppPalette.toComposeColorScheme(): ColorScheme {
             surfaceDim = Color(s.surfaceDim),
             surfaceContainer = Color(s.surfaceContainer),
             surfaceContainerHigh = Color(this.surfaceContainerHigh),
-            surfaceContainerHighest = Color(s.surfaceContainerHighest),
+            surfaceContainerHighest = Color(this.surfaceContainerHighest),
             surfaceContainerLow = Color(this.surfaceContainerLow),
-            surfaceContainerLowest = cardColor,
+            surfaceContainerLowest = Color(this.surfaceContainerLowest),
         )
     } else {
         lightColorScheme(
@@ -141,7 +155,7 @@ fun AppPalette.toComposeColorScheme(): ColorScheme {
             onPrimary = Color(onPrimary),
             primaryContainer = Color(primaryContainer),
             onPrimaryContainer = Color(s.onPrimaryContainer),
-            inversePrimary = Color(s.inverseSurface),
+            inversePrimary = Color(s.inversePrimary),
             secondary = Color(s.secondary),
             onSecondary = Color(s.onSecondary),
             secondaryContainer = Color(s.secondaryContainer),
@@ -170,9 +184,9 @@ fun AppPalette.toComposeColorScheme(): ColorScheme {
             surfaceDim = Color(s.surfaceDim),
             surfaceContainer = Color(s.surfaceContainer),
             surfaceContainerHigh = Color(this.surfaceContainerHigh),
-            surfaceContainerHighest = Color(s.surfaceContainerHighest),
+            surfaceContainerHighest = Color(this.surfaceContainerHighest),
             surfaceContainerLow = Color(this.surfaceContainerLow),
-            surfaceContainerLowest = cardColor,
+            surfaceContainerLowest = Color(this.surfaceContainerLowest),
         )
     }
 }

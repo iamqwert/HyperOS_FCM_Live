@@ -48,8 +48,8 @@ android {
         targetSdkVersion 37
         // Fixed (bumped by hand each release) so LSPosed update checks never treat
         // this fork as older than upstream builds that inherit a low jgit commitCount.
-        versionCode 38
-        versionName "3.5.4"
+        versionCode 40
+        versionName "3.6.0"
 
         // HyperOS modules ship arm64 only; drop armv7a / x86 / x86_64 natives.
         ndk {
@@ -119,7 +119,6 @@ android {
         checkReleaseBuilds false
     }
 
-    dependenciesInfo.includeInApk false
     namespace 'io.github.howard20181.hyperos.fcmlive'
 }
 
@@ -128,12 +127,15 @@ base {
 }
 
 dependencies {
-    // Compile-time only: annotations used by the source; nothing is packaged.
-    compileOnly 'androidx.annotation:annotation:1.11.0'
-    // Material Design 3 components, theme, typography and shape tokens.
+    // The base of the theme chain, and the only reason it is here: the parent
+    // named in res/values/themes.xml is Theme.Material3.DayNight.NoActionBar,
+    // which descends from Theme.MaterialComponents.*, which descends from
+    // Theme.AppCompat.*. No source file references it directly.
     implementation 'androidx.appcompat:appcompat:1.8.0'
-    // Declared for the ActivityResultContracts import in MainActivity. Resolves
-    // at 1.8.2 through appcompat today; declaring it explicitly means Dependabot
+    // Declared for the ActivityResultContracts imports: CreateDocument and
+    // OpenDocument in AboutActivity (allowlist export / import) and
+    // RequestPermission in MainActivity (the diagnostics log). Resolves at
+    // 1.8.2 through appcompat today; declaring it explicitly means Dependabot
     // tracks it instead of the version silently riding along.
     implementation 'androidx.activity:activity:1.8.2'
     // Material Views: two real consumers keep this here — the
@@ -145,8 +147,9 @@ dependencies {
     // Jetpack Compose (View-compatible). Theme bridge lives in theme/ComposeTheme.kt.
     def composeBom = platform('androidx.compose:compose-bom:2026.09.00')
     implementation composeBom
+    // `ui` is the KMP root artifact: it resolves to ui-android, so declaring
+    // ui-android as well was the same module twice.
     implementation 'androidx.compose.ui:ui'
-    implementation 'androidx.compose.ui:ui-android'
     implementation 'androidx.compose.foundation:foundation'
     // Pinned above what composeBom 2026.09.00 resolves (1.4.0): 1.4.0 ships
     // every Expressive component — LoadingIndicator, SplitButton, ButtonGroup,
@@ -154,9 +157,10 @@ dependencies {
     // them Kotlin-internal, so none of it compiles against. 1.5.0-alpha is the
     // first line that exposes them. Verified: compiles, and passes R8 release.
     implementation 'androidx.compose.material3:material3:1.5.0-alpha27'
-    // Since material3 1.4.0 the icon packs are no longer pulled in transitively,
-    // so Icons.* fails to resolve without this. Version comes from the BOM.
-    implementation 'androidx.compose.material:material-icons-core'
+    // Icons are drawables under res/drawable (Material Symbols, see the red
+    // line at the top of theme/ComposeTokens.kt), so the compose icon packs are
+    // not needed at all — not even the core one. material3 stopped pulling them
+    // in transitively at 1.4.0, and nothing here references `Icons.*` any more.
     implementation 'androidx.compose.ui:ui-tooling-preview'
     debugImplementation 'androidx.compose.ui:ui-tooling'
     compileOnly 'io.github.libxposed:api:102.0.0'
