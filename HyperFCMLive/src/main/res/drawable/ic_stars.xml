@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Material Symbols "layers" (fill1, outlined family). Path data verbatim
+<!-- Material Symbols "stars" (fill1, outlined family). Path data verbatim
      from fonts.gstatic.com (Apache-2.0); the source canvas is 960x960 with a
      -960 y origin, shifted down via the group.
      -->
@@ -11,6 +11,6 @@
     <group android:translateY="960">
         <path
             android:fillColor="@android:color/white"
-            android:pathData="M480-118 120-398l66-50 294 228 294-228 66 50-360 280Zm0-202L120-600l360-280 360 280-360 280Z" />
+            android:pathData="m320-240 160-122 160 122-60-198 160-114H544l-64-208-64 208H220l160 114-60 198ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z" />
     </group>
 </vector>

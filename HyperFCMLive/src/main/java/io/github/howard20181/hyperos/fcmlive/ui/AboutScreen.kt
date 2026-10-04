@@ -82,6 +82,7 @@ import io.github.howard20181.hyperos.fcmlive.mcu.Hct
 import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppShapes
+import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
 import io.github.howard20181.hyperos.fcmlive.theme.ThemePrefs
 import kotlinx.coroutines.launch
 
@@ -216,6 +217,33 @@ private fun AboutBody(
     val styleEntries = stringArrayResource(R.array.palette_style_entries)
     val specEntries = stringArrayResource(R.array.color_spec_entries)
 
+    // The two appearance menus are scoped by each other, because the settings
+    // are not independent: the 2025 spec covers four palette styles and nothing
+    // else (`Scheme.Variant.supportsExpressive2025`), so every other style falls
+    // back to 2021. Offering a style the spec in effect cannot render is
+    // offering a choice that silently does nothing; offering a spec the current
+    // style cannot take is offering one whose label never moves. Each menu
+    // therefore lists only what is reachable from where the user is now:
+    //   palette ⟹ supported by the spec in effect
+    //   spec    ⟹ 2025 only while the style can take it
+    // Note the lists cannot strand the current value: an in-effect 2025 implies
+    // by construction a style that supports it, so that style is always in the
+    // filtered list.
+    //
+    // Both lists are built from the *resolved* spec, which is also what makes
+    // this the way back out of a pair the 2025 spec cannot render: the request
+    // itself is never rewritten (see ThemePrefs.specVersion), so a style that
+    // can take it brings 2025 straight back.
+    val paletteVariants = Scheme.Variant.entries.filter {
+        colorSpec != ThemePrefs.SPEC_2025 || it.supportsExpressive2025
+    }
+    val paletteStyleNow = variantAt(paletteStyle)
+    val specValues = if (paletteStyleNow.supportsExpressive2025) {
+        listOf(ThemePrefs.SPEC_2021, ThemePrefs.SPEC_2025)
+    } else {
+        listOf(ThemePrefs.SPEC_2021)
+    }
+
     val checkingText = stringResource(R.string.update_checking)
     val noneText = stringResource(R.string.update_none)
     val errorText = stringResource(R.string.update_error)
@@ -236,6 +264,14 @@ private fun AboutBody(
     updateOffer?.let { offer ->
         AlertDialog(
             onDismissRequest = { updateOffer = null },
+            // Popup level, like every panel drawn over the page. M3's dialog
+            // default is `surfaceContainerHigh`, which on this ramp is a tone
+            // *below* the page (92 against 94), so the dialog would have sat
+            // behind the surface it is drawn over. The popup level is where
+            // Material's own menus sit (`MenuTokens.ContainerColor` =
+            // `surfaceContainer`), and it is deliberately not the card's — see
+            // [AppSurfaces].
+            containerColor = LocalAppSurfaces.current.popup,
             text = { Text(stringResource(R.string.update_found, offer.version)) },
             confirmButton = {
                 TextButton(onClick = {
@@ -317,13 +353,24 @@ private fun AboutBody(
                 iconRes = R.drawable.ic_palette_style,
                 title = stringResource(R.string.palette_style),
                 subtitle = stringResource(R.string.about_sub_palette_style),
-                entries = styleEntries.toList(),
-                currentIndex = paletteStyle,
+                // Entry index == Scheme.Variant.ordinal, which is how the
+                // string array is written; [paletteVariants] is that list minus
+                // whatever the spec in effect cannot render.
+                entries = paletteVariants.map { styleEntries[it.ordinal] },
+                currentIndex = paletteVariants.indexOf(paletteStyleNow),
                 first = false,
                 last = false,
                 onPick = { index ->
-                    ThemePrefs.setPaletteStyle(context, variantAt(index))
-                    paletteStyle = index
+                    // Mapping through the filtered list is what keeps the write
+                    // honest: the index is a position in *this* menu, not an
+                    // ordinal.
+                    ThemePrefs.setPaletteStyle(context, paletteVariants[index])
+                    paletteStyle = paletteVariants[index].ordinal
+                    // Changing the style can put the spec out of reach (see
+                    // ThemePrefs.specVersion), so the spec row re-reads the
+                    // resolved value instead of keeping its own copy — the two
+                    // rows can only ever move together.
+                    colorSpec = ThemePrefs.specVersion(context)
                     actions.onAppearanceChange()
                 }
             )
@@ -332,13 +379,13 @@ private fun AboutBody(
                 iconRes = R.drawable.ic_color_spec,
                 title = stringResource(R.string.color_spec),
                 subtitle = stringResource(R.string.about_sub_color_spec),
-                entries = specEntries.toList(),
-                currentIndex = colorSpec,
+                entries = specValues.map { specEntries[it] },
+                currentIndex = specValues.indexOf(colorSpec),
                 first = false,
                 last = true,
                 onPick = { index ->
-                    ThemePrefs.setSpecVersion(context, index)
-                    colorSpec = index
+                    ThemePrefs.setSpecVersion(context, specValues[index])
+                    colorSpec = ThemePrefs.specVersion(context)
                     actions.onAppearanceChange()
                 }
             )
@@ -526,6 +573,12 @@ private fun PopupCard(
                 // the page's card language, and M3's default menu corner is
                 // much tighter than anything else on this screen.
                 shape = shapes.menu,
+                // Popup level, as every dropdown — see LocalAppSurfaces. This
+                // is M3's own menu default (`MenuTokens.ContainerColor` =
+                // `surfaceContainer`), the same level as the page; the panel's
+                // own tone is what separates it from the card it lands on,
+                // never an outline.
+                containerColor = LocalAppSurfaces.current.popup,
                 // Negative on purpose: the provider *adds* the offset to the
                 // chosen candidate, and the candidate we land on is
                 // "menu end at anchor end", so a negative X is what pulls the
@@ -577,7 +630,7 @@ private fun DynamicColorCard(
     )
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        color = LocalAppSurfaces.current.card,
         shape = shape
     ) {
         val view = LocalView.current
@@ -620,6 +673,7 @@ private fun DynamicColorCard(
                     modifier = Modifier.padding(start = 12.dp),
                     checked = dynamic,
                     onCheckedChange = { toggle() },
+                    colors = appSwitchColors(),
                     thumbContent = { SwitchThumbMark(checked = dynamic) }
                 )
             }
@@ -791,7 +845,7 @@ private fun AboutScreenPreview() {
                     onHelp = {},
                     onCheckUpdate = {},
                     onUpdateOpen = {},
-                    versionLine = "当前版本 3.5.4 (38)",
+                    versionLine = "当前版本 3.6.0 (40)",
                     onAppearanceChange = {}
                 )
             )

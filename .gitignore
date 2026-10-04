@@ -50,6 +50,14 @@ docs/internal/
 docs/private/
 docs/sensitive/
 
+# 真机取证现场产出（本地验证目录，不在本仓库树内，规则先备此处）
+# 内含 logcat 全量 dump、connectivity/NetworkBoost dumpsys、APK dex 摘录，仅本地分析用
+FINDINGS-*
+findings/
+/live-*/
+logcat_*.txt
+*2026-10-03*
+
 # Windows folder customization
 desktop.ini
 

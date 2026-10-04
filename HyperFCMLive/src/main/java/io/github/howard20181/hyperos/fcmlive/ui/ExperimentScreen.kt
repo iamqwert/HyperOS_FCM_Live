@@ -47,6 +47,14 @@ import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
  * sub-switch underneath, hidden until the master is on and animated in and out
  * on the flip. The hidden state and the hook agree, because the sub-switch's
  * hook reads the master flag as well.
+ *
+ * The layout is the settings pages' section pattern, deliberately: a
+ * [SectionTitle] per section, and the rows of one section drawn as a connected
+ * group — [GROUP_ROW_GAP] between rows, group corners on the ends only, a lone
+ * row keeping the whole card radius. A revealed sub-option is the *second row
+ * of its master's group*, not a card of its own, which is why the master's
+ * [SettingsSwitchCard.last] follows the reveal: with the sub-row on screen the
+ * two read as one block, and with it gone the master is a section of one row.
  */
 @Composable
 fun ExperimentScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
@@ -71,12 +79,18 @@ private fun ExperimentBody(
     // Read once per screen: the hook side owns the live value, and the mirror
     // is only the answer the UI last left behind.
     var wechatDozeKeepout by remember { mutableStateOf(Prefs.readLocalWechatDozeKeepout(context)) }
+    var wifiWeakSignalRelaxed by remember {
+        mutableStateOf(Prefs.readLocalWifiWeakSignalSwitchRelaxed(context))
+    }
+    var wifiWeakSignalFloor by remember {
+        mutableStateOf(Prefs.readLocalWifiWeakSignalFloor(context))
+    }
+    val floorLabels = Prefs.WIFI_WEAK_SIGNAL_FLOORS.map {
+        stringResource(R.string.experiment_wifi_weak_signal_floor_item, it)
+    }
     var sleepKeepalive by remember { mutableStateOf(Prefs.readLocalSleepKeepalive(context)) }
     var sleepKeepaliveData by remember {
         mutableStateOf(Prefs.readLocalSleepKeepaliveData(context))
-    }
-    var sleepKeepaliveCharging by remember {
-        mutableStateOf(Prefs.readLocalSleepKeepaliveCharging(context))
     }
 
     LazyColumn(
@@ -100,6 +114,58 @@ private fun ExperimentBody(
             )
         }
         item {
+            SectionTitle(R.string.experiment_section_network)
+            SettingsSwitchCard(
+                iconRes = R.drawable.ic_wifi_lock,
+                title = stringResource(R.string.experiment_wifi_weak_signal_relaxed),
+                description = stringResource(R.string.experiment_wifi_weak_signal_relaxed_desc),
+                checked = wifiWeakSignalRelaxed,
+                onCheckedChange = { checked ->
+                    Prefs.writeWifiWeakSignalSwitchRelaxed(context, Prefs.remote(), checked)
+                    wifiWeakSignalRelaxed = checked
+                },
+                // The floor row below is this row's group partner, so the master
+                // gives up its bottom corners for exactly as long as that row is
+                // on screen.
+                last = !wifiWeakSignalRelaxed
+            )
+            // Master and sub-option, revealed the same way the sleep pair is.
+            // This one narrows rather than widens — scores below the chosen
+            // floor go back to the ROM — so there is nothing to show until the
+            // master says the user wants the wider switch at all.
+            AnimatedVisibility(
+                visible = wifiWeakSignalRelaxed,
+                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                    SettingsMenuCard(
+                        iconRes = R.drawable.ic_stars,
+                        title = stringResource(R.string.experiment_wifi_weak_signal_floor),
+                        description = stringResource(
+                            R.string.experiment_wifi_weak_signal_floor_desc
+                        ),
+                        entries = floorLabels,
+                        currentIndex = Prefs.WIFI_WEAK_SIGNAL_FLOORS
+                            .indexOf(wifiWeakSignalFloor)
+                            .coerceAtLeast(0),
+                        onPick = { index ->
+                            val picked = Prefs.WIFI_WEAK_SIGNAL_FLOORS[index]
+                            Prefs.writeWifiWeakSignalFloor(context, Prefs.remote(), picked)
+                            wifiWeakSignalFloor = picked
+                        },
+                        // The entries are bare numbers, so the panel takes the
+                        // numeric floor instead of the two-character one; see
+                        // [MENU_NUMERIC_MIN_WIDTH].
+                        menuMinWidth = MENU_NUMERIC_MIN_WIDTH,
+                        first = false,
+                        last = true
+                    )
+                }
+            }
+        }
+        item {
             SectionTitle(R.string.experiment_section_sleep)
             SettingsSwitchCard(
                 iconRes = R.drawable.ic_wifi,
@@ -109,7 +175,8 @@ private fun ExperimentBody(
                 onCheckedChange = { checked ->
                     Prefs.writeSleepKeepalive(context, Prefs.remote(), checked)
                     sleepKeepalive = checked
-                }
+                },
+                last = !sleepKeepalive
             )
             // The sub-switch only means anything while the master switch is on,
             // so the master switch reveals it rather than leaving a control
@@ -120,9 +187,9 @@ private fun ExperimentBody(
                 exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
             ) {
                 Column {
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
                     SettingsSwitchCard(
-                        iconRes = R.drawable.ic_signal_cellular_alt,
+                        iconRes = R.drawable.ic_android_cell_4_bar,
                         title = stringResource(R.string.experiment_sleep_keepalive_data),
                         description = stringResource(
                             R.string.experiment_sleep_keepalive_data_desc
@@ -131,27 +198,16 @@ private fun ExperimentBody(
                         onCheckedChange = { checked ->
                             Prefs.writeSleepKeepaliveData(context, Prefs.remote(), checked)
                             sleepKeepaliveData = checked
-                        }
-                    )
-                    // Third member of the same set: this one narrows both
-                    // radios, so it sits beside the data sub-switch rather than
-                    // under it.
-                    Spacer(modifier = Modifier.height(8.dp))
-                    SettingsSwitchCard(
-                        iconRes = R.drawable.ic_battery_charging_full,
-                        title = stringResource(R.string.experiment_sleep_keepalive_charging),
-                        description = stringResource(
-                            R.string.experiment_sleep_keepalive_charging_desc
-                        ),
-                        checked = sleepKeepaliveCharging,
-                        onCheckedChange = { checked ->
-                            Prefs.writeSleepKeepaliveCharging(context, Prefs.remote(), checked)
-                            sleepKeepaliveCharging = checked
-                        }
+                        },
+                        first = false,
+                        last = true
                     )
                 }
             }
         }
+        // The same 16dp tail the settings page ends on, so the last card does
+        // not sit flush against the gesture strip on a fully scrolled page.
+        item { Spacer(modifier = Modifier.height(16.dp)) }
     }
 }
 

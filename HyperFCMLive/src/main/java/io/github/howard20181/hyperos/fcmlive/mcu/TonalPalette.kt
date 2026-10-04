@@ -23,7 +23,12 @@ package io.github.howard20181.hyperos.fcmlive.mcu
 /** A palette of tones with constant HCT hue and chroma. */
 class TonalPalette private constructor(
     val hue: Double,
-    val chroma: Double
+    val chroma: Double,
+    /**
+     * The key color: a color that represents the hue and chroma of the palette. It is the first
+     * tone, starting from T50, that matches the palette's chroma (see [KeyColor]).
+     */
+    val keyColor: Hct
 ) {
 
     private val cache: MutableMap<Int, Int> = HashMap()
@@ -53,10 +58,14 @@ class TonalPalette private constructor(
 
     companion object {
         @JvmStatic
-        fun fromHct(hct: Hct): TonalPalette = TonalPalette(hct.hue, hct.chroma)
+        fun fromHct(hct: Hct): TonalPalette = TonalPalette(hct.hue, hct.chroma, hct)
 
         @JvmStatic
-        fun fromHueAndChroma(hue: Double, chroma: Double): TonalPalette = TonalPalette(hue, chroma)
+        fun fromInt(argb: Int): TonalPalette = fromHct(Hct.fromInt(argb))
+
+        @JvmStatic
+        fun fromHueAndChroma(hue: Double, chroma: Double): TonalPalette =
+            TonalPalette(hue, chroma, KeyColor(hue, chroma).create())
 
         private fun averageArgb(argb1: Int, argb2: Int): Int {
             val red1 = (argb1 ushr 16) and 0xff
@@ -70,6 +79,72 @@ class TonalPalette private constructor(
             val blue = Math.round((blue1 + blue2) / 2f)
             return (255 shl 24 or (red and 255) shl 16 or (green and 255) shl 8 or (blue and 255))
         }
+    }
+}
+
+/**
+ * Key color is a color that represents the hue and chroma of a tonal palette.
+ *
+ * A direct port of the upstream `TonalPalette.KeyColor`: a binary search for the first tone,
+ * starting from T50, that can provide the requested chroma.
+ */
+private class KeyColor(private val hue: Double, private val requestedChroma: Double) {
+
+    /** Cache that maps tone to max chroma, to avoid duplicated HCT calculation. */
+    private val chromaCache: MutableMap<Int, Double> = HashMap()
+
+    /** Key color is the first tone, starting from T50, matching the given hue and chroma. */
+    fun create(): Hct {
+        // Pivot around T50 because T50 has the most chroma available, on average. Thus it is most
+        // likely to have a direct answer.
+        val pivotTone = 50
+        val toneStepSize = 1
+        // Epsilon to accept values slightly higher than the requested chroma.
+        val epsilon = 0.01
+
+        // Binary search to find the tone that can provide a chroma that is closest to the
+        // requested chroma.
+        var lowerTone = 0
+        var upperTone = 100
+        while (lowerTone < upperTone) {
+            val midTone = (lowerTone + upperTone) / 2
+            val isAscending = maxChroma(midTone) < maxChroma(midTone + toneStepSize)
+            val sufficientChroma = maxChroma(midTone) >= requestedChroma - epsilon
+
+            if (sufficientChroma) {
+                // Either range [lowerTone, midTone] or [midTone, upperTone] has the answer, so
+                // search in the range that is closer to the pivot tone.
+                if (Math.abs(lowerTone - pivotTone) < Math.abs(upperTone - pivotTone)) {
+                    upperTone = midTone
+                } else {
+                    if (lowerTone == midTone) {
+                        return Hct.from(hue, requestedChroma, lowerTone.toDouble())
+                    }
+                    lowerTone = midTone
+                }
+            } else {
+                // As there is no sufficient chroma in the midTone, follow the direction to the
+                // chroma peak.
+                if (isAscending) {
+                    lowerTone = midTone + toneStepSize
+                } else {
+                    // Keep midTone for potential chroma peak.
+                    upperTone = midTone
+                }
+            }
+        }
+
+        return Hct.from(hue, requestedChroma, lowerTone.toDouble())
+    }
+
+    private fun maxChroma(tone: Int): Double {
+        return chromaCache.getOrPut(tone) {
+            Hct.from(hue, MAX_CHROMA_VALUE, tone.toDouble()).chroma
+        }
+    }
+
+    private companion object {
+        private const val MAX_CHROMA_VALUE = 200.0
     }
 }
 

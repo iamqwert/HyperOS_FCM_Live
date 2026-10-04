@@ -1,20 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Material Symbols "grid_view" (fill1, outlined family). Path data verbatim
+     from fonts.gstatic.com (Apache-2.0); the source canvas is 960x960 with a
+     -960 y origin, shifted down via the group.
+     Row icon placeholder while an app's icon loads: the same four-tile mark
+     the hand-drawn version had, so the swap is invisible in the list.
+     -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <!--
-      Row icon placeholder, shown for the few frames between row creation and
-      the async icon load finishing.
-
-      Deliberately not android.R.drawable.sym_def_app_icon: on current Android
-      that resource id resolves to res/drawable/sym_def_app_icon.xml, which is
-      an <adaptive-icon>, and Compose's painterResource rejects anything that
-      is neither a <vector> nor a bitmap with
-      "Only VectorDrawables and rasterized asset types are supported".
-    -->
-    <path
-        android:fillColor="@color/md_outline"
-        android:pathData="M5.5,4h4a1.5,1.5 0 0 1 1.5,1.5v4a1.5,1.5 0 0 1 -1.5,1.5h-4a1.5,1.5 0 0 1 -1.5,-1.5v-4a1.5,1.5 0 0 1 1.5,-1.5z M14.5,4h4a1.5,1.5 0 0 1 1.5,1.5v4a1.5,1.5 0 0 1 -1.5,1.5h-4a1.5,1.5 0 0 1 -1.5,-1.5v-4a1.5,1.5 0 0 1 1.5,-1.5z M5.5,13h4a1.5,1.5 0 0 1 1.5,1.5v4a1.5,1.5 0 0 1 -1.5,1.5h-4a1.5,1.5 0 0 1 -1.5,-1.5v-4a1.5,1.5 0 0 1 1.5,-1.5z M14.5,13h4a1.5,1.5 0 0 1 1.5,1.5v4a1.5,1.5 0 0 1 -1.5,1.5h-4a1.5,1.5 0 0 1 -1.5,-1.5v-4a1.5,1.5 0 0 1 1.5,-1.5z" />
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="@color/md_outline"
+            android:pathData="M120-520v-320h320v320H120Zm0 400v-320h320v320H120Zm400-400v-320h320v320H520Zm0 400v-320h320v320H520Z" />
+    </group>
 </vector>

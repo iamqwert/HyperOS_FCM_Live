@@ -57,6 +57,10 @@ object ThemePrefs {
         prefs(context).edit().putInt(KEY_THEME_MODE, mode).apply()
     }
 
+    /**
+     * The palette style in effect. Any style is valid on its own — what it can
+     * *pair* with is the spec's business, see [specVersion].
+     */
     @JvmStatic
     fun paletteStyle(context: Context): Scheme.Variant {
         val ordinal = prefs(context).getInt(KEY_PALETTE_STYLE, DEFAULT_STYLE)
@@ -69,10 +73,35 @@ object ThemePrefs {
         prefs(context).edit().putInt(KEY_PALETTE_STYLE, variant.ordinal).apply()
     }
 
+    /**
+     * The spec to honour, **resolved** against the style in effect.
+     *
+     * Expressive (2025) publishes rules for four styles and nothing else
+     * ([Scheme.Variant.supportsExpressive2025]); asked for on any other style it
+     * renders 2021 (upstream `DynamicScheme.maybeFallbackSpecVersion`). The
+     * value stored here is the user's *request*, and this call is what turns it
+     * into the spec actually in force — which is why the appearance page shows
+     * this and not the stored int: a row labelled 2025 above colors generated
+     * with the 2021 rules is a label contradicting the screen.
+     *
+     * The demotion is deliberately **not** written back. A style change is not
+     * a decision about the spec, and rewriting the stored request on read made
+     * one: a single frame rendered with a non-supporting style retired 2025 on
+     * disk for good, so the user's next visit to an expressive style came back
+     * 2021 with nothing on screen to explain it. Keeping the request means the
+     * pair re-resolves the moment the style can take it again, and the two rows
+     * are always read together (see `ui/AboutScreen.kt`), so they cannot
+     * disagree either way.
+     */
     @JvmStatic
     fun specVersion(context: Context): Int {
-        val spec = prefs(context).getInt(KEY_SPEC, DEFAULT_SPEC)
-        return if (spec == SPEC_2021 || spec == SPEC_2025) spec else DEFAULT_SPEC
+        val stored = prefs(context).getInt(KEY_SPEC, DEFAULT_SPEC)
+        val requested = if (stored == SPEC_2021 || stored == SPEC_2025) stored else DEFAULT_SPEC
+        return if (requested == SPEC_2025 && !paletteStyle(context).supportsExpressive2025) {
+            SPEC_2021
+        } else {
+            requested
+        }
     }
 
     @JvmStatic

@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.UiUtils
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
+import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.launch
 
@@ -241,6 +242,9 @@ private fun LicenseDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        // Raised container, as everywhere else — see LocalAppSurfaces. M3's
+        // dialog role sits a tone below the page in this pairing.
+        containerColor = LocalAppSurfaces.current.card,
         title = {
             Text(text = sheet.title, style = MaterialTheme.typography.titleLarge)
         },
@@ -353,20 +357,46 @@ private const val AOSP_URL = "https://android.googlesource.com/platform/framewor
 private const val JSPECIFY_URL = "https://github.com/jspecify/jspecify"
 private const val MCU_URL = "https://github.com/material-foundation/material-color-utilities"
 
-/** name, version ("" if none), license label, project URL. */
+/**
+ * name, version ("" if none), license label, project URL.
+ *
+ * One row per third-party **project**, not per Gradle module: AndroidX is a
+ * single project with a single license and a single repository, so it is shown
+ * by the modules this app is built on rather than by all ~39 families that
+ * material and appcompat drag in behind it. Versions are the *resolved* ones,
+ * not the declared ones.
+ *
+ * Audited against
+ * `./gradlew :HyperFCMLive:dependencies --configuration releaseRuntimeClasspath`
+ * on 2026-10-04. Two things that resolution lists are not rows here: BOMs and
+ * dependency-management patches (`compose-bom`, `kotlin-bom`, the kotlinx
+ * ones), and `com.google.guava:listenablefuture` — an empty marker artifact
+ * with no classes to attribute. `libxposed api`, the AOSP stubs and Material
+ * Color Utilities are compile-time or vendored, so they are never on the
+ * runtime classpath and are listed for attribution.
+ */
 private val DEPS = arrayOf(
+    arrayOf("AndroidX Activity", "1.8.2", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Annotation", "1.9.1", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX AppCompat", "1.8.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Arch Core", "2.2.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Collection", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Compose Foundation", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose Material Icons Core", "1.7.8", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Compose Material3", "1.5.0-alpha27", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Compose UI", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Core", "1.16.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Interpolator", "1.0.0", "Apache License 2.0", ANDROIDX_URL),
     // Build-only stubs vendored under hiddenapi/stubs; kept for attribution.
     arrayOf("AOSP Framework Annotations", "", "Apache License 2.0", AOSP_URL),
+    // Pulled in by Material Components at runtime scope; annotations only, so
+    // there is no code in the APK — the row is a licence statement, like
+    // JSpecify below.
+    arrayOf(
+        "Error Prone Annotations",
+        "2.15.0",
+        "Apache License 2.0",
+        "https://github.com/google/error-prone"
+    ),
     arrayOf(
         "JetBrains Annotations",
         "23.0.0",
@@ -375,6 +405,18 @@ private val DEPS = arrayOf(
     ),
     arrayOf("JSpecify", "1.0.0", "Apache License 2.0", JSPECIFY_URL),
     arrayOf("Kotlin Stdlib", "2.2.10", "Apache License 2.0", "https://github.com/JetBrains/kotlin"),
+    arrayOf(
+        "Kotlinx Coroutines",
+        "1.9.0",
+        "Apache License 2.0",
+        "https://github.com/Kotlin/kotlinx.coroutines"
+    ),
+    arrayOf(
+        "Kotlinx Serialization",
+        "1.7.3",
+        "Apache License 2.0",
+        "https://github.com/Kotlin/kotlinx.serialization"
+    ),
     arrayOf("libxposed API", "102.0.0", "Apache License 2.0", "https://github.com/libxposed/api"),
     arrayOf("libxposed Interface", "102.0.0", "Apache License 2.0", "https://github.com/libxposed"),
     arrayOf("libxposed Service", "102.0.0", "Apache License 2.0", "https://github.com/libxposed/service"),

@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Material Symbols "layers" (fill1, outlined family). Path data verbatim
+<!-- Material Symbols "close" (fill1, outlined family). Path data verbatim
      from fonts.gstatic.com (Apache-2.0); the source canvas is 960x960 with a
      -960 y origin, shifted down via the group.
+     Same family and weight as ic_check: the two are the switch thumb's on and
+     off marks and are never seen apart, so they must not disagree.
      -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -11,6 +13,6 @@
     <group android:translateY="960">
         <path
             android:fillColor="@android:color/white"
-            android:pathData="M480-118 120-398l66-50 294 228 294-228 66 50-360 280Zm0-202L120-600l360-280 360 280-360 280Z" />
+            android:pathData="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z" />
     </group>
 </vector>
