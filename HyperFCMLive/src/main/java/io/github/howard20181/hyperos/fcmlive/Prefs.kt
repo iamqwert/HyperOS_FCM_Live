@@ -18,7 +18,10 @@ import java.util.concurrent.Executors
  * and querying an on-demand provider is unreliable, so we use the framework's
  * own cross-process prefs as the single source of truth. After writing, the app
  * broadcasts [ACTION_ALLOWLIST_CHANGED] so the system_server hook re-reads
- * its in-memory copy.
+ * its in-memory copy. A second action is sent only when the autostart write is
+ * turned on — [ACTION_APPLY_AUTOSTART], which asks the hook to run that write
+ * over the whole allowlist instead of waiting for each app's next push (see
+ * [KEY_WAKE_WRITE_AUTOSTART]).
  *
  * A local private-prefs mirror is kept so the settings UI can sort allowlisted
  * apps to the top immediately on launch, before libxposed finishes binding.
@@ -45,12 +48,25 @@ import java.util.concurrent.Executors
  * sanitized — a value from a retired option list would otherwise read as a
  * depth nobody offers any more.
  *
- * The current pair is `sleep_keepalive` ⊃ `…_data`. A `…_charging_only` sibling
- * used to live beside them and was removed on 2026-10-04 — see
- * HOOKS_AND_DIAGNOSTICS.md §4.6.1 for why ("only while charging" narrowed the
+ * The current pair is `wake_autostart_relaxed` ⊃ `wake_write_autostart`, and it
+ * has a section of its own because it gates a different ROM mechanism from the
+ * stopped-state switch above it (the MIUI autostart AppOp rather than the AOSP
+ * stopped state); `wake_stopped_packages` used to have a
+ * `wake_clear_stopped_state` sub-switch and is now a single switch — the
+ * sub-switch reset the package's stopped state, which the master's flag already
+ * opens, so it could never change the outcome of a broadcast it ran on. See the
+ * ponytail in `hookActivityManagerService` for the bytecode behind that and for
+ * the sample that would bring it back. `sleep_keepalive` and
+ * `sleep_keepalive_data` used to be one of these and are now **peers**: each
+ * radio in sleep mode's cutoff follows its own key, neither gates the other, and
+ * the screen shows both rows — see
+ * `isSleepKeepaliveDataEnabled()` in Hooker.kt for why rule 1 stopped applying
+ * to that pair. A `…_charging_only` sibling
+ * used to live beside them and was later removed — see
+ * HOOKS_AND_DIAGNOSTICS.md §5.5 for why ("only while charging" narrowed the
  * master and could never widen it, and the premise it was justified by turned
  * out to be false). The WeChat pair was removed with the shield (see
- * HOOKS_AND_DIAGNOSTICS.md §4.8).
+ * HOOKS_AND_DIAGNOSTICS.md Appendix C).
  *
  * Rare paths need an explicit "applied / handed back to the ROM" log line:
  * **never infer that a hook worked from the absence of a log line.**
@@ -96,7 +112,7 @@ object Prefs {
      * default, because WiFi-only is the cheaper half: an unattended phone at
      * home is on WiFi anyway, and holding the cellular radio open is the part
      * that actually costs power. A night with no WiFi gets nothing out of
-     * this switch — that is what the sub-switch is for.
+     * this switch — that is what the other switch is for.
      *
      * Default **off**, like every other experiment:
      * keeping a radio up all night defeats the power saving the user turned
@@ -109,15 +125,16 @@ object Prefs {
     private const val KEY_SLEEP_KEEPALIVE_PENDING_PUSH = "sleep_keepalive_pending_push"
 
     /**
-     * Remote + local: "keep mobile data up during sleep" sub-switch.
+     * Remote + local: "keep mobile data up during sleep".
      *
-     * Only consulted while [KEY_SLEEP_KEEPALIVE] is on; on its own it does
-     * nothing at all, which is why the experiment screen only reveals it once
-     * the master switch is on. With it on, the pair behaves like a single
-     * "keep the whole network up" switch: both radios survive the night, at a
-     * higher cost.
+     * A **peer** of [KEY_SLEEP_KEEPALIVE], not its sub-switch. Each of the two
+     * radios in sleep mode's cutoff follows its own key and this one is read on
+     * its own, so turning the WiFi switch off no longer silences it. With both
+     * on the pair behaves like a single "keep the whole network up" switch —
+     * both radios survive the night, at a higher cost — but either half can
+     * also be had without the other.
      *
-     * Default **off**, same reasoning as the master switch — ask before
+     * Default **off**, same reasoning as the WiFi switch — ask before
      * holding a radio open overnight.
      */
     const val KEY_SLEEP_KEEPALIVE_DATA = "sleep_keepalive_data"
@@ -209,8 +226,121 @@ object Prefs {
     val WIFI_WEAK_SIGNAL_FLOORS: IntArray = intArrayOf(45, 40, 35, 30)
     /** Default floor: see [KEY_WIFI_WEAK_SIGNAL_FLOOR]. */
     const val WIFI_WEAK_SIGNAL_FLOOR_DEFAULT = 45
+
+    /**
+     * Remote + local: "wake stopped packages" experiment — the master switch.
+     *
+     * Since Android 3.1 a package in the stopped state (never launched,
+     * force-stopped, or stopped by a freeze tool) receives no manifest
+     * broadcast: `broadcastIntentLocked` stamps every intent with
+     * `FLAG_EXCLUDE_STOPPED_PACKAGES` unless the caller is privileged, and the
+     * delivery filter skips stopped receivers. The module already clears that
+     * one hurdle for the GMS→c2dm hop (see Hooker's ActivityManagerService
+     * hook); this switch drops it for broadcasts to a checked package from
+     * *any* caller, which is what "唤醒" means here — the flag is added and
+     * nothing else about the broadcast changes.
+     *
+     * The list gate is `Hooker#wakeExplicitlyAllows`, so membership is required
+     * and GMS is not exempt: an empty list means "no app", which is what the
+     * screen says. The hook sits on the AMS *entry* point
+     * (`broadcastIntentWithFeature`), not on `broadcastIntentLocked`, so it
+     * covers the broadcasts apps send; the ones the system delivers on its own
+     * (alarms, notification actions, anything through a `PendingIntent`) never
+     * pass through it, and the description says so.
+     *
+     * Two things it does not do, both of which matter on screen: it does not
+     * start or keep a process alive, and it does not change what the ROM does
+     * with the broadcast once it is allowed in. An app that has been frozen out
+     * of running in the background still needs the rest of the module for that.
+     *
+     * Default **off**, like every other experiment: stopped-state delivery is a
+     * protection the user or a freeze tool asked for, and the flag is added
+     * before the ROM's own delivery decision rather than after it.
+     */
+    const val KEY_WAKE_STOPPED_PACKAGES = "wake_stopped_packages"
+    /** UI-only: set while the mirror holds a wake change the module never saw. */
+    private const val KEY_WAKE_STOPPED_PACKAGES_PENDING_PUSH =
+        "wake_stopped_packages_pending_push"
+
+    /**
+     * Remote + local: "relax the autostart gate" experiment — the master switch
+     * of the second wake pair.
+     *
+     * Where the first pair works on the *stopped* state, this one works on the
+     * MIUI *autostart* gate. `BroadcastQueueModernStubImpl#checkApplicationAutoStart`
+     * runs before a broadcast is delivered, and on this ROM it ends in
+     * `WakePathChecker#isAllowedByWakePathRule`, which reads the MIUI autostart
+     * AppOp (`MIUIOP 10008`). The shipped module already answers that method
+     * for the GMS→c2dm hop only (caller is GMS and the action is c2dm); this
+     * switch drops the caller/action restriction and lets any *push* broadcast
+     * through, which is what the two reference modules do — both answer the
+     * method from the intent alone and never look at the caller.
+     *
+     * Narrower than the reference modules on purpose: the target must be a
+     * package the user actually checked (see [KEY_ALLOWLIST]), and the intent
+     * must be a push action aimed at a named package. An empty allowlist
+     * therefore means "no app", not "every app".
+     *
+     * Nothing is written to disk by this one: it answers a gate for a broadcast
+     * already in flight. The op itself is [KEY_WAKE_WRITE_AUTOSTART]'s job.
+     *
+     * Default **off**: this is the module reaching past the FCM chain it exists
+     * for, so it stays a deliberate choice.
+     */
+    const val KEY_WAKE_AUTOSTART_RELAXED = "wake_autostart_relaxed"
+    /** UI-only: set while the mirror holds an autostart-relaxed change the module never saw. */
+    private const val KEY_WAKE_AUTOSTART_RELAXED_PENDING_PUSH =
+        "wake_autostart_relaxed_pending_push"
+
+    /**
+     * Remote + local: "write the autostart permission" sub-switch.
+     *
+     * Only consulted while [KEY_WAKE_AUTOSTART_RELAXED] is on, and for the same
+     * explicitly checked packages. Where the master merely lets one broadcast
+     * through, this writes the ROM's own AppOp: the MIUI autostart op
+     * (`10008`) is set to `MODE_ALLOWED` for the package, which is exactly what
+     * `android.miui.AppOpsUtils#setApplicationAutoStart(ctx, pkg, true)` does
+     * — the package then passes `WakePathChecker#isAllowedByWakePathRule` for
+     * every later broadcast too, including the ones the module never sees.
+     *
+     * The write happens on two occasions. Turning the switch **on** applies it
+     * to the whole allowlist at once — the app broadcasts
+     * [ACTION_APPLY_AUTOSTART] and the module walks the list — so the row takes
+     * effect on the spot and the result can be checked from a shell straight
+     * away. Afterwards it is *lazy*: each qualifying push (the c2dm / Firebase
+     * action family) rewrites the op for its own package, which is what
+     * corrects a package some other tool has reset. That second half is why a
+     * package is not fixed the instant it drifts — it waits for its next push.
+     *
+     * This is the one experiment that edits a user-visible system setting, and
+     * the earlier "bypass the gate, never write the op" line is relaxed for it
+     * on purpose: it is off by default and only reachable from the experiment
+     * screen, so the write is a choice the user made. It is not reverted when
+     * the switch is turned off — nothing in the module knows what the value was
+     * before.
+     *
+     * Default **off**, same reasoning as the master switch.
+     */
+    const val KEY_WAKE_WRITE_AUTOSTART = "wake_write_autostart"
+    /** UI-only: set while the mirror holds an autostart-write change the module never saw. */
+    private const val KEY_WAKE_WRITE_AUTOSTART_PENDING_PUSH =
+        "wake_write_autostart_pending_push"
+
     /** Action the app broadcasts after writing, to refresh system_server. */
     const val ACTION_ALLOWLIST_CHANGED = MODULE_PKG + ".ALLOWLIST_CHANGED"
+
+    /**
+     * Action that asks the system_server hook to run the autostart write over
+     * the whole allowlist right now, instead of waiting for each package to be
+     * handed a push first.
+     *
+     * Deliberately not folded into [ACTION_ALLOWLIST_CHANGED]: that one is a
+     * "re-read your copy" hint sent after *every* settings write, and it is
+     * throttled on the receiving side. This one asks for a one-off piece of
+     * work, and losing it costs nothing beyond the lazy path it was meant to
+     * short-circuit.
+     */
+    const val ACTION_APPLY_AUTOSTART = MODULE_PKG + ".APPLY_AUTOSTART"
 
     /**
      * Remote prefs handle published by the settings UI once libxposed binds, so
@@ -531,6 +661,152 @@ object Prefs {
         }
     }
 
+    /** Wake master-switch value as the UI last left it; the mirror is what the experiment screen shows. */
+    @JvmStatic
+    fun readLocalWakeStoppedPackages(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_WAKE_STOPPED_PACKAGES, false)
+    }
+
+    /** Wake counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingWakeStoppedPackagesPush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_WAKE_STOPPED_PACKAGES_PENDING_PUSH, false)
+    }
+
+    /**
+     * Write the wake master switch and make it live.
+     *
+     * Same shape as [writeSleepKeepalive]. The hook lives in system_server and
+     * reads the remote value lazily at each qualifying broadcast, so flipping
+     * this takes effect on the next broadcast without a reload.
+     */
+    @JvmStatic
+    fun writeWakeStoppedPackages(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean
+    ) {
+        val app = appContext(context)
+        localPrefs(app).edit().putBoolean(KEY_WAKE_STOPPED_PACKAGES, enabled).apply()
+        if (remotePrefs == null) {
+            localPrefs(app).edit()
+                .putBoolean(KEY_WAKE_STOPPED_PACKAGES_PENDING_PUSH, true).apply()
+            broadcastAllowlistChanged(app)
+            return
+        }
+        localPrefs(app).edit()
+            .putBoolean(KEY_WAKE_STOPPED_PACKAGES_PENDING_PUSH, false).apply()
+        WRITER.execute {
+            try {
+                remotePrefs.edit().putBoolean(KEY_WAKE_STOPPED_PACKAGES, enabled).commit()
+            } catch (t: Throwable) {
+                localPrefs(app).edit()
+                    .putBoolean(KEY_WAKE_STOPPED_PACKAGES_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+        }
+    }
+
+    /** Autostart-relaxed master switch value as the UI last left it. */
+    @JvmStatic
+    fun readLocalWakeAutostartRelaxed(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_WAKE_AUTOSTART_RELAXED, false)
+    }
+
+    /** Autostart-relaxed counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingWakeAutostartRelaxedPush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_WAKE_AUTOSTART_RELAXED_PENDING_PUSH, false)
+    }
+
+    /**
+     * Write the autostart-relaxed master switch and make it live.
+     *
+     * Same shape as [writeWakeStoppedPackages]: the hook lives in system_server
+     * and reads the remote value lazily at each qualifying broadcast, so
+     * flipping this takes effect on the next one without a reload.
+     */
+    @JvmStatic
+    fun writeWakeAutostartRelaxed(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean
+    ) {
+        val app = appContext(context)
+        localPrefs(app).edit().putBoolean(KEY_WAKE_AUTOSTART_RELAXED, enabled).apply()
+        if (remotePrefs == null) {
+            localPrefs(app).edit()
+                .putBoolean(KEY_WAKE_AUTOSTART_RELAXED_PENDING_PUSH, true).apply()
+            broadcastAllowlistChanged(app)
+            return
+        }
+        localPrefs(app).edit()
+            .putBoolean(KEY_WAKE_AUTOSTART_RELAXED_PENDING_PUSH, false).apply()
+        WRITER.execute {
+            try {
+                remotePrefs.edit().putBoolean(KEY_WAKE_AUTOSTART_RELAXED, enabled).commit()
+            } catch (t: Throwable) {
+                localPrefs(app).edit()
+                    .putBoolean(KEY_WAKE_AUTOSTART_RELAXED_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+        }
+    }
+
+    /** Autostart-write sub-switch value as the UI last left it. */
+    @JvmStatic
+    fun readLocalWakeWriteAutostart(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_WAKE_WRITE_AUTOSTART, false)
+    }
+
+    /** Autostart-write counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingWakeWriteAutostartPush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_WAKE_WRITE_AUTOSTART_PENDING_PUSH, false)
+    }
+
+    /**
+     * Write the autostart-write sub-switch and make it live.
+     *
+     * Same shape as [writeWakeStoppedPackages], and gated the same way: the
+     * stored value is kept, but the hook reads it only while the master is on,
+     * so nothing is written while the control is hidden.
+     */
+    @JvmStatic
+    fun writeWakeWriteAutostart(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean
+    ) {
+        val app = appContext(context)
+        localPrefs(app).edit().putBoolean(KEY_WAKE_WRITE_AUTOSTART, enabled).apply()
+        if (remotePrefs == null) {
+            localPrefs(app).edit()
+                .putBoolean(KEY_WAKE_WRITE_AUTOSTART_PENDING_PUSH, true).apply()
+            broadcastAllowlistChanged(app)
+            return
+        }
+        localPrefs(app).edit()
+            .putBoolean(KEY_WAKE_WRITE_AUTOSTART_PENDING_PUSH, false).apply()
+        WRITER.execute {
+            try {
+                remotePrefs.edit().putBoolean(KEY_WAKE_WRITE_AUTOSTART, enabled).commit()
+            } catch (t: Throwable) {
+                localPrefs(app).edit()
+                    .putBoolean(KEY_WAKE_WRITE_AUTOSTART_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+            // Turning the pair on is the one moment the user is looking at this
+            // row, so the write is applied to the whole allowlist now rather
+            // than whenever each app happens to receive its next push. Sent only
+            // when enabling: turning it off deliberately leaves what was already
+            // written alone, and the module never learns the previous values.
+            if (enabled) {
+                broadcastApplyAutostart(app)
+            }
+        }
+    }
+
     /**
      * Write strict mode and make it live.
      *
@@ -644,5 +920,19 @@ object Prefs {
         val handler = Handler(Looper.getMainLooper())
         handler.postDelayed({ app.sendBroadcast(Intent(ACTION_ALLOWLIST_CHANGED)) }, 400L)
         handler.postDelayed({ app.sendBroadcast(Intent(ACTION_ALLOWLIST_CHANGED)) }, 1500L)
+    }
+
+    /**
+     * Ask system_server to apply the autostart write to every allowlisted
+     * package now — see [ACTION_APPLY_AUTOSTART].
+     *
+     * Sent once rather than repeated like [broadcastAllowlistChanged]: the
+     * receiving side re-reads the allowlist itself before walking it, so a miss
+     * here is covered by the three reload broadcasts, and a duplicate would
+     * only re-walk a list that is already written.
+     */
+    @JvmStatic
+    fun broadcastApplyAutostart(context: Context) {
+        appContext(context).sendBroadcast(Intent(ACTION_APPLY_AUTOSTART))
     }
 }

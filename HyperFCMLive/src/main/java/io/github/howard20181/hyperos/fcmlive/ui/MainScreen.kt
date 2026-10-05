@@ -181,6 +181,32 @@ fun MainScreen(
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
 ) {
     val pullState = rememberPullToRefreshState()
+
+    // A finished refresh puts the list back at the top.
+    //
+    // The scan re-sorts: checked apps first, everything else alphabetically. A
+    // row the user just unchecked therefore leaves the top group and lands
+    // wherever its name puts it, which can be hundreds of rows down. A
+    // `LazyColumn` does not hold the scroll *index* across that — on every
+    // measure it rewrites the position to wherever the remembered first visible
+    // row's key moved to (LazyList, `updateScrollPositionIfTheFirstItemWasMoved`),
+    // so the page travelled down with the row that was unchecked. Uncheck a row
+    // near the top, pull to refresh, and the view ended up at the bottom of the
+    // list.
+    //
+    // The top is where a refresh belongs: the pull reaches this box only as
+    // unconsumed nested scroll, which a list that is not already at the very top
+    // does not produce. Asking for item 0 is also what makes the move hold —
+    // `scrollToItem` forgets the stored key (`requestPositionAndForgetLastKnownKey`),
+    // so the next measure has nothing left to pull the position down with.
+    var wasRefreshing by remember { mutableStateOf(refreshing) }
+    LaunchedEffect(refreshing) {
+        if (wasRefreshing && !refreshing) {
+            lazyListState.scrollToItem(0)
+        }
+        wasRefreshing = refreshing
+    }
+
     Scaffold(
         modifier = modifier,
         snackbarHost = { SnackbarHost(snackbarHostState) },

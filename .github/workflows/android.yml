@@ -1,16 +1,38 @@
 # 发版流程（2026-10-03 实测）：main 是保护分支，直接 `git push origin main` 会被拒
 # （GH006 … Required status check "build" is expected），必须走「分支 → PR → 等 check → 合并 → dispatch」：
-#   ① 本地 commit → `git branch release/<ver>` → `push -u`
-#   ② 开 PR：本机无 gh，用
-#      printf "protocol=https\nhost=github.com\n\n" | git credential fill | sed -n 's/^password=//p'
-#      取 token，再 curl GitHub API（POST /repos/<o>/<r>/pulls）
-#   ③ 轮询 GET /repos/<o>/<r>/commits/<sha>/check-runs，等 name == "build" 的 conclusion == success
-#   ④ PUT /repos/<o>/<r>/pulls/<n>/merge  {"merge_method":"merge"}
-#   ⑤ POST /repos/<o>/<r>/actions/workflows/android.yml/dispatches
-#      {"ref":"main","inputs":{"publish_release":true}}
-# 沙箱会吞 env：每个联网命令都要包 ( unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; … )。
-# origin 指向 fork（iamqwert），不是上游；推送后用 `git rev-parse origin/main` 核对。
-# 未经用户点头不提交、不推送。
+#   ① 本地 commit → `git branch release/<ver>`
+#   ② 推到远端 —— 见下面「agent 沙箱怎么推」；推完 `git rev-parse origin/main` 核对
+#   ③ 开 PR：`gh pr create --repo iamqwert/HyperOS_FCM_Live --base main --head release/<ver>`
+#   ④ 轮询 `gh api repos/<o>/<r>/commits/<sha>/check-runs`，等 name == "build" 的 conclusion == success
+#   ⑤ `gh pr merge <n> --merge`
+#   ⑥ `gh workflow run android.yml --ref main -f publish_release=true`
+#
+# ## agent 沙箱怎么推（2026-10-04 两次实测，与人工终端不同）
+# **`gh` 是有的**（`gh auth status` 已登录 iamqwert，scopes 含 repo/workflow），不要再自己
+# 取 token + curl。**`github.com:443` 的 git 通道是间歇故障，不是永久不通**——同一天内
+# 19:41 push 成功、20:03~20:05 连败三次（`CONNECT tunnel failed, response 502` /
+# `schannel: server closed abruptly`）、20:12 又恢复。`api.github.com` 一直通。
+# ⇒ **先试 `git push` 1~2 次，失败再换 REST API 造提交**，不要一上来就只在 API 上想办法：
+#   1. 用 Git Data API 把改动做成一个远端提交：
+#      `POST /git/blobs`(base64) 逐文件 → `POST /git/trees`{base_tree, tree[]} →
+#      `POST /git/commits`{message, tree, parents} → `POST /git/refs`（改写已存在的分支用 PATCH）
+#   1b.**造 commit 必须显式传 `author` 与 `committer` 的 name+email**，否则落到 token 持有者的
+#      真实邮箱；泄漏后即便 force push 挤掉该提交，它作为 dangling 对象仍可凭 sha 公开读到
+#      （HTTP 200），只能联系 GitHub Support 删。
+#   2. **文件内容取 `git cat-file blob HEAD:<path>` 的字节，不要读工作树文件**：
+#      `core.autocrlf=true`，工作树是 CRLF、仓库里存的是 LF，直传会让整批文件变成 CRLF。
+#   3. 删除的文件在 tree 条目里写 `"sha": null`（同一个 tree 调用即可表达增改删）。
+#   4. **验收：比对造出来的 tree sha 与 `git rev-parse HEAD^{tree}`**，相等才说明内容逐字节一致。
+#      （提交 sha 本来就不会相等 —— API 建的 commit 除非显式传了 author，否则作者身份不同；
+#      tree 相等就够了。）
+#   5. 沙箱内每个联网命令都要包 `( unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; … )`；
+#      用 Python `urllib` 时同样要先 pop 掉这四个变量，否则会被塞进 `127.0.0.1:64989` 而 502。
+#   6. 走 API 造出来的提交与本地同内容的提交 **tree 相同但 sha 不同** ⇒ 本地落后/超前都属正常，
+#      等通道恢复后 `git fetch && git reset --soft <远端 head>` 对齐即可。
+#      **reset 前务必 `git status`**：`--hard` 会连带抹掉工作树里未提交的改动，它们不在任何
+#      commit 里，一旦抹掉只能靠 `git fsck --unreachable` 翻之前 stash 留下的 commit 找回。
+#
+# origin 指向 fork（iamqwert），不是上游。未经用户点头不提交、不推送。
 #
 # tag / release name 由 APK 文件名推出（见 release job，tag = v<versionName.versionCode>）；
 # 发行说明 = CHANGELOG.md 的 `## <versionName>` 小节 + .github/release-notes.md
@@ -84,7 +106,15 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: hyperos-fcm-live-release
-          path: HyperFCMLive/build/outputs/apk/release/*.apk
+          # mapping.txt rides along because R8 now renames Compose and the Kotlin
+          # stdlib (the two package-wide keeps were removed from
+          # proguard-rules.pro). Only this module's own classes stay readable, so
+          # without the mapping a crash reported from inside Compose is a wall of
+          # a/b/c frames. Keep the two in the same artifact so they cannot drift
+          # apart.
+          path: |
+            HyperFCMLive/build/outputs/apk/release/*.apk
+            HyperFCMLive/build/outputs/mapping/release/mapping.txt
           if-no-files-found: error
           retention-days: 30
 

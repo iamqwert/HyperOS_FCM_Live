@@ -1,6 +1,7 @@
 package io.github.howard20181.hyperos.fcmlive
 
 import android.annotation.SuppressLint
+import android.app.AppOpsManager
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -126,122 +127,80 @@ class Hooker : XposedModule() {
     }
 
     private fun hookSystemServer(classLoader: ClassLoader) {
-        try {
-            hookAllowlist()
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook allowlist receiver", t)
-        }
-        try {
-            hookGreezeManagerService(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook GreezeManagerService", t)
-        }
-        try {
-            hookGreezerNoRestrict(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook GreezerNoRestrict", t)
-        }
-        try {
-            hookDomesticPolicyManager(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook DomesticPolicyManager", t)
-        }
-        try {
-            hookListAppsManager(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook ListAppsManager", t)
-        }
-        try {
-            hookBroadcastQueueModernStubImpl(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook BroadcastQueueModernStubImpl", t)
-        }
-        try {
-            hookGreezeBroadcastCache(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook greeze broadcast cache", t)
-        }
-        try {
-            hookProcessPolicy(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook ProcessPolicy", t)
-        }
-        try {
-            hookAwareResourceControl(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook AwareResourceControl", t)
-        }
-        try {
-            hookSleepModeNetworkPolicy(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook sleep-mode network policy", t)
-        }
-        try {
-            hookActivityManagerService(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook ActivityManagerService", t)
-        }
-        try {
-            hookInternationalPolicyManager(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook InternationalPolicyManager", t)
-        }
-        try {
-            hookUdpPackageRestrict(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook udpPackageRestrict", t)
-        }
-        try {
-            hookProcessCleanerBase(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook ProcessCleanerBase", t)
-        }
-        try {
-            hookAlarmGate(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook alarm gate", t)
-        }
-        try {
-            hookWifiWeakSignalSwitch(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook wifi weak-signal switch", t)
-        }
-        try {
-            probeWakePath(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to install wake-path probe", t)
-        }
-        try {
-            probeBroadcastWakePath(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to install broadcast wake-path probe", t)
-        }
-        try {
-            probeGmsInMessageApp(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to probe mMessageApp", t)
-        }
-        try {
-            probeSleepModeUidRule(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to probe sleep-mode uid rule", t)
-        }
-        try {
-            probePacketFilterSupport(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to probe packet filter support", t)
-        }
-        try {
-            probeSocketTeardown(classLoader)
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to install socket-teardown probe", t)
-        }
-        try {
-            startGmsTrafficProbe()
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to start GMS traffic probe", t)
+        for (group in systemServerGroups(classLoader)) {
+            installGroup(group)
         }
     }
+
+    /**
+     * The system_server install surface: one line per group, in install order.
+     *
+     * Adding a group is adding a line here, not copying another try/catch.
+     * [installGroup] gives every group the isolation the hand-written blocks
+     * had: a throw inside one group leaves all the others installed, and
+     * [logSummary] still reports once at the end.
+     *
+     * Three things this table has to keep that the upstream pattern
+     * (`FIXES: List<Pair<String, Fixes>>` + a single `hook skip` line) has no
+     * equivalent for:
+     * 1. [hookE] bookkeeping — `setId()` de-duplication plus the
+     *    `hooksInstalled` / `hookTargetsAbsent` counters behind the
+     *    `N hook(s) installed, M target(s) absent` line that every install
+     *    check ends with.
+     * 2. Two absent levels — [logSkip] (INFO) for a target this generation is
+     *    expected to carry, [logSkipOtherGeneration] (DEBUG) for a target only
+     *    another generation carries. Collapsing them into one "skip" line is
+     *    what makes "never existed on this generation" indistinguishable from
+     *    "lost in the last OTA".
+     * 3. The failure wording `Failed to <verb> <name>`, which
+     *    HOOKS_AND_DIAGNOSTICS.md 3.11 quotes verbatim — hence the verb being
+     *    part of the entry rather than a fixed "hook".
+     */
+    private fun systemServerGroups(classLoader: ClassLoader): List<Group> = listOf(
+        Group("hook", "allowlist receiver") { hookAllowlist() },
+        Group("hook", "GreezeManagerService") { hookGreezeManagerService(classLoader) },
+        Group("hook", "GreezerNoRestrict") { hookGreezerNoRestrict(classLoader) },
+        Group("hook", "DomesticPolicyManager") { hookDomesticPolicyManager(classLoader) },
+        Group("hook", "ListAppsManager") { hookListAppsManager(classLoader) },
+        Group("hook", "BroadcastQueueModernStubImpl") {
+            hookBroadcastQueueModernStubImpl(classLoader)
+        },
+        Group("hook", "greeze broadcast cache") { hookGreezeBroadcastCache(classLoader) },
+        Group("hook", "ProcessPolicy") { hookProcessPolicy(classLoader) },
+        Group("hook", "AwareResourceControl") { hookAwareResourceControl(classLoader) },
+        Group("hook", "sleep-mode network policy") { hookSleepModeNetworkPolicy(classLoader) },
+        Group("hook", "ActivityManagerService") { hookActivityManagerService(classLoader) },
+        Group("hook", "InternationalPolicyManager") {
+            hookInternationalPolicyManager(classLoader)
+        },
+        Group("hook", "udpPackageRestrict") { hookUdpPackageRestrict(classLoader) },
+        Group("hook", "ProcessCleanerBase") { hookProcessCleanerBase(classLoader) },
+        Group("hook", "alarm gate") { hookAlarmGate(classLoader) },
+        Group("hook", "wifi weak-signal switch") { hookWifiWeakSignalSwitch(classLoader) },
+        Group("install", "wake-path probe") { probeWakePath(classLoader) },
+        Group("install", "broadcast wake-path probe") { probeBroadcastWakePath(classLoader) },
+        Group("probe", "mMessageApp") { probeGmsInMessageApp(classLoader) },
+        Group("probe", "sleep-mode uid rule") { probeSleepModeUidRule(classLoader) },
+        Group("probe", "packet filter support") { probePacketFilterSupport(classLoader) },
+        Group("install", "socket-teardown probe") { probeSocketTeardown(classLoader) },
+        Group("start", "GMS traffic probe") { startGmsTrafficProbe() },
+    )
+
+    /** Runs one group; a throw inside it cannot reach the groups behind it. */
+    private fun installGroup(group: Group) {
+        try {
+            group.install()
+        } catch (t: Throwable) {
+            log(Log.ERROR, TAG, "Failed to ${group.verb} ${group.name}", t)
+        }
+    }
+
+    /**
+     * One install group. [verb] and [name] are the failure wording
+     * (`Failed to <verb> <name>`), not decoration: that string is quoted in the
+     * diagnostics doc and grepped out of overnight logs.
+     */
+    private class Group(val verb: String, val name: String, val install: () -> Unit)
 
     /**
      * Read-only probe for gate A3 (action list 2.2).
@@ -511,43 +470,29 @@ class Hooker : XposedModule() {
 
     private fun hookPackage(packageName: String, classLoader: ClassLoader) {
         if ("com.miui.powerkeeper" == packageName) {
-            try {
-                hookGmsObserver(classLoader)
-            } catch (t: Throwable) {
-                log(Log.ERROR, TAG, "Failed to hook GmsObserver", t)
-            }
-            try {
-                hookAppStandbyUidState(packageName, classLoader)
-            } catch (t: Throwable) {
-                log(Log.ERROR, TAG, "Failed to hook AppStandbyController", t)
-            }
-            try {
-                hookGlobalFeatureConfigureHelper(classLoader)
-            } catch (t: Throwable) {
-                log(Log.ERROR, TAG, "Failed to hook GlobalFeatureConfigureHelper", t)
-            }
-            try {
-                hookNoRestrictList(classLoader)
-            } catch (t: Throwable) {
-                log(Log.ERROR, TAG, "Failed to hook NoRestrictList", t)
-            }
-            try {
-                hookScenarioCompiler(classLoader)
-            } catch (t: Throwable) {
-                log(Log.ERROR, TAG, "Failed to hook ScenarioCompiler", t)
-            }
-            try {
-                hookWechatDozeKeepout(classLoader)
-            } catch (t: Throwable) {
-                log(Log.ERROR, TAG, "Failed to hook WeChat doze keepout", t)
-            }
-            try {
-                hookSleepModeNetworkKeepalive(classLoader)
-            } catch (t: Throwable) {
-                log(Log.ERROR, TAG, "Failed to hook sleep-mode network keepalive", t)
+            for (group in powerKeeperGroups(packageName, classLoader)) {
+                installGroup(group)
             }
         }
     }
+
+    /** The PowerKeeper install surface: same shape and same rules as [systemServerGroups]. */
+    private fun powerKeeperGroups(packageName: String, classLoader: ClassLoader): List<Group> =
+        listOf(
+            Group("hook", "GmsObserver") { hookGmsObserver(classLoader) },
+            Group("hook", "AppStandbyController") {
+                hookAppStandbyUidState(packageName, classLoader)
+            },
+            Group("hook", "GlobalFeatureConfigureHelper") {
+                hookGlobalFeatureConfigureHelper(classLoader)
+            },
+            Group("hook", "NoRestrictList") { hookNoRestrictList(classLoader) },
+            Group("hook", "ScenarioCompiler") { hookScenarioCompiler(classLoader) },
+            Group("hook", "WeChat doze keepout") { hookWechatDozeKeepout(classLoader) },
+            Group("hook", "sleep-mode network keepalive") {
+                hookSleepModeNetworkKeepalive(classLoader)
+            },
+        )
 
     override fun onHotReloading(param: XposedModuleInterface.HotReloadingParam): Boolean {
         // Hot reload is fully supported on LSPosed API 102: onHotReloaded unhooks every
@@ -612,7 +557,7 @@ class Hooker : XposedModule() {
      *   letter on this ROM — dnsproxyd answers `500 Command not recognized` — and
      *   is intercepted only as an OTA hedge.
      *
-     * A quiet night proves nothing on its own; HOOKS_AND_DIAGNOSTICS.md §10.5
+     * A quiet night proves nothing on its own; HOOKS_AND_DIAGNOSTICS.md §6.4
      * fixes the wording for that case ("not observed in this window", never
      * "not needed").
      */
@@ -746,6 +691,13 @@ class Hooker : XposedModule() {
         } catch (e: Exception) {
             log(Log.ERROR, TAG, "Failed to hook GreezeManagerService#deferBroadcastForMiui", e)
         }
+        // ponytail: mGmsLimitEnabled is cleared on every call, never once at
+        //   install. It is pure runtime state — constructor-initialised to true,
+        //   and the dump command is its only writer — so every system_server
+        //   restart resets it and a one-shot clean-up would be silently undone
+        //   (independently corroborated by hyperos-fcm-fix's greeze notes).
+        //   Cost: one Unsafe write per call. Condition to drop it: proof on this
+        //   generation that the field is never read after boot.
         val triggerGMSLimitActionMethod: Method
         try {
             triggerGMSLimitActionMethod = try {
@@ -774,21 +726,13 @@ class Hooker : XposedModule() {
         } catch (e: Throwable) {
             log(Log.ERROR, TAG, "Failed to hook GreezeManagerService#triggerGMSLimitAction", e)
         }
-        try {
-            val updateGmsNetStatusMethod = GreezeManagerServiceClass.getDeclaredMethod(
-                "updateGmsNetStatus", Boolean::class.javaPrimitiveType
-            )
-            hookE(updateGmsNetStatusMethod).intercept { chain: XposedInterface.Chain ->
-                val args = chain.args.toTypedArray()
-                if (args.isNotEmpty()) {
-                    args[0] = false
-                }
-                chain.proceed(args)
-            }
-            deoptimize(updateGmsNetStatusMethod)
-        } catch (e: NoSuchMethodException) {
-            logSkip("GreezeManagerService#updateGmsNetStatus absent, skip")
-        }
+        forceBooleanArg(
+            GreezeManagerServiceClass,
+            "updateGmsNetStatus",
+            false,
+            "GreezeManagerService",
+            Log.INFO
+        )
     }
 
     private fun hookDomesticPolicyManager(classLoader: ClassLoader) {
@@ -1090,6 +1034,24 @@ class Hooker : XposedModule() {
                 ) {
                     return@intercept true
                 }
+                // Experiment: the branch above is the shipped GMS→c2dm hop. This
+                // one drops its caller/action restriction for push broadcasts to
+                // a package the user checked — the two reference modules answer
+                // this method from the intent alone and never look at the caller.
+                // Deliberately narrower than they are: the target must be
+                // *explicitly* allowlisted, so an empty list cannot turn this
+                // into a whole-device gate bypass. The action test comes first
+                // because it is local and rejects almost every broadcast the
+                // system asks about, which keeps the remote-prefs read below off
+                // the hot path.
+                if (intent != null &&
+                    targetPackage != null &&
+                    isPushAction(intent.action) &&
+                    isWakeAutostartRelaxedEnabled() &&
+                    wakeExplicitlyAllows(targetPackage)
+                ) {
+                    return@intercept true
+                }
             } catch (e: Exception) {
                 log(
                     Log.ERROR, TAG,
@@ -1109,6 +1071,13 @@ class Hooker : XposedModule() {
         // process, no one ever thawed it, and GMS retried the same message forever
         // ("No response to broadcast"). Hook isRestrictReceiver itself instead — answer
         // false (not restricted) and reproduce the native thaw before delivering.
+        //
+        // ponytail: checkReceiverIfRestricted is deliberately left unhooked, even
+        //   though every comparable external module still short-circuits it —
+        //   short-circuiting skips the thaw above. Cost: one extra
+        //   isRestrictReceiver round-trip per c2dm broadcast. Condition to add it
+        //   back: a real sample that is allowed here yet still ends in
+        //   "No response to broadcast", with proof the thaw is not what saved it.
         try {
             val GreezeManagerServiceClass =
                 classLoader.loadClass("com.miui.server.greeze.GreezeManagerService")
@@ -1206,6 +1175,14 @@ class Hooker : XposedModule() {
         }
     }
 
+    // ponytail: GMS is only ever APPENDED to the returned list, never removed
+    //   from a ROM-side list. Comparable external modules remove GMS from
+    //   `whiteApps` and from Millet's black/white lists on the assumption that
+    //   they are restriction lists; that polarity has never been confirmed, and
+    //   if any of them is an allow-list the removal tightens instead of
+    //   loosening. Cost: the entry is rebuilt per query instead of persisted.
+    //   Condition to revisit: bytecode or runtime proof of a list's polarity on
+    //   this generation — and even then, prefer appending over removing.
     private fun hookProcessPolicy(classLoader: ClassLoader) {
         val ProcessPolicyClass = classLoader.loadClass("com.android.server.am.ProcessPolicy")
         val getWhiteListMethod = ProcessPolicyClass.getDeclaredMethod(
@@ -1310,6 +1287,9 @@ class Hooker : XposedModule() {
         }
     }
 
+    @Volatile
+    private var systemContextFailureLogged = false
+
     private fun getSystemContext(): Context? {
         if (systemContext == null) {
             try {
@@ -1319,7 +1299,16 @@ class Hooker : XposedModule() {
                 if (ctx is Context) {
                     systemContext = ctx
                 }
-            } catch (ignored: Throwable) {
+            } catch (t: Throwable) {
+                // Every caller treats a null context as "this group is skipped":
+                // the allowlist receiver is never installed, the GMS uid cannot be
+                // resolved, and so on. That used to leave no trace at all, so the
+                // module could be installed, report N hooks, and still be quietly
+                // inert. Once per boot is enough — this is retried on every call.
+                if (!systemContextFailureLogged) {
+                    systemContextFailureLogged = true
+                    log(Log.WARN, TAG, "System context unavailable", t)
+                }
             }
         }
         return systemContext
@@ -1484,7 +1473,7 @@ class Hooker : XposedModule() {
                     // radios in PowerKeeper would satisfy the flag while the
                     // link was down. The line names the assumption rather than
                     // leaving it to be re-derived; the cross-generation gap is
-                    // tracked in HOOKS_AND_DIAGNOSTICS.md §4.6.1.
+                    // tracked in HOOKS_AND_DIAGNOSTICS.md §3.8.6.
                     log(
                         Log.INFO, TAG,
                         "Sleep mode exited: GMS was kept on the whitelist, " +
@@ -1615,7 +1604,7 @@ class Hooker : XposedModule() {
      * Relaxed WiFi weak-signal switch, hooked in system_server.
      *
      * What the ROM does without us (measured on-device, V816, see
-     * HOOKS_AND_DIAGNOSTICS.md §5.9.2): `AmlMiuiThirdPartScorer` keeps a legacy
+     * HOOKS_AND_DIAGNOSTICS.md §3.9): `AmlMiuiThirdPartScorer` keeps a legacy
      * score in `mLegacyIntScore` and turns it into a usable/unusable verdict at
      * a **hardcoded** 50 inside `notifyScoreAndIsUsable()`. A single call there
      * publishes everything outward — `notifyScoreUpdate(sessionId, score)` for
@@ -1648,7 +1637,7 @@ class Hooker : XposedModule() {
      * without ever causing a switch, so it is a watch item and not a fixed
      * gap — if a switch is later reported while every sub-floor score stayed
      * unflipped, check that call first before suspecting this hook. See
-     * HOOKS_AND_DIAGNOSTICS §7.5.
+     * HOOKS_AND_DIAGNOSTICS.md §6.3.
      *
      * Class resolution note, which is the reason this one is not a plain
      * `classLoader.loadClass`: the class is **not reachable from system_server's
@@ -2027,10 +2016,13 @@ class Hooker : XposedModule() {
      * this module has no opinion about it either way — it runs because the
      * block runs, not because we chose it.
      *
-     * Policy — WiFi stays up whenever the master switch is on; mobile data
-     * follows `Prefs.KEY_SLEEP_KEEPALIVE_DATA`. Both are read lazily at each
-     * cutoff call, so a flip lands on the next sleep entry without a reboot,
-     * and the sub-switch is gated by the master so the set cannot drift. Who
+     * Policy — each radio follows its own switch: WiFi under
+     * `Prefs.KEY_SLEEP_KEEPALIVE`, mobile data under
+     * `Prefs.KEY_SLEEP_KEEPALIVE_DATA`. Both keys are read lazily at each cutoff
+     * call, so a flip lands on the next sleep entry without a reboot, and
+     * neither key gates the other — a night that keeps exactly one radio up is
+     * a configuration the user can ask for, which is why the experiment screen
+     * draws the two switches as peers rather than as a master and a sub. Who
      * may actually use the restored network is still decided by Doze's per-uid
      * chain, which this hook leaves alone.
      *
@@ -2118,31 +2110,25 @@ class Hooker : XposedModule() {
             if (enabling || !calledFromSleepApply()) {
                 return@intercept chain.proceed()
             }
-            // "Armed" means master AND sub, and the two ways the pair can
-            // decline are named apart: a night that kept neither radio up has
-            // to say whether the *master* was off — which ignores this
-            // sub-switch while leaving its stored value alone — or whether only
-            // the data sub-switch was. The single "not armed" line this used to
-            // print left the reader to guess, which is the weak-evidence shape
-            // the rest of this pair already logs its way out of.
+            // One line per sleep entry either way, so the night's log states
+            // which policy ran instead of leaving it to be inferred. This used
+            // to name two reasons — the WiFi switch off, or this one — because
+            // the data switch was gated by the WiFi one; the two are peers now,
+            // so there is exactly one way this hook declines.
             if (!isSleepKeepaliveDataEnabled()) {
                 log(
                     Log.INFO, TAG,
-                    "sleep-mode: mobile data left to the ROM policy (" +
-                        (if (isSleepKeepaliveEnabled()) {
-                            "keepalive data sub-switch off)"
-                        } else {
-                            "keepalive master switch off, data sub-switch ignored)"
-                        })
+                    "sleep-mode: mobile data left to the ROM policy " +
+                        "(keepalive data switch off)"
                 )
                 return@intercept chain.proceed()
             }
             // No pairing rule with the WiFi hook: each radio follows its own
             // switch, and a night where only one of them is kept up is a
-            // configuration the user can now ask for.
+            // configuration the user can ask for.
             log(
                 Log.INFO, TAG,
-                "sleep-mode: kept mobile data on (data sub-switch is on)"
+                "sleep-mode: kept mobile data on (keepalive data switch is on)"
             )
             null
         }
@@ -2153,10 +2139,10 @@ class Hooker : XposedModule() {
         // That misread already cost a night of diagnosis.
         log(
             Log.INFO, TAG,
-            "Sleep-mode network keepalive hooked: idle until the experiment " +
-                "switch is on, then WiFi stays up for the whole night and mobile " +
-                "data follows its sub-switch; the ROM runs its full cutoff path " +
-                "so SleepState still records what to restore."
+            "Sleep-mode network keepalive hooked: idle until an experiment " +
+                "switch is on, then each radio stays up under its own switch " +
+                "(WiFi / mobile data); the ROM runs its full cutoff path so " +
+                "SleepState still records what to restore."
         )
     }
 
@@ -2195,9 +2181,11 @@ class Hooker : XposedModule() {
      * `setWifiEnabled(false)` — along with the `SleepState` bookkeeping inside
      * it. That is exactly why this is no longer the normal path: it can keep
      * both radios up, but it cannot keep **one** of them up and let the other
-     * go, which is the whole point of the data sub-switch. As a fallback the
-     * gap does not matter — the only choice left there is between "both radios
-     * up" and "network gone, with nothing the user can do about it".
+     * go. As a fallback the gap does not matter — the only choice left there is
+     * between "both radios up" and "network gone, with nothing the user can do
+     * about it" — so it arms when **either** sleep switch is on and says so.
+     * (That is also why the experiment screen's two switches, which are peers
+     * here, cannot both be honoured on this path.)
      *
      * This answers the flag read and nothing else: the setting itself is
      * untouched, so no earthquake feature is turned on and no other reader of
@@ -2225,7 +2213,9 @@ class Hooker : XposedModule() {
             if (SLEEP_EARTHQUAKE_KEY != chain.getArg(1)) {
                 return@intercept chain.proceed()
             }
-            if (!isSleepKeepaliveEnabled() || !calledFromSleepConfig()) {
+            if ((!isSleepKeepaliveEnabled() && !isSleepKeepaliveDataEnabled()) ||
+                !calledFromSleepConfig()
+            ) {
                 return@intercept chain.proceed()
             }
             log(
@@ -2256,16 +2246,14 @@ class Hooker : XposedModule() {
     }
 
     /**
-     * Mobile-data sub-switch, read lazily like the master switch.
+     * Mobile-data switch, read lazily like its WiFi sibling.
      *
-     * The keepalive switch is the master of this pair, so mobile data is held
-     * open only while the master is on as well. The experiment screen already
-     * hides this control behind the master, and the string promises it is "in
-     * force only while the item above is on" — gating here is what makes that
-     * promise true. Without it, turning the master off would leave this hook
-     * holding cellular open behind a control the user can no longer see. The
-     * stored sub-switch value is not cleared, so turning the master back on
-     * restores the last choice.
+     * The two sleep switches are **peers, not a master and a sub**: each radio
+     * follows its own key, and a night that keeps exactly one of them up is a
+     * configuration the user can ask for. This one used to AND the WiFi key,
+     * back when "keep WiFi, let mobile data go" was the only shape the pair
+     * offered; hiding it on screen behind the other would now claim a hierarchy
+     * the hook does not have.
      *
      * Fails to *disabled* for the same reason as the WeChat pair: an
      * unreadable switch must mean "leave the system's own data policy alone",
@@ -2273,35 +2261,48 @@ class Hooker : XposedModule() {
      */
     private fun isSleepKeepaliveDataEnabled(): Boolean {
         return try {
-            val config = getRemotePreferences(Prefs.GROUP_CONFIG)
-            config.getBoolean(Prefs.KEY_SLEEP_KEEPALIVE, false) &&
-                config.getBoolean(Prefs.KEY_SLEEP_KEEPALIVE_DATA, false)
+            getRemotePreferences(Prefs.GROUP_CONFIG)
+                .getBoolean(Prefs.KEY_SLEEP_KEEPALIVE_DATA, false)
         } catch (ignored: Throwable) {
             false
         }
     }
 
     /**
-     * Force the single-boolean `(Z)` overload of [name] to false.
+     * Pin the single boolean argument of [name] to [value] and let the call
+     * through: one shape, one helper, several targets (see the call sites).
      *
-     * Every current caller is an OS3-only GmsObserver flag setter, so the
-     * absent branch reports through [logSkipOtherGeneration] (DEBUG). That
-     * bakes a generation assumption into an otherwise generic helper: a future
-     * caller pointing at a method the *current* generation does carry would
-     * have its miss downgraded to DEBUG. Give such a caller its own [logSkip]
-     * path rather than reusing this helper as-is.
+     * [level] is what keeps the two readings of "absent" apart, and the reason
+     * this replaced a helper that hardcoded [logSkipOtherGeneration]: an
+     * OS3-only target and an OS4 load-bearing target have the same shape, but a
+     * miss on the second must not be reported at the same level as a miss on
+     * the first. Callers pass [Log.DEBUG] for "another generation's method" and
+     * [Log.INFO] for "a target this generation should carry".
+     *
+     * Pinning the argument unconditionally is equivalent to the older
+     * only-if-it-is-true form used by `updateFrameworkGmsNetStatus`: the
+     * argument is a primitive boolean, so writing the value it already holds is
+     * a no-op.
      */
-    private fun hookForceFalse(owner: Class<*>, name: String) {
+    private fun forceBooleanArg(
+        owner: Class<*>,
+        name: String,
+        value: Boolean,
+        label: String,
+        level: Int = Log.DEBUG
+    ) {
         try {
             val method = owner.getDeclaredMethod(name, Boolean::class.javaPrimitiveType)
             hookE(method).intercept { chain: XposedInterface.Chain ->
                 val args = chain.args.toTypedArray()
-                args[0] = false
+                if (args.isNotEmpty()) {
+                    args[0] = value
+                }
                 chain.proceed(args)
             }
             deoptimize(method)
         } catch (e: NoSuchMethodException) {
-            logSkipOtherGeneration("GmsObserver#$name absent, skip")
+            logSkip("$label#$name absent, skip", level)
         }
     }
 
@@ -2457,13 +2458,14 @@ class Hooker : XposedModule() {
             val GmsObserverClass = classLoader.loadClass("com.miui.powerkeeper.utils.GmsObserver")
             // OS3-only (cross-generation): the local state machine
             // (mGmsBlocked / mGmsControlEnabled) that drove these three was
-            // removed on OS4, so on the test device all three report absent
-            // through logSkipOtherGeneration (DEBUG). See hookGmsObserver's
-            // header. Do not delete them on the strength of that DEBUG line.
+            // removed on OS4, so on the test device all three report absent at
+            // DEBUG — the default level of [forceBooleanArg]. See
+            // hookGmsObserver's header. Do not delete them on the strength of
+            // that DEBUG line.
             for (legacyName in arrayOf(
                 "updateGmsAlarm", "updateGmsNetWork", "updateGoogleReletivesWakelock"
             )) {
-                hookForceFalse(GmsObserverClass, legacyName)
+                forceBooleanArg(GmsObserverClass, legacyName, false, "GmsObserver")
             }
             // OS3-only (cross-generation): the hard "disable GMS" entries.
             // Absent on OS4, which has no local state machine to gate them.
@@ -2479,42 +2481,21 @@ class Hooker : XposedModule() {
             // OS3-only (cross-generation): the three flag setters of the local
             // state machine. Absent on OS4 for the same reason as above.
             for (limitFlag in arrayOf("updateGmsEnabled", "updateGmsState", "updateGmsInstalled")) {
-                hookForceFalse(GmsObserverClass, limitFlag)
+                forceBooleanArg(GmsObserverClass, limitFlag, false, "GmsObserver")
             }
             // OS4's live limit exit, and the reason this whole function still
             // earns its place on the test generation: OS4 routes the sole GMS
             // network limit through here (reflection into greeze), not through
-            // any of the OS3 methods above. Logged with logSkip (INFO, not
-            // DEBUG) on purpose — this one is load-bearing, so a miss on the
-            // current generation must be visible in the install summary.
-            try {
-                val updateFrameworkGmsNetStatusMethod = GmsObserverClass.getDeclaredMethod(
-                    "updateFrameworkGmsNetStatus", Boolean::class.javaPrimitiveType
-                )
-                hookE(updateFrameworkGmsNetStatusMethod).intercept { chain: XposedInterface.Chain ->
-                    val args = chain.args.toTypedArray()
-                    if (args.isNotEmpty() && java.lang.Boolean.TRUE == args[0]) {
-                        args[0] = false
-                    }
-                    chain.proceed(args)
-                }
-                deoptimize(updateFrameworkGmsNetStatusMethod)
-            } catch (e: NoSuchMethodException) {
-                logSkip("GmsObserver#updateFrameworkGmsNetStatus absent, skip")
-            }
-            try {
-                val onGoogleReachabilityChangedMethod = GmsObserverClass.getDeclaredMethod(
-                    "onGoogleReachabilityChanged", Boolean::class.javaPrimitiveType
-                )
-                hookE(onGoogleReachabilityChangedMethod).intercept { chain: XposedInterface.Chain ->
-                    val args = chain.args.toTypedArray()
-                    args[0] = true
-                    chain.proceed(args)
-                }
-                deoptimize(onGoogleReachabilityChangedMethod)
-            } catch (e: NoSuchMethodException) {
-                logSkip("GmsObserver#onGoogleReachabilityChanged absent, skip")
-            }
+            // any of the OS3 methods above. INFO (not DEBUG) on purpose — this
+            // one is load-bearing, so a miss on the current generation must be
+            // visible in the install summary.
+            forceBooleanArg(
+                GmsObserverClass, "updateFrameworkGmsNetStatus", false, "GmsObserver", Log.INFO
+            )
+            // OS4 reachability callback, pinned to "reachable".
+            forceBooleanArg(
+                GmsObserverClass, "onGoogleReachabilityChanged", true, "GmsObserver", Log.INFO
+            )
             try {
                 val bridgeMethod = GmsObserverClass.getDeclaredMethod(
                     "c", GmsObserverClass, Boolean::class.javaPrimitiveType
@@ -2758,6 +2739,15 @@ class Hooker : XposedModule() {
      * Hooking inside PowerKeeper removes the race that Shizuku watchdogs have:
      * every regeneration of the projection includes GMS at the source.
      */
+    // ponytail: GMS is added to the *query result*, never written back to
+    //   Settings or to PowerKeeper's own table. The three non-injecting external
+    //   projects all write `MILLET_NO_RESTRICT_APP` / `aurogon_enable` instead,
+    //   and therefore have to poll forever against PowerKeeper regenerating the
+    //   setting; rebuilding the answer at query time is immune to that race by
+    //   construction. Cost: no effect outside the code path that asks this
+    //   helper. Condition to change: a generation that reads the list without
+    //   going through UserConfigureHelper — and even then, another query-time
+    //   hook beats a persisted write, which would outlive the module.
     private fun hookNoRestrictList(classLoader: ClassLoader) {
         // Source-level: ensure getNoRestrictApps() always returns GMS.
         try {
@@ -3430,22 +3420,110 @@ class Hooker : XposedModule() {
             val sys = getSystemContext() ?: return false
             val receiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context, intent: Intent) {
-                    if (Prefs.ACTION_ALLOWLIST_CHANGED == intent.action) {
-                        requestAllowlistReload()
+                    // This receiver *has* to be RECEIVER_EXPORTED: it lives on
+                    // the system_server context and the only legitimate sender —
+                    // the settings app — is a different uid, so a non-exported
+                    // registration would never receive anything. Being exported
+                    // with no broadcast permission also means any app on the
+                    // device can reach these two actions, so the sender is
+                    // checked in the callback instead of at registration time.
+                    val fromPackage = try {
+                        sentFromPackage
+                    } catch (t: Throwable) {
+                        null
+                    }
+                    val fromUid = try {
+                        sentFromUid
+                    } catch (t: Throwable) {
+                        Process.INVALID_UID
+                    }
+                    if (allowlistSenderIsForeign(fromPackage, fromUid)) {
+                        logForeignAllowlistSenderOnce(fromPackage, fromUid)
+                        return
+                    }
+                    when (intent.action) {
+                        Prefs.ACTION_ALLOWLIST_CHANGED -> requestAllowlistReload()
+                        Prefs.ACTION_APPLY_AUTOSTART -> applyAutostartToAllowlist()
                     }
                 }
             }
             val filter = IntentFilter(Prefs.ACTION_ALLOWLIST_CHANGED)
+            filter.addAction(Prefs.ACTION_APPLY_AUTOSTART)
             val handler = allowlistBackgroundHandler()
             sys.registerReceiver(receiver, filter, null, handler, Context.RECEIVER_EXPORTED)
             allowlistReceiverRegistered = true
             log(Log.INFO, TAG, "Allowlist receiver installed")
             return true
         } catch (e: Throwable) {
+            // Silent before this: the async installer retries and only warns
+            // after every attempt, so a failure on the lazy path (called from
+            // getFcmAllowlist) left the allowlist quietly stale with nothing in
+            // the log to say why.
+            logAllowlistRegisterFailureOnce(e)
             return false
         } finally {
             allowlistRegistering.set(false)
         }
+    }
+
+    /**
+     * Whether a delivery was positively sent by somebody other than this module's
+     * own app.
+     *
+     * Registration cannot express this: a required broadcast permission would have
+     * to be granted to the settings app, and a permission that is ever missing
+     * would take the whole allowlist path down silently — a worse failure than the
+     * one it guards against. So the identity the system already stamps on every
+     * delivery is read back instead ([BroadcastReceiver.getSentFromPackage] /
+     * [BroadcastReceiver.getSentFromUid], API 34+, and minSdk is 35).
+     *
+     * Fail-open by construction: only a sender that is *positively* identified as
+     * different is rejected. Anything unstamped (null package and INVALID_UID) is
+     * processed exactly as it was before this check existed, so it can never
+     * narrow the legitimate path — the worst case is that it filters nothing.
+     */
+    private fun allowlistSenderIsForeign(fromPackage: String?, fromUid: Int): Boolean {
+        if (fromPackage != null) {
+            return fromPackage != Prefs.MODULE_PKG
+        }
+        if (fromUid == Process.INVALID_UID) {
+            return false
+        }
+        // Unknown package but a known uid: system / root / shell are the only
+        // uids besides the module's own that legitimately drive this (adb
+        // `am broadcast` debugging).
+        return fromUid != Process.SYSTEM_UID &&
+            fromUid != Process.ROOT_UID &&
+            fromUid != Process.SHELL_UID
+    }
+
+    @Volatile
+    private var foreignAllowlistSenderLogged = false
+
+    /** Once per boot: a rejected sender is worth seeing, a flood of them is not. */
+    private fun logForeignAllowlistSenderOnce(fromPackage: String?, fromUid: Int) {
+        if (foreignAllowlistSenderLogged) {
+            return
+        }
+        foreignAllowlistSenderLogged = true
+        log(
+            Log.WARN, TAG,
+            "Ignored allowlist broadcast from " +
+                (fromPackage ?: "uid $fromUid") +
+                "; only " + Prefs.MODULE_PKG + " may drive the allowlist"
+        )
+    }
+
+    @Volatile
+    private var allowlistRegisterFailureLogged = false
+
+    /** Once per boot: the retry loop would otherwise repeat this N times. */
+    private fun logAllowlistRegisterFailureOnce(t: Throwable) {
+        if (allowlistRegisterFailureLogged) {
+            return
+        }
+        allowlistRegisterFailureLogged = true
+        log(Log.WARN, TAG, "Allowlist receiver registration failed", t)
     }
 
     private fun findMethod(
@@ -3599,6 +3677,14 @@ class Hooker : XposedModule() {
                         targetPackage != null &&
                         moduleAppliesTo(targetPackage, Tier.WAKE)
                     ) {
+                        // ponytail: only the flag is added — appOp is passed
+                        //   through untouched. External modules raise OP_NONE to
+                        //   OP_POST_NOTIFICATION here; appOp sits among several
+                        //   ints with no reliable position rule, and AOSP defines
+                        //   stopped-package delivery by this flag alone. Cost: a
+                        //   broadcast the ROM still refuses on appOp grounds
+                        //   stays refused. Condition to add it back: a real
+                        //   sample of "flag present, still not delivered".
                         try {
                             if ((intent.flags and Intent.FLAG_INCLUDE_STOPPED_PACKAGES) == 0) {
                                 intent.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
@@ -3627,9 +3713,334 @@ class Hooker : XposedModule() {
                     log(Log.ERROR, TAG, "C2DM broadcast hook failed", t)
                 }
             }
+            // Experiment: stopped-package delivery for the packages the user
+            // checked, not only the GMS→c2dm hop above. Same flag, same exit,
+            // wider caller set — the caller check that guards the hop is
+            // deliberately absent here, because a sender other than GMS is
+            // exactly what this switch is for.
+            //
+            // The list gate is [wakeExplicitlyAllows], not `moduleAppliesTo`.
+            // The two differ in exactly the ways this pair's description would
+            // otherwise lie about: `moduleAppliesTo(Tier.WAKE)` fails open on an
+            // empty list (so a fresh install with nothing checked would have the
+            // flag added to broadcasts aimed at *every* package) and exempts GMS
+            // unconditionally. Both are right for the shipped wake privileges,
+            // whose posture is a whole-device FCM fix, and both are wrong for a
+            // switch whose description says "only the checked apps". The second
+            // wake pair is gated the same way, so the two rows one section apart
+            // now mean the same thing.
+            //
+            // ponytail: the flag is added and nothing else about the broadcast
+            //   changes — no appOp rewrite, no ordered-broadcast promotion, no
+            //   resultTo, no new permission. Cost: a broadcast the ROM still
+            //   refuses for some other reason (a permission, a MIUI policy, an
+            //   app whose receivers are disabled) stays refused. Condition to
+            //   add more: a sample of "allowlisted, flag present, still not
+            //   delivered".
+            //
+            // ponytail: this used to also reset the package's stopped state
+            //   (`setPackageStoppedState(pkg, false, userId)`) behind a second
+            //   opt-in. Removed as provably redundant: the flag added here opens
+            //   the very gate the reset was meant to open. ROM bytecode
+            //   (OS4.0.0.33 / myron): `broadcastIntentLockedTraced` adds
+            //   FLAG_EXCLUDE_STOPPED_PACKAGES unconditionally, and
+            //   `IntentResolver#buildResolveList` filters stopped packages only
+            //   when `Intent.isExcludingStopped()` holds, which is compiled to
+            //   `(mFlags & 0x30) == 0x10` — i.e. EXCLUDE set *and* INCLUDE clear.
+            //   So with this flag present the receiver is resolved, the broadcast
+            //   is delivered, and PackageManager clears stopped on delivery; the
+            //   reset never made a difference on any broadcast that reaches here.
+            //   Cost of the removal: a broadcast the module never sees (an alarm,
+            //   a PendingIntent, an internal call straight into
+            //   `broadcastIntentLocked`) is still filtered out for a stopped
+            //   package, and there is no longer anything undoing that. Condition
+            //   to bring it back: a sample of an allowlisted package blocked by
+            //   stopped on such a path — not a binder-dispatched one.
+            if (intent != null && isWakeStoppedPackagesEnabled()) {
+                try {
+                    val wakePackage = targetPackageOf(intent)
+                    if (wakePackage != null && wakeExplicitlyAllows(wakePackage)) {
+                        try {
+                            if ((intent.flags and Intent.FLAG_INCLUDE_STOPPED_PACKAGES) == 0) {
+                                intent.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+                            }
+                        } catch (t: Throwable) {
+                            log(
+                                Log.ERROR, TAG,
+                                "wake: failed to add FLAG_INCLUDE_STOPPED_PACKAGES", t
+                            )
+                        }
+                    }
+                } catch (t: Throwable) {
+                    log(Log.ERROR, TAG, "Wake broadcast hook failed", t)
+                }
+            }
+            // Experiment: the autostart pair's persistent half. Same targeted
+            // push and same explicit-allowlist gate as the master's runtime
+            // bypass, but instead of answering a gate it writes the ROM's own
+            // autostart AppOp for the package — see maybeWriteAutostart. The
+            // action test is the cheap local one, so the remote-prefs read only
+            // happens for a push broadcast.
+            if (intent != null && isPushAction(intent.action)) {
+                try {
+                    val autostartPackage = targetPackageOf(intent)
+                    if (autostartPackage != null &&
+                        isWakeWriteAutostartEnabled() &&
+                        wakeExplicitlyAllows(autostartPackage)
+                    ) {
+                        maybeWriteAutostart(autostartPackage)
+                    }
+                } catch (t: Throwable) {
+                    log(Log.ERROR, TAG, "Wake autostart write hook failed", t)
+                }
+            }
             chain.proceed()
         }
         deoptimize(broadcastMethod)
+    }
+
+    /**
+     * Experiment master switch: stopped-package delivery (see the branch in
+     * [hookActivityManagerService]).
+     *
+     * Fails to *disabled*: stopped-state delivery is a protection the user or a
+     * freeze tool asked for, and an unreadable switch must leave the ROM's own
+     * delivery decision alone rather than adding flags on the strength of a
+     * value nobody could read.
+     */
+    private fun isWakeStoppedPackagesEnabled(): Boolean {
+        return try {
+            getRemotePreferences(Prefs.GROUP_CONFIG)
+                .getBoolean(Prefs.KEY_WAKE_STOPPED_PACKAGES, false)
+        } catch (ignored: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Experiment master switch: relax the autostart gate (see the second branch
+     * in [hookBroadcastQueueModernStubImpl]).
+     *
+     * Fails to *disabled*. The autostart decision is the ROM's, and an
+     * unreadable switch must leave it alone rather than start answering every
+     * push broadcast from a value nobody could read.
+     */
+    private fun isWakeAutostartRelaxedEnabled(): Boolean {
+        return try {
+            getRemotePreferences(Prefs.GROUP_CONFIG)
+                .getBoolean(Prefs.KEY_WAKE_AUTOSTART_RELAXED, false)
+        } catch (ignored: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Experiment sub-switch: write the package's autostart op.
+     *
+     * [Prefs.KEY_WAKE_AUTOSTART_RELAXED] is the master of this pair, so the
+         * write happens only while the master is on as well: turning the master off
+         * must not leave a hook writing a user-visible setting behind a control the
+         * user can no longer see. The stored sub-value is kept, so turning the
+         * master back on restores the last choice.
+     *
+     * Fails to *disabled* for the same reason as the master.
+     */
+    private fun isWakeWriteAutostartEnabled(): Boolean {
+        return try {
+            val config = getRemotePreferences(Prefs.GROUP_CONFIG)
+            config.getBoolean(Prefs.KEY_WAKE_AUTOSTART_RELAXED, false) &&
+                config.getBoolean(Prefs.KEY_WAKE_WRITE_AUTOSTART, false)
+        } catch (ignored: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * The wake experiments' own allowlist gate: membership is required, so an
+     * empty list means "no app" rather than "every app".
+     *
+     * Deliberately not [moduleAppliesTo]. That one fails open on an empty list
+     * and exempts GMS, which is right for the shipped wake privileges — the
+     * module's default posture is a whole-device FCM fix — but wrong here: all
+     * four of these switches reach past the FCM chain the module exists for
+     * (the stopped-package flag, the stopped-state write, the relaxed autostart
+     * gate, the AppOp write), and each of their descriptions promises "only the
+     * checked apps". Sharing one gate is what makes that promise true on every
+     * row rather than on some of them.
+     */
+    private fun wakeExplicitlyAllows(packageName: String): Boolean {
+        return getFcmAllowlist().contains(packageName)
+    }
+
+    /**
+     * Whether [action] belongs to the push family the autostart pair acts on.
+     *
+     * The c2dm actions match by suffix because the family has historical
+     * prefixes (`com.google.android.c2dm`, `com.google.android.gcm`); the
+     * Firebase ones are exact. Same set the two reference modules use, and the
+     * same reasoning as the shipped GMS→c2dm hop, widened past c2dm only for
+     * this experiment.
+     */
+    private fun isPushAction(action: String?): Boolean {
+        if (action == null) {
+            return false
+        }
+        return PUSH_ACTIONS.contains(action) || PUSH_ACTION_SUFFIXES.any { action.endsWith(it) }
+    }
+
+    /**
+     * The lazy half of the autostart pair: the write for the one package a push
+     * was just aimed at.
+     *
+     * This is what keeps the setting from drifting back: a freeze tool that
+     * resets the op is corrected the next time its package gets a push. It is
+     * no longer the only way the op is written — [applyAutostartToAllowlist]
+     * covers the whole list the moment the user flips the sub-switch on, which
+     * is what makes the switch observable from a shell right after tapping it.
+     *
+     * One line per write and nothing on a no-op, so the log stays quiet: a
+     * package already at `MODE_ALLOWED` (and every package inside its throttle
+     * window) prints nothing at all.
+     */
+    private fun maybeWriteAutostart(packageName: String) {
+        if (writeAutostartIfNeeded(packageName, throttle = true) == AUTOSTART_WRITTEN) {
+            log(Log.INFO, TAG, "wake: set the autostart op (10008) of $packageName to allowed")
+        }
+    }
+
+    /**
+     * Run the autostart write over the whole allowlist, once, on request from
+     * the settings UI — see [Prefs.ACTION_APPLY_AUTOSTART].
+     *
+     * Without this the sub-switch was purely lazy: flipping it changed nothing
+     * on disk until each app happened to receive its next push, which for a
+     * rarely-pushed package could be tomorrow or never, and left no way to
+     * confirm the write from a shell right after tapping the row.
+     *
+     * Deliberately not a repeating task and not run at boot: its job is to make
+     * one user action take effect, and the lazy path above is what maintains
+     * the result afterwards. Nothing here un-does the write — the module never
+     * learns the previous values, so turning the switch off leaves them alone.
+     *
+     * Runs on the allowlist handler thread, which serialises it against itself
+     * (a burst of taps queues, it does not interleave) and against the allowlist
+     * reads. The list is re-read here rather than taken from the last reload:
+     * the reload throttle would otherwise let this walk a stale copy.
+     *
+     * Logging is one line for the whole walk, never one per package — this runs
+     * over a list the user can see, and per-package lines would print all of it
+     * on every tap.
+     */
+    private fun applyAutostartToAllowlist() {
+        if (!isWakeWriteAutostartEnabled()) {
+            return
+        }
+        loadAllowlistFromRemotePrefs()
+        val allowlist = getFcmAllowlist()
+        if (allowlist.isEmpty()) {
+            log(
+                Log.INFO, TAG,
+                "wake: autostart write requested with an empty allowlist, nothing to write"
+            )
+            return
+        }
+        var written = 0
+        var already = 0
+        var failed = 0
+        for (pkg in allowlist) {
+            // throttle = false: this is a user action, so it writes even inside
+            // the lazy path's window. An already-allowed package is still only
+            // a read, so re-tapping the switch costs no settings writes.
+            when (writeAutostartIfNeeded(pkg, throttle = false)) {
+                AUTOSTART_WRITTEN -> written++
+                AUTOSTART_FAILED -> failed++
+                else -> already++
+            }
+        }
+        log(
+            Log.INFO, TAG,
+            "wake: autostart on request over ${allowlist.size} allowlisted package(s): " +
+                "$written written, $already already allowed, $failed failed"
+        )
+    }
+
+    /**
+     * Set the package's MIUI autostart AppOp to "allowed" if it is not allowed
+     * already — the persistent half of the autostart pair, and the one place
+     * the module edits a user-visible system setting.
+     *
+     * There is no public API for this. The op is `MIUIOP_AUTO_START = 10008`
+     * (`com.miui.internal.os.MiuiHooks.OP_AUTO_START`, OS4 miui-framework
+     * bytecode), and MIUI's own write is
+     * `android.miui.AppOpsUtils#setApplicationAutoStart(Context, String, boolean)`
+     * — which is a three-line wrapper around exactly the call made here:
+     * it resolves the uid with `PackageManager#getPackageUidAsUser` and then
+     * `AppOpsManager.setMode(10008, uid, pkg, autoStart ? 0 : 2)`
+     * (`AppOpsUtils` disassembly, offsets 0x0000-0x0026: `if-eqz` picks
+     * `const/4 #int 0` = `MODE_ALLOWED`, else `const/4 #int 2` =
+     * `MODE_ERRORED`). Calling `setMode` directly keeps this off the
+     * `AppOpsUtils` hidden class and lets the uid be resolved for the user this
+     * module actually runs in.
+     *
+     * The op code is not in the SDK either — the public `AppOpsManager` only
+     * exposes the name-based overloads — so both methods are resolved by
+     * reflection and invoked through [XposedInterface.getInvoker], the same
+     * route the module already uses for other hidden framework methods.
+     *
+     * Identity is cleared around the calls. The hook runs on the broadcast's
+     * binder thread, so without it the ROM would judge the *sender's* uid:
+     * `setMode` enforces `MANAGE_APP_OPS_MODES`, which the module only holds as
+     * system_server (uid 1000). Scope is these calls and nothing else — clearing
+     * across `chain.proceed()` would let every broadcast run as system.
+     *
+     * Read-before-write, so a package already at `MODE_ALLOWED` costs a read and
+     * no settings write. [throttle] is false for the on-request walk, which is
+     * user-driven and must take effect even inside the lazy path's window.
+     *
+     * Returns [AUTOSTART_WRITTEN], [AUTOSTART_ALREADY] or [AUTOSTART_FAILED].
+     * Logging is left to the caller because the two callers want different
+     * shapes: the lazy path wants a line per write, the on-request walk wants
+     * one line for the whole list. The one exception is a failure, which is
+     * logged here with the exception — a failure has to name its package to be
+     * useful, and it is never the common case.
+     */
+    private fun writeAutostartIfNeeded(packageName: String, throttle: Boolean): Int {
+        val setMode = APP_OPS_SET_MODE
+        val checkOpNoThrow = APP_OPS_CHECK_OP_NO_THROW
+        if (setMode == null || checkOpNoThrow == null) {
+            return AUTOSTART_FAILED
+        }
+        if (throttle) {
+            val now = SystemClock.elapsedRealtime()
+            val last = wakeAutostartLastMs.putIfAbsent(packageName, now)
+            if (last != null) {
+                if (now - last < WAKE_AUTOSTART_COOLDOWN_MS) {
+                    return AUTOSTART_ALREADY
+                }
+                wakeAutostartLastMs[packageName] = now
+            }
+        }
+        val context = getSystemContext() ?: return AUTOSTART_FAILED
+        val token = Binder.clearCallingIdentity()
+        try {
+            val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
+                ?: return AUTOSTART_FAILED
+            val uid = context.packageManager.getApplicationInfo(packageName, 0).uid
+            val current =
+                getInvoker(checkOpNoThrow).invoke(appOps, MIUIOP_AUTO_START, uid, packageName)
+            if (current == AppOpsManager.MODE_ALLOWED) {
+                return AUTOSTART_ALREADY
+            }
+            getInvoker(setMode).invoke(
+                appOps, MIUIOP_AUTO_START, uid, packageName, AppOpsManager.MODE_ALLOWED
+            )
+            return AUTOSTART_WRITTEN
+        } catch (t: Throwable) {
+            log(Log.ERROR, TAG, "wake: failed to write the autostart op of $packageName", t)
+            return AUTOSTART_FAILED
+        } finally {
+            Binder.restoreCallingIdentity(token)
+        }
     }
 
     /**
@@ -4313,7 +4724,7 @@ class Hooker : XposedModule() {
      *
      * The step from "the uid rule was applied" to "the link stayed up" is a
      * generation assumption, not a measurement — see the exit branch in
-     * [armSleepModeChain] and HOOKS_AND_DIAGNOSTICS.md §4.6.1.
+     * [armSleepModeChain] and HOOKS_AND_DIAGNOSTICS.md §3.8.6.
      */
     @Volatile
     private var sGmsKeptOnSleepWhitelist = false
@@ -4558,6 +4969,86 @@ class Hooker : XposedModule() {
          */
         private const val SLEEP_CONTROLLER_CLASS =
             "com.miui.powerkeeper.statemachine.PhoneSleepModeController"
+
+        /**
+         * Push-family actions the autostart pair acts on.
+         *
+         * The c2dm ones match by suffix because the family has historical
+         * prefixes; the Firebase ones are exact. Everything the autostart
+         * branches do is gated on this being true, which is what keeps them off
+         * the hot path of the broadcast queue.
+         */
+        private val PUSH_ACTION_SUFFIXES = arrayOf(
+            ".android.c2dm.intent.RECEIVE",
+            ".android.c2dm.intent.REGISTRATION"
+        )
+        private val PUSH_ACTIONS = setOf(
+            "com.google.firebase.MESSAGING_EVENT",
+            "com.google.firebase.INSTANCE_ID_EVENT",
+            "com.google.firebase.NEW_TOKEN"
+        )
+
+        /**
+         * MIUI's autostart AppOp — `com.miui.internal.os.MiuiHooks.OP_AUTO_START`.
+         * Not an AOSP op: the MIUI range starts at 10000.
+         */
+        private const val MIUIOP_AUTO_START = 10008
+
+        /**
+         * Outcomes of [writeAutostartIfNeeded]. Ints rather than an enum so the
+         * broadcast paths stay allocation-free; the two callers only compare
+         * them, they never hold them.
+         */
+        private const val AUTOSTART_ALREADY = 0
+        private const val AUTOSTART_WRITTEN = 1
+        private const val AUTOSTART_FAILED = -1
+
+        /**
+         * Shortest interval between two autostart writes for the same package on
+         * the *lazy* path — see [maybeWriteAutostart]. The setting is persistent,
+         * so a burst of pushes does not need a burst of writes, and the
+         * read-before-write makes an already-allowed package cost nothing but a
+         * read.
+         *
+         * [applyAutostartToAllowlist] ignores it, because that path is one
+         * deliberate user action rather than a stream of system events.
+         */
+        private const val WAKE_AUTOSTART_COOLDOWN_MS = 60_000L
+        /** Package → last autostart write attempt, best-effort under concurrency. */
+        private val wakeAutostartLastMs = ConcurrentHashMap<String, Long>()
+
+        /**
+         * `AppOpsManager#setMode(int, int, String, int)` and
+         * `#checkOpNoThrow(int, int, String)`, resolved once.
+         *
+         * Neither overload is in the public SDK — it only exposes the name-based
+         * forms, because the op *code* is the hidden half. Resolved by
+         * reflection and invoked through [XposedInterface.getInvoker], the route
+         * the module already uses for hidden framework methods; a miss makes
+         * [writeAutostartIfNeeded] report [AUTOSTART_FAILED] rather than crash.
+         */
+        private val APP_OPS_SET_MODE: Method? by lazy {
+            try {
+                AppOpsManager::class.java.getDeclaredMethod(
+                    "setMode",
+                    Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
+                    String::class.java, Int::class.javaPrimitiveType
+                )
+            } catch (t: Throwable) {
+                null
+            }
+        }
+        private val APP_OPS_CHECK_OP_NO_THROW: Method? by lazy {
+            try {
+                AppOpsManager::class.java.getDeclaredMethod(
+                    "checkOpNoThrow",
+                    Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, String::class.java
+                )
+            } catch (t: Throwable) {
+                null
+            }
+        }
+
 
         /**
          * WiFi scorer behind the relaxed weak-signal switch.

@@ -477,7 +477,7 @@ private fun AboutBody(
             )
             Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
             NavCard(
-                iconRes = R.drawable.ic_open_licenses,
+                iconRes = R.drawable.ic_license,
                 title = stringResource(R.string.open_source_licenses),
                 subtitle = stringResource(R.string.about_sub_licenses),
                 onClick = actions.onLicenses,
@@ -845,7 +845,7 @@ private fun AboutScreenPreview() {
                     onHelp = {},
                     onCheckUpdate = {},
                     onUpdateOpen = {},
-                    versionLine = "当前版本 3.6.0 (40)",
+                    versionLine = "当前版本 3.6.1 (41)",
                     onAppearanceChange = {}
                 )
             )

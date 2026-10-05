@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shortcut icon foreground: Material Symbols "monitor_heart" (fill1, outlined family),
+     path data verbatim from fonts.gstatic.com (Apache-2.0).
+
+     Adaptive-icon layer, so this is a 108dp canvas. The Material Symbols 960
+     canvas is scaled to 54dp and centred with a 27dp inset, i.e. the 24dp
+     glyph box of the "App Shortcuts Icon Design Guidelines" (24dp icon in a
+     48dp shortcut: 54/108 = 24/48). The 2dp padding the spec asks for is
+     inside the Material box, and the silhouette is the launcher's mask - this
+     layer paints no shape of its own.
+
+     The fill is the `onPrimary` side of the `primary` role the background
+     layer paints, so the pairing is the scheme's own contrast pair: light is
+     white-on-#8B4A5A (what the old bitmap tiles drew), and night flips to
+     #4A0F22-on-#E8B4C0 so the glyph keeps its contrast against the tile - the
+     one thing the guidelines require of it. Nothing tints this layer (the
+     launcher draws the drawable as-is; no Compose `Icon` is involved), so
+     `fillColor` is what actually decides the colour here.
+
+     Glyph: pulse trace - the FCM diagnostics screen
+     -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.05625"
+        android:scaleY="0.05625"
+        android:translateX="27"
+        android:translateY="27">
+        <group android:translateY="960">
+            <path
+                android:fillColor="@color/md_on_primary"
+                android:pathData="M160-160q-33 0-56.5-23.5T80-240v-200h215l69 138q5 11 15 16.5t21 5.5q11 0 21-5.5t15-16.5l124-248 44 88q5 11 15 16.5t21 5.5h240v200q0 33-23.5 56.5T800-160H160ZM80-520v-200q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v200H665l-69-138q-5-11-15-15.5t-21-4.5q-11 0-21 4.5T524-658L400-410l-44-88q-5-11-15-16.5t-21-5.5H80Z" />
+        </group>
+    </group>
+</vector>

@@ -1000,6 +1000,27 @@ class MainActivity : AppCompatActivity() {
                 this, prefs, Prefs.readLocalSleepKeepaliveData(this)
             )
         }
+        if (Prefs.hasPendingWakeStoppedPackagesPush(this)) {
+            // Same repair for the wake switch, which the experiment screen
+            // owns; without this a flip made before the service bound would be
+            // reverted here rather than pushed up.
+            Prefs.writeWakeStoppedPackages(
+                this, prefs, Prefs.readLocalWakeStoppedPackages(this)
+            )
+        }
+        if (Prefs.hasPendingWakeAutostartRelaxedPush(this)) {
+            // And for the second wake pair's master switch, which the experiment
+            // screen owns; same repair, same reason.
+            Prefs.writeWakeAutostartRelaxed(
+                this, prefs, Prefs.readLocalWakeAutostartRelaxed(this)
+            )
+        }
+        if (Prefs.hasPendingWakeWriteAutostartPush(this)) {
+            // And for its autostart-write sub-switch.
+            Prefs.writeWakeWriteAutostart(
+                this, prefs, Prefs.readLocalWakeWriteAutostart(this)
+            )
+        }
         if (Prefs.hasPendingPush(this)) {
             // A check made before the service bound is newer than the remote set:
             // push it up (the write broadcasts, so system_server re-reads too)
@@ -1144,8 +1165,13 @@ class MainActivity : AppCompatActivity() {
      * Swap the visible list once. Skips pushing when nothing changed, so a
      * refresh does not recompose — and therefore does not "flash" — for nothing.
      *
-     * Scroll position needs no restoring here: rows are keyed by package name,
-     * so Compose keeps the place even though a check may have moved a row.
+     * Scroll position: rows are keyed by package name, and that is not the whole
+     * story — a keyed `LazyColumn` keeps the first visible *row* in place when
+     * the order changes, not the index, so a check that moves a row moves the
+     * viewport with it. For a refresh that is exactly the wrong outcome (the
+     * unchecked row drops to its alphabetical place and drags the page down);
+     * the list therefore goes back to the top when the refresh ends. See the
+     * `LaunchedEffect` in `MainScreen`.
      */
     private fun applyAppSnapshot(next: List<AppListStore.AppEntry>, stopRefresh: Boolean) {
         // Always re-sync from the live allowlist — loadApps may have started

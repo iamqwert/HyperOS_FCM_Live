@@ -48,8 +48,8 @@ android {
         targetSdkVersion 37
         // Fixed (bumped by hand each release) so LSPosed update checks never treat
         // this fork as older than upstream builds that inherit a low jgit commitCount.
-        versionCode 40
-        versionName "3.6.0"
+        versionCode 41
+        versionName "3.6.1"
 
         // HyperOS modules ship arm64 only; drop armv7a / x86 / x86_64 natives.
         ndk {
@@ -167,6 +167,13 @@ dependencies {
     implementation 'io.github.libxposed:service:102.0.0'
     // Compile-time hidden-API signatures (not packaged in the APK).
     compileOnly project(":hiddenapi:stubs")
+    // JVM unit tests (no device / ADB). Release 3.5.3 dropped this line while
+    // keeping src/test, which left both test classes importing org.junit with no
+    // provider on the classpath: `:HyperFCMLive:testDebugUnitTest` did not even
+    // compile, so the MCU colour-port golden checks and the version-comparison
+    // cases stopped running without anything failing. Test scope only — it is not
+    // on releaseRuntimeClasspath and ships nothing.
+    testImplementation 'junit:junit:4.13.2'
 }
 
 // Refuse to produce a release artifact without a real keystore. The AOSP debug

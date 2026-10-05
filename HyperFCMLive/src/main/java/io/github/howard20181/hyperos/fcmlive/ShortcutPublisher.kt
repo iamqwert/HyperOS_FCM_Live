@@ -6,6 +6,7 @@ import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
 import android.graphics.drawable.Icon
 import android.net.Uri
+import android.util.Log
 
 /**
  * Push launcher shortcuts from code so icon/label updates reach the
@@ -15,6 +16,8 @@ import android.net.Uri
  * gate: the guard that used to return early below N_MR1 could never fire.
  */
 object ShortcutPublisher {
+
+    private const val TAG = "ShortcutPublisher"
 
     private const val ID_SETTINGS = "settings"
     private const val ID_HELP = "help"
@@ -55,7 +58,11 @@ object ShortcutPublisher {
                 )
                 .build()
             sm.dynamicShortcuts = listOf(settings, help, fcm)
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            // Not fatal — the static res/xml/shortcuts.xml entries still stand —
+            // but silence here meant a ROM that rejects dynamic shortcuts left no
+            // trace at all, while the launcher showed stale icons.
+            Log.w(TAG, "publish failed; static shortcuts.xml entries still apply", t)
         }
     }
 }

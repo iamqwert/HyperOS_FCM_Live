@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Icons "battery_saver". Path data verbatim from github.com/google/material-design-icons (Apache-2.0); the source canvas
+     is 24x24, centred and scaled onto the 960 one by the group below.
+     Material Icons (not Symbols) — the classic battery with a plus in it,
+     which is the shape the battery-optimisation screen itself uses.
+     Drawn on a 24x24 canvas, so it is scaled onto the 960 one.
+     -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:scaleX="40" android:scaleY="40">
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M16,4h-2V2h-4v2H8C7.45,4,7,4.45,7,5v16c0,0.55,0.45,1,1,1h8c0.55,0,1-0.45,1-1V5C17,4.45,16.55,4,16,4z M15,14h-2v2h-2 v-2H9v-2h2v-2h2v2h2V14z" />
+    </group>
+</vector>

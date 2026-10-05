@@ -87,7 +87,10 @@ object LauncherIcon {
             @Suppress("DEPRECATION")
             changed.putExtra(Intent.EXTRA_CHANGED_COMPONENT_NAME, alias.className)
             context.sendBroadcast(changed)
-        } catch (ignored: Throwable) {
+        } catch (t: Throwable) {
+            // The component write above already landed; this broadcast only asks
+            // launchers to re-read. Worth a line, not worth failing the call.
+            Log.w(TAG, "PACKAGE_CHANGED notify failed", t)
         }
         return applied
     }
