@@ -153,7 +153,17 @@
     <string name="experiment_sleep_keepalive">保护 WiFi 不断网</string>
     <string name="experiment_sleep_keepalive_desc">在睡眠模式下，WiFi 保持开启，FCM 通道不会整夜中断；夜间耗电增加</string>
     <string name="experiment_sleep_keepalive_data">保护移动数据不断网</string>
-    <string name="experiment_sleep_keepalive_data_desc">移动数据与 WiFi 均整夜不断连；夜间耗电更多</string>
+    <string name="experiment_sleep_keepalive_data_desc">在睡眠模式下，移动数据保持开启，FCM 通道仍可用；夜间耗电更多</string>
+
+    <string name="experiment_section_wake">唤醒</string>
+    <string name="experiment_wake_stopped_packages">投递广播到已停止的应用</string>
+    <string name="experiment_wake_stopped_packages_desc">在应用发起广播时补上投递到已停止应用的标记，仅对 FCM 唤醒白名单内已勾选的应用生效；闹钟、通知动作等由系统直接投递的广播不在覆盖范围内</string>
+    <!-- 自启动单列一节：与上面的停止状态是两个互不相干的闸门，默认关闭 -->
+    <string name="experiment_section_autostart">自启动</string>
+    <string name="experiment_wake_autostart_relaxed">放宽推送广播的自启动检查</string>
+    <string name="experiment_wake_autostart_relaxed_desc">已勾选的白名单应用的推送广播不再被自启动检查拦下</string>
+    <string name="experiment_wake_autostart_write">把应用的自启动权限写为允许</string>
+    <string name="experiment_wake_autostart_write_desc">已勾选应用的自启动权限 MIUIOP 10008 写为允许，之后推送到达时也会补写；会改变应用权限且不随本开关关闭而还原</string>
 
     <!-- 模块状态页 -->
     <string name="status_yes">是</string>

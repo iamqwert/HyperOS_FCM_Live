@@ -26,9 +26,13 @@
  *   `save`, `settings_backup_restore`) serve the same path for fill0 and
  *   fill1, and the fill0 URL 404s. Judge compliance by whether the `fill1`
  *   URL above answers 200, never by the downloaded filename.
- *   Two things are deliberately not icons and stay as they are: the launcher
- *   icon layers (`ic_launcher_*`, this app's own brand mark) and the
- *   launcher shortcut tiles (`drawable-xxhdpi/ic_shortcut_*.png`).
+ *   The launcher icon layers (`ic_launcher_*`) are this app's own brand mark
+ *   and are not icons in the sense above. The launcher shortcut icons ARE:
+ *   each one is an Adaptive Icon (`ic_shortcut_<id>` + `<id>_fg`) whose
+ *   foreground carries the Symbols glyph, scaled so the 24dp system icon of
+ *   the "App Shortcuts Icon Design Guidelines" lands at 50% of the 108dp
+ *   canvas. The launcher's mask draws the silhouette, so no bitmap tile is
+ *   involved any more.
  *   Where a Symbols glyph's fill1 form is itself a ring
  *   (`radio_button_unchecked`), that is the glyph — do not "fix" it into a
  *   disc.

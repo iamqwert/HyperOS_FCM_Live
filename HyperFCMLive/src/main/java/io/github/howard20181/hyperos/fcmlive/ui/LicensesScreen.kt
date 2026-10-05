@@ -334,6 +334,9 @@ private fun licenseRawFor(name: String, licenseLabel: String): Int = when {
     licenseLabel.contains("Apache") -> R.raw.license_apache2
     licenseLabel.contains("GPL") -> R.raw.license_gpl3
     licenseLabel.contains("MIT") -> R.raw.license_mit
+    // JUnit is EPL-1.0, and the fallback below is Apache — without this branch the
+    // row would have shown the wrong licence text under a correct-looking label.
+    licenseLabel.contains("Eclipse") -> R.raw.license_epl1
     else -> R.raw.license_apache2
 }
 
@@ -368,12 +371,25 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  *
  * Audited against
  * `./gradlew :HyperFCMLive:dependencies --configuration releaseRuntimeClasspath`
- * on 2026-10-04. Two things that resolution lists are not rows here: BOMs and
+ * on 2026-10-04, and re-audited on 2026-10-05 by reading the class definitions
+ * back out of the release dex (what actually ships, not what resolves). Two
+ * things that resolution lists are not rows here: BOMs and
  * dependency-management patches (`compose-bom`, `kotlin-bom`, the kotlinx
  * ones), and `com.google.guava:listenablefuture` — an empty marker artifact
- * with no classes to attribute. `libxposed api`, the AOSP stubs and Material
+ * with no classes to attribute (confirmed: no `com.google.guava` class is
+ * defined in the APK at all). `libxposed api`, the AOSP stubs and Material
  * Color Utilities are compile-time or vendored, so they are never on the
  * runtime classpath and are listed for attribution.
+ *
+ * The 2026-10-05 pass added the two rows that were missing:
+ * - **AndroidX ConstraintLayout** is the one AndroidX family here that is *not*
+ *   in the `androidx/androidx` monorepo, so the shared ANDROIDX_URL row cannot
+ *   stand in for it. Its code does ship (3 classes survive R8, pulled in behind
+ *   Material Components).
+ * - **JUnit** is test-scope: it is in *no* APK, and it is here only as a licence
+ *   statement, the same way the annotation-only rows are. It exists because
+ *   `testImplementation` is back in build.gradle after Release 3.5.3 dropped it
+ *   and orphaned src/test.
  */
 private val DEPS = arrayOf(
     arrayOf("AndroidX Activity", "1.8.2", "Apache License 2.0", ANDROIDX_URL),
@@ -384,6 +400,14 @@ private val DEPS = arrayOf(
     arrayOf("AndroidX Compose Foundation", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Compose Material3", "1.5.0-alpha27", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Compose UI", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
+    // Separate repository, so ANDROIDX_URL does not cover it. Only on the
+    // classpath behind Material Components, but its code does survive R8.
+    arrayOf(
+        "AndroidX ConstraintLayout",
+        "2.2.1",
+        "Apache License 2.0",
+        "https://github.com/androidx/constraintlayout"
+    ),
     arrayOf("AndroidX Core", "1.16.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Interpolator", "1.0.0", "Apache License 2.0", ANDROIDX_URL),
     // Build-only stubs vendored under hiddenapi/stubs; kept for attribution.
@@ -404,6 +428,10 @@ private val DEPS = arrayOf(
         "https://github.com/JetBrains/java-annotations"
     ),
     arrayOf("JSpecify", "1.0.0", "Apache License 2.0", JSPECIFY_URL),
+    // Test scope only — nothing from it is in any APK. Listed for the same
+    // reason as the annotation-only rows: it is a third-party project in the
+    // build with its own licence. EPL-1.0 (see licenseRawFor).
+    arrayOf("JUnit", "4.13.2", "Eclipse Public License 1.0", "https://github.com/junit-team/junit4"),
     arrayOf("Kotlin Stdlib", "2.2.10", "Apache License 2.0", "https://github.com/JetBrains/kotlin"),
     arrayOf(
         "Kotlinx Coroutines",

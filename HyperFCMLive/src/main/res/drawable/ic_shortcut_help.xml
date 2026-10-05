@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher shortcut icon: an Adaptive Icon, per the guidance on
+     `android:icon` ("bitmap ... or adaptive icon; prefer adaptive icons for
+     performance and consistency") and the App Shortcuts Icon Design
+     Guidelines (only the 24dp system icon; the silhouette is the launcher's).
+
+     Background is full-bleed: the launcher's Adaptive Icon mask owns the
+     silhouette, exactly as ic_launcher_background does - so there is no baked
+     circle here, and no baked rounded square (which is what the old PNG tiles
+     did and the one thing the guidelines' "Don't" section rules out).
+
+     The background is the scheme's `primary` role rather than a literal, so it
+     follows light/night like the rest of the app; the foreground pairs with
+     `onPrimary`. Light is therefore #8B4A5A - the exact colour the discarded
+     bitmap tiles were filled with.
+
+     Glyph: Material Symbols "help" (fill1) - see ic_shortcut_help_fg.
+     -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/md_primary" />
+    <foreground android:drawable="@drawable/ic_shortcut_help_fg" />
+    <monochrome android:drawable="@drawable/ic_shortcut_help_fg" />
+</adaptive-icon>

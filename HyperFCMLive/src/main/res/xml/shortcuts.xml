@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Launcher long-press shortcuts. Icons are PNG tiles (drawable-xxhdpi)
-     so MIUI/HyperOS launchers render the rounded background reliably. -->
+<!-- Launcher long-press shortcuts. Each android:icon is an Adaptive Icon
+     (drawable/ic_shortcut_*.xml) whose foreground carries the Material Symbols
+     glyph: the launcher's own mask draws the silhouette, so nothing is baked
+     into the artwork. Per the App Shortcuts Icon Design Guidelines the glyph
+     is a 24dp system icon centred in the 48dp shortcut. -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
 
     <shortcut

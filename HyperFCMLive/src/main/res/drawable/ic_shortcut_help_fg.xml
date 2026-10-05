@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shortcut icon foreground: Material Symbols "help" (fill1, outlined family),
+     path data verbatim from fonts.gstatic.com (Apache-2.0).
+
+     Adaptive-icon layer, so this is a 108dp canvas. The Material Symbols 960
+     canvas is scaled to 54dp and centred with a 27dp inset, i.e. the 24dp
+     glyph box of the "App Shortcuts Icon Design Guidelines" (24dp icon in a
+     48dp shortcut: 54/108 = 24/48). The 2dp padding the spec asks for is
+     inside the Material box, and the silhouette is the launcher's mask - this
+     layer paints no shape of its own.
+
+     The fill is the `onPrimary` side of the `primary` role the background
+     layer paints, so the pairing is the scheme's own contrast pair: light is
+     white-on-#8B4A5A (what the old bitmap tiles drew), and night flips to
+     #4A0F22-on-#E8B4C0 so the glyph keeps its contrast against the tile - the
+     one thing the guidelines require of it. Nothing tints this layer (the
+     launcher draws the drawable as-is; no Compose `Icon` is involved), so
+     `fillColor` is what actually decides the colour here.
+
+     Glyph: question mark disc - the online help page
+     -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.05625"
+        android:scaleY="0.05625"
+        android:translateX="27"
+        android:translateY="27">
+        <group android:translateY="960">
+            <path
+                android:fillColor="@color/md_on_primary"
+                android:pathData="M513.5-254.5Q528-269 528-290t-14.5-35.5Q499-340 478-340t-35.5 14.5Q428-311 428-290t14.5 35.5Q457-240 478-240t35.5-14.5ZM442-394h74q0-33 7.5-52t42.5-52q26-26 41-49.5t15-56.5q0-56-41-86t-97-30q-57 0-92.5 30T342-618l66 26q5-18 22.5-39t53.5-21q32 0 48 17.5t16 38.5q0 20-12 37.5T506-526q-44 39-54 59t-10 73Zm38 314q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z" />
+        </group>
+    </group>
+</vector>
