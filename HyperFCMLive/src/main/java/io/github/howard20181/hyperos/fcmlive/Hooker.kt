@@ -67,10 +67,55 @@ class Hooker : XposedModule() {
 
     /**
      * Counts behind the end-of-install summary line.
-     * Every hook goes through [hookE]; absent targets are counted by [logSkip].
+     * Every hook goes through [hookE]; absent targets are counted by [logSkip]
+     * (same generation) and [logSkipOtherGeneration] (another generation).
      */
     private var hooksInstalled = 0
     private var hookTargetsAbsent = 0
+
+    /**
+     * Absent on *another* supported generation, counted apart from
+     * [hookTargetsAbsent] so the summary line can say which is which.
+     *
+     * On the test ROM the whole PowerKeeper set reports absent (ten symbols
+     * that only OS3 carries). Folded into one number that read as
+     * `10 target(s) absent`, i.e. a healthy install looked like ten broken
+     * hooks — and the reading that actually matters, "did this OTA drop
+     * something this generation is supposed to have", was invisible.
+     */
+    private var hookTargetsAbsentOtherGeneration = 0
+
+    /**
+     * Symbols collected by [logSkipOtherGeneration], flushed as one line.
+     *
+     * Ten OS3-only symbols on this ROM answered the same question in ten
+     * lines, and each line pays the LSPosed per-line prefix (~160 B) — more
+     * than most of the messages themselves. The symbols are all kept, so a
+     * ROM that starts carrying one still shows as a differing entry.
+     */
+    private val otherGenerationAbsent = ArrayList<String>()
+
+    /**
+     * Findings from the read-only existence probes, flushed as one line.
+     *
+     * These answer "does this ROM carry the symbol / is the feature flag on",
+     * which does not change between generations. Nine of them used to print a
+     * line each. Only the *normal* reading is folded in: an abnormal one (a
+     * layer that stopped resolving, a socket-teardown half that is gone) still
+     * prints its own line, because that is the case worth noticing.
+     */
+    private val probeFindings = ArrayList<String>()
+
+    /**
+     * True only between the start and the end of an install pass.
+     *
+     * A late arrival lands after [flushOtherGenerationAbsent] has run: the wifi
+     * weak-signal retry lives on its own thread and is not joined by its group,
+     * so its "unreachable after retry" verdict can come back after the pass
+     * closed. Such a line is printed on its own instead of being buffered for a
+     * flush that may never come (the next one is a hot reload or a reboot away).
+     */
+    private var installPassCollecting = false
 
     private fun hookE(executable: Executable): XposedInterface.HookBuilder {
         val builder = hook(executable)
@@ -81,30 +126,57 @@ class Hooker : XposedModule() {
         return builder
     }
 
+    /** This generation is expected to carry it, and does not. Counted and logged. */
     private fun logSkip(message: String) {
-        logSkip(message, Log.INFO)
+        hookTargetsAbsent++
+        log(Log.INFO, TAG, message)
     }
 
     /**
-     * Same accounting as [logSkip] — still counted in [hookTargetsAbsent] — but
-     * logged at DEBUG instead of INFO.
+     * Another supported generation carries it, this one does not — expected,
+     * not a gap. Counted in [hookTargetsAbsentOtherGeneration] (never in
+     * [hookTargetsAbsent]) and reported by [flushOtherGenerationAbsent] at
+     * DEBUG, on one line together with its siblings.
      *
      * Reserved for targets that are *expected* to be missing on at least one
-     * supported ROM generation. An "absent" line here means "this generation
-     * does not carry the method", not "the hook is broken". Because the level
-     * is what separates the two readings, never route a same-generation miss
+     * supported ROM generation: an entry here means "this generation does not
+     * carry the method", not "the hook is broken". Because that distinction is
+     * what separates the two readings, never route a same-generation miss
      * through here: a genuine regression on the current generation would then
-     * hide under DEBUG. Every caller must be a target whose absence is
-     * explained by a known generation split — see [hookGmsObserver] for the
+     * hide among the expected ones. Every caller must be a target whose absence
+     * is explained by a known generation split — see [hookGmsObserver] for the
      * PowerKeeper set, the largest user of this path.
+     *
+     * [symbol] is the missing symbol, optionally with a parenthetical when the
+     * cause is not a generation split (`checkWakePath (wake-path probe)`,
+     * `AmlMiuiThirdPartScorer (unreachable after retry)`), since the consequent
+     * "so what did not get installed" would otherwise be lost when the lines
+     * are merged.
      */
-    private fun logSkipOtherGeneration(message: String) {
-        logSkip(message, Log.DEBUG)
+    private fun logSkipOtherGeneration(symbol: String) {
+        hookTargetsAbsentOtherGeneration++
+        if (!installPassCollecting) {
+            log(Log.DEBUG, TAG, "cross-generation target(s) absent (1), skip: $symbol")
+            return
+        }
+        otherGenerationAbsent.add(symbol)
     }
 
-    private fun logSkip(message: String, level: Int) {
-        hookTargetsAbsent++
-        log(level, TAG, message)
+    /**
+     * One line for every cross-generation miss collected during an install pass.
+     *
+     * Called at the end of the pass — [hookSystemServer] / [hookPackage], the two
+     * entry points that hot reload also uses — and cleared afterwards. Each
+     * process gets its own [Hooker] instance, so the list holds exactly one pass.
+     */
+    private fun flushOtherGenerationAbsent() {
+        if (otherGenerationAbsent.isEmpty()) return
+        log(
+            Log.DEBUG, TAG,
+            "cross-generation target(s) absent (${otherGenerationAbsent.size}), skip: " +
+                otherGenerationAbsent.joinToString(", ")
+        )
+        otherGenerationAbsent.clear()
     }
 
     override fun onSystemServerStarting(param: XposedModuleInterface.SystemServerStartingParam) {
@@ -118,17 +190,52 @@ class Hooker : XposedModule() {
         logSummary("system_server")
     }
 
+    /** Collects one [probeFindings] entry; see the field for why they are merged. */
+    private fun recordProbe(finding: String) {
+        probeFindings.add(finding)
+    }
+
+    /** One line for every read-only probe answered during this install pass. */
+    private fun flushProbes() {
+        if (probeFindings.isEmpty()) return
+        log(Log.INFO, TAG, "probe: " + probeFindings.joinToString(" "))
+        probeFindings.clear()
+    }
+
     private fun logSummary(process: String) {
+        // No flush here on purpose: the merged probe / cross-generation lines are
+        // flushed at the end of the install pass ([hookSystemServer] /
+        // [hookPackage]), which is the only place guaranteed to run — see the
+        // note there about the hot-reload path skipping this function.
+        val crossGeneration = hookTargetsAbsentOtherGeneration
         log(
             Log.INFO, TAG, "HyperFCMLive active in $process: " +
                 "$hooksInstalled hook(s) installed, " +
-                "$hookTargetsAbsent target(s) absent on this ROM"
+                "$hookTargetsAbsent target(s) absent on this ROM" +
+                if (crossGeneration == 0) {
+                    ""
+                } else {
+                    ", $crossGeneration cross-generation (expected)"
+                }
         )
     }
 
     private fun hookSystemServer(classLoader: ClassLoader) {
-        for (group in systemServerGroups(classLoader)) {
-            installGroup(group)
+        // The flush belongs to the install pass, not to [logSummary]. On hot
+        // reload [onHotReloaded] calls this function directly and never goes
+        // through [onSystemServerStarting], so the summary is never reached —
+        // buffering without this flush would drop every merged finding silently
+        // on every hot reload, which is the one failure mode the merged lines
+        // exist to make visible. `finally` so a throw cannot lose them either.
+        installPassCollecting = true
+        try {
+            for (group in systemServerGroups(classLoader)) {
+                installGroup(group)
+            }
+        } finally {
+            installPassCollecting = false
+            flushOtherGenerationAbsent()
+            flushProbes()
         }
     }
 
@@ -216,12 +323,12 @@ class Hooker : XposedModule() {
         val name = "updateSleepModeUidRule"
         try {
             val cm = classLoader.loadClass("android.net.ConnectivityManager")
-            val method = cm.getDeclaredMethod(
-                name, java.lang.Integer.TYPE, java.lang.Boolean.TYPE
-            )
-            log(Log.INFO, TAG, "sleep-mode probe: ConnectivityManager#$name present: $method")
+            cm.getDeclaredMethod(name, java.lang.Integer.TYPE, java.lang.Boolean.TYPE)
+            // The lookup pins the exact parameter list, so "present" already means
+            // "present with the signature the caller below needs".
+            recordProbe("ConnectivityManager#$name=present")
         } catch (e: NoSuchMethodException) {
-            log(Log.INFO, TAG, "sleep-mode probe: ConnectivityManager#$name ABSENT (gate A3 negative)")
+            recordProbe("ConnectivityManager#$name=ABSENT(gateA3)")
         } catch (e: ClassNotFoundException) {
             logSkip("ConnectivityManager absent, sleep-mode probe skip")
         }
@@ -229,7 +336,6 @@ class Hooker : XposedModule() {
             classLoader,
             "android.net.ConnectivityManager",
             "enableSleepModeChain",
-            "sleep-mode chain probe",
             java.lang.Boolean.TYPE
         )
     }
@@ -239,22 +345,25 @@ class Hooker : XposedModule() {
      * tell MIUI's reflective trampolines from real work: the target symbol lives in
      * framework.jar, so it is absent from every services.jar dex and cannot be
      * found statically.
+     *
+     * The finding is keyed `<SimpleClass>#<method>`, which is unambiguous on its
+     * own — the merged probe line carries several of them. A missing *class* is
+     * still reported on its own line: that is a finding, not a routine reading.
      */
     private fun probeReflectiveMethod(
         classLoader: ClassLoader,
         className: String,
         methodName: String,
-        label: String,
         vararg parameterTypes: Class<*>
     ) {
+        val key = "${className.substringAfterLast('.')}#$methodName"
         try {
-            val clazz = classLoader.loadClass(className)
-            val method = clazz.getDeclaredMethod(methodName, *parameterTypes)
-            log(Log.INFO, TAG, "$label: ${clazz.simpleName}#$methodName present: $method")
+            classLoader.loadClass(className).getDeclaredMethod(methodName, *parameterTypes)
+            recordProbe("$key=present")
         } catch (e: NoSuchMethodException) {
-            log(Log.INFO, TAG, "$label: ${className.substringAfterLast('.')}#$methodName ABSENT")
+            recordProbe("$key=ABSENT")
         } catch (e: ClassNotFoundException) {
-            logSkip("$className absent, $label skip")
+            logSkip("$className absent, $methodName probe skip")
         }
     }
 
@@ -274,7 +383,7 @@ class Hooker : XposedModule() {
                 classLoader.loadClass("com.miui.powerinsight.packetfilter.FilterEnablePolicy")
             val supported =
                 policy.getDeclaredMethod("isSupportPacketFilter").invoke(null) as? Boolean
-            log(Log.INFO, TAG, "packet filter probe: isSupportPacketFilter=$supported")
+            recordProbe("packet-filter=$supported")
         } catch (e: ClassNotFoundException) {
             logSkip("FilterEnablePolicy absent, packet filter probe skip")
         } catch (e: NoSuchMethodException) {
@@ -325,24 +434,33 @@ class Hooker : XposedModule() {
      */
     private fun probeSocketTeardown(classLoader: ClassLoader) {
         reportWhetstoneClasses(classLoader)
+        val layers = ArrayList<String>(3)
         hookSocketTeardown(
             classLoader,
             "com.miui.whetstone.WhetstoneActivityManager",
             "doDesSocketForUid",
-            "client"
+            "client",
+            layers
         )
         hookSocketTeardown(
             classLoader,
             "com.miui.whetstone.server.WhetstoneActivityManagerService",
             "doDesSocketForUid",
-            "server"
+            "server",
+            layers
         )
         hookSocketTeardown(
             classLoader,
             "com.android.server.net.MiuiNetworkManagementService",
             "doDesSocketForUid",
-            "impl"
+            "impl",
+            layers
         )
+        // A layer that failed to install reported itself through logSkip above;
+        // only the layers that did install are folded into the merged line.
+        if (layers.isNotEmpty()) {
+            recordProbe("socket-teardown=${layers.joinToString("+")}")
+        }
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -350,7 +468,8 @@ class Hooker : XposedModule() {
         classLoader: ClassLoader,
         className: String,
         methodName: String,
-        label: String
+        label: String,
+        installedLayers: MutableList<String>
     ) {
         val clazz = try {
             classLoader.loadClass(className)
@@ -394,11 +513,20 @@ class Hooker : XposedModule() {
             result
         }
         deoptimize(method)
-        log(Log.INFO, TAG, "socket-teardown probe[$label]: $methodName hooked (read-only)")
+        installedLayers.add(label)
     }
 
-    /** Reports whether each half of the Whetstone pair resolves in system_server. */
+    /**
+     * Reports whether each half of the Whetstone pair resolves in system_server,
+     * and whether it declares the entry point.
+     *
+     * The normal reading is folded into the merged probe line as a pair of
+     * counts. A half that stops resolving is *not*: it keeps its own line,
+     * because a counter cannot say which half went missing.
+     */
     private fun reportWhetstoneClasses(classLoader: ClassLoader) {
+        var resolvable = 0
+        var declaring = 0
         for (name in arrayOf(
             "com.miui.whetstone.WhetstoneActivityManager",
             "com.miui.whetstone.server.WhetstoneActivityManagerService"
@@ -409,12 +537,12 @@ class Hooker : XposedModule() {
                 log(Log.INFO, TAG, "whetstone probe: $name NOT resolvable here")
                 continue
             }
-            val declares = clazz.declaredMethods.any { it.name == "doDesSocketForUid" }
-            log(
-                Log.INFO, TAG,
-                "whetstone probe: $name resolvable, declares doDesSocketForUid=$declares"
-            )
+            resolvable++
+            if (clazz.declaredMethods.any { it.name == "doDesSocketForUid" }) {
+                declaring++
+            }
         }
+        recordProbe("whetstone=res:$resolvable/2,decl:$declaring/2")
     }
 
     /**
@@ -444,10 +572,7 @@ class Hooker : XposedModule() {
             field.isAccessible = true
             val list = field.get(null) as? Collection<*>
             val present = list?.contains(GMS_PACKAGE_NAME) ?: false
-            log(
-                Log.INFO, TAG,
-                "mMessageApp probe: size=${list?.size ?: -1}, containsGms=$present"
-            )
+            recordProbe("mMessageApp=${list?.size ?: -1},gms=$present")
         } catch (e: NoSuchFieldException) {
             logSkip("AurogonImmobulusMode#mMessageApp absent, probe skip")
         } catch (e: ClassNotFoundException) {
@@ -469,10 +594,20 @@ class Hooker : XposedModule() {
     }
 
     private fun hookPackage(packageName: String, classLoader: ClassLoader) {
-        if ("com.miui.powerkeeper" == packageName) {
-            for (group in powerKeeperGroups(packageName, classLoader)) {
-                installGroup(group)
+        // Same reasoning as [hookSystemServer]: this is also the hot-reload entry
+        // point. Only the PowerKeeper domain installs anything, so for any other
+        // package both buffers are empty and the flush is a no-op.
+        installPassCollecting = true
+        try {
+            if ("com.miui.powerkeeper" == packageName) {
+                for (group in powerKeeperGroups(packageName, classLoader)) {
+                    installGroup(group)
+                }
             }
+        } finally {
+            installPassCollecting = false
+            flushOtherGenerationAbsent()
+            flushProbes()
         }
     }
 
@@ -1359,8 +1494,7 @@ class Hooker : XposedModule() {
                 .also { it.isAccessible = true }
         } catch (e: NoSuchFieldException) {
             logSkipOtherGeneration(
-                "MiuiNetworkPolicyManagerService.mSleepModeWhitelistUids absent, " +
-                    "sleep-whitelist arm skip"
+                "MiuiNetworkPolicyManagerService.mSleepModeWhitelistUids (sleep-whitelist arm)"
             )
             null
         }
@@ -1390,8 +1524,8 @@ class Hooker : XposedModule() {
             serviceClass.getDeclaredMethod("setSleepModeWhitelistUidRules")
         } catch (e: NoSuchMethodException) {
             logSkipOtherGeneration(
-                "MiuiNetworkPolicyManagerService#setSleepModeWhitelistUidRules absent, " +
-                    "sleep-whitelist arm skip"
+                "MiuiNetworkPolicyManagerService#setSleepModeWhitelistUidRules " +
+                    "(sleep-whitelist arm)"
             )
             return false
         }
@@ -1431,7 +1565,7 @@ class Hooker : XposedModule() {
             )
         } catch (e: NoSuchMethodException) {
             logSkipOtherGeneration(
-                "MiuiNetworkPolicyManagerService#enableSleepModeChain absent, skip"
+                "MiuiNetworkPolicyManagerService#enableSleepModeChain"
             )
             return false
         }
@@ -1676,7 +1810,7 @@ class Hooker : XposedModule() {
                 }
             }
             logSkipOtherGeneration(
-                "AmlMiuiThirdPartScorer unreachable after retry, wifi-weak-signal switch skip"
+                "AmlMiuiThirdPartScorer (unreachable after retry)"
             )
         }, "fcmlive-wifi-scorer")
         waiter.isDaemon = true
@@ -2276,7 +2410,9 @@ class Hooker : XposedModule() {
      * this replaced a helper that hardcoded [logSkipOtherGeneration]: an
      * OS3-only target and an OS4 load-bearing target have the same shape, but a
      * miss on the second must not be reported at the same level as a miss on
-     * the first. Callers pass [Log.DEBUG] for "another generation's method" and
+     * the first. Callers pass [Log.DEBUG] for "another generation's method"
+     * (routed to [logSkipOtherGeneration], so it joins the merged
+     * cross-generation line and stays out of `target(s) absent`) and
      * [Log.INFO] for "a target this generation should carry".
      *
      * Pinning the argument unconditionally is equivalent to the older
@@ -2302,7 +2438,11 @@ class Hooker : XposedModule() {
             }
             deoptimize(method)
         } catch (e: NoSuchMethodException) {
-            logSkip("$label#$name absent, skip", level)
+            if (level == Log.DEBUG) {
+                logSkipOtherGeneration("$label#$name")
+            } else {
+                logSkip("$label#$name absent, skip")
+            }
         }
     }
 
@@ -2351,7 +2491,7 @@ class Hooker : XposedModule() {
                 }
                 deoptimize(initGmsChainMethod)
             } catch (e: NoSuchMethodException) {
-                logSkipOtherGeneration("NetdExecutor#initGmsChain absent, skip")
+                logSkipOtherGeneration("NetdExecutor#initGmsChain")
             }
             // Present on both generations, but dead on OS4: the method exists
             // (so this never reports absent) yet no dex in the OS4 ROM invokes
@@ -2394,7 +2534,7 @@ class Hooker : XposedModule() {
                 }
                 deoptimize(setGmsChainStateMethod)
             } catch (e: NoSuchMethodException) {
-                logSkipOtherGeneration("NetdExecutor#setGmsChainState absent, skip")
+                logSkipOtherGeneration("NetdExecutor#setGmsChainState")
             }
             try {
                 val executeMethod = NetdExecutorClass.getDeclaredMethod(
@@ -2444,10 +2584,11 @@ class Hooker : XposedModule() {
                     chain.proceed()
                 }
                 deoptimize(executeMethod)
-                log(
-                    Log.INFO, TAG, "NetdExecutor#execute returns " + executeReturn.name +
-                        "; standby-firewall skip returns " + (skipValue?.toString() ?: "null")
-                )
+                // Folded into the merged `probe:` line. This is the same kind of
+                // static signature fact as the other probe findings, and it was
+                // the only probe in this process printing on a line of its own.
+                val skipText = skipValue?.toString() ?: "null"
+                recordProbe("NetdExecutor#execute->${executeReturn.name},skip=$skipText")
             } catch (e: NoSuchMethodException) {
                 logSkip("NetdExecutor#execute not found, skip command-level GMS net hooks")
             }
@@ -2475,7 +2616,7 @@ class Hooker : XposedModule() {
                     hookE(disableMethod).intercept { _: XposedInterface.Chain -> null }
                     deoptimize(disableMethod)
                 } catch (e: NoSuchMethodException) {
-                    logSkipOtherGeneration("GmsObserver#$alwaysSkip absent, skip")
+                    logSkipOtherGeneration("GmsObserver#$alwaysSkip")
                 }
             }
             // OS3-only (cross-generation): the three flag setters of the local
@@ -2788,6 +2929,12 @@ class Hooker : XposedModule() {
         try {
             val writerClass =
                 classLoader.loadClass("com.miui.powerkeeper.provider.UserConfigureHelper")
+            // One line for the whole set, not one per method: these are N methods
+            // of a single class answering the same question ("which writer can put
+            // GMS back to miuiAuto"), and each line pays the ~161 B LSPosed prefix.
+            // An install check reads the hooked *set*, not which line installed
+            // which method.
+            val reAssertHooked = ArrayList<String>()
             for (method in writerClass.declaredMethods) {
                 val name = method.name
                 val looksWriter =
@@ -2827,7 +2974,14 @@ class Hooker : XposedModule() {
                     result
                 }
                 deoptimize(method)
-                log(Log.INFO, TAG, "UserConfigureHelper#${method.name} hooked for userTable re-assert")
+                reAssertHooked.add(method.name)
+            }
+            if (reAssertHooked.isNotEmpty()) {
+                log(
+                    Log.INFO, TAG,
+                    "UserConfigureHelper#${reAssertHooked.joinToString("/")} " +
+                        "hooked for userTable re-assert"
+                )
             }
         } catch (e: ClassNotFoundException) {
             // Already reported above when getNoRestrictApps was missing.
@@ -3136,7 +3290,7 @@ class Hooker : XposedModule() {
                 }
                 deoptimize(isNoRestrictFreezeableMethod)
             } catch (e: NoSuchMethodException) {
-                logSkipOtherGeneration("AurogonImmobulusMode#isNoRestrictFreezeable absent, skip")
+                logSkipOtherGeneration("AurogonImmobulusMode#isNoRestrictFreezeable")
             }
 
             // triggerQuickFreeze(uid, reason) — skip GMS entirely.
@@ -3248,9 +3402,12 @@ class Hooker : XposedModule() {
             if (loaded != sAllowlist || strict != sStrictMode) {
                 // Log on content change, not on every read: the stale-path reload
                 // would otherwise repeat an identical line every ALLOWLIST_STALE_MS.
+                // The package count is deliberately not printed: without the names
+                // it only ever said "not empty", which the boolean says directly,
+                // and a 9-to-5 edit read as the same line either way.
                 log(
                     Log.INFO, TAG,
-                    "allowlist loaded: ${loaded.size} pkg(s), strict=$strict"
+                    "allowlist loaded: selected=${loaded.isNotEmpty()}, strict=$strict"
                 )
             }
             sAllowlist = loaded
@@ -3335,9 +3492,23 @@ class Hooker : XposedModule() {
             return
         }
         val t = Thread({
+            // Early boot is why this loop exists, so an early failure is the
+            // expected case, not the reportable one: at uptime ~13s
+            // `ContextImpl.registerReceiverInternal` still holds a null
+            // IActivityManager and throws NPE; the retry then succeeds a few
+            // seconds later (observed on device 2026-10-05: attempt 0 at
+            // 23:03:14.787 failed, an attempt 3s later logged "installed").
+            // Only the final attempt reports the throwable — reporting attempt 0
+            // would put a stack trace in every single boot log for something that
+            // heals itself 3s later, and would then let the once-per-boot guard
+            // swallow a genuine failure on the lazy path.
             for (attempt in 0 until ALLOWLIST_REGISTER_MAX_ATTEMPTS) {
-                if (registerAllowlistReceiver()) {
+                val lastAttempt = attempt == ALLOWLIST_REGISTER_MAX_ATTEMPTS - 1
+                if (registerAllowlistReceiver(reportFailure = lastAttempt)) {
                     return@Thread
+                }
+                if (lastAttempt) {
+                    break
                 }
                 try {
                     Thread.sleep(ALLOWLIST_REGISTER_RETRY_MS)
@@ -3409,7 +3580,14 @@ class Hooker : XposedModule() {
         return tier == Tier.STRICT && !sStrictMode
     }
 
-    private fun registerAllowlistReceiver(): Boolean {
+    /**
+     * @param reportFailure log the throwable when this attempt fails. The boot
+     *   retry loop passes `false` for every attempt but the last, because an
+     *   early-boot failure is expected and self-healing: reporting it would put a
+     *   stack trace in every boot log and consume the once-per-boot guard before
+     *   a genuine failure could use it.
+     */
+    private fun registerAllowlistReceiver(reportFailure: Boolean = true): Boolean {
         if (allowlistReceiverRegistered) {
             return true
         }
@@ -3455,11 +3633,14 @@ class Hooker : XposedModule() {
             log(Log.INFO, TAG, "Allowlist receiver installed")
             return true
         } catch (e: Throwable) {
-            // Silent before this: the async installer retries and only warns
-            // after every attempt, so a failure on the lazy path (called from
-            // getFcmAllowlist) left the allowlist quietly stale with nothing in
-            // the log to say why.
-            logAllowlistRegisterFailureOnce(e)
+            // The boot retry loop reports only its final attempt, so it stays
+            // silent here. The lazy path — this method called straight from
+            // getFcmAllowlist — reports, because before there was any logging at
+            // all a failure there left the allowlist quietly stale with nothing
+            // in the log to say why.
+            if (reportFailure) {
+                logAllowlistRegisterFailureOnce(e)
+            }
             return false
         } finally {
             allowlistRegistering.set(false)
@@ -3517,7 +3698,12 @@ class Hooker : XposedModule() {
     @Volatile
     private var allowlistRegisterFailureLogged = false
 
-    /** Once per boot: the retry loop would otherwise repeat this N times. */
+    /**
+     * Once per boot. Callers are the lazy path and the boot loop's final attempt.
+     * The guard matters because the lazy path runs inside a hook callback
+     * (getFcmAllowlist is on the hot path), which would otherwise repeat the same
+     * stack trace on every wake.
+     */
     private fun logAllowlistRegisterFailureOnce(t: Throwable) {
         if (allowlistRegisterFailureLogged) {
             return
@@ -4107,7 +4293,7 @@ class Hooker : XposedModule() {
             }
         }
         if (methods.isEmpty()) {
-            logSkipOtherGeneration("checkAlarmIsAllowedSend absent, alarm gate skip")
+            logSkipOtherGeneration("checkAlarmIsAllowedSend (alarm gate)")
             return
         }
         for (method in methods) {
@@ -4206,13 +4392,19 @@ class Hooker : XposedModule() {
         // another parallel 30-min chain (observed overnight: three chains
         // interleaving after two reloads).
         val generation = claimTrafficProbeGeneration()
-        probeBackgroundHandler().post { probeGmsTraffic("startup") }
+        // The schedule declaration used to be a line of its own. It rides the
+        // startup report instead: same reader, same moment, and the startup line
+        // is already the one naming the generation a hot-reload check looks at.
+        val intervalMin = GMS_TRAFFIC_PROBE_INTERVAL_MS / 60_000
+        probeBackgroundHandler().post {
+            probeGmsTraffic("startup, read-only, every ${intervalMin}min, gen $generation")
+        }
         probeBackgroundHandler().postDelayed(object : Runnable {
             override fun run() {
                 if (latestTrafficProbeGeneration() != generation) {
                     log(
                         Log.INFO, TAG,
-                        "gms traffic probe: chain generation $generation superseded, " +
+                        "gms probe: chain generation $generation superseded, " +
                             "retire without rescheduling"
                     )
                     return
@@ -4221,11 +4413,6 @@ class Hooker : XposedModule() {
                 probeBackgroundHandler().postDelayed(this, GMS_TRAFFIC_PROBE_INTERVAL_MS)
             }
         }, GMS_TRAFFIC_PROBE_INTERVAL_MS)
-        log(
-            Log.INFO, TAG,
-            "gms traffic probe: scheduled every ${GMS_TRAFFIC_PROBE_INTERVAL_MS / 60_000} min " +
-                "(read-only, generation $generation)"
-        )
     }
 
     /**
@@ -4247,22 +4434,23 @@ class Hooker : XposedModule() {
         System.getProperties().getProperty(TRAFFIC_PROBE_GENERATION_KEY)?.toLongOrNull() ?: 0L
 
     private fun probeGmsTraffic(reason: String) {
-        // Emitted before the uid check so the broadcast-gate counters are
+        // One line per tick. The gate counters and the traffic delta come off the
+        // same timer and answer the same question — "did anything get gated, and
+        // is GMS still talking" — yet this function used to print them as two
+        // back-to-back lines (three when nothing was gated but a counter was
+        // non-zero). The gate half is still built first, so the counters are
         // reported even on ROMs where GMS's uid cannot be resolved.
-        logBroadcastGateSummary()
         val uid = gmsUid()
-        if (uid == null) {
-            log(Log.INFO, TAG, "gms traffic probe [$reason]: GMS uid unresolved, skip")
-            return
+        val traffic = if (uid == null) {
+            "GMS uid unresolved"
+        } else {
+            "uid=$uid ${trafficSinceLastProbe(uid)}"
         }
-        log(
-            Log.INFO, TAG,
-            "gms traffic probe [$reason]: uid=$uid ${trafficSinceLastProbe(uid)}"
-        )
+        log(Log.INFO, TAG, "gms probe [$reason]: $traffic; ${broadcastGateSummary()}")
     }
 
     /**
-     * P0/P1/P2 evidence line, one per traffic-probe tick.
+     * P0/P1/P2 evidence, appended to every traffic-probe tick.
      *
      * Reading it:
      *  - `allowed` counts c2dm the isAllowBroadcast gate admitted. `uid-fallback`
@@ -4275,28 +4463,42 @@ class Hooker : XposedModule() {
      *    non-zero value proves P0 is active on this ROM/branch.
      * All four zero means the branch was never exercised this interval.
      *
-     * The second line is the P2 wake-path probe, and it is emitted here on purpose:
-     * the probe's own detailed lines only fire when its gate is actually reached,
-     * so without this tick "never reached" and "reached and always allowed" would
+     * The wake-path half is the P2 probe, and it rides this tick on purpose: the
+     * probe's own detailed lines only fire when its gate is actually reached, so
+     * without this tick "never reached" and "reached and always allowed" would
      * look identical. `c2dm-denied` non-zero is the finding that would reopen the
      * module's design.
+     *
+     * Returned rather than logged: the caller ([probeGmsTraffic]) appends it to
+     * the traffic line it shares a tick with.
      */
-    private fun logBroadcastGateSummary() {
-        log(
-            Log.INFO, TAG,
-            "broadcast gate: c2dm allowed=${broadcastGateAllowedCount} " +
-                "(uid-fallback=${broadcastGateAllowedByUidCount}), " +
-                "skipped=${broadcastGateSkippedCount}, " +
-                "reached-defer=${deferC2dmPassthroughCount}, " +
-                "cn-actions=${broadcastGateCnActionCount}"
-        )
-        log(
-            Log.INFO, TAG,
-            "broadcast gate: wake-path reached=${broadcastWakePathReachedCount}, " +
-                "c2dm=${broadcastWakePathC2dmCount}, " +
-                "denied=${broadcastWakePathDeniedCount}, " +
-                "c2dm-denied=${broadcastWakePathC2dmDeniedCount}"
-        )
+    private fun broadcastGateSummary(): String {
+        // An idle tick is by far the common case — the counters sit at zero for
+        // days on a device where nothing is being gated. Every counter is still
+        // named, so "never exercised" stays greppable and distinguishable from
+        // "reached and always allowed".
+        val idle = broadcastGateAllowedCount == 0 &&
+            broadcastGateSkippedCount == 0 &&
+            deferC2dmPassthroughCount == 0 &&
+            broadcastGateCnActionCount == 0 &&
+            broadcastWakePathReachedCount == 0 &&
+            broadcastWakePathC2dmCount == 0 &&
+            broadcastWakePathDeniedCount == 0 &&
+            broadcastWakePathC2dmDeniedCount == 0
+        if (idle) {
+            return "broadcast gate idle — c2dm " +
+                "allowed/skipped/reached-defer/cn-actions = 0, " +
+                "wake-path reached/c2dm/denied/c2dm-denied = 0"
+        }
+        return "broadcast gate c2dm allowed=${broadcastGateAllowedCount} " +
+            "(uid-fallback=${broadcastGateAllowedByUidCount}), " +
+            "skipped=${broadcastGateSkippedCount}, " +
+            "reached-defer=${deferC2dmPassthroughCount}, " +
+            "cn-actions=${broadcastGateCnActionCount}; " +
+            "wake-path reached=${broadcastWakePathReachedCount}, " +
+            "c2dm=${broadcastWakePathC2dmCount}, " +
+            "denied=${broadcastWakePathDeniedCount}, " +
+            "c2dm-denied=${broadcastWakePathC2dmDeniedCount}"
     }
 
     /**
@@ -4362,7 +4564,7 @@ class Hooker : XposedModule() {
         val clazz = try {
             classLoader.loadClass("com.android.server.am.ActivityManagerServiceImpl")
         } catch (e: ClassNotFoundException) {
-            logSkipOtherGeneration("ActivityManagerServiceImpl absent, wake-path probe skip")
+            logSkipOtherGeneration("ActivityManagerServiceImpl (wake-path probe)")
             return
         }
         val method = clazz.declaredMethods.firstOrNull { m ->
@@ -4371,7 +4573,7 @@ class Hooker : XposedModule() {
                 m.returnType == Boolean::class.javaPrimitiveType
         }
         if (method == null) {
-            logSkipOtherGeneration("checkWakePath absent, wake-path probe skip")
+            logSkipOtherGeneration("checkWakePath (wake-path probe)")
             return
         }
         // Best effort: CallerInfo#callerPkg identifies the waking side. Absent on some
@@ -4478,7 +4680,7 @@ class Hooker : XposedModule() {
         val clazz = try {
             classLoader.loadClass("com.miui.server.WakePathChecker")
         } catch (e: ClassNotFoundException) {
-            logSkipOtherGeneration("WakePathChecker absent, broadcast wake-path probe skip")
+            logSkipOtherGeneration("WakePathChecker (broadcast wake-path probe)")
             return
         }
         val method = clazz.declaredMethods.firstOrNull { m ->
@@ -4487,7 +4689,7 @@ class Hooker : XposedModule() {
                 m.returnType == Boolean::class.javaPrimitiveType
         }
         if (method == null) {
-            logSkipOtherGeneration("checkBroadcastWakePath absent, broadcast wake-path probe skip")
+            logSkipOtherGeneration("checkBroadcastWakePath (broadcast wake-path probe)")
             return
         }
         method.isAccessible = true
@@ -4601,7 +4803,7 @@ class Hooker : XposedModule() {
      * One-shot booleans alone cannot answer "did the change take effect": a
      * legitimately-never-taken branch looks identical to a broken hook. These
      * counters are printed together once per traffic-probe tick
-     * (see [logBroadcastGateSummary]), so a night's log shows the split even
+     * (see [broadcastGateSummary]), so a night's log shows the split even
      * when every count is zero.
      */
     @Volatile
