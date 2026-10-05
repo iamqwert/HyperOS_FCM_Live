@@ -177,10 +177,10 @@ PolicyManagerConfig.<clinit>
 
 每一个钩点组独立 `try/catch`，缺失按性质分两级：
 
-- **`NoSuchMethodException` / `NoSuchFieldException`** → `logSkip`（INFO）或 `logSkipOtherGeneration`（DEBUG），计入 `hookTargetsAbsent`，继续装下一个；
+- **`NoSuchMethodException` / `NoSuchFieldException`** → `logSkip`（INFO，计入 `hookTargetsAbsent`）或 `logSkipOtherGeneration`（DEBUG，计入 `hookTargetsAbsentOtherGeneration`），继续装下一个；
 - **`ClassNotFoundException`** → 通常 ERROR（说明域选错了或代次跳变太大）。
 
-**任何一个钩点失败都不影响其余钩点**。装机摘要行里的 `M target(s) absent` 即该降级计数的呈现，它本身是兼容性健康度指标：`M` 突然增大意味着 ROM 代次变了。
+**任何一个钩点失败都不影响其余钩点**。装机摘要行里的 `M target(s) absent on this ROM` 即该降级计数的呈现，它本身是兼容性健康度指标：`M` 突然增大意味着 ROM 代次变了。**跨代预期缺失不计入 `M`**，而是在同一行尾单列 `, K cross-generation (expected)`——否则这台机器上一次完全健康的安装会显示成 `10 target(s) absent`，把唯一要看的读数（"这次 OTA 真丢了本代该有的东西"）埋掉。
 
 ### 2.5 构建与工具链
 
@@ -626,6 +626,10 @@ hookSystemServer
 
 每组带一个**动词**（`hook` / `install` / `probe` / `start`），因为它就是失败文案 `Failed to <verb> <name>` 的组成部分，而不是装饰：这些字符串是装机验证与整夜日志 grep 的锚点，把动词统一成 `hook` 等于改掉日志契约。清单化之后保持不变的三件事：`hookE` 的 `setId()` 去重与 `hooksInstalled` / `hookTargetsAbsent` 计数（摘要行的 `N hook(s) installed, M target(s) absent` 由它而来），以及 `logSkip`（INFO，本代次该有的目标缺失）与 `logSkipOtherGeneration`（DEBUG，别的代次才有的目标缺失）两级 absent 之分——合成一条"skip"就再也分不出"这一代从来没有"与"这次 OTA 丢了"。
 
+**两级 absent 的成行粒度不同，这是刻意的**：同代缺失（INFO）逐条立即打；跨代缺失（DEBUG）**先入缓冲，由安装面出口并成一行** `cross-generation target(s) absent (K), skip: <符号…>`——符号一个不丢（将来某代开始带这个符号，它会从这行里消失，diff 一行即可看出），行数从 10 降到 1。同理，只读存在性探针的**正常读数**也并成一行 `probe: <键=值…>`；**异常读数（某层不再解析、某半边消失）仍各自单独成行**，因为那才是要看见的东西。
+
+⚠ **缓冲的 flush 必须挂在安装面出口 `hookSystemServer` / `hookPackage` 的 `finally` 里，不能挂 `logSummary`**：热重载由 `onHotReloaded` **直接**调用这两个函数，从不经过 `onSystemServerStarting` / `onPackageReady` ⇒ 热重载路径上 `logSummary` 根本不执行（实证：热重载日志里**没有**摘要行）。挂在 `logSummary` 会让这些行在每次热重载被静默吞掉——恰好是这两条合并行本要消除的失效形态。另外 wifi 弱信号重试跑在自己的线程里、不被所在组 join，其结论可能晚于 flush 到达；那种迟到项由 `installPassCollecting` 判定，单独成行而不是留在缓冲里等下一次（下一次是热重载或重启之后）。
+
 **回调内标准形态**：
 
 ```kotlin
@@ -790,7 +794,7 @@ WhetstoneActivityManager (client, static) ──AIDL "whetstone.activity"──�
 | 探针                               | 节流方式                                                                                                                                                                       | 理由                                                                                 |
 | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `checkWakePath`（Gate-W）          | 拒绝：前 10 次逐条 + 按调用方聚合（30 min 节流的 denied summary 摘要行，心跳行附 `top=`）；放行：按时间节流（`WAKE_PATH_HEARTBEAT_MIN_MS` = 30 min）                                                            | 一夜进入近万次，每次都打日志会把 `modules_*.log` 淹没                                                |
-| `checkBroadcastWakePath`（Gate-B） | 首次到达打一条即时 `… broadcast gate first reach …`（仅此一条）；明细行前 `WAKE_PATH_DETAIL_LIMIT`（10）次（c2dm 到达、以及任何拒绝各计一份）；计数每次 traffic-probe tick（30 min）随 `broadcast gate: wake-path …` 行输出 | Gate-W 的首次心跳即时可见，广播路径若只靠 30 min 摘要行，"已挂钩但从未执行"要等半小时才能与"到达但从不拒绝"区分，故补一条**只打一次**的到达行 |
+| `checkBroadcastWakePath`（Gate-B） | 首次到达打一条即时 `… broadcast gate first reach …`（仅此一条）；明细行前 `WAKE_PATH_DETAIL_LIMIT`（10）次（c2dm 到达、以及任何拒绝各计一份）；计数每次 traffic-probe tick（30 min）随该 tick 的 `gms probe …` 行尾输出 | Gate-W 的首次心跳即时可见，广播路径若只靠 30 min 摘要行，"已挂钩但从未执行"要等半小时才能与"到达但从不拒绝"区分，故补一条**只打一次**的到达行 |
 | `doDesSocketForUid`              | 前 10 次，或任何命中 GMS uid 的调用                                                                                                                                                   | GMS 命中无论第几次都必须记录                                                                   |
 
 ### 4.5 日志契约
@@ -799,11 +803,17 @@ WhetstoneActivityManager (client, static) ──AIDL "whetstone.activity"──�
 | ----------------------------- | --------------------------------------------------------------------------------------- |
 | `TAG = "HyperGreeze"`         | 全部日志统一前缀                                                                                |
 | `logSkip(msg)`                | 目标缺失，INFO，**递增 `hookTargetsAbsent`**                                                    |
-| `logSkipOtherGeneration(msg)` | 目标缺失但属于"另一代次 ROM 的符号"，DEBUG——不该在当前代次出现，不是异常                                             |
+| `logSkipOtherGeneration(symbol)` | 目标缺失但属于"另一代次 ROM 的符号"，DEBUG——不该在当前代次出现，不是异常。**不立即成行**：入缓冲，由安装面出口并成一条 `cross-generation target(s) absent (K), skip: …`，且不计入摘要行的 `M` |
 | `ClassNotFoundException`      | 通常 ERROR（类应当存在）                                                                         |
-| 装机摘要行                         | `HyperFCMLive active in <process>: N hook(s) installed, M target(s) absent on this ROM` |
+| 装机摘要行                         | `HyperFCMLive active in <process>: N hook(s) installed, M target(s) absent on this ROM[, K cross-generation (expected)]` |
+| 探针合并行                         | `probe: <键=值…>`（只并"正常读数"；异常读数各自成行）。**powerkeeper 域同样有一行**——`NetdExecutor#execute->…` 原先是自成一行的签名探测，现收进这里，两个域的 `probe:` 键名一律用 `<SimpleClass>#<method>` |
+| 白名单行                          | `allowlist loaded: selected=<bool>, strict=<bool>`——**不打印包数**：在看不到包名的前提下，计数只等价于"非空"，而 9→5 的编辑在新旧两版都读作同一行 |
+| 30 min 心跳行                     | `gms probe [<reason>]: <uid/rx/tx>; broadcast gate …`——**同一 tick 的计数字段与流量增量合成一行**（原先是背靠背两条：`gms traffic probe [periodic]` + `broadcast gate:`；非全零时更是三条）。`reason` 里带 `gen N`，热重载判据看它递增 |
+| 安装面成组行                       | 同一类、同一用途的多个钩子并成一行：`UserConfigureHelper#{a/b/c} hooked for userTable re-assert` |
 
-摘要行是**装机验证的第一判据**：两个域各应出现一次，`M` 的取值应与该 ROM 的代次预期相符。热重载会重新打印一次，此时 `N` 是重挂的数量而非累计值（`setId` 保证同一目标收敛为一条）。
+摘要行是**装机验证的第一判据**：两个域各应出现一次，`M` 的取值应与该 ROM 的代次预期相符（本机 powerkeeper 为 `18 hook(s) installed, 0 target(s) absent on this ROM, 10 cross-generation (expected)`——那 10 个是 OS3-only 符号，不是回归）。
+
+**摘要行只在开机那一次出现，热重载不会重打**：热重载入口是 `onHotReloaded`，它直接调 `hookSystemServer` / `hookPackage`，不经 `onSystemServerStarting` / `onPackageReady`（实证：`modules_2026-10-05T23_15_51.594188.log` 是装新版后的热重载，全文 54 行里没有任何 `hook(s) installed` 行）。热重载是否生效改看探针启动行的 `gen N` 递增与旧链 `superseded, retire` 行（那条独立的 `gms traffic probe: scheduled every 30 min … generation N` 已并入启动行，`generation` 不再单独成行）。
 
 一次性证据标志位清单（每个都对应一条"这条路径真的跑过一次"的 INFO）：
 
@@ -1051,7 +1061,7 @@ grep -c "Close err:" gcm.txt   # 0 ⇒ 这不是诊断本体
 
 - `AppStandbyController#setUidState hooked` 这类行会**每次 package-ready 重复一次**（热重载会重跑），看起来像装了多个钩子，实际 `setId()` 已把它们收敛为一条活钩子。行尾带 `pkg=` 与 `userId=` 就是为了消除这个误读。
 - **摘要行只在开机那一次出现**（日志核对：开机时两个注入域各打一条 `HyperFCMLive active in …`，之后的两次热重载只重打了各钩子的安装行与探针行，**没有**再打摘要行）。所以"日志里只有一组 `N hook(s) installed`"不能读作"后续热重载没生效"——热重载是否生效看探针的 `generation` 递增（`gms traffic probe: … generation 2/3`）与旧链 `superseded, retire` 行。
-- 实测一次 framework 软重启后的自检：system_server **29 hooks / 0 absent**，powerkeeper **18 hooks / 10 absent**（10 个 absent 全是 `NetdExecutor` ×2 + `GmsObserver` ×8，本 ROM 已知缺失，非回归）。跨版本比较钩子数时须先确认被比较的钩点在当前 HEAD 是否还存在（`git grep` 可核对）。
+- 实测一次 framework 软重启后的自检：system_server **29 hooks / 0 absent**，powerkeeper **18 hooks / 0 absent on this ROM, 10 cross-generation (expected)**（那 10 个全是 `NetdExecutor` ×2 + `GmsObserver` ×8，本 ROM 已知缺失，非回归）。跨版本比较钩子数时须先确认被比较的钩点在当前 HEAD 是否还存在（`git grep` 可核对）。
 
 ### 5.2 长窗观测与真机对照
 
@@ -1269,19 +1279,28 @@ adb logcat -d -v time | grep -a "notifySwitchNetworkByOtherStrategies"
 
 **日志冗余审计**
 
-全量清点：`Hooker.kt` 共 **237 处**日志调用点——42 条 `logSkip`（INFO，同代缺失）、14 条 `logSkipOtherGeneration`（DEBUG，跨代缺失）、22 条 `hooked/armed` 安装确认、42 条 probe。
+全量清点（按"函数名紧跟左括号"计匹配行）：`log(…)` **146 处**、`logSkip` **43 处**（INFO，同代缺失）、`logSkipOtherGeneration` **15 处**（DEBUG，跨代缺失）、`recordProbe` **10 处**（存在性/签名探针）。合计 **214 处**。
+
+**成本在行数，不在字数**（实测）：LSPosed 每行的固定前缀（时间戳 + bearer + 模块 tag + 序号）约 **161 B**，比多数消息正文还长——一次热重载日志 12,959 B 里，消息正文只占 4,235 B，其余 8,670 B 全是前缀。"把长解释缩短"几乎没有收益（四条最长的解释行合计才 900 B），**并线才是唯一有效的办法**。
 
 | #   | 现象                                                                                                                                                                                                                                                      | 级   | 处置                                             |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- | ---------------------------------------------- |
-| 1   | **30 分钟四条叠加**：`GMS_TRAFFIC_PROBE_INTERVAL_MS` 与 `WAKE_PATH_HEARTBEAT_MIN_MS` 同为 30 min，同一 tick 上叠加 `gms traffic probe [periodic]` / `broadcast gate: c2dm …` / `broadcast gate: wake-path …` / `wake-path probe: heartbeat …` ≈ **192 行/天**，实机连续窗口内长期全零 | 中   | 候选：无事件时只留一条合并行；`top=[]` 在 `denied=0` 时恒空，属恒空字段 |
+| 1   | **30 分钟多行叠加**：`GMS_TRAFFIC_PROBE_INTERVAL_MS` 与 `WAKE_PATH_HEARTBEAT_MIN_MS` 同为 30 min，同一 tick 上叠加 `gms traffic probe [periodic]` / `broadcast gate: c2dm …` / `broadcast gate: wake-path …` / `wake-path probe: heartbeat …` ≈ **192 行/天**，实机连续窗口内长期全零 | 中   | **已修（两轮）**：① 两条 `broadcast gate:` 在全零时并为一条（192 → 144 行/天）；② 再把 `broadcast gate:` 整体并到 `gms probe [<reason>]` 行尾 ⇒ tick 由 2 行 → **1 行**（≈144 → ≈96 行/天；非全零时也从 3 行降到 1 行）。未做：`wake-path probe: heartbeat` 仍单独成行——它由 `checkWakePath` 现场触发，与定时 tick 不同源；`top=[]` 在 `denied=0` 时恒空但仍打印 |
 | 2   | **死标志**：`wakePathDeniedLogged` / `wakePathReachedLogged` 只声明、零读写                                                                                                                                                                                        | 低   | **已删**，原位留注释警告「勿再引入只置一次的布尔哨兵——它与『压根没到达』不可区分」   |
 | 3   | `userTable: ensure …` + `userTable: GMS current bgControl=…` 每次调用必出 2 行，而 `current == noRestrict` 时静默 return ⇒ 「无需写入」与「准备写入」外观相同                                                                                                                        | 中   | 候选：无需写入也补一行（本项目口径：不能靠日志没出现反推）。该函数有 4 个调用点      |
 | 4   | `userTableReassertInFlight` **非 volatile 且 check-then-set 非原子**                                                                                                                                                                                         | 低   | 候选：`AtomicBoolean.compareAndSet`               |
-| 5   | **纯存在性 probe 占 9 行 INFO**：whetstone ×2、socket-teardown ×3、sleep-mode ×2、packet filter、mMessageApp——只答「ROM 有无此方法」，答过一次后不再变                                                                                                                               | 低   | 候选：降 DEBUG 或并为一行                               |
+| 5   | **纯存在性 probe 占 9 行 INFO**：whetstone ×2、socket-teardown ×3、sleep-mode ×2、packet filter、mMessageApp——只答「ROM 有无此方法」，答过一次后不再变                                                                                                                               | 低   | **已修**：并为一行 `probe: <键=值…>`。whetstone 折算成 `res:n/2,decl:n/2`、socket-teardown 合成 `层1+层2+层3`，其余键值原样保留；键名改用 `<SimpleClass>#<method>` 以免并线后失去归属。唯一不再打印的是 `Method.toString()` 的完整签名——探针查找本就锁死参数表，`present` 已等价于「以该签名存在」。**异常读数不并入**（某层不再解析等各自成行） |
 | 6   | `Failed to hook GmsObserver` / `Failed to hook GlobalFeatureConfigureHelper` 各有两处、文案完全相同（内层 CNFE 与 `hookPackage` 外层兜底）⇒ 无法区分「类不存在」与「桥接方法缺失」                                                                                                             | 低   | 候选：文案分层                                        |
-| 7   | `logSkip(msg, level)` 无论 INFO/DEBUG 都 `hookTargetsAbsent++` ⇒ 安装期 `M target(s) absent` 把 10 条 OS3-only 预期缺失算进「本 ROM 缺失」                                                                                                                                 | 中   | 候选：计数器按代次拆分，或汇总行括注「其中 N 为跨代预期」                 |
+| 7   | `logSkip(msg, level)` 无论 INFO/DEBUG 都 `hookTargetsAbsent++` ⇒ 安装期 `M target(s) absent` 把 10 条 OS3-only 预期缺失算进「本 ROM 缺失」                                                                                                                                 | 中   | **已修**：删掉双参 `logSkip(msg, level)`，拆成 `logSkip`（INFO，计入 `hookTargetsAbsent`）与 `logSkipOtherGeneration`（DEBUG，计入 `hookTargetsAbsentOtherGeneration`）；摘要行改为 `… M target(s) absent on this ROM, K cross-generation (expected)`。本机读数由 `18 installed / 10 absent` 变为 `18 installed / 0 absent on this ROM, 10 cross-generation (expected)` |
 | 8   | 睡眠进入三行叠加：`chain enabled, whitelist size N` 与白名单臂的 `kept GMS …` / `already whitelisted …`（本代不可达，OS3 上会真叠加）                                                                                                                                               | 低   | 观察                                             |
 | 9   | `gms traffic probe: chain generation N superseded …` 每次热重载出 1~2 条，是热重载的必然结果而非异常                                                                                                                                                                         | 低   | 保留（解释旧链为何消失）                                   |
+| 10  | **安装确认行是最大的一块**：一次热重载 24~26 行 / ≈6 KB（system_server 23 组 + PowerKeeper 7 组，逐组一行）                                                                                                                                                                          | —   | **保留**：这是"哪个钩子是活的"唯一的逐符号证据。砍掉后某组静默失败只能从计数变化反推，与本项目"不能靠日志没出现反推"的口径冲突 |
+
+**第一轮实测收益**（装新版后的热重载，`modules_2026-10-05T23_15_51.594188.log`）：**54 行 / 12,959 B → 36 行 / 9,287 B（−18 行 / −28%）**，合并后只剩一条 `probe:`、一条 `cross-generation …`、一条 `broadcast gate: idle …`。剩下的大头就是第 10 行那 24 条安装确认 + 3 条事件，已无可并之物。
+
+**第二轮（A–E 五项）**：A `gms probe` 与 `broadcast gate` 并成一行、B `UserConfigureHelper#{a/b/c} hooked …` 三行并一行、C `NetdExecutor#execute->…` 收进 `probe:` 行、D `scheduled every 30 min … generation N` 并入探针启动行、E `allowlist loaded: N pkg(s)` 改为 `selected=<bool>`。**稳定态 tick 行 96 → 48 行/天**（含 heartbeat 后 ≈144 → ≈96）；安装面每次少 3 行（B −2 / D −1），E 换语义不省行，**C 净 0 行**——它的价值是语义归类（powerkeeper 域原先零 `probe:` 行，收进来后行数不变，但两个域的探针从此同前缀、同 `<SimpleClass>#<method>` 键名）。
+
+**为什么 24 条安装确认行始终不动**：一次热重载 24~26 行 / ≈6 KB 是最大的一块，但它是"哪个钩子活着"的**唯一逐符号证据**。真正可压的只有"同类、同用途"的成组行（`UserConfigureHelper` 三方法即此例）；把不同用途的钩子也并成一行，等于用计数变化反推静默失败，与本项目"不能靠日志没出现反推"的口径冲突。
 
 ### 6.6 收口面与粒度：不自建防火墙
 
