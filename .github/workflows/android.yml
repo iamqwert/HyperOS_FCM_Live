@@ -102,19 +102,32 @@ jobs:
             ./gradlew --no-daemon -PallowDebugSignedRelease :HyperFCMLive:assembleRelease
           fi
 
+      - name: Stage release artifacts
+        # `upload-artifact` stores what it is given relative to the *least common
+        # ancestor* of the paths, not flattened. Listing the APK (under
+        # `build/outputs/apk/release/`) and the mapping (under
+        # `build/outputs/mapping/release/`) side by side therefore buried them
+        # inside the artifact as `apk/release/…` and `mapping/release/…`, and the
+        # release job's `release/*.apk` matched nothing — the build went green and
+        # only the publish step failed, which is why 3.6.1's first release run
+        # died after the APK had already been built. One flat `dist/` root keeps
+        # both files at the top level, next to each other.
+        #
+        # mapping.txt rides along because R8 renames Compose and the Kotlin stdlib
+        # (the two package-wide keeps were removed from proguard-rules.pro). Only
+        # this module's own classes stay readable, so without the mapping a crash
+        # reported from inside Compose is a wall of a/b/c frames. Same directory,
+        # so the two cannot drift apart.
+        run: |
+          mkdir -p dist
+          cp HyperFCMLive/build/outputs/apk/release/*.apk dist/
+          cp HyperFCMLive/build/outputs/mapping/release/mapping.txt dist/
+
       - name: Upload release artifact
         uses: actions/upload-artifact@v7
         with:
           name: hyperos-fcm-live-release
-          # mapping.txt rides along because R8 now renames Compose and the Kotlin
-          # stdlib (the two package-wide keeps were removed from
-          # proguard-rules.pro). Only this module's own classes stay readable, so
-          # without the mapping a crash reported from inside Compose is a wall of
-          # a/b/c frames. Keep the two in the same artifact so they cannot drift
-          # apart.
-          path: |
-            HyperFCMLive/build/outputs/apk/release/*.apk
-            HyperFCMLive/build/outputs/mapping/release/mapping.txt
+          path: dist/
           if-no-files-found: error
           retention-days: 30
 
