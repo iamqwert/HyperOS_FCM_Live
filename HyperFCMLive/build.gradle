@@ -156,7 +156,7 @@ dependencies {
     // FloatingToolbar, MaterialShapes, MotionScheme.expressive() — but declares
     // them Kotlin-internal, so none of it compiles against. 1.5.0-alpha is the
     // first line that exposes them. Verified: compiles, and passes R8 release.
-    implementation 'androidx.compose.material3:material3:1.5.0-alpha27'
+    implementation 'androidx.compose.material3:material3:1.5.0-alpha29'
     // Icons are drawables under res/drawable (Material Symbols, see the red
     // line at the top of theme/ComposeTokens.kt), so the compose icon packs are
     // not needed at all — not even the core one. material3 stopped pulling them
