@@ -3,15 +3,14 @@
   文案红线：改文案前先整段读一遍，不要回写旧版本。本文件是用户向文案的唯一来源；
   帮助页正文在 HELP.md。
   1. 只有中文 values/strings.xml，不维护第二语言。
-  2. 不用第二人称（"等你要""你需要"），段末不加句号，冒号后逐行展开。
-  3. 「白名单」必须分清三种：本应用的「FCM 唤醒白名单」/ 手机管家「省电策略」/
+  2. 「白名单」必须分清三种：本应用的「FCM 唤醒白名单」/ 手机管家「省电策略」/
      AOSP「电池优化」，它们不是一回事。
-  4. 钩子返回值是 ROM 的读取值，不是「请求」；值 = 1 表示 ROM 内建的「需保持可达」，
+  3. 钩子返回值是 ROM 的读取值，不是「请求」；值 = 1 表示 ROM 内建的「需保持可达」，
      不要写成「不限网」。
-  5. 睡眠相关一律写「进入或退出」睡眠模式，不要只写「进入」。
-  6. powerkeeper 的中文正式名是「电量和性能」。
-  7. 实验性开关默认全部关闭，且只描述功能，不附加「已开启／已关闭」这类状态描述。
-  8. 危险开关只放在 ExperimentActivity。
+  4. 睡眠相关一律写「进入或退出」睡眠模式，不要只写「进入」。
+  5. powerkeeper 的中文正式名是「电量和性能」。
+  6. 实验性开关默认全部关闭，且只描述功能，不附加「已开启／已关闭」这类状态描述。
+  7. 危险开关只放在 ExperimentActivity。
 -->
 <resources>
     <string name="app_name">修复澎湃系统谷歌推送重连</string>
@@ -155,15 +154,22 @@
     <string name="experiment_sleep_keepalive_data">保护移动数据不断网</string>
     <string name="experiment_sleep_keepalive_data_desc">在睡眠模式下，移动数据保持开启，FCM 通道仍可用；夜间耗电更多</string>
 
-    <string name="experiment_section_wake">唤醒</string>
-    <string name="experiment_wake_stopped_packages">投递广播到已停止的应用</string>
-    <string name="experiment_wake_stopped_packages_desc">在应用发起广播时补上投递到已停止应用的标记，仅对 FCM 唤醒白名单内已勾选的应用生效；闹钟、通知动作等由系统直接投递的广播不在覆盖范围内</string>
-    <!-- 自启动单列一节：与上面的停止状态是两个互不相干的闸门，默认关闭 -->
+    <!-- 自启动单列一节：主开关在运行时放行，副档逐层扩大覆盖面，写入档落持久设置，默认全关 -->
     <string name="experiment_section_autostart">自启动</string>
-    <string name="experiment_wake_autostart_relaxed">放宽推送广播的自启动检查</string>
-    <string name="experiment_wake_autostart_relaxed_desc">已勾选的白名单应用的推送广播不再被自启动检查拦下</string>
-    <string name="experiment_wake_autostart_write">把应用的自启动权限写为允许</string>
-    <string name="experiment_wake_autostart_write_desc">已勾选应用的自启动权限 MIUIOP 10008 写为允许，之后推送到达时也会补写；会改变应用权限且不随本开关关闭而还原</string>
+    <string name="experiment_autostart_gate_release">放宽已勾选应用唤醒条件</string>
+    <string name="experiment_autostart_gate_release_desc">放行已勾选应用的服务启动与进程启动</string>
+    <string name="experiment_autostart_restart_release">不冻结已勾选应用</string>
+    <string name="experiment_autostart_restart_release_desc">已勾选应用进程结束后，按正常路径重启而非被系统冻结</string>
+    <string name="experiment_autostart_root_release">答复自启动查询为允许</string>
+    <string name="experiment_autostart_root_release_desc">对于已勾选应用，系统查询自启动状态的统一入口均按允许答复，覆盖上方各档与其余全部读取点；系统可能不再记录这些应用的自启动记录</string>
+    <string name="experiment_wake_autostart_write">同时写入系统自启动设置</string>
+    <string name="experiment_wake_autostart_write_desc">把自启动行为写入系统设置，不改手机管家的自启动开关；系统应用不写入；不随本开关关闭还原</string>
+    <string name="experiment_wake_autostart_switch">同时写入自启动开关状态</string>
+    <string name="experiment_wake_autostart_switch_desc">写入自启动设置的同时一并写入开关状态，应用管理将显示已勾选应用的自启动开关为开；系统应用不写入；不随本开关关闭还原</string>
+    <string name="experiment_autostart_empty_list">当前白名单为空，开关只作用于白名单内的应用，请先配置白名单</string>
+    <string name="experiment_autostart_write_confirm_title">写入系统自启动设置</string>
+    <string name="experiment_autostart_write_confirm">写入只改变自启动行为，不改变手机管家的自启动开关，在应用管理里看不出变化\n为安全考虑，系统应用一律不写入\n写入后，关闭本开关不会还原；	撤销方式：在手机管家里把该应用的自启动先打开再关闭</string>
+    <string name="experiment_autostart_write_confirm_ok">写入</string>
 
     <!-- 模块状态页 -->
     <string name="status_yes">是</string>

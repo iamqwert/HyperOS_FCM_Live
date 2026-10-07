@@ -13,9 +13,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -32,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.Prefs
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
+import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
 
 /**
  * Experiment switches: everything here is off by default and reaches into
@@ -48,6 +52,14 @@ import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
  * sub-switch underneath, hidden until the master is on and animated in and out
  * on the flip. The hidden state and the hook agree, because the sub-switch's
  * hook reads the master flag as well.
+ *
+ * The autostart pair is the exception to that hiding rule, and it is worth
+ * reading before copying the shape: its sub-switch writes a ROM setting that
+ * stays written after the master goes off, and its hook reads only its own flag
+ * — not the master's. Hiding it with the master would take the only control for
+ * a live setting off the screen and leave the row's own value unreadable, so
+ * this sub-row stays visible while *its own* value is on. On screen exactly
+ * while the setting it controls is.
  *
  * A pair is not the only shape a section can take, and the sleep section is the
  * counter-example worth reading before adding one: its two switches answer the
@@ -107,15 +119,40 @@ private fun ExperimentBody(
     var sleepKeepaliveData by remember {
         mutableStateOf(Prefs.readLocalSleepKeepaliveData(context))
     }
-    var wakeStoppedPackages by remember {
-        mutableStateOf(Prefs.readLocalWakeStoppedPackages(context))
-    }
-    var wakeAutostartRelaxed by remember {
-        mutableStateOf(Prefs.readLocalWakeAutostartRelaxed(context))
-    }
     var wakeWriteAutostart by remember {
         mutableStateOf(Prefs.readLocalWakeWriteAutostart(context))
     }
+    var autostartGateRelease by remember {
+        mutableStateOf(Prefs.readLocalAutostartGateRelease(context))
+    }
+    var autostartRestartRelease by remember {
+        mutableStateOf(Prefs.readLocalAutostartRestartRelease(context))
+    }
+    var autostartRootRelease by remember {
+        mutableStateOf(Prefs.readLocalAutostartRootRelease(context))
+    }
+    var wakeWriteAutostartSwitch by remember {
+        mutableStateOf(Prefs.readLocalWakeWriteAutostartSwitch(context))
+    }
+    // The write rows are on screen while either persistent switch says so: the
+    // settings they write outlive every runtime switch, and each hook reads its
+    // own flag alone, so hiding them with the master would remove the only
+    // control for settings that are still in force. The two runtime rungs are
+    // the opposite: pure memory, nothing persists, so they follow the master.
+    val writeRevealed = autostartGateRelease || wakeWriteAutostart
+    // Both autostart rows do nothing on an empty FCM wake allowlist, and an
+    // empty list means the opposite here from what it means in the shipped
+    // feature — there, every app; here, no app. Read once, like the switch
+    // values above, and shown in both switch positions because the row does the
+    // same nothing either way.
+    val emptyAllowlist = remember { Prefs.readLocalAllowlist(context).isEmpty() }
+    val emptyAllowlistHint = if (emptyAllowlist) {
+        stringResource(R.string.experiment_autostart_empty_list)
+    } else {
+        null
+    }
+    var writeConfirmVisible by remember { mutableStateOf(false) }
+    var switchConfirmVisible by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
@@ -140,7 +177,7 @@ private fun ExperimentBody(
         item {
             SectionTitle(R.string.experiment_section_network)
             SettingsSwitchCard(
-                iconRes = R.drawable.ic_wifi_lock,
+                iconRes = R.drawable.ic_wifi_weak_relaxed,
                 title = stringResource(R.string.experiment_wifi_weak_signal_relaxed),
                 description = stringResource(R.string.experiment_wifi_weak_signal_relaxed_desc),
                 checked = wifiWeakSignalRelaxed,
@@ -224,64 +261,213 @@ private fun ExperimentBody(
             )
         }
         item {
-            SectionTitle(R.string.experiment_section_wake)
-            SettingsSwitchCard(
-                iconRes = R.drawable.ic_campaign,
-                title = stringResource(R.string.experiment_wake_stopped_packages),
-                description = stringResource(R.string.experiment_wake_stopped_packages_desc),
-                checked = wakeStoppedPackages,
-                onCheckedChange = { checked ->
-                    Prefs.writeWakeStoppedPackages(context, Prefs.remote(), checked)
-                    wakeStoppedPackages = checked
-                },
-            )
-        }
-        item {
-            // A section of its own rather than a second row under "唤醒". The two
-            // answer different ROM gates on the same broadcast path — the AOSP
-            // stopped state above, the MIUI autostart AppOp here — and they
-            // disagree on every property a reader would group them by: what
-            // triggers the persistent write, which broadcasts are reached, and
-            // whether a user-visible setting ends up changed. Under one heading,
-            // with their corners left open so the rows connect, they read as one
-            // feature escalating in strength.
+            // A section of its own: every row here works on the MIUI autostart
+            // verdict, which is a different ROM mechanism from the AOSP stopped
+            // state the shipped GMS→c2dm hop opens in memory. The runtime
+            // switches that used to share this screen — one answering the
+            // stopped gate, one the autostart gate, both for broadcasts the
+            // module intercepted — are gone: every real FCM broadcast is the
+            // shipped hop, so neither could change an FCM outcome.
+            //
+            // The rows form a ladder of independently testable rungs, widest
+            // first: answer the service/process checkpoints in memory, then the
+            // freeze gate, then the op query itself, and — persisting — write
+            // the behavior op and, optionally, the switch op the manager's own
+            // toggle writes alongside it. Each runtime rung reads only its own
+            // flag, so any single rung can be measured alone; the two write
+            // rows outlive every runtime switch, which is why they do not hide
+            // with the master (see writeRevealed).
             SectionTitle(R.string.experiment_section_autostart)
             SettingsSwitchCard(
-                iconRes = R.drawable.ic_policy,
-                title = stringResource(R.string.experiment_wake_autostart_relaxed),
-                description = stringResource(R.string.experiment_wake_autostart_relaxed_desc),
-                checked = wakeAutostartRelaxed,
+                iconRes = R.drawable.ic_autostart_release,
+                title = stringResource(R.string.experiment_autostart_gate_release),
+                description = stringResource(R.string.experiment_autostart_gate_release_desc),
+                checked = autostartGateRelease,
                 onCheckedChange = { checked ->
-                    Prefs.writeWakeAutostartRelaxed(context, Prefs.remote(), checked)
-                    wakeAutostartRelaxed = checked
+                    Prefs.writeAutostartGateRelease(context, Prefs.remote(), checked)
+                    autostartGateRelease = checked
                 },
-                last = !wakeAutostartRelaxed
+                stateLine = emptyAllowlistHint,
+                stateLineOff = emptyAllowlistHint,
+                first = true,
+                // Every rung below reveals with one of these two switches, so
+                // the master keeps its bottom corners only when the whole
+                // ladder under it is gone.
+                last = !writeRevealed
             )
             AnimatedVisibility(
-                visible = wakeAutostartRelaxed,
+                visible = autostartGateRelease,
                 enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
                 exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
             ) {
                 Column {
                     Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
                     SettingsSwitchCard(
-                        iconRes = R.drawable.ic_key,
+                        iconRes = R.drawable.ic_restart_release,
+                        title = stringResource(R.string.experiment_autostart_restart_release),
+                        description = stringResource(
+                            R.string.experiment_autostart_restart_release_desc
+                        ),
+                        checked = autostartRestartRelease,
+                        onCheckedChange = { checked ->
+                            Prefs.writeAutostartRestartRelease(
+                                context, Prefs.remote(), checked
+                            )
+                            autostartRestartRelease = checked
+                        },
+                        stateLine = emptyAllowlistHint,
+                        stateLineOff = emptyAllowlistHint,
+                        first = false,
+                        // The root row shares this rung's visibility, so it is
+                        // always on screen right below.
+                        last = false
+                    )
+                    Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                    SettingsSwitchCard(
+                        iconRes = R.drawable.ic_root_release,
+                        title = stringResource(R.string.experiment_autostart_root_release),
+                        description = stringResource(
+                            R.string.experiment_autostart_root_release_desc
+                        ),
+                        checked = autostartRootRelease,
+                        onCheckedChange = { checked ->
+                            Prefs.writeAutostartRootRelease(context, Prefs.remote(), checked)
+                            autostartRootRelease = checked
+                        },
+                        stateLine = emptyAllowlistHint,
+                        stateLineOff = emptyAllowlistHint,
+                        first = false,
+                        last = !writeRevealed
+                    )
+                }
+            }
+            AnimatedVisibility(
+                visible = writeRevealed,
+                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                    SettingsSwitchCard(
+                        iconRes = R.drawable.ic_autostart_write,
                         title = stringResource(R.string.experiment_wake_autostart_write),
-                        description = stringResource(R.string.experiment_wake_autostart_write_desc),
+                        description = stringResource(
+                            R.string.experiment_wake_autostart_write_desc
+                        ),
                         checked = wakeWriteAutostart,
                         onCheckedChange = { checked ->
-                            Prefs.writeWakeWriteAutostart(context, Prefs.remote(), checked)
-                            wakeWriteAutostart = checked
+                            // Only the on direction needs the dialog: it is the
+                            // one that leaves a setting behind. Turning it off
+                            // writes nothing, which is exactly what the dialog
+                            // explains.
+                            if (checked) {
+                                writeConfirmVisible = true
+                            } else {
+                                Prefs.writeWakeWriteAutostart(context, Prefs.remote(), false)
+                                wakeWriteAutostart = false
+                            }
                         },
+                        stateLine = emptyAllowlistHint,
+                        stateLineOff = emptyAllowlistHint,
+                        // The master is always on screen above this row, so
+                        // this row is never the visible group's first.
                         first = false,
-                        last = true
+                        last = !wakeWriteAutostart
                     )
+                    AnimatedVisibility(
+                        visible = wakeWriteAutostart,
+                        enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                        exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
+                    ) {
+                        Column {
+                            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                            SettingsSwitchCard(
+                                iconRes = R.drawable.ic_autostart_switch_write,
+                                title = stringResource(
+                                    R.string.experiment_wake_autostart_switch
+                                ),
+                                description = stringResource(
+                                    R.string.experiment_wake_autostart_switch_desc
+                                ),
+                                checked = wakeWriteAutostartSwitch,
+                                onCheckedChange = { checked ->
+                                    // Same dialog rule as its behavior-op
+                                    // partner: the on direction leaves a
+                                    // setting behind, the off direction
+                                    // writes nothing.
+                                    if (checked) {
+                                        switchConfirmVisible = true
+                                    } else {
+                                        Prefs.writeWakeWriteAutostartSwitch(
+                                            context, Prefs.remote(), false
+                                        )
+                                        wakeWriteAutostartSwitch = false
+                                    }
+                                },
+                                stateLine = emptyAllowlistHint,
+                                stateLineOff = emptyAllowlistHint,
+                                first = false,
+                                last = true
+                            )
+                        }
+                    }
                 }
             }
         }
         // The same 16dp tail the settings page ends on, so the last card does
         // not sit flush against the gesture strip on a fully scrolled page.
         item { Spacer(modifier = Modifier.height(16.dp)) }
+    }
+
+    // The one experiment that leaves something behind asks first, and the dialog
+    // is also where the undo path is written: the switch is deliberately a plain
+    // toggle, so the explanation has to live somewhere the user cannot miss.
+    if (writeConfirmVisible) {
+        AlertDialog(
+            onDismissRequest = { writeConfirmVisible = false },
+            // Popup level, as in [AboutScreen]: the M3 dialog default is a tone
+            // below this ramp's page, so a dialog on it would sit behind the
+            // surface it is drawn over.
+            containerColor = LocalAppSurfaces.current.popup,
+            title = { Text(stringResource(R.string.experiment_autostart_write_confirm_title)) },
+            text = { Text(stringResource(R.string.experiment_autostart_write_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    writeConfirmVisible = false
+                    Prefs.writeWakeWriteAutostart(context, Prefs.remote(), true)
+                    wakeWriteAutostart = true
+                }) {
+                    Text(stringResource(R.string.experiment_autostart_write_confirm_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { writeConfirmVisible = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
+    }
+    if (switchConfirmVisible) {
+        AlertDialog(
+            onDismissRequest = { switchConfirmVisible = false },
+            containerColor = LocalAppSurfaces.current.popup,
+            title = { Text(stringResource(R.string.experiment_autostart_write_confirm_title)) },
+            text = { Text(stringResource(R.string.experiment_autostart_write_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    switchConfirmVisible = false
+                    Prefs.writeWakeWriteAutostartSwitch(context, Prefs.remote(), true)
+                    wakeWriteAutostartSwitch = true
+                }) {
+                    Text(stringResource(R.string.experiment_autostart_write_confirm_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { switchConfirmVisible = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
     }
 }
 
