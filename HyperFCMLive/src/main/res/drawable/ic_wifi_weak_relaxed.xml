@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Symbols "signal_wifi_bad" (fill1, outlined family). Path data
+     verbatim from fonts.gstatic.com (Apache-2.0); the source canvas is 960x960
+     with a -960 y origin, shifted down via the group.
+     Local name is by use, not by symbol: this is the row that relaxes the
+     WiFi weak-signal handover, keeping the user on weak WiFi instead of
+     switching to mobile data.
+     -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M480-120 0-600q95-97 219.5-148.5T480-800q136 0 260.5 51.5T960-600l-99 99q-23-11-48.5-16.5T761-523q-101 0-172 71t-71 172q0 26 5.5 51.5T540-180l-60 60Zm196-20-56-56 84-84-84-84 56-56 84 84 84-84 57 56-84 84 83 84-56 56-84-83-84 83Z" />
+    </group>
+</vector>

@@ -282,6 +282,7 @@ class Hooker : XposedModule() {
         },
         Group("hook", "udpPackageRestrict") { hookUdpPackageRestrict(classLoader) },
         Group("hook", "ProcessCleanerBase") { hookProcessCleanerBase(classLoader) },
+        Group("hook", "autostart gate") { hookAutostartGate(classLoader) },
         Group("hook", "alarm gate") { hookAlarmGate(classLoader) },
         Group("hook", "wifi weak-signal switch") { hookWifiWeakSignalSwitch(classLoader) },
         Group("install", "wake-path probe") { probeWakePath(classLoader) },
@@ -1169,24 +1170,14 @@ class Hooker : XposedModule() {
                 ) {
                     return@intercept true
                 }
-                // Experiment: the branch above is the shipped GMS→c2dm hop. This
-                // one drops its caller/action restriction for push broadcasts to
-                // a package the user checked — the two reference modules answer
-                // this method from the intent alone and never look at the caller.
-                // Deliberately narrower than they are: the target must be
-                // *explicitly* allowlisted, so an empty list cannot turn this
-                // into a whole-device gate bypass. The action test comes first
-                // because it is local and rejects almost every broadcast the
-                // system asks about, which keeps the remote-prefs read below off
-                // the hot path.
-                if (intent != null &&
-                    targetPackage != null &&
-                    isPushAction(intent.action) &&
-                    isWakeAutostartRelaxedEnabled() &&
-                    wakeExplicitlyAllows(targetPackage)
-                ) {
-                    return@intercept true
-                }
+                // The branch above is the only autostart gate this module
+                // answers. A second branch used to drop its caller restriction
+                // and answer any push broadcast from the intent alone, the way
+                // the two reference modules do; it is gone because it never ran
+                // on anything the shipped GMS→c2dm hop had not answered already
+                // — real FCM calls always come from GMS, so `callerPackage` is
+                // GMS on every broadcast the module cares about, and with all
+                // four experiment switches off push still arrived.
             } catch (e: Exception) {
                 log(
                     Log.ERROR, TAG,
@@ -3899,74 +3890,13 @@ class Hooker : XposedModule() {
                     log(Log.ERROR, TAG, "C2DM broadcast hook failed", t)
                 }
             }
-            // Experiment: stopped-package delivery for the packages the user
-            // checked, not only the GMS→c2dm hop above. Same flag, same exit,
-            // wider caller set — the caller check that guards the hop is
-            // deliberately absent here, because a sender other than GMS is
-            // exactly what this switch is for.
-            //
-            // The list gate is [wakeExplicitlyAllows], not `moduleAppliesTo`.
-            // The two differ in exactly the ways this pair's description would
-            // otherwise lie about: `moduleAppliesTo(Tier.WAKE)` fails open on an
-            // empty list (so a fresh install with nothing checked would have the
-            // flag added to broadcasts aimed at *every* package) and exempts GMS
-            // unconditionally. Both are right for the shipped wake privileges,
-            // whose posture is a whole-device FCM fix, and both are wrong for a
-            // switch whose description says "only the checked apps". The second
-            // wake pair is gated the same way, so the two rows one section apart
-            // now mean the same thing.
-            //
-            // ponytail: the flag is added and nothing else about the broadcast
-            //   changes — no appOp rewrite, no ordered-broadcast promotion, no
-            //   resultTo, no new permission. Cost: a broadcast the ROM still
-            //   refuses for some other reason (a permission, a MIUI policy, an
-            //   app whose receivers are disabled) stays refused. Condition to
-            //   add more: a sample of "allowlisted, flag present, still not
-            //   delivered".
-            //
-            // ponytail: this used to also reset the package's stopped state
-            //   (`setPackageStoppedState(pkg, false, userId)`) behind a second
-            //   opt-in. Removed as provably redundant: the flag added here opens
-            //   the very gate the reset was meant to open. ROM bytecode
-            //   (OS4.0.0.33 / myron): `broadcastIntentLockedTraced` adds
-            //   FLAG_EXCLUDE_STOPPED_PACKAGES unconditionally, and
-            //   `IntentResolver#buildResolveList` filters stopped packages only
-            //   when `Intent.isExcludingStopped()` holds, which is compiled to
-            //   `(mFlags & 0x30) == 0x10` — i.e. EXCLUDE set *and* INCLUDE clear.
-            //   So with this flag present the receiver is resolved, the broadcast
-            //   is delivered, and PackageManager clears stopped on delivery; the
-            //   reset never made a difference on any broadcast that reaches here.
-            //   Cost of the removal: a broadcast the module never sees (an alarm,
-            //   a PendingIntent, an internal call straight into
-            //   `broadcastIntentLocked`) is still filtered out for a stopped
-            //   package, and there is no longer anything undoing that. Condition
-            //   to bring it back: a sample of an allowlisted package blocked by
-            //   stopped on such a path — not a binder-dispatched one.
-            if (intent != null && isWakeStoppedPackagesEnabled()) {
-                try {
-                    val wakePackage = targetPackageOf(intent)
-                    if (wakePackage != null && wakeExplicitlyAllows(wakePackage)) {
-                        try {
-                            if ((intent.flags and Intent.FLAG_INCLUDE_STOPPED_PACKAGES) == 0) {
-                                intent.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
-                            }
-                        } catch (t: Throwable) {
-                            log(
-                                Log.ERROR, TAG,
-                                "wake: failed to add FLAG_INCLUDE_STOPPED_PACKAGES", t
-                            )
-                        }
-                    }
-                } catch (t: Throwable) {
-                    log(Log.ERROR, TAG, "Wake broadcast hook failed", t)
-                }
-            }
-            // Experiment: the autostart pair's persistent half. Same targeted
-            // push and same explicit-allowlist gate as the master's runtime
-            // bypass, but instead of answering a gate it writes the ROM's own
-            // autostart AppOp for the package — see maybeWriteAutostart. The
-            // action test is the cheap local one, so the remote-prefs read only
-            // happens for a push broadcast.
+            // Experiment: the autostart switch's write. It used to be the
+            // persistent half of a pair whose runtime half answered the same
+            // gate in memory for broadcasts the module intercepted; that half is
+            // gone — see the [checkApplicationAutoStart] hook — so what is left
+            // writes the ROM's own autostart AppOp for the package, see
+            // maybeWriteAutostart. The action test is the cheap local one, so
+            // the remote-prefs read only happens for a push broadcast.
             if (intent != null && isPushAction(intent.action)) {
                 try {
                     val autostartPackage = targetPackageOf(intent)
@@ -3986,73 +3916,36 @@ class Hooker : XposedModule() {
     }
 
     /**
-     * Experiment master switch: stopped-package delivery (see the branch in
-     * [hookActivityManagerService]).
+     * Experiment switch: write the package's autostart op.
      *
-     * Fails to *disabled*: stopped-state delivery is a protection the user or a
-     * freeze tool asked for, and an unreadable switch must leave the ROM's own
-     * delivery decision alone rather than adding flags on the strength of a
-     * value nobody could read.
-     */
-    private fun isWakeStoppedPackagesEnabled(): Boolean {
-        return try {
-            getRemotePreferences(Prefs.GROUP_CONFIG)
-                .getBoolean(Prefs.KEY_WAKE_STOPPED_PACKAGES, false)
-        } catch (ignored: Throwable) {
-            false
-        }
-    }
-
-    /**
-     * Experiment master switch: relax the autostart gate (see the second branch
-     * in [hookBroadcastQueueModernStubImpl]).
+     * It used to be the sub-switch of a master that answered the same ROM gate
+     * in memory, and was ANDed with it so that turning the master off stopped
+     * the hook from writing a user-visible setting behind a control the user
+     * could no longer see. That master is gone — see the comment in the
+     * [checkApplicationAutoStart] hook — so this is now read on its own: the
+     * row on screen is the whole control, and there is no hidden gate above it.
      *
-     * Fails to *disabled*. The autostart decision is the ROM's, and an
-     * unreadable switch must leave it alone rather than start answering every
-     * push broadcast from a value nobody could read.
-     */
-    private fun isWakeAutostartRelaxedEnabled(): Boolean {
-        return try {
-            getRemotePreferences(Prefs.GROUP_CONFIG)
-                .getBoolean(Prefs.KEY_WAKE_AUTOSTART_RELAXED, false)
-        } catch (ignored: Throwable) {
-            false
-        }
-    }
-
-    /**
-     * Experiment sub-switch: write the package's autostart op.
-     *
-     * [Prefs.KEY_WAKE_AUTOSTART_RELAXED] is the master of this pair, so the
-         * write happens only while the master is on as well: turning the master off
-         * must not leave a hook writing a user-visible setting behind a control the
-         * user can no longer see. The stored sub-value is kept, so turning the
-         * master back on restores the last choice.
-     *
-     * Fails to *disabled* for the same reason as the master.
+     * Fails to *disabled*: this writes a setting the user can see, so an
+     * unreadable switch must leave the ROM's own value alone.
      */
     private fun isWakeWriteAutostartEnabled(): Boolean {
         return try {
-            val config = getRemotePreferences(Prefs.GROUP_CONFIG)
-            config.getBoolean(Prefs.KEY_WAKE_AUTOSTART_RELAXED, false) &&
-                config.getBoolean(Prefs.KEY_WAKE_WRITE_AUTOSTART, false)
+            getRemotePreferences(Prefs.GROUP_CONFIG)
+                .getBoolean(Prefs.KEY_WAKE_WRITE_AUTOSTART, false)
         } catch (ignored: Throwable) {
             false
         }
     }
 
     /**
-     * The wake experiments' own allowlist gate: membership is required, so an
-     * empty list means "no app" rather than "every app".
+     * The experiment's own allowlist gate: membership is required, so an empty
+     * list means "no app" rather than "every app".
      *
      * Deliberately not [moduleAppliesTo]. That one fails open on an empty list
      * and exempts GMS, which is right for the shipped wake privileges — the
-     * module's default posture is a whole-device FCM fix — but wrong here: all
-     * four of these switches reach past the FCM chain the module exists for
-     * (the stopped-package flag, the stopped-state write, the relaxed autostart
-     * gate, the AppOp write), and each of their descriptions promises "only the
-     * checked apps". Sharing one gate is what makes that promise true on every
-     * row rather than on some of them.
+     * module's default posture is a whole-device FCM fix — but wrong for the one
+     * experiment left here, which writes a user-visible ROM setting and whose
+     * description promises "only the checked apps".
      */
     private fun wakeExplicitlyAllows(packageName: String): Boolean {
         return getFcmAllowlist().contains(packageName)
@@ -4090,7 +3983,8 @@ class Hooker : XposedModule() {
      */
     private fun maybeWriteAutostart(packageName: String) {
         if (writeAutostartIfNeeded(packageName, throttle = true) == AUTOSTART_WRITTEN) {
-            log(Log.INFO, TAG, "wake: set the autostart op (10008) of $packageName to allowed")
+            val ops = if (isWakeWriteAutostartSwitchEnabled()) " (10008, 10053)" else " (10008)"
+            log(Log.INFO, TAG, "wake: set the autostart op$ops of $packageName to allowed")
         }
     }
 
@@ -4132,6 +4026,8 @@ class Hooker : XposedModule() {
         }
         var written = 0
         var already = 0
+        var skipped = 0
+        var missing = 0
         var failed = 0
         for (pkg in allowlist) {
             // throttle = false: this is a user action, so it writes even inside
@@ -4140,13 +4036,16 @@ class Hooker : XposedModule() {
             when (writeAutostartIfNeeded(pkg, throttle = false)) {
                 AUTOSTART_WRITTEN -> written++
                 AUTOSTART_FAILED -> failed++
+                AUTOSTART_SKIPPED_SYSTEM -> skipped++
+                AUTOSTART_SKIPPED_MISSING -> missing++
                 else -> already++
             }
         }
         log(
             Log.INFO, TAG,
             "wake: autostart on request over ${allowlist.size} allowlisted package(s): " +
-                "$written written, $already already allowed, $failed failed"
+                "$written written, $already already allowed, $skipped system, " +
+                "$missing missing, $failed failed"
         )
     }
 
@@ -4154,6 +4053,11 @@ class Hooker : XposedModule() {
      * Set the package's MIUI autostart AppOp to "allowed" if it is not allowed
      * already — the persistent half of the autostart pair, and the one place
      * the module edits a user-visible system setting.
+     *
+     * With the switch-write rung on, the op the manager toggle owns (`10053`)
+     * is written right after the behavior op (`10008`), the same pair 手机管家
+     * writes when its own toggle moves. Each op is read before written and
+     * each write counts; the return value says whether *anything* was written.
      *
      * There is no public API for this. The op is `MIUIOP_AUTO_START = 10008`
      * (`com.miui.internal.os.MiuiHooks.OP_AUTO_START`, OS4 miui-framework
@@ -4183,12 +4087,20 @@ class Hooker : XposedModule() {
      * no settings write. [throttle] is false for the on-request walk, which is
      * user-driven and must take effect even inside the lazy path's window.
      *
-     * Returns [AUTOSTART_WRITTEN], [AUTOSTART_ALREADY] or [AUTOSTART_FAILED].
-     * Logging is left to the caller because the two callers want different
-     * shapes: the lazy path wants a line per write, the on-request walk wants
-     * one line for the whole list. The one exception is a failure, which is
-     * logged here with the exception — a failure has to name its package to be
-     * useful, and it is never the common case.
+     * System packages are refused outright — see [AUTOSTART_SKIPPED_SYSTEM].
+     * The refusal is checked on the same [ApplicationInfo] the uid resolution
+     * already needs, so it costs nothing extra, and a package that cannot be
+     * resolved at all still falls through to [AUTOSTART_FAILED]: an
+     * unresolvable package does not get written either.
+     *
+     * Returns [AUTOSTART_WRITTEN], [AUTOSTART_ALREADY],
+     * [AUTOSTART_SKIPPED_SYSTEM], [AUTOSTART_SKIPPED_MISSING] or
+     * [AUTOSTART_FAILED]. Logging is left to
+     * the caller because the two callers want different shapes: the lazy path
+     * wants a line per write, the on-request walk wants one line for the
+     * whole list. The one exception is a failure, which is logged here with
+     * the exception — a failure has to name its package to be useful, and it
+     * is never the common case.
      */
     private fun writeAutostartIfNeeded(packageName: String, throttle: Boolean): Int {
         val setMode = APP_OPS_SET_MODE
@@ -4211,22 +4123,72 @@ class Hooker : XposedModule() {
         try {
             val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
                 ?: return AUTOSTART_FAILED
-            val uid = context.packageManager.getApplicationInfo(packageName, 0).uid
-            val current =
-                getInvoker(checkOpNoThrow).invoke(appOps, MIUIOP_AUTO_START, uid, packageName)
-            if (current == AppOpsManager.MODE_ALLOWED) {
-                return AUTOSTART_ALREADY
+            val ai = try {
+                context.packageManager.getApplicationInfo(packageName, 0)
+            } catch (e: PackageManager.NameNotFoundException) {
+                // Checked, then uninstalled without being unchecked first: skip
+                // silently — see [AUTOSTART_SKIPPED_MISSING]. Not the generic
+                // catch below: that logs an ERROR with a stack per stale entry
+                // per broadcast, which is noise, not a failure.
+                return AUTOSTART_SKIPPED_MISSING
             }
-            getInvoker(setMode).invoke(
-                appOps, MIUIOP_AUTO_START, uid, packageName, AppOpsManager.MODE_ALLOWED
-            )
-            return AUTOSTART_WRITTEN
+            if ((ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0) {
+                return AUTOSTART_SKIPPED_SYSTEM
+            }
+            val uid = ai.uid
+            // The read-before-write goes through the same AppOpsManager entry
+            // the root choke hooks; with the flag up the choke passes the read
+            // through instead of answering it, so the persistent half keeps
+            // seeing the ops' real values even while the root rung is on.
+            autostartWriteReadInFlight.set(true)
+            var wrote = false
+            try {
+                wrote = writeOpIfDenied(
+                    appOps, checkOpNoThrow, setMode, MIUIOP_AUTO_START, uid, packageName
+                )
+                if (isWakeWriteAutostartSwitchEnabled()) {
+                    // The switch op rides the same occasions and the same
+                    // guard as the behavior op — 手机管家's own toggle writes
+                    // the pair together, so the module does too.
+                    wrote = writeOpIfDenied(
+                        appOps, checkOpNoThrow, setMode,
+                        MIUIOP_AUTO_START_SWITCH, uid, packageName
+                    ) || wrote
+                }
+            } finally {
+                autostartWriteReadInFlight.set(false)
+            }
+            return if (wrote) AUTOSTART_WRITTEN else AUTOSTART_ALREADY
         } catch (t: Throwable) {
             log(Log.ERROR, TAG, "wake: failed to write the autostart op of $packageName", t)
             return AUTOSTART_FAILED
         } finally {
             Binder.restoreCallingIdentity(token)
         }
+    }
+
+    /**
+     * One op of the autostart pair: read it, and set it to `MODE_ALLOWED` if
+     * it is not allowed already. True when this call wrote, false when the op
+     * was already allowed (a read, no settings write).
+     */
+    private fun writeOpIfDenied(
+        appOps: AppOpsManager,
+        checkOpNoThrow: Method,
+        setMode: Method,
+        op: Int,
+        uid: Int,
+        packageName: String
+    ): Boolean {
+        val current =
+            getInvoker(checkOpNoThrow).invoke(appOps, op, uid, packageName)
+        if (current == AppOpsManager.MODE_ALLOWED) {
+            return false
+        }
+        getInvoker(setMode).invoke(
+            appOps, op, uid, packageName, AppOpsManager.MODE_ALLOWED
+        )
+        return true
     }
 
     /**
@@ -4463,6 +4425,13 @@ class Hooker : XposedModule() {
      *    non-zero value proves P0 is active on this ROM/branch.
      * All four zero means the branch was never exercised this interval.
      *
+     * `autostart gate` rides the same tick for the same reason: its detail lines
+     * only fire on a denial, so without this "never denied" and "never asked"
+     * would look identical. `service-denied` / `process-denied` non-zero is the
+     * ROM refusing a start the broadcast hook already waved through — the
+     * finding that says the autostart op, not the broadcast gate, is what
+     * decides delivery.
+     *
      * The wake-path half is the P2 probe, and it rides this tick on purpose: the
      * probe's own detailed lines only fire when its gate is actually reached, so
      * without this tick "never reached" and "reached and always allowed" would
@@ -4484,11 +4453,20 @@ class Hooker : XposedModule() {
             broadcastWakePathReachedCount == 0 &&
             broadcastWakePathC2dmCount == 0 &&
             broadcastWakePathDeniedCount == 0 &&
-            broadcastWakePathC2dmDeniedCount == 0
+            broadcastWakePathC2dmDeniedCount == 0 &&
+            autostartGateServiceDeniedCount == 0 &&
+            autostartGateProcessDeniedCount == 0 &&
+            autostartGateRestartDeniedCount == 0 &&
+            autostartGatePreStartDeniedCount == 0 &&
+            autostartGateReleaseCount == 0 &&
+            autostartGateRestartReleaseCount == 0 &&
+            autostartRootReleaseCount == 0
         if (idle) {
             return "broadcast gate idle — c2dm " +
                 "allowed/skipped/reached-defer/cn-actions = 0, " +
-                "wake-path reached/c2dm/denied/c2dm-denied = 0"
+                "wake-path reached/c2dm/denied/c2dm-denied = 0, " +
+                "autostart gate service/process/restart/pre-start-denied, " +
+                "released, restart-released, root-released = 0"
         }
         return "broadcast gate c2dm allowed=${broadcastGateAllowedCount} " +
             "(uid-fallback=${broadcastGateAllowedByUidCount}), " +
@@ -4498,7 +4476,14 @@ class Hooker : XposedModule() {
             "wake-path reached=${broadcastWakePathReachedCount}, " +
             "c2dm=${broadcastWakePathC2dmCount}, " +
             "denied=${broadcastWakePathDeniedCount}, " +
-            "c2dm-denied=${broadcastWakePathC2dmDeniedCount}"
+            "c2dm-denied=${broadcastWakePathC2dmDeniedCount}; " +
+            "autostart gate service-denied=${autostartGateServiceDeniedCount}, " +
+                "process-denied=${autostartGateProcessDeniedCount}, " +
+                "restart-denied=${autostartGateRestartDeniedCount}, " +
+                "pre-start-denied=${autostartGatePreStartDeniedCount}, " +
+                "released=${autostartGateReleaseCount}, " +
+                "restart-released=${autostartGateRestartReleaseCount}, " +
+                "root-released=${autostartRootReleaseCount}"
     }
 
     /**
@@ -4753,6 +4738,448 @@ class Hooker : XposedModule() {
         )
     }
 
+    /**
+     * The four autostart checkpoints that read `MIUIOP 10008`, and the runtime
+     * half of the autostart story.
+     *
+     * `BroadcastQueueModernStubImpl#checkApplicationAutoStart` — the module's
+     * hook — answers at method entry for caller=GMS + c2dm, so on the FCM hop
+     * `MIUIOP 10008` is never read there at all. It *is* read by the
+     * checkpoints below, which is why setting the op changes behaviour even
+     * though the module already answers the broadcast gate:
+     *
+     *  - `AutoStartManagerServiceStubImpl#isAllowStartService` — starting or
+     *    binding a service. This is the one that fires for a *cached* process:
+     *    the broadcast is delivered without a process start, and the receiver
+     *    then has to start the messaging service.
+     *  - `ProcessManagerService#isAllowAutoStart` — starting a process. This is
+     *    the one that fires once the process has been reaped.
+     *  - `AutoStartManagerServiceStubImpl#canRestartServiceLocked` — scheduling
+     *    a killed service back. Reached only from
+     *    `ActiveServices.scheduleServiceRestartLocked`, so it is a third path
+     *    rather than a third reading of the same one.
+     *  - `PreStartFeedbackImpl#isAutoStart` — the pre-start *punishment* path.
+     *    See [AUTOSTART_PRE_START_METHOD].
+     *
+     * The first two read the same op, so one setting fixes both, and whether the
+     * process was dead does not change which of the two is asked. User-side
+     * evidence (2026-10-06): with `10008` denied, normal-priority pushes did not
+     * arrive at all; allowing it was enough, and `10053` — the op the Security
+     * Centre row shows — changed nothing.
+     *
+     * The last two differ. `canRestartServiceLocked` was a probe until live
+     * samples showed the gate actually denying checked packages (2026-10-07:
+     * `restart DENIED` lines with a checked push target as `callee`), which is
+     * the condition the probe was waiting for — releasing a checkpoint whose
+     * denials had never been observed would have been an intervention nobody
+     * could measure. It is now releasable under its **own** experiment key,
+     * not the master's: the freeze decision is a separate mechanism (its
+     * `false` verdict sends the process to `KillProcessInfo` instead of a
+     * restart), and isolating it is the reason the rung exists.
+     * `PreStartFeedbackImpl#isAutoStart` stays a probe: its four callers give
+     * the same boolean three punishment meanings and one bookkeeping one, and
+     * the whole path sits behind static ROM flags whose enablement on this
+     * generation is unknown.
+     *
+     * Read-through by default: the verdict is passed on untouched, denials for a
+     * checked callee are counted, and each (gate, callee) pair gets its own
+     * detail allowance per hour (see [AUTOSTART_GATE_DETAIL_PER_CALLEE]). The
+     * per-gate experiment keys turn a counted denial into an override, and
+     * then only when the ROM was about to deny a callee the user checked —
+     * nothing is written to disk either way.
+     */
+    private fun hookAutostartGate(classLoader: ClassLoader) {
+        var installed = 0
+        val autostartStubClass = try {
+            classLoader.loadClass(AUTOSTART_STUB_CLASS)
+        } catch (e: ClassNotFoundException) {
+            logSkipOtherGeneration("$AUTOSTART_STUB_CLASS (autostart gate)")
+            null
+        }
+        val serviceTargets = autostartStubClass?.declaredMethods?.mapNotNull { m ->
+            if (m.name != AUTOSTART_SERVICE_METHOD ||
+                m.returnType != Boolean::class.javaPrimitiveType
+            ) {
+                return@mapNotNull null
+            }
+            val intentIndex = m.parameterTypes.indexOfFirst { it == Intent::class.java }
+            if (intentIndex < 0) null else kotlin.Pair(m, intentIndex)
+        } ?: emptyList<kotlin.Pair<Method, Int>>()
+        if (serviceTargets.isEmpty() && autostartStubClass != null) {
+            logSkipOtherGeneration("$AUTOSTART_SERVICE_METHOD (autostart gate)")
+        }
+        for ((method, intentIndex) in serviceTargets) {
+            method.isAccessible = true
+            hookE(method).intercept { chain: XposedInterface.Chain ->
+                val intent = chain.getArg(intentIndex) as? Intent
+                val callee = intent?.component?.packageName ?: intent?.getPackage()
+                // The callee alone cannot tell a push wake from any other
+                // service start, and that distinction is the whole question this
+                // probe exists to answer: modern FCM reaches an app by starting
+                // or binding its Firebase* service rather than by sending it a
+                // c2dm broadcast (the shipped broadcast hop has never seen one on
+                // this ROM — `broadcast gate c2dm allowed` stays 0). So the
+                // detail carries the component's short class name, which names
+                // the service the ROM was about to refuse.
+                val detail = intent?.let { shortComponent(it) }
+                autostartGateVerdict(chain, AUTOSTART_GATE_SERVICE, callee, detail)
+            }
+            deoptimize(method)
+            installed++
+        }
+        val processClass = try {
+            classLoader.loadClass("com.android.server.am.ProcessManagerService")
+        } catch (e: ClassNotFoundException) {
+            logSkipOtherGeneration("ProcessManagerService (autostart gate)")
+            null
+        }
+        val processTarget = processClass?.declaredMethods?.firstOrNull { m ->
+            m.name == AUTOSTART_PROCESS_METHOD &&
+                m.returnType == Boolean::class.javaPrimitiveType &&
+                m.parameterCount == 2 &&
+                m.parameterTypes[0] == String::class.java &&
+                m.parameterTypes[1] == Int::class.javaPrimitiveType
+        }
+        if (processTarget == null) {
+            if (processClass != null) {
+                logSkipOtherGeneration("$AUTOSTART_PROCESS_METHOD(String,int) (autostart gate)")
+            }
+        } else {
+            processTarget.isAccessible = true
+            hookE(processTarget).intercept { chain: XposedInterface.Chain ->
+                autostartGateVerdict(
+                    chain, AUTOSTART_GATE_PROCESS, chain.getArg(0) as? String
+                )
+            }
+            deoptimize(processTarget)
+            installed++
+        }
+        // Gate G2: restart-after-death. Both overloads take the callee as
+        // parameter 0, so one matcher covers them; there is nothing else on
+        // this class by that name returning a boolean. Releasable under its
+        // own experiment key — see the class note above.
+        val restartTargets = autostartStubClass?.declaredMethods?.filter { m ->
+            m.name == AUTOSTART_RESTART_METHOD &&
+                m.returnType == Boolean::class.javaPrimitiveType &&
+                m.parameterCount >= 1 &&
+                m.parameterTypes[0] == String::class.java
+        } ?: emptyList()
+        if (restartTargets.isEmpty() && autostartStubClass != null) {
+            logSkipOtherGeneration("$AUTOSTART_RESTART_METHOD (autostart gate probe)")
+        }
+        for (method in restartTargets) {
+            method.isAccessible = true
+            hookE(method).intercept { chain: XposedInterface.Chain ->
+                autostartGateVerdict(
+                    chain,
+                    AUTOSTART_GATE_RESTART,
+                    chain.getArg(0) as? String
+                )
+            }
+            deoptimize(method)
+            installed++
+        }
+        // Probe G1: the pre-start path. Private helper on a class reached only
+        // through its own instance, so the probe targets the read itself rather
+        // than one of the four callers — every one of them asks the same
+        // question through this method.
+        val preStartClass = try {
+            classLoader.loadClass(AUTOSTART_PRE_START_CLASS)
+        } catch (e: ClassNotFoundException) {
+            logSkipOtherGeneration("$AUTOSTART_PRE_START_CLASS (autostart gate probe)")
+            null
+        }
+        val preStartTarget = preStartClass?.declaredMethods?.firstOrNull { m ->
+            m.name == AUTOSTART_PRE_START_METHOD &&
+                m.returnType == Boolean::class.javaPrimitiveType &&
+                m.parameterCount == 2 &&
+                m.parameterTypes[0] == String::class.java &&
+                m.parameterTypes[1] == Int::class.javaPrimitiveType
+        }
+        if (preStartTarget == null) {
+            if (preStartClass != null) {
+                logSkipOtherGeneration(
+                    "$AUTOSTART_PRE_START_METHOD(String,int) (autostart gate probe)"
+                )
+            }
+        } else {
+            preStartTarget.isAccessible = true
+            hookE(preStartTarget).intercept { chain: XposedInterface.Chain ->
+                autostartGateVerdict(
+                    chain,
+                    AUTOSTART_GATE_PRE_START,
+                    chain.getArg(0) as? String,
+                    releaseable = false
+                )
+            }
+            deoptimize(preStartTarget)
+            installed++
+        }
+        // Root choke: one hook at the AppOpsManager client entry covers every
+        // system_server-side reader that funnels through it, including the
+        // per-checkpoint hooks above and the pre-start punishment path — the
+        // choke cannot tell callers apart, which is its documented cost. The
+        // manager UI reads the same op from its own process, where this hook
+        // does not exist, so the display keeps telling the truth. Count-only
+        // per event (one detail line per package per window), because the ROM
+        // never "denies" here — the answer is pre-empted before the ROM's own
+        // logic runs.
+        val appOpsClass = try {
+            classLoader.loadClass("android.app.AppOpsManager")
+        } catch (e: ClassNotFoundException) {
+            logSkipOtherGeneration("android.app.AppOpsManager (autostart root choke)")
+            null
+        }
+        val rootTargets = appOpsClass?.declaredMethods?.filter { m ->
+            m.returnType != Int::class.javaPrimitiveType ||
+                m.parameterTypes.firstOrNull() != Int::class.javaPrimitiveType ||
+                m.parameterTypes.getOrNull(1) != Int::class.javaPrimitiveType ||
+                m.parameterTypes.getOrNull(2) != String::class.java
+        }?.let { ints ->
+            ints.filter { m ->
+                m.name == "checkOpNoThrow" && m.parameterCount == 3
+            } + ints.filter { m ->
+                m.name == "noteOpNoThrow" &&
+                    m.parameterCount == 5 &&
+                    m.parameterTypes[3] == String::class.java &&
+                    m.parameterTypes[4] == String::class.java
+            }
+        } ?: emptyList()
+        if (rootTargets.isEmpty() && appOpsClass != null) {
+            logSkipOtherGeneration("AppOpsManager checkOpNoThrow/noteOpNoThrow (autostart root choke)")
+        }
+        for (method in rootTargets) {
+            method.isAccessible = true
+            hookE(method).intercept { chain: XposedInterface.Chain ->
+                // The module's own read-before-write goes through this same
+                // method; answering it here would make every write see "already
+                // allowed" and silently stop the persistent half from ever
+                // writing. The write path raises this flag around its read.
+                if (java.lang.Boolean.TRUE == autostartWriteReadInFlight.get()) {
+                    return@intercept chain.proceed()
+                }
+                var answered = false
+                try {
+                    val pkg = chain.getArg(2) as? String
+                    if ((chain.getArg(0) as? Int) == MIUIOP_AUTO_START &&
+                        pkg != null &&
+                        wakeExplicitlyAllows(pkg) &&
+                        isAutostartRootReleaseEnabled()
+                    ) {
+                        ++autostartRootReleaseCount
+                        answered = true
+                        if (claimAutostartGateDetail(AUTOSTART_GATE_ROOT, pkg)) {
+                            log(
+                                Log.INFO, TAG,
+                                "autostart root: answered op 10008 as allowed " +
+                                    "(callee=$pkg)"
+                            )
+                        }
+                    }
+                } catch (t: Throwable) {
+                    log(Log.ERROR, TAG, "autostart root choke failed", t)
+                }
+                if (answered) AppOpsManager.MODE_ALLOWED else chain.proceed()
+            }
+            deoptimize(method)
+            installed++
+        }
+        if (installed > 0) {
+            log(
+                Log.INFO, TAG,
+                "autostart gate: $installed checkpoint(s) hooked (read-through); " +
+                    "denials counted unconditionally, each releasable gate follows " +
+                    "its own experiment switch, pre-start probed read-only, " +
+                    "AppOps root choke answers op 10008 before the ROM judges"
+            )
+        }
+    }
+
+    /**
+     * One autostart-gate verdict: count a denial for a checked callee, and
+     * release it when the experiment switch says to.
+     *
+     * Returns the value the caller should hand back to the ROM — the original
+     * verdict, or `true` when this overrode it.
+     *
+     * One line per denial, carrying the outcome as well: the denial and the
+     * release used to be two lines with two independent detail budgets, so a
+     * late denial could be logged while its release silently fell past the
+     * limit and the pair became unreadable — which is exactly how the first
+     * sample ended, with a `DENIED` that nobody could tell apart from a
+     * `kept`. Merging them costs one line per event instead of two, so the
+     * budget below now covers twice as many events as it used to.
+     */
+    private fun autostartGateVerdict(
+        chain: XposedInterface.Chain,
+        gate: String,
+        callee: String?,
+        detail: String? = null,
+        releaseable: Boolean = true
+    ): Any? {
+        val result = chain.proceed()
+        try {
+            if (java.lang.Boolean.TRUE == result) {
+                return result
+            }
+            if (callee == null || !wakeExplicitlyAllows(callee)) {
+                return result
+            }
+            val denied = when (gate) {
+                AUTOSTART_GATE_SERVICE -> ++autostartGateServiceDeniedCount
+                AUTOSTART_GATE_PROCESS -> ++autostartGateProcessDeniedCount
+                AUTOSTART_GATE_RESTART -> ++autostartGateRestartDeniedCount
+                else -> ++autostartGatePreStartDeniedCount
+            }
+            // Probed checkpoints are answered by the ROM exactly as it answered
+            // them before this hook existed, whatever the switch says: the point
+            // of the probe is to learn whether they fire, and releasing them in
+            // the same step would make the observation and the intervention
+            // impossible to tell apart.
+            //
+            // The two releasable gate families each read their own experiment
+            // key — deliberately not an AND chain under the master, so that
+            // one rung can be isolated and measured on its own.
+            val release = releaseable && when (gate) {
+                AUTOSTART_GATE_RESTART -> isAutostartRestartReleaseEnabled()
+                else -> isAutostartGateReleaseEnabled()
+            }
+            if (release) {
+                if (gate == AUTOSTART_GATE_RESTART) {
+                    ++autostartGateRestartReleaseCount
+                } else {
+                    ++autostartGateReleaseCount
+                }
+            }
+            if (claimAutostartGateDetail(gate, callee)) {
+                // Who asked, as far as the binder layer can tell. A real uid
+                // other than 1000 means the call crossed a process boundary,
+                // which is the only way this gate can name its caller; 1000
+                // means system_server asked itself, and the caller stays
+                // unknown. Either answer is a fact, so it is logged as read.
+                val callerUid = try {
+                    Binder.getCallingUid()
+                } catch (t: Throwable) {
+                    -1
+                }
+                log(
+                    Log.INFO, TAG,
+                    "autostart gate: ${autostartGateLabel(gate)} DENIED #$denied -> " +
+                        (if (!releaseable) "probe" else if (release) "released" else "kept") +
+                        " (callee=$callee" +
+                        (if (detail == null) "" else ", $detail") +
+                        ", caller-uid=$callerUid)"
+                )
+            }
+            if (release) {
+                return true
+            }
+        } catch (t: Throwable) {
+            log(Log.ERROR, TAG, "Failed to evaluate autostart gate", t)
+        }
+        return result
+    }
+
+    /**
+     * Human wording for the gate key inside a detail line.
+     *
+     * The two original gates keep the exact letters they have always had —
+     * `service start DENIED` / `process start DENIED` — because saved samples
+     * and the diagnostics notes grep for them; only the two probes added
+     * alongside need new words, and they get the gate name on its own. A gate
+     * the ROM answered by *restarting* a killed service is not a "start", and a
+     * pre-start checkpoint that is itself a probe should not borrow the start
+     * family's phrasing.
+     */
+    private fun autostartGateLabel(gate: String): String = when (gate) {
+        AUTOSTART_GATE_SERVICE -> "$gate start"
+        AUTOSTART_GATE_PROCESS -> "$gate start"
+        else -> gate
+    }
+
+    /**
+     * `ServiceName` out of an intent meant to start one — the short class name,
+     * because the full one repeats the package that is already in the line, and
+     * the action when there is no component. Null when neither is present.
+     */
+    private fun shortComponent(intent: Intent): String? {
+        val component = intent.component
+        if (component != null) {
+            val cls = component.className
+            val dot = cls.lastIndexOf('.')
+            return cls.substring(dot + 1)
+        }
+        val action = intent.action
+        if (!action.isNullOrEmpty()) {
+            val dot = action.lastIndexOf('.')
+            return "action=" + action.substring(dot + 1)
+        }
+        return null
+    }
+
+    /**
+     * Experiment switch: release the autostart verdict for a checked callee.
+     *
+     * Fails to *disabled*: this answers a gate the ROM owns, and an unreadable
+     * switch must leave the ROM's own decision alone.
+     */
+    private fun isAutostartGateReleaseEnabled(): Boolean {
+        return try {
+            getRemotePreferences(Prefs.GROUP_CONFIG)
+                .getBoolean(Prefs.KEY_AUTOSTART_GATE_RELEASE, false)
+        } catch (ignored: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Experiment switch: release the restart gate (freeze instead of restart)
+     * for a checked callee. Reads its **own** key — not the master's — so the
+     * freeze rung can be measured in isolation.
+     *
+     * Fails to *disabled*, same reasoning as the master above.
+     */
+    private fun isAutostartRestartReleaseEnabled(): Boolean {
+        return try {
+            getRemotePreferences(Prefs.GROUP_CONFIG)
+                .getBoolean(Prefs.KEY_AUTOSTART_RESTART_RELEASE, false)
+        } catch (ignored: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Experiment switch: answer the autostart op query itself for a checked
+     * package. Reads its **own** key, same isolation reasoning.
+     *
+     * Fails to *disabled*, same reasoning as the master above.
+     */
+    private fun isAutostartRootReleaseEnabled(): Boolean {
+        return try {
+            getRemotePreferences(Prefs.GROUP_CONFIG)
+                .getBoolean(Prefs.KEY_AUTOSTART_ROOT_RELEASE, false)
+        } catch (ignored: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Experiment switch: write the autostart *switch* op (`10053`) alongside
+     * the behavior op. ANDed with the behavior write on the hook side, so
+     * this alone writes nothing.
+     *
+     * Fails to *disabled*: this writes a setting the user can see, so an
+     * unreadable switch must leave the ROM's own value alone.
+     */
+    private fun isWakeWriteAutostartSwitchEnabled(): Boolean {
+        return try {
+            getRemotePreferences(Prefs.GROUP_CONFIG)
+                .getBoolean(Prefs.KEY_WAKE_WRITE_AUTOSTART_SWITCH, false)
+        } catch (ignored: Throwable) {
+            false
+        }
+    }
+
     /** `resolveInfo.activityInfo.applicationInfo.packageName`, `"?"` if unavailable. */
     private fun resolvePackageOf(resolveInfo: Any?): String {
         val info = resolveInfo as? ResolveInfo ?: return "?"
@@ -4893,6 +5320,105 @@ class Hooker : XposedModule() {
 
     @Volatile
     private var broadcastWakePathC2dmDeniedCount = 0
+
+    /**
+     * Autostart gate: denials the ROM issued for a *checked* callee, split by
+     * the checkpoint that issued them. See [hookAutostartGate].
+     *
+     * Counted whether or not the experiment switch is on, so a user who never
+     * turns it on still gets the evidence: non-zero here is the ROM refusing a
+     * start that the module's own broadcast hook already waved through.
+     */
+    @Volatile
+    private var autostartGateServiceDeniedCount = 0
+
+    @Volatile
+    private var autostartGateProcessDeniedCount = 0
+
+    /**
+     * Autostart gate: denials from the two checkpoints added alongside the pair
+     * above, counted the same way and for the same reason.
+     *
+     * Both are **read-only**: they exist to establish whether these ROM paths
+     * are live and whether they ever deny a checked package, before anything is
+     * allowed to answer them. A counter that stays zero is the answer "not on
+     * this build" — which is a fact worth having, and one the module cannot get
+     * by reading the ROM alone.
+     */
+    @Volatile
+    private var autostartGateRestartDeniedCount = 0
+
+    @Volatile
+    private var autostartGatePreStartDeniedCount = 0
+
+    /** Autostart gate: verdicts this hook flipped from deny to allow. */
+    @Volatile
+    private var autostartGateReleaseCount = 0
+
+    /**
+     * Restart gate: verdicts flipped from freeze to restart. Counted apart
+     * from [autostartGateReleaseCount] because the gate answers a different
+     * question — whether a dead service may come back at all, not whether a
+     * start may happen — and the ladder reads the two rungs separately.
+     */
+    @Volatile
+    private var autostartGateRestartReleaseCount = 0
+
+    /**
+     * Root choke: queries answered as allowed before the ROM's own logic ran.
+     * Not a denial count at all — the ROM never refuses here — so it lives in
+     * its own number and never mixes into the `released=` pair.
+     */
+    @Volatile
+    private var autostartRootReleaseCount = 0
+
+    /**
+     * Autostart gate detail budget: "(gate/callee)" → lines already spent in
+     * the current window, plus the window's start and total. See
+     * [AUTOSTART_GATE_DETAIL_PER_CALLEE] for why it is shaped this way.
+     *
+     * Guarded by [autostartGateDetailLock] rather than made a concurrent map,
+     * because the reset has to see the buckets and the window start as one
+     * decision: two threads entering on either side of the boundary would
+     * otherwise clear each other's work or hand out a second full allowance.
+     * Every access is short and none of them can block on the ROM.
+     */
+    private val autostartGateDetailBuckets = HashMap<String, Int>()
+    private val autostartGateDetailLock = Any()
+    private var autostartGateDetailWindowStartMs = 0L
+    private var autostartGateDetailWindowTotal = 0
+
+    /**
+     * Whether this denial may spend a detail line, rolling the window when it
+     * has aged out. True for at most [AUTOSTART_GATE_DETAIL_PER_CALLEE] lines
+     * per (gate, callee) pair per window.
+     *
+     * The bucket key is the pair, not the bare callee: an active callee that
+     * gets denied at several gates in the same window would otherwise spend
+     * one shared allowance across all of them and starve the later gates —
+     * which is exactly what the first live window did (22 denials, 10 lines,
+     * the restart gate starved by the process gate before it).
+     */
+    private fun claimAutostartGateDetail(gate: String, callee: String): Boolean {
+        synchronized(autostartGateDetailLock) {
+            val now = SystemClock.elapsedRealtime()
+            if (now - autostartGateDetailWindowStartMs >= AUTOSTART_GATE_DETAIL_WINDOW_MS) {
+                autostartGateDetailBuckets.clear()
+                autostartGateDetailWindowTotal = 0
+                autostartGateDetailWindowStartMs = now
+            }
+            val key = "$gate/$callee"
+            val used = autostartGateDetailBuckets[key] ?: 0
+            if (used >= AUTOSTART_GATE_DETAIL_PER_CALLEE ||
+                autostartGateDetailWindowTotal >= AUTOSTART_GATE_DETAIL_PER_HOUR
+            ) {
+                return false
+            }
+            autostartGateDetailBuckets[key] = used + 1
+            autostartGateDetailWindowTotal++
+            return true
+        }
+    }
 
     /** 3.2 gate: how many times the ROM really asked netd to destroy sockets. */
     @Volatile
@@ -5193,8 +5719,45 @@ class Hooker : XposedModule() {
         /**
          * MIUI's autostart AppOp — `com.miui.internal.os.MiuiHooks.OP_AUTO_START`.
          * Not an AOSP op: the MIUI range starts at 10000.
+         *
+         * **This one is the behaviour; `10053` is only the switch the Security
+         * Centre UI shows.** Confirmed on V816 by opening autostart for a
+         * package and watching both ops: the ROM writes and reverts the pair
+         * together, but writing `10008` alone is already enough to change what
+         * the ROM does. So the ~25 packages sitting at `10008=allow /
+         * 10053=ignore` are not in an inconsistent *functional* state — only
+         * the Settings row is lying. (Corollary: the user's own revert path is
+         * the two-step one — a row showing "off" has to be turned "on" before
+         * "off" writes `10008` back.)
+         *
+         * **Why this op decides delivery although the module already answers
+         * the broadcast gate.** The hook on
+         * `BroadcastQueueModernStubImpl#checkApplicationAutoStart` short-circuits
+         * at method entry for caller=GMS + c2dm, so on the FCM hop the op is
+         * never even read there. The op is read by the *other* checkpoints
+         * (see HOOKS_AND_DIAGNOSTICS §「自启动 AppOps 10008 共四类检查点」):
+         * service start/bind (`AutoStartManagerServiceStub#isAllowStartService`
+         * and friends) and process start (`ProcessManagerService#isAllowAutoStart`).
+         * A message whose process is cached still has to start the messaging
+         * service; one whose process was reaped has to start the process. Both
+         * read this op, which is why the same write fixes both and why whether
+         * the process was dead does not change the outcome.
+         *
+         * Rejection shows up in logcat as `MIUILOG-AutoStart, Service/Provider/
+         * Broadcast Reject …`; the service/activity sibling family is what the
+         * read-only `checkWakePath` probe logs as `checkWakePath DENIED`.
          */
         private const val MIUIOP_AUTO_START = 10008
+
+        /**
+         * `10053 = OP_AUTO_START_SWITCH` — the manager toggle's own op, which
+         * 手机管家's autostart switch writes alongside `10008`
+         * (framework.jar → `miui/MiuiAppOpsNames.java`). Writing it is the
+         * display-symmetry rung; whether the manager's row *reads* it for
+         * display is not yet bytecode-confirmed, so nothing on screen
+         * promises a visible change.
+         */
+        private const val MIUIOP_AUTO_START_SWITCH = 10053
 
         /**
          * Outcomes of [writeAutostartIfNeeded]. Ints rather than an enum so the
@@ -5204,6 +5767,33 @@ class Hooker : XposedModule() {
         private const val AUTOSTART_ALREADY = 0
         private const val AUTOSTART_WRITTEN = 1
         private const val AUTOSTART_FAILED = -1
+
+        /**
+         * The package carries [ApplicationInfo.FLAG_SYSTEM], so the write was
+         * refused on purpose. One flag covers every preloaded shape the user
+         * can end up with — factory apps on any preloaded partition, and
+         * updated system apps, where the update only replaces the APK under
+         * /data and never clears the flag.
+         *
+         * The reason for the refusal is reversibility, not harm: the ROM's own
+         * undo path for a written op is 手机管家's autostart toggle, and the
+         * deep system packages do not appear on that page at all. This module
+         * never learns the previous op values, so a write it cannot undo
+         * through the ROM is a write it cannot undo at all.
+         */
+        private const val AUTOSTART_SKIPPED_SYSTEM = 2
+
+        /**
+         * The allowlisted package is no longer installed — checked once, then
+         * uninstalled without being unchecked first. There is nothing to write
+         * and nothing to fail at: the entry is stale in the allowlist until the
+         * user unchecks it (or reinstalls), and the ROM's own op row for a
+         * removed package is gone anyway. Skipped silently, like
+         * [AUTOSTART_SKIPPED_SYSTEM], because it is a state the allowlist can
+         * legitimately sit in, not an error — an ERROR per stale entry per
+         * broadcast would be indistinguishable from a storm.
+         */
+        private const val AUTOSTART_SKIPPED_MISSING = 3
 
         /**
          * Shortest interval between two autostart writes for the same package on
@@ -5218,6 +5808,17 @@ class Hooker : XposedModule() {
         private const val WAKE_AUTOSTART_COOLDOWN_MS = 60_000L
         /** Package → last autostart write attempt, best-effort under concurrency. */
         private val wakeAutostartLastMs = ConcurrentHashMap<String, Long>()
+
+        /**
+         * Set while the module itself is reading the autostart op for its
+         * read-before-write. The root choke hooks the very method this read
+         * goes through, and without the flag the choke's answer ("allowed")
+         * would make every write see an already-allowed op and silently stop
+         * the persistent half from ever writing while the root rung is on.
+         * Thread-local because the write runs on the allowlist handler thread;
+         * always cleared in a finally.
+         */
+        private val autostartWriteReadInFlight = ThreadLocal<Boolean>()
 
         /**
          * `AppOpsManager#setMode(int, int, String, int)` and
@@ -5326,6 +5927,75 @@ class Hooker : XposedModule() {
 
         /** Gate-W / Gate-B: detailed probe lines before falling back to plain counters. */
         private const val WAKE_PATH_DETAIL_LIMIT = 10
+
+        /**
+         * Autostart gate: detailed lines, budgeted **per callee and per hour**
+         * rather than once per process.
+         *
+         * The budget used to be a single process-lifetime allowance of 20 shared
+         * by both gates. An evening of normal phone use spent it before
+         * midnight, so the quiet hours — the only stretch in which a denial is
+         * interesting — were left with counters and no detail. "Nothing to
+         * read" is precisely the case the detail exists for, and the budget was
+         * the reason for it.
+         *
+         * Per callee so one chatty package cannot spend every other package's
+         * allowance, and hourly so a burst cannot spend the rest of the night's.
+         * The hourly total is a volume backstop for the case where many distinct
+         * checked packages are all being denied at once.
+         */
+        private const val AUTOSTART_GATE_DETAIL_PER_CALLEE = 4
+        private const val AUTOSTART_GATE_DETAIL_PER_HOUR = 40
+        private const val AUTOSTART_GATE_DETAIL_WINDOW_MS = 60 * 60_000L
+
+        // OS4 (myron) symbols, confirmed against `miui-services` dex: the class is
+        // `AutoStartManagerServiceStubImpl`, not the `…Stub` the diagnostics doc
+        // used to quote — `loadClass` on the shorter name finds nothing.
+        private const val AUTOSTART_STUB_CLASS =
+            "com.android.server.am.AutoStartManagerServiceStubImpl"
+        private const val AUTOSTART_SERVICE_METHOD = "isAllowStartService"
+        private const val AUTOSTART_PROCESS_METHOD = "isAllowAutoStart"
+        /**
+         * Restart-after-death. Same class as the two above, and the only
+         * autostart checkpoint on the "service was killed and is being
+         * scheduled back" path — `ActiveServices.scheduleServiceRestartLocked`.
+         * Two overloads exist; both take the callee package as parameter 0.
+         */
+        private const val AUTOSTART_RESTART_METHOD = "canRestartServiceLocked"
+
+        /**
+         * MIUI's pre-start feedback: the fourth place in this ROM that reads
+         * `10008`, and the only one outside `am`'s autostart family.
+         *
+         * `PreStartFeedbackImpl#isAutoStart(String, int)` is the read itself — a
+         * private helper returning `true` when the op is `MODE_ALLOWED`. Its
+         * callers are the pre-start *punishments*: `isProhibitShowWindow` (block
+         * a window), `isTempDeniedNotificationForPreStart` (withhold a
+         * notification) and `reportProcStartedLocked` (track a cached process
+         * for kill). So an app that starts in the background without autostart
+         * is not merely refused — the ROM also takes its window and its
+         * notification away, which is a delivery-side effect the other three
+         * checkpoints cannot produce.
+         *
+         * Probed read-only: whether these paths are even enabled on this build
+         * is a static ROM flag, not something the module may assume.
+         */
+        private const val AUTOSTART_PRE_START_CLASS =
+            "com.android.server.am.PreStartFeedbackImpl"
+        private const val AUTOSTART_PRE_START_METHOD = "isAutoStart"
+
+        private const val AUTOSTART_GATE_SERVICE = "service"
+        private const val AUTOSTART_GATE_PROCESS = "process"
+        private const val AUTOSTART_GATE_RESTART = "restart"
+        private const val AUTOSTART_GATE_PRE_START = "pre-start"
+
+        /**
+         * Detail-bucket key for the root choke. Not a gate the ROM can deny —
+         * the choke answers before the ROM's own logic runs — so it never
+         * appears in a `DENIED` line; it only borrows the detail budget so one
+         * active package cannot flood the log with per-query lines.
+         */
+        private const val AUTOSTART_GATE_ROOT = "root"
 
         /**
          * §5 alarm gate: the Impl overrides the Stub, so the Impl is the live

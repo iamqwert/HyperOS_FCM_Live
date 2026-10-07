@@ -957,10 +957,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun reloadAllowlist() {
-        val prefs = remotePrefs() ?: return
+        val prefs = remotePrefs()
+        // Keys of experiments this version no longer has, dropped from both
+        // copies before anything reads them — see [Prefs.dropRetiredConfigKeys].
+        // Called with a null handle too, so the mirror is cleaned even when the
+        // module service never binds.
+        Prefs.dropRetiredConfigKeys(this, prefs)
         // Same repair as the allowlist below, for the strict-mode flag: a toggle
         // made before the service bound lives only in the mirror, and adopting
         // the older remote value here would silently revert it.
+        if (prefs == null) return
         if (Prefs.hasPendingStrictPush(this)) {
             Prefs.writeStrictMode(this, prefs, strictMode)
         }
@@ -1000,25 +1006,39 @@ class MainActivity : AppCompatActivity() {
                 this, prefs, Prefs.readLocalSleepKeepaliveData(this)
             )
         }
-        if (Prefs.hasPendingWakeStoppedPackagesPush(this)) {
-            // Same repair for the wake switch, which the experiment screen
-            // owns; without this a flip made before the service bound would be
-            // reverted here rather than pushed up.
-            Prefs.writeWakeStoppedPackages(
-                this, prefs, Prefs.readLocalWakeStoppedPackages(this)
-            )
-        }
-        if (Prefs.hasPendingWakeAutostartRelaxedPush(this)) {
-            // And for the second wake pair's master switch, which the experiment
-            // screen owns; same repair, same reason.
-            Prefs.writeWakeAutostartRelaxed(
-                this, prefs, Prefs.readLocalWakeAutostartRelaxed(this)
-            )
-        }
         if (Prefs.hasPendingWakeWriteAutostartPush(this)) {
-            // And for its autostart-write sub-switch.
+            // Same repair for the autostart-write switch, which the experiment
+            // screen owns; without this a flip made before the service bound
+            // would be reverted here rather than pushed up.
             Prefs.writeWakeWriteAutostart(
                 this, prefs, Prefs.readLocalWakeWriteAutostart(this)
+            )
+        }
+        if (Prefs.hasPendingAutostartGateReleasePush(this)) {
+            // Same repair for the autostart-gate switch, which the experiment
+            // screen owns; without this a flip made before the service bound
+            // would be reverted here rather than pushed up.
+            Prefs.writeAutostartGateRelease(
+                this, prefs, Prefs.readLocalAutostartGateRelease(this)
+            )
+        }
+        if (Prefs.hasPendingAutostartRestartReleasePush(this)) {
+            // Same repair for the restart-gate rung.
+            Prefs.writeAutostartRestartRelease(
+                this, prefs, Prefs.readLocalAutostartRestartRelease(this)
+            )
+        }
+        if (Prefs.hasPendingAutostartRootReleasePush(this)) {
+            // Same repair for the AppOps root rung.
+            Prefs.writeAutostartRootRelease(
+                this, prefs, Prefs.readLocalAutostartRootRelease(this)
+            )
+        }
+        if (Prefs.hasPendingWakeWriteAutostartSwitchPush(this)) {
+            // Same repair for the switch-write rung, which rides the
+            // autostart-write walk.
+            Prefs.writeWakeWriteAutostartSwitch(
+                this, prefs, Prefs.readLocalWakeWriteAutostartSwitch(this)
             )
         }
         if (Prefs.hasPendingPush(this)) {
