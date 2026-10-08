@@ -366,6 +366,26 @@ object Prefs {
     private const val KEY_WAKE_WRITE_AUTOSTART_SWITCH_PENDING_PUSH =
         "wake_write_autostart_switch_pending_push"
 
+    /**
+     * Remote + local: keep a checked app's network up across a greeze freeze.
+     *
+     * `DomesticPolicyManager#isRestrictNet(uid)` is the one verdict behind the
+     * freeze-time network cut: `GreezeManagerService#freezeUids` tears the
+     * uid's sockets and adds the restriction flags only when it answers true.
+     * The shipped hook already forces `false` for the GMS uid; this switch
+     * extends the same answer to uids whose package is on the FCM wake
+     * allowlist. Nothing is written, no list is edited, and the freeze itself
+     * still happens — only its network half is kept off for checked apps. An
+     * empty allowlist answers no uid, so the switch does nothing until the
+     * user checks at least one app.
+     *
+     * Default **off**, like every other experiment.
+     */
+    const val KEY_GREEZE_NET_RELEASE = "greeze_net_release"
+    /** UI-only: set while the mirror holds a net-release change the module never saw. */
+    private const val KEY_GREEZE_NET_RELEASE_PENDING_PUSH =
+        "greeze_net_release_pending_push"
+
     /** Action the app broadcasts after writing, to refresh system_server. */
     const val ACTION_ALLOWLIST_CHANGED = MODULE_PKG + ".ALLOWLIST_CHANGED"
 
@@ -941,6 +961,52 @@ object Prefs {
             } catch (t: Throwable) {
                 localPrefs(app).edit()
                     .putBoolean(KEY_AUTOSTART_ROOT_RELEASE_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+        }
+    }
+
+    /** Net-release switch value as the UI last left it. */
+    @JvmStatic
+    fun readLocalGreezeNetRelease(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_GREEZE_NET_RELEASE, false)
+    }
+
+    /** Net-release counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingGreezeNetReleasePush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_GREEZE_NET_RELEASE_PENDING_PUSH, false)
+    }
+
+    /**
+     * Write the net-release switch and make it live.
+     *
+     * Same shape as [writeAutostartGateRelease]: the hook reads the key at the
+     * moment the ROM asks its verdict, so the value takes effect on the next
+     * freeze without an apply broadcast.
+     */
+    @JvmStatic
+    fun writeGreezeNetRelease(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean
+    ) {
+        val app = appContext(context)
+        localPrefs(app).edit().putBoolean(KEY_GREEZE_NET_RELEASE, enabled).apply()
+        if (remotePrefs == null) {
+            localPrefs(app).edit()
+                .putBoolean(KEY_GREEZE_NET_RELEASE_PENDING_PUSH, true).apply()
+            broadcastAllowlistChanged(app)
+            return
+        }
+        localPrefs(app).edit()
+            .putBoolean(KEY_GREEZE_NET_RELEASE_PENDING_PUSH, false).apply()
+        WRITER.execute {
+            try {
+                remotePrefs.edit().putBoolean(KEY_GREEZE_NET_RELEASE, enabled).commit()
+            } catch (t: Throwable) {
+                localPrefs(app).edit()
+                    .putBoolean(KEY_GREEZE_NET_RELEASE_PENDING_PUSH, true).apply()
             }
             broadcastAllowlistChanged(app)
         }

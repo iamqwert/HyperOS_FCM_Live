@@ -171,6 +171,11 @@
     <string name="experiment_autostart_write_confirm">写入只改变自启动行为，不改变手机管家的自启动开关，在应用管理里看不出变化\n为安全考虑，系统应用一律不写入\n写入后，关闭本开关不会还原；	撤销方式：在手机管家里把该应用的自启动先打开再关闭</string>
     <string name="experiment_autostart_write_confirm_ok">写入</string>
 
+    <!-- 后台网络单列一节：冻结期网络放宽，只作用于白名单内应用，默认关 -->
+    <string name="experiment_section_background_net">后台网络</string>
+    <string name="experiment_greeze_net_release">保持已勾选应用冻结期联网</string>
+    <string name="experiment_greeze_net_release_desc">已勾选应用切至后台被冻时网络保持可用；本项并不优化 FCM 推送，而是保护这些应用的自有长连接</string>
+
     <!-- 模块状态页 -->
     <string name="status_yes">是</string>
     <string name="status_no">否</string>

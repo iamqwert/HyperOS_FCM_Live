@@ -134,6 +134,9 @@ private fun ExperimentBody(
     var wakeWriteAutostartSwitch by remember {
         mutableStateOf(Prefs.readLocalWakeWriteAutostartSwitch(context))
     }
+    var greezeNetRelease by remember {
+        mutableStateOf(Prefs.readLocalGreezeNetRelease(context))
+    }
     // The write rows are on screen while either persistent switch says so: the
     // settings they write outlive every runtime switch, and each hook reads its
     // own flag alone, so hiding them with the master would remove the only
@@ -413,6 +416,29 @@ private fun ExperimentBody(
                     }
                 }
             }
+        }
+        item {
+            // A section of its own: this row answers the freeze-time network
+            // cut (greeze), not the autostart verdict the section above works
+            // on — same freeze machinery, a different half of it. Nothing is
+            // written and nothing hides behind anything: one row, always on
+            // screen, so no first/last juggling.
+            SectionTitle(R.string.experiment_section_background_net)
+            SettingsSwitchCard(
+                iconRes = R.drawable.ic_greeze_net_release,
+                title = stringResource(R.string.experiment_greeze_net_release),
+                description = stringResource(R.string.experiment_greeze_net_release_desc),
+                checked = greezeNetRelease,
+                onCheckedChange = { checked ->
+                    Prefs.writeGreezeNetRelease(context, Prefs.remote(), checked)
+                    greezeNetRelease = checked
+                },
+                // Same empty-allowlist hint the autostart rows carry: the text
+                // is generic (it never mentions autostart), and this switch is
+                // just as inert until at least one app is checked.
+                stateLine = emptyAllowlistHint,
+                stateLineOff = emptyAllowlistHint
+            )
         }
         // The same 16dp tail the settings page ends on, so the last card does
         // not sit flush against the gesture strip on a fully scrolled page.

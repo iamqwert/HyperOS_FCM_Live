@@ -1041,6 +1041,12 @@ class MainActivity : AppCompatActivity() {
                 this, prefs, Prefs.readLocalWakeWriteAutostartSwitch(this)
             )
         }
+        if (Prefs.hasPendingGreezeNetReleasePush(this)) {
+            // Same repair for the greeze net-release switch.
+            Prefs.writeGreezeNetRelease(
+                this, prefs, Prefs.readLocalGreezeNetRelease(this)
+            )
+        }
         if (Prefs.hasPendingPush(this)) {
             // A check made before the service bound is newer than the remote set:
             // push it up (the write broadcasts, so system_server re-reads too)
