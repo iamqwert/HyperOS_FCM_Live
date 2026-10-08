@@ -47,7 +47,8 @@ import java.util.concurrent.atomic.AtomicLong
  * - Root is not module privilege. No `su`/`exec su` from a hook (watchdog risk),
  *   no SELinux changes, no injection into GMS or into a target app, no cloud
  *   (云控) countermeasures, no global writes upstream of this module's own
- *   three documented write sites.
+ *   five documented write sites — see the write-surface audit on
+ *   [ensureGmsInMilletSetting].
  *
  * Defence placement, which decides whether a hook is worth having:
  * - A live path whose current branch does not hit GMS → keep a **sentinel**
@@ -970,9 +971,17 @@ class Hooker : XposedModule() {
      *
      * Currently inert: greezer history shows GMS never enters the freeze path on
      * this device (E7-3 closed, negative). Shipped as defence: if a future ROM or
-     * state freezes GMS, this keeps the network restriction off. Only the GMS uid
-     * is forced — every other uid proceeds unchanged, so the instant-messaging
-     * apps that *are* on the exempt list keep their existing policy.
+     * state freezes GMS, this keeps the network restriction off.
+     *
+     * Experiment branch (`greeze_net_release`, default off): the same `false`
+     * for a uid whose package is on the FCM wake allowlist. An empty allowlist
+     * answers no uid, and an unreadable switch reads as off — the freeze
+     * decision itself is untouched either way, only its network half. GMS is
+     * deliberately not answered by the branch: the forced answer above is the
+     * only path that touches the GMS uid, so the two stay separately countable.
+     * Without the experiment branch, every other uid proceeds unchanged, so
+     * the instant-messaging apps that *are* on the exempt list keep their
+     * existing policy.
      */
     private fun hookDomesticRestrictNet(domesticPolicyManagerClass: Class<*>) {
         try {
@@ -993,10 +1002,33 @@ class Hooker : XposedModule() {
                     }
                     return@intercept false
                 }
+                if (uid is Int && isGreezeNetReleaseEnabled()) {
+                    val checkedPkg = allowlistPackageForUid(uid)
+                    if (checkedPkg != null) {
+                        greezeNetReleaseCount++
+                        // Detail budget: one line per uid, ever — the summary
+                        // tick carries the volume, so repeating the same names
+                        // each freeze would only spend log bytes.
+                        synchronized(greezeNetReleaseLoggedUids) {
+                            if (greezeNetReleaseLoggedUids.add(uid)) {
+                                log(
+                                    Log.INFO, TAG,
+                                    "greeze net release: kept checked app " +
+                                        "$checkedPkg (uid $uid) unrestricted"
+                                )
+                            }
+                        }
+                        return@intercept false
+                    }
+                }
                 chain.proceed()
             }
             deoptimize(isRestrictNetMethod)
-            log(Log.INFO, TAG, "DomesticPolicyManager#isRestrictNet hooked for GMS")
+            log(
+                Log.INFO, TAG,
+                "DomesticPolicyManager#isRestrictNet hooked for GMS; " +
+                    "checked apps follow greeze_net_release"
+            )
         } catch (e: NoSuchMethodException) {
             logSkip("DomesticPolicyManager#isRestrictNet absent, skip")
         }
@@ -1092,7 +1124,19 @@ class Hooker : XposedModule() {
                             @Suppress("UNCHECKED_CAST")
                             val mSystemBlackList =
                                 field.get(chain.thisObject) as MutableList<String>?
-                            mSystemBlackList?.remove(GMS_PACKAGE_NAME)
+                            // One-shot confirmation: this constructor fires during
+                            // system_server startup and used to mutate silently, so
+                            // "hook installed" and "mutation actually happened" were
+                            // indistinguishable in the logs.
+                            val removed = mSystemBlackList?.remove(GMS_PACKAGE_NAME)
+                            if (removed != null && !listAppsBlacklistPruneLogged) {
+                                listAppsBlacklistPruneLogged = true
+                                log(
+                                    Log.INFO, TAG,
+                                    "ListAppsManager: pruned GMS from system blacklist " +
+                                        "(was present=$removed)"
+                                )
+                            }
                         } catch (e: Exception) {
                             log(Log.ERROR, TAG, "Failed to modify system blacklist", e)
                         }
@@ -1128,7 +1172,19 @@ class Hooker : XposedModule() {
                         @Suppress("UNCHECKED_CAST")
                         val mUseDataWhiteList =
                             field.get(chain.thisObject) as MutableSet<String>?
-                        mUseDataWhiteList?.add(GMS_PACKAGE_NAME)
+                        val added = mUseDataWhiteList?.add(GMS_PACKAGE_NAME)
+                        // isInWhiteList is a hot query path: confirm the mutation
+                        // once, then stay silent — the fixed per-line log cost
+                        // dwarfs the message body, and this hook runs on every
+                        // use-data query for every package.
+                        if (added != null && !listAppsUseDataAddLogged) {
+                            listAppsUseDataAddLogged = true
+                            log(
+                                Log.INFO, TAG,
+                                "ListAppsManager: added GMS to use-data whitelist " +
+                                    "(was absent=$added)"
+                            )
+                        }
                     } catch (e: Exception) {
                         log(Log.ERROR, TAG, "Failed to modify use data whitelist", e)
                     }
@@ -3009,13 +3065,17 @@ class Hooker : XposedModule() {
      * After a repair, triggers P4 recovery so an already-frozen GMS gets a
      * chance to reconnect.
      *
-     * Write-surface audit (2026-10-03): this is one of only **three** places in
-     * the module that persists anything outside its own prefs — this one,
-     * [ensureGmsUserTableBgControl], and the WeChat doze keepout (default off).
-     * All three widen a restriction; none can blacklist an app, and there is no
-     * path that leaves an app worse off after uninstalling the module than it
-     * was before installing it. Keep it that way: a new write has to justify
-     * itself against this list.
+     * Write-surface audit (2026-10-03, extended 2026-10-08): these are the only
+     * **five** places in the module that persist anything outside its own prefs —
+     * this one, [ensureGmsUserTableBgControl], the WeChat doze keepout (default
+     * off), and the autostart op writes ([writeAutostartIfNeeded]: `setMode(10008)`,
+     * plus `setMode(10053)` behind its own sub-rung — both default off). All of
+     * them widen a restriction; none can blacklist an app, and there is no path
+     * that leaves an app worse off after uninstalling the module than it was
+     * before installing it. Runtime-only effects a reboot erases — sleep-mode
+     * uid injections, netd/DNS rule rewrites, in-memory hook answers — are
+     * deliberately not counted here: this list tracks what persists. Keep it
+     * that way: a new write has to justify itself against this list.
      */
     private fun ensureGmsInMilletSetting() {
         ensureGmsUserTableBgControl()
@@ -4432,6 +4492,11 @@ class Hooker : XposedModule() {
      * finding that says the autostart op, not the broadcast gate, is what
      * decides delivery.
      *
+     * `net-released` rides it too: the greeze net-release detail line fires
+     * once per uid, ever, so the counter is the only measure of how often
+     * freezes actually hit checked apps — and a steady zero with the switch
+     * on means greeze never froze a checked app this interval.
+     *
      * The wake-path half is the P2 probe, and it rides this tick on purpose: the
      * probe's own detailed lines only fire when its gate is actually reached, so
      * without this tick "never reached" and "reached and always allowed" would
@@ -4460,13 +4525,14 @@ class Hooker : XposedModule() {
             autostartGatePreStartDeniedCount == 0 &&
             autostartGateReleaseCount == 0 &&
             autostartGateRestartReleaseCount == 0 &&
-            autostartRootReleaseCount == 0
+            autostartRootReleaseCount == 0 &&
+            greezeNetReleaseCount == 0
         if (idle) {
             return "broadcast gate idle — c2dm " +
                 "allowed/skipped/reached-defer/cn-actions = 0, " +
                 "wake-path reached/c2dm/denied/c2dm-denied = 0, " +
                 "autostart gate service/process/restart/pre-start-denied, " +
-                "released, restart-released, root-released = 0"
+                "released, restart-released, root-released, net-released = 0"
         }
         return "broadcast gate c2dm allowed=${broadcastGateAllowedCount} " +
             "(uid-fallback=${broadcastGateAllowedByUidCount}), " +
@@ -4483,7 +4549,8 @@ class Hooker : XposedModule() {
                 "pre-start-denied=${autostartGatePreStartDeniedCount}, " +
                 "released=${autostartGateReleaseCount}, " +
                 "restart-released=${autostartGateRestartReleaseCount}, " +
-                "root-released=${autostartRootReleaseCount}"
+                "root-released=${autostartRootReleaseCount}, " +
+                "net-released=${greezeNetReleaseCount}"
     }
 
     /**
@@ -5180,6 +5247,51 @@ class Hooker : XposedModule() {
         }
     }
 
+    /**
+     * Experiment switch: keep a checked app's network up across a greeze
+     * freeze. Reads its **own** key — it answers the freeze-time network cut,
+     * not the autostart verdict, and must stay measurable on its own.
+     *
+     * Fails to *disabled*: this answers a verdict the ROM owns.
+     */
+    private fun isGreezeNetReleaseEnabled(): Boolean {
+        return try {
+            getRemotePreferences(Prefs.GROUP_CONFIG)
+                .getBoolean(Prefs.KEY_GREEZE_NET_RELEASE, false)
+        } catch (ignored: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * The allowlisted package a uid belongs to, if any.
+     *
+     * A uid can host several packages (shared uid is rare but legal), so the
+     * check is "any of them is checked" and one checked name is returned for
+     * the log line. Resolved through the package manager per call, with no
+     * cache: the only caller of `isRestrictNet` is `freezeUids`, so the extra
+     * hop rides an already-cold path and a cache would need install/uninstall
+     * invalidation to stay honest. GMS never reaches here — the shipped branch
+     * above answers the GMS uid first.
+     */
+    private fun allowlistPackageForUid(uid: Int): String? {
+        val packages = try {
+            getSystemContext()?.packageManager?.getPackagesForUid(uid)
+        } catch (ignored: Throwable) {
+            null
+        } ?: return null
+        val allowlist = getFcmAllowlist()
+        if (allowlist.isEmpty()) {
+            return null
+        }
+        for (pkg in packages) {
+            if (allowlist.contains(pkg)) {
+                return pkg
+            }
+        }
+        return null
+    }
+
     /** `resolveInfo.activityInfo.applicationInfo.packageName`, `"?"` if unavailable. */
     private fun resolvePackageOf(resolveInfo: Any?): String {
         val info = resolveInfo as? ResolveInfo ?: return "?"
@@ -5373,6 +5485,18 @@ class Hooker : XposedModule() {
     private var autostartRootReleaseCount = 0
 
     /**
+     * Greeze net release: freeze-time network restrictions skipped for checked
+     * apps. Not an autostart verdict at all — it rides the greeze hook — so it
+     * lives in its own number and its own summary word (`net-released`), never
+     * mixing into the autostart gate's `released=` group.
+     */
+    @Volatile
+    private var greezeNetReleaseCount = 0
+
+    /** Uids whose first net-release already produced a detail line. */
+    private val greezeNetReleaseLoggedUids = HashSet<Int>()
+
+    /**
      * Autostart gate detail budget: "(gate/callee)" → lines already spent in
      * the current window, plus the window's start and total. See
      * [AUTOSTART_GATE_DETAIL_PER_CALLEE] for why it is shaped this way.
@@ -5431,6 +5555,14 @@ class Hooker : XposedModule() {
     /** One-shot: confirms 3.6 actually kept the UDP packet filter off GMS. */
     @Volatile
     private var gmsUdpFilterLogged = false
+
+    /** One-shot: confirms the ListAppsManager system-blacklist prune actually ran. */
+    @Volatile
+    private var listAppsBlacklistPruneLogged = false
+
+    /** One-shot: confirms the ListAppsManager use-data whitelist add actually ran. */
+    @Volatile
+    private var listAppsUseDataAddLogged = false
 
     /** One-shot: confirms the §5 alarm gate is actually reached for GMS alarms. */
     @Volatile

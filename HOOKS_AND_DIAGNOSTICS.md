@@ -307,7 +307,7 @@ moduleAppliesTo(pkg, tier) =
 | `AurogonImmobulusMode#isNoRestrictFreezeable(String,int)`    | GMS → `false`（"不要冻结"）；仅 OS4 存在                 | 防御位                       |
 | `AurogonImmobulusMode#triggerQuickFreeze(I,I)`               | GMS uid → 跳过（返回类型安全零值）                         | 防御位                       |
 | `PolicyMaker#isAllowFreeze(I)`                               | GMS uid → 跳过                                   | 防御位                       |
-| `DomesticPolicyManager#isRestrictNet(I)`                     | GMS uid → `false`                              | 防御位                       |
+| `DomesticPolicyManager#isRestrictNet(I)`                     | GMS uid → `false`；已勾选应用 uid → `false`（实验开关 `greeze_net_release`，默认关） | 防御位 + 实验档              |
 | `GreezeManagerService#udpPackageRestrict(I,boolean)`         | GMS uid 且 `allow==true` → 跳过                   | 防御位                       |
 | `GreezeManagerService#triggerGMSLimitAction(Boolean)` / `()` | 有参版强制 `false`；无参版用 Unsafe 清 `mGmsLimitEnabled` | 防御位                       |
 | `GreezeManagerService#updateGmsNetStatus(Boolean)`           | 强制 `false`                                     | 防御位                       |
@@ -323,6 +323,8 @@ moduleAppliesTo(pkg, tier) =
 `isPushApp` 的调用栈判定用 `StackWalker`（`RETAIN_CLASS_REFERENCE`，要求 API ≥ 34）：命中 `isRestrictNet` 帧且类由 system_server 的 ClassLoader 加载时才改写返回值。这是为了区分"`isRestrictNet` 问我是不是推送应用"与"别处问同一个问题"。
 
 该钩子在 CN ROM 上不执行，并不意味着网络限制这一侧存在缺口：同一目标由 `DomesticPolicyManager#isRestrictNet` 承担（上表第 5 行）。两处并存是代次覆盖，不是冗余——实现选择由 region 一次性决定（2.3.1），模块无法也不应在运行时改写它。
+
+实验档 `greeze_net_release`（默认关）复用 `isRestrictNet` 这条钩子：uid 反查包名（`getPackagesForUid`，**无缓存**——`isRestrictNet` 唯一调用方是 `freezeUids`，冷路径不值得为它引入失效复杂度），任一包名在 FCM 唤醒白名单内即答 `false`。空名单 = 不作用于任何应用；读取失败按关处理。实验分支排在 GMS 分支**之后**，GMS uid 永远不走实验分支，两个方向各自计数、互不混入。日志形状：每个 uid 首次放行打一条 `greeze net release: kept checked app <pkg> (uid N) unrestricted`，量级进摘要行 `net-released=`。
 
 ### 3.6 C 面：清理与自启动（system_server）
 
@@ -705,6 +707,7 @@ freezeUids(uid)
   ├─ AurogonImmobulusMode#triggerQuickFreeze(uid,…)   → GMS: 跳过
   ├─ PolicyMaker#isAllowFreeze(uid)                   → GMS: 跳过
   ├─ DomesticPolicyManager#isRestrictNet(uid)         → GMS: false ⇒ 不置 0x0C00、不销毁 socket
+  │                                                     （已勾选应用: false，实验开关 greeze_net_release，默认关）
   └─ GreezeManagerService#udpPackageRestrict(uid,true)→ GMS: 跳过 ⇒ 不下发 UDP 过滤
                                                           （allow=false 方向必须放行）
 ```
@@ -1379,7 +1382,7 @@ adb logcat -d -v time | grep -a "notifySwitchNetworkByOtherStrategies"
 | system_server | 冻结  | `AurogonImmobulusMode#isNoRestrictFreezeable`                                             | → false                          |
 | system_server | 冻结  | `AurogonImmobulusMode#triggerQuickFreeze`                                                 | 跳过                               |
 | system_server | 冻结  | `PolicyMaker#isAllowFreeze`                                                               | 跳过                               |
-| system_server | 网络  | `DomesticPolicyManager#isRestrictNet`                                                     | → false                          |
+| system_server | 网络  | `DomesticPolicyManager#isRestrictNet`                                                     | → false（GMS + 实验档已勾选应用）           |
 | system_server | 网络  | `GreezeManagerService#udpPackageRestrict`（allow=true）                                     | 跳过                               |
 | system_server | 网络  | `GreezeManagerService#triggerGMSLimitAction`                                              | → false / 清标志位                   |
 | system_server | 网络  | `GreezeManagerService#updateGmsNetStatus`                                                 | → false                          |
