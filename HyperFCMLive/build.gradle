@@ -169,22 +169,33 @@ dependencies {
     debugImplementation 'androidx.compose.ui:ui-tooling'
     // Miuix (compose-miuix-ui) — the theme behind 界面风格 = Miuix.
     //
-    // Pinned to the last single-artifact release, and not to 0.9.x: 0.9.4 is
-    // published with Kotlin metadata 2.4.0, which this module's compiler cannot
-    // read. AGP 9.4.1 drives Kotlin through its built-in support at a 2.2.0
-    // compiler (which reads up to 2.3.0), and there is no way to raise it here:
-    // applying org.jetbrains.kotlin.android fails ("no longer required since AGP
-    // 9.0"), android.builtInKotlin=false then fails on an ApplicationExtension
-    // cast, and pulling the 2.4.20 Gradle plugins onto the classpath does not move
-    // the compiler. Verified by compiling: 0.9.4 dies with "Class 'kotlin.Unit' was
-    // compiled with an incompatible version of Kotlin", 0.8.8 builds clean.
+    // The ceiling here is not Miuix's, it is our compiler's: AGP 9.4.1 drives
+    // Kotlin through its built-in support at a **2.2.0** compiler, which reads
+    // binary metadata up to **2.3.0**. Verified by compiling, including the two
+    // ways of trying to raise it — applying org.jetbrains.kotlin.android fails
+    // ("no longer required since AGP 9.0"), and android.builtInKotlin=false then
+    // dies on an ApplicationExtension cast. Putting the 2.4.20 Gradle plugins on
+    // the classpath does not move the compiler either: 0.9.4 fails with
+    // "Class 'kotlin.Unit' was compiled with an incompatible version of Kotlin".
+    // The newest stable AGP is 9.4.1 (9.5.0 exists only as alpha09).
     //
-    // What that costs, and why it is acceptable: 0.8.x has no preference module
-    // (top.yukonga.miuix.kmp.preference only exists from 0.9.0), so the rows stay
-    // ours and Miuix supplies the colour scheme, the Monet derivation, the ripple
-    // and the overscroll. Revisit this when AGP's built-in Kotlin reaches 2.4 —
-    // then the rows themselves can move to miuix-preference.
-    implementation 'top.yukonga.miuix.kmp:miuix-android:0.8.8'
+    // Miuix moved to Kotlin 2.4.0 at its 0.9.2 (its own release notes say so), so
+    // **0.9.1 is the last release this module can compile against** — and it is a
+    // good stopping point rather than a bad one: the module split (miuix-ui +
+    // miuix-preference) happened at 0.9.0, so 0.9.1 already carries the preference
+    // rows. Between 0.9.1 and 0.9.4 the preference package is the same files plus
+    // Slider/RangeSlider, so the docs at compose-miuix-ui.github.io still describe
+    // what is on the classpath. Note for the next step: 0.9.1 publishes the leaf
+    // rows (SwitchPreference, ArrowPreference, Checkbox/RadioButtonPreference,
+    // Overlay*/Window* dropdown + spinner) but no public base Preference container,
+    // so a row that is neither a switch nor an arrow still has to be composed from
+    // Miuix's basic parts.
+    //
+    // Raise this the moment AGP's built-in Kotlin reaches 2.4: same coordinates,
+    // just newer versions, and the rows can move onto Miuix's own preference
+    // components for real.
+    implementation 'top.yukonga.miuix.kmp:miuix-ui-android:0.9.1'
+    implementation 'top.yukonga.miuix.kmp:miuix-preference-android:0.9.1'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
     // Compile-time hidden-API signatures (not packaged in the APK).
