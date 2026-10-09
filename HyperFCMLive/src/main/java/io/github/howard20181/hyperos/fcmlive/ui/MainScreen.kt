@@ -29,7 +29,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -61,6 +60,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,6 +81,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -118,12 +119,11 @@ data class MainTopBarState(
     val overflow: OverflowState = OverflowState()
 )
 
-/** The four overflow toggles. Pure state — the Activity owns the consequences. */
+/** The overflow toggles. Pure state — the Activity owns the consequences. */
 data class OverflowState(
     val showSystemApps: Boolean = false,
     val showFcmSupportedOnly: Boolean = false,
-    val excludeMiPushApps: Boolean = false,
-    val strictMode: Boolean = false
+    val excludeMiPushApps: Boolean = false
 )
 
 /** Every action the top bar can ask for. */
@@ -136,8 +136,7 @@ data class MainActions(
     val onAbout: () -> Unit,
     val onToggleShowSystemApps: () -> Unit,
     val onToggleShowFcmOnly: () -> Unit,
-    val onToggleExcludeMiPush: () -> Unit,
-    val onToggleStrictMode: () -> Unit
+    val onToggleExcludeMiPush: () -> Unit
 )
 
 /**
@@ -170,12 +169,19 @@ fun MainScreen(
     onRefresh: () -> Unit,
     onDiagnostics: () -> Unit,
     modifier: Modifier = Modifier,
-    // Remembered here, inside the composition, so the position is part of the
-    // saveable state the host window restores. The Activity used to build the
-    // state itself and hand it in, which is the one way to get a `LazyListState`
-    // nobody ever saves — the list came back at the top after a rotation, the
-    // opposite of what building it there was meant to achieve.
-    lazyListState: LazyListState = rememberLazyListState(),
+    // Remembered *saveably*, inside the composition: the position has to survive
+    // both a rotation and the composition being torn down and rebuilt. The
+    // Activity used to build the state itself and hand it in, which is the one
+    // way to get a `LazyListState` nobody ever saves — the list came back at the
+    // top after a rotation, the opposite of what building it there was meant to
+    // achieve. So it stays internal, but through [rememberSaveable]: the
+    // saveable registry lives on the view, not the composition, so the position
+    // is restored even when the composition is disposed wholesale — which is
+    // what [io.github.howard20181.hyperos.fcmlive.ui.WindowSnapshot] does when it
+    // redraws this window to refresh the swipe-back picture.
+    lazyListState: LazyListState = rememberSaveable(saver = LazyListState.Saver) {
+        LazyListState()
+    },
     // The M3 feedback surface. Owned by the caller, because that is where the
     // messages originate; hosted here, because this is the tree on screen.
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
@@ -592,16 +598,6 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
             offset = DpOffset(x = -MENU_EDGE_INSET, y = 0.dp)
         ) {
             MenuItemRow(
-                label = stringResource(R.string.show_system_apps),
-                modifier = Modifier.fillMaxWidth(),
-                minWidth = MENU_OVERFLOW_MIN_WIDTH,
-                arrangement = Arrangement.SpaceBetween,
-                checkable = state.showSystemApps,
-                trailing = { OverflowCheckbox(state.showSystemApps) },
-                onClick = { expanded = false; actions.onToggleShowSystemApps() }
-            )
-            Spacer(modifier = Modifier.height(MENU_ITEM_GAP))
-            MenuItemRow(
                 label = stringResource(R.string.show_fcm_supported_apps),
                 modifier = Modifier.fillMaxWidth(),
                 minWidth = MENU_OVERFLOW_MIN_WIDTH,
@@ -622,13 +618,13 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
             )
             Spacer(modifier = Modifier.height(MENU_ITEM_GAP))
             MenuItemRow(
-                label = stringResource(R.string.strict_mode),
+                label = stringResource(R.string.show_system_apps),
                 modifier = Modifier.fillMaxWidth(),
                 minWidth = MENU_OVERFLOW_MIN_WIDTH,
                 arrangement = Arrangement.SpaceBetween,
-                checkable = state.strictMode,
-                trailing = { OverflowCheckbox(state.strictMode) },
-                onClick = { expanded = false; actions.onToggleStrictMode() }
+                checkable = state.showSystemApps,
+                trailing = { OverflowCheckbox(state.showSystemApps) },
+                onClick = { expanded = false; actions.onToggleShowSystemApps() }
             )
             Spacer(modifier = Modifier.height(MENU_ITEM_GAP))
             MenuItemRow(
@@ -697,6 +693,8 @@ fun AppListPane(
                 icon = app.icon,
                 checked = app.checked,
                 supportMiPush = app.supportMiPush,
+                exempt = app.exempt,
+                exemptNote = app.exemptNote,
                 multiSelect = multiSelect,
                 rowSelected = selected.contains(app.packageName),
                 onClick = { onRowClick(app) },
@@ -714,6 +712,18 @@ fun AppListPane(
  * The old row needed a measure pass to stop a long name from pushing its tag off
  * the row; `weight(1f, fill = false)` says that directly, which is most of why
  * this is shorter than the adapter it replaces.
+ *
+ * [exempt] rows — GMS and its persistent process, and the odd framework package
+ * whose only FCM marker is a leftover action — are drawn as unavailable:
+ * desaturated to `onSurfaceVariant` at reduced emphasis, with the checkbox
+ * replaced by a note saying why, and no ripple or click handling at all. For
+ * GMS the module always acts for it whatever the allowlist says, so a checkbox
+ * there would be a control that does nothing; for the others there is no FCM
+ * client to act for at all. Either way, a control that does nothing reads as a
+ * bug.
+ *
+ * [exemptNote] carries the reason as a string resource rather than being fixed
+ * here, because the two cases are not the same sentence.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -723,6 +733,8 @@ private fun LazyItemScope.AppRow(
     icon: Drawable?,
     checked: Boolean,
     supportMiPush: Boolean,
+    exempt: Boolean,
+    exemptNote: Int,
     multiSelect: Boolean,
     rowSelected: Boolean,
     onClick: () -> Unit,
@@ -738,18 +750,22 @@ private fun LazyItemScope.AppRow(
     // `primaryContainer` is tone 25 (#3B3B3B), `onSurface` is tone 10 and
     // `primary` tone 0. The on/off of the allowlist stays legible because the
     // glyph itself differs — the tint's job under selection is contrast.
-    val labelColor = if (cardSelected) {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurface
+    //
+    // An exempt row is never cardSelected (it cannot be staged — see the tap
+    // handlers), so its colours only have to work on the plain card.
+    val labelColor = when {
+        cardSelected -> MaterialTheme.colorScheme.onPrimaryContainer
+        exempt -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.onSurface
     }
-    val supportingColor = if (cardSelected) {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
+    val supportingColor = when {
+        cardSelected -> MaterialTheme.colorScheme.onPrimaryContainer
+        exempt -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val statusTint = when {
         cardSelected -> MaterialTheme.colorScheme.onPrimaryContainer
+        exempt -> MaterialTheme.colorScheme.outline
         checked -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -759,17 +775,30 @@ private fun LazyItemScope.AppRow(
         if (checked) R.string.a11y_allowlist_on else R.string.a11y_allowlist_off
     )
     val mipushTag = stringResource(R.string.mipush_badge)
+    // The reason this row is inert. Taken from the entry rather than fixed
+    // here: an exempt row's sentence has to match the reason, and there is
+    // more than one reason.
+    val exemptNoteText = if (exemptNote != 0) stringResource(exemptNote) else ""
     val selectionState = stringResource(
         if (rowSelected) R.string.row_selected else R.string.row_unselected
     )
-    val description = remember(label, packageName, allowlistState, supportMiPush, multiSelect, selectionState) {
-        buildList {
-            add(label)
-            add(packageName)
-            add(allowlistState)
-            if (supportMiPush) add(mipushTag)
-            if (multiSelect) add(selectionState)
-        }.joinToString("，")
+    val description = remember(
+        label, packageName, allowlistState, supportMiPush, multiSelect,
+        selectionState, exempt, exemptNoteText
+    ) {
+        if (exempt) {
+            // The checkbox state is not part of what an exempt row means, so it
+            // is not announced; what replaces it is.
+            listOf(label, packageName, exemptNoteText).joinToString("，")
+        } else {
+            buildList {
+                add(label)
+                add(packageName)
+                add(allowlistState)
+                if (supportMiPush) add(mipushTag)
+                if (multiSelect) add(selectionState)
+            }.joinToString("，")
+        }
     }
 
     if (icon == null) {
@@ -784,21 +813,36 @@ private fun LazyItemScope.AppRow(
             .heightIn(min = 72.dp)
             .semantics {
                 contentDescription = description
-                if (multiSelect) {
+                if (multiSelect && !exempt) {
                     selected = rowSelected
+                }
+                if (exempt) {
+                    // Tells accessibility services the row is present but not
+                    // actionable, so a screen reader does not invite a tap that
+                    // would do nothing.
+                    disabled()
                 }
             }
             // See [MenuItemRow]: the ripple `combinedClickable` installs is
             // painted inside this node's rectangular bounds, so without the
             // clip in front it spills over the card's rounded corners.
             .clip(shape)
-            .combinedClickable(
-                interactionSource = interactionSource,
-                indication = ripple(),
-                onLongClick = onLongClick,
-                onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                    onClick()
+            // An exempt row installs no clickable at all rather than a clickable
+            // that ignores taps: no ripple, no haptic, and nothing for a
+            // long-press to start a selection with.
+            .then(
+                if (exempt) {
+                    Modifier
+                } else {
+                    Modifier.combinedClickable(
+                        interactionSource = interactionSource,
+                        indication = ripple(),
+                        onLongClick = onLongClick,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            onClick()
+                        }
+                    )
                 }
             ),
         shape = shape,
@@ -816,6 +860,10 @@ private fun LazyItemScope.AppRow(
                 painter = icon?.let { rememberDrawablePainter(it) }
                     ?: painterResource(R.drawable.ic_app_placeholder),
                 contentDescription = null,
+                // Dimmed rather than hidden: the icon still identifies the app,
+                // but at reduced opacity so the row reads as unavailable before
+                // the label is read.
+                alpha = if (exempt) 0.38f else 1f,
                 modifier = Modifier.size(44.dp)
             )
             Spacer(modifier = Modifier.width(14.dp))
@@ -834,20 +882,36 @@ private fun LazyItemScope.AppRow(
                     }
                 }
                 Text(
-                    text = packageName,
+                    // An exempt row says why it cannot be checked in place of
+                    // its package name — the package name is the one thing the
+                    // user already knows about it, and the reason is the thing
+                    // they do not.
+                    text = if (exempt) exemptNoteText else packageName,
                     style = MaterialTheme.typography.bodySmall,
                     color = supportingColor
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Icon(
-                painter = painterResource(
-                    if (checked) R.drawable.ic_status_enabled else R.drawable.ic_status_disabled
-                ),
-                contentDescription = null,
-                tint = statusTint,
-                modifier = Modifier.size(28.dp)
-            )
+            if (exempt) {
+                // A lock rather than the on/off glyph: the checkbox states do
+                // not apply, and drawing an "off" tick would suggest the user
+                // could turn it on.
+                Icon(
+                    painter = painterResource(R.drawable.ic_status_locked),
+                    contentDescription = null,
+                    tint = statusTint,
+                    modifier = Modifier.size(28.dp)
+                )
+            } else {
+                Icon(
+                    painter = painterResource(
+                        if (checked) R.drawable.ic_status_enabled else R.drawable.ic_status_disabled
+                    ),
+                    contentDescription = null,
+                    tint = statusTint,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
         }
     }
 }
@@ -936,8 +1000,7 @@ private fun MainScreenPreview() {
                 onAbout = {},
                 onToggleShowSystemApps = {},
                 onToggleShowFcmOnly = {},
-                onToggleExcludeMiPush = {},
-                onToggleStrictMode = {}
+                onToggleExcludeMiPush = {}
             ),
             query = "",
             onQueryChange = {},

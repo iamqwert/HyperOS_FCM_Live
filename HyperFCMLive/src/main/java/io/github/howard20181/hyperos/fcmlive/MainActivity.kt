@@ -34,6 +34,8 @@ import io.github.howard20181.hyperos.fcmlive.ui.MainActions
 import io.github.howard20181.hyperos.fcmlive.ui.MainScreen
 import io.github.howard20181.hyperos.fcmlive.ui.MainTopBarState
 import io.github.howard20181.hyperos.fcmlive.ui.OverflowState
+import io.github.howard20181.hyperos.fcmlive.ui.WindowSnapshot
+import io.github.howard20181.hyperos.fcmlive.ui.startActivityWithSnapshot
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
 import java.util.Locale
@@ -139,12 +141,6 @@ class MainActivity : AppCompatActivity() {
      */
     private var excludeMiPushApps = false
 
-    /**
-     * Overflow: when true, the module leaves unchecked apps to the system once
-     * at least one app is checked (`Hooker#moduleAppliesTo`). Read from the
-     * local mirror here; the live copy the hooks read lives in remote prefs.
-     */
-    private var strictMode = false
     private var xposedService: XposedService? = null
     /** Palette this activity was painted with; a mismatch on resume = repaint. */
     private var appliedPalette: AppPalette? = null
@@ -199,14 +195,20 @@ class MainActivity : AppCompatActivity() {
         // toggles the overflow option, their stored preference wins.
         showFcmSupportedOnly = getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
             .getBoolean(Prefs.KEY_SHOW_FCM_ONLY, true)
-        // Off by default: an existing install must not start leaving unchecked
-        // apps to the system just because it was upgraded.
-        strictMode = Prefs.readLocalStrictMode(this)
-        // Off by default for the same reason, and because the point of the
-        // MiPush tag is to be seen — a filter that is on from the start hides
-        // the very apps it is meant to explain.
+        // On by default: an app that carries MiPush is already reachable through
+        // the vendor channel, so offering it for the FCM wake list by default
+        // would push the user toward work the module does not need to do. The
+        // MiPush badge is still shown on a row the user deliberately surfaces by
+        // unchecking the filter, so the tag stays discoverable.
         excludeMiPushApps = getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
-            .getBoolean(Prefs.KEY_EXCLUDE_MIPUSH, false)
+            .getBoolean(Prefs.KEY_EXCLUDE_MIPUSH, true)
+        // Off by default. Must come from SharedPreferences, not only from
+        // onSaveInstanceState: that bundle survives a config change or a
+        // system-initiated process death, but **not** a swipe-away from
+        // Recents, so the checkbox used to reset on every relaunch — and took
+        // the GMS row with it, which is the one row the screen exists for.
+        showSystemApps = getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
+            .getBoolean(Prefs.KEY_SHOW_SYSTEM, false)
 
         initXposedService()
 
@@ -266,11 +268,10 @@ class MainActivity : AppCompatActivity() {
                         onBatchAdd = { applyBatchAllowlist(true) },
                         onBatchRemove = { applyBatchAllowlist(false) },
                         onSelectAll = { toggleSelectAllVisible() },
-                        onAbout = { startActivity(Intent(this, AboutActivity::class.java)) },
+                        onAbout = { startActivityWithSnapshot(Intent(this, AboutActivity::class.java)) },
                         onToggleShowSystemApps = { toggleOverflowShowSystemApps() },
                         onToggleShowFcmOnly = { toggleOverflowShowFcmOnly() },
-                        onToggleExcludeMiPush = { toggleOverflowExcludeMiPush() },
-                        onToggleStrictMode = { toggleOverflowStrictMode() }
+                        onToggleExcludeMiPush = { toggleOverflowExcludeMiPush() }
                     ),
                     // The field reads the query from this state, so no view
                     // hand-off is needed: whatever currentQuery holds when the
@@ -327,7 +328,7 @@ class MainActivity : AppCompatActivity() {
             multiSelect = multiSelectMode,
             allVisibleSelected = isAllVisibleSelected(),
             overflow = OverflowState(
-                showSystemApps, showFcmSupportedOnly, excludeMiPushApps, strictMode
+                showSystemApps, showFcmSupportedOnly, excludeMiPushApps
             )
         )
     }
@@ -348,6 +349,13 @@ class MainActivity : AppCompatActivity() {
 
     /** Normal-mode tap toggles the allowlist; a multi-select tap only stages. */
     private fun handleRowTap(app: AppListStore.AppEntry) {
+        // An exempt row has no state to toggle — it is always acted for — so a
+        // tap on it is swallowed here as well as being drawn inert. Guarding the
+        // handler rather than only the composable keeps the rule true for every
+        // caller, including anything added later.
+        if (app.exempt) {
+            return
+        }
         if (multiSelectMode) {
             toggleSelected(app.packageName)
             return
@@ -376,6 +384,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleRowLongPress(app: AppListStore.AppEntry) {
+        // Same reason as [handleRowTap]: an exempt row cannot be staged for a
+        // batch action, so it must not start a selection either.
+        if (app.exempt) {
+            return
+        }
         if (multiSelectMode) {
             toggleSelected(app.packageName)
         } else {
@@ -392,6 +405,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun toggleOverflowShowSystemApps() {
         showSystemApps = !showSystemApps
+        getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
+            .edit()
+            .putBoolean(Prefs.KEY_SHOW_SYSTEM, showSystemApps)
+            .apply()
         pushUiState()
         loadApps()
     }
@@ -416,16 +433,6 @@ class MainActivity : AppCompatActivity() {
         // entry: this toggle decides what is offered, not what the module
         // already does for an app.
         filterApps(currentQuery)
-    }
-
-    private fun toggleOverflowStrictMode() {
-        strictMode = !strictMode
-        // Written to the remote group the hooks read, then announced with the
-        // same broadcast as a list edit, so it is live at once. Nothing in the
-        // list changes: the toggle only decides what the module does for apps
-        // that are not checked.
-        Prefs.writeStrictMode(this, remotePrefs(), strictMode)
-        pushUiState()
     }
 
     /** Launch-time update check: a line of feedback only (About keeps its badge). */
@@ -628,8 +635,10 @@ class MainActivity : AppCompatActivity() {
         store?.shutdown()
         if (isFinishing) {
             // Leaving for real rather than being rebuilt: drop the scan cache so
-            // the icons it pins are released with the screen.
+            // the icons it pins are released with the screen, and drop the
+            // snapshot the sub-pages reveal — nothing will open from here again.
             sAppScanCache = null
+            WindowSnapshot.clear(MainActivity::class.java)
         }
         backInvokedCallback?.let {
             try {
@@ -736,6 +745,12 @@ class MainActivity : AppCompatActivity() {
             }
         } else {
             for (app in filteredApps) {
+                // Exempt rows stay out of the staging set: a batch would either
+                // add a package that is already unconditionally active, or
+                // remove one whose removal changes nothing.
+                if (app.exempt) {
+                    continue
+                }
                 selectedPkgs.add(app.packageName)
             }
         }
@@ -759,6 +774,13 @@ class MainActivity : AppCompatActivity() {
         val newAllow = HashSet(allowlist)
         for (app in allApps) {
             if (!selected.contains(app.packageName)) {
+                continue
+            }
+            // Belt and braces with [toggleSelectAllVisible]: a batch must not be
+            // able to flip an exempt row's stored state even if one were ever
+            // staged. Adding it would be a no-op the UI cannot show; removing it
+            // would look like it turned the module off for GMS, which it cannot.
+            if (app.exempt) {
                 continue
             }
             if (add && !app.checked) {
@@ -963,13 +985,7 @@ class MainActivity : AppCompatActivity() {
         // Called with a null handle too, so the mirror is cleaned even when the
         // module service never binds.
         Prefs.dropRetiredConfigKeys(this, prefs)
-        // Same repair as the allowlist below, for the strict-mode flag: a toggle
-        // made before the service bound lives only in the mirror, and adopting
-        // the older remote value here would silently revert it.
         if (prefs == null) return
-        if (Prefs.hasPendingStrictPush(this)) {
-            Prefs.writeStrictMode(this, prefs, strictMode)
-        }
         if (Prefs.hasPendingWechatDozeKeepoutPush(this)) {
             // And for the WeChat keepout switch: a flip made before the
             // service bound lives only in the local mirror.
@@ -1146,7 +1162,46 @@ class MainActivity : AppCompatActivity() {
                     val entry = AppListStore.AppEntry(ai.packageName, ai.loadLabel(pm).toString())
                     entry.supportFcm = support.fcm.contains(ai.packageName)
                     entry.supportMiPush = support.miPush.contains(ai.packageName)
+                    when {
+                        EXEMPT_PACKAGES.contains(ai.packageName) -> {
+                            entry.exempt = true
+                            entry.exemptNote = R.string.gms_row_note
+                        }
+                    }
                     result.add(entry)
+                }
+                // GMS is added here rather than trusted to the loop above.
+                //
+                // `getInstalledPackages(0)` is not guaranteed to return it: on
+                // HyperOS the query can come back without preinstalled system
+                // packages, so GMS is simply absent from `installed` — which is
+                // why turning "show system apps" on did not make it appear, and
+                // why no FCM rule could ever have found it. Asking for the one
+                // package directly is what puts the row beyond the reach of that
+                // whole class of query behaviour.
+                //
+                // It obeys the system-app toggle like any other system package:
+                // hidden while the toggle is off, shown when it is on. The point
+                // is that it can no longer be lost by a query that omits it.
+                if (!result.any { it.packageName == GMS_PACKAGE_NAME }) {
+                    val gms = try {
+                        pm.getApplicationInfo(GMS_PACKAGE_NAME, 0)
+                    } catch (e: PackageManager.NameNotFoundException) {
+                        // Genuinely not installed on this device: nothing to add.
+                        null
+                    }
+                    if (gms != null && (showSys || !isSystemApp(gms))) {
+                        val entry =
+                            AppListStore.AppEntry(
+                                gms.packageName,
+                                gms.loadLabel(pm).toString()
+                            )
+                        entry.supportFcm = support.fcm.contains(gms.packageName)
+                        entry.supportMiPush = support.miPush.contains(gms.packageName)
+                        entry.exempt = true
+                        entry.exemptNote = R.string.gms_row_note
+                        result.add(entry)
+                    }
                 }
                 for (app in result) {
                     app.checked = allow.contains(app.packageName)
@@ -1239,11 +1294,32 @@ class MainActivity : AppCompatActivity() {
         private const val MIUI_SECURITY_PACKAGE = "com.lbe.security.miui"
 
         /**
-         * Tapping apps one by one into the allowlist looks like this: fill the
-         * window with adds, then tell the user the long-press multi-select exists —
-         * that is the gesture they were doing by hand. A gap longer than the window
-         * restarts the count, so a slow browse never triggers the tip.
+         * Google Play services. Spelled out once here because the UI needs the
+         * name for two different questions and they must agree: the row is inert
+         * ([EXEMPT_PACKAGES]) *and* it is listed as push-capable whatever its
+         * Manifest holds ([scanPushSupport]).
+         *
+         * The hook side has its own private copy (`Hooker.GMS_PACKAGE_NAME`) in
+         * the `system_server` process, which this one cannot reach into.
          */
+        private const val GMS_PACKAGE_NAME = "com.google.android.gms"
+
+        /**
+         * The packages the module is unconditionally exempt for — the same two
+         * [io.github.howard20181.hyperos.fcmlive.Hooker] special-cases in
+         * `moduleAppliesTo`. Duplicated here rather than shared because the hook
+         * side's copy is private to its own companion and is loaded in
+         * `system_server`, a process this one cannot reach into.
+         *
+         * They exist on the UI side only to decide that a row is inert. GMS is
+         * always acted for whatever the allowlist holds, so offering a checkbox
+         * for it would be offering a control that does nothing.
+         */
+        private val EXEMPT_PACKAGES = setOf(
+            GMS_PACKAGE_NAME,
+            "com.google.android.gms.persistent"
+        )
+
         private const val RAPID_CHECK_WINDOW_MS = 12000L
         private const val RAPID_CHECK_HINT_AT = 4
 
@@ -1287,8 +1363,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         /**
-         * Packages that look FCM-capable: any one of four Manifest markers is
-         * enough.
+         * Packages that look FCM-capable, scored by four independent Manifest
+         * markers and then judged by one rule — with GMS carved out in front.
          *
          * 1. `com.google.firebase.messaging.FirebaseMessagingService` — a
          *    declared service (class name).
@@ -1299,16 +1375,70 @@ class MainActivity : AppCompatActivity() {
          * 4. `com.google.android.c2dm.intent.RECEIVE` — an intent-filter
          *    action, normally on the instance-id receiver.
          *
+         * **GMS is included unconditionally, before and independently of the
+         * rule.** It is the one package the screen exists for, and a list of
+         * "apps that support push" with no Google Play services in it reads as a
+         * broken module rather than as a strict filter. On-device it was missing
+         * for two separate reasons, neither of which the rule could have fixed:
+         * the SDK lets an app point `RECEIVE` at a receiver of its own, so a
+         * client need not declare the components the rule looks for; and
+         * `getInstalledPackages()` on HyperOS can omit preinstalled system
+         * packages altogether, so GMS never reached this function's input.
+         *
+         * **The rule, for everything else: any two of ②③④ is enough; ② or ③
+         * alone is also enough; ① alone, ④ alone, and nothing at all are out.**
+         *
+         * Why ② is not required: the SDK's public receiver expects a *custom*
+         * receiver class to hand the message to, so an app can receive `RECEIVE`
+         * without ever declaring `FirebaseInstanceIdReceiver`. Tying acceptance
+         * to ② would drop such clients.
+         *
+         * Why ① alone is out: `FirebaseMessagingService` is a public base class
+         * any app that merely links the SDK inherits, with no promise that a push
+         * was ever wired up, so it is the noisiest marker of the four. ④ alone is
+         * out for the older reason — the pre-Firebase c2dm era left bare
+         * `RECEIVE` actions behind on components that have nothing to do with
+         * messaging (`framework-res` still carries one on its factory-reset
+         * receiver, a remote-wipe leftover). ② alone and ③ alone stay in because
+         * an app that ships one of the SDK's own components is a client whether
+         * or not anything else in its Manifest corroborates it.
+         *
          * The names are `Hooker`'s constants, and the module asks the same
-         * four questions in system_server (`Hooker#declaresFcmComponent`) —
-         * asking it the same way is the point.
+         * questions in system_server (`Hooker#declaresFcmComponent`) — asking it
+         * the same way is the point. GMS is the one deliberate divergence there
+         * too: the hook exempts it before asking any of this (see
+         * `moduleAppliesTo`), so it never depends on the answer.
+         *
+         * Markers 3/4 arrive as device-wide queries and 1/2 from a per-package
+         * lookup, so both sources feed the *same* per-package score here rather
+         * than being unioned into the result: a package gets in only after the
+         * one rule is applied to everything known about it.
          */
         private fun scanPushSupport(
             pm: PackageManager,
             candidates: Collection<String>?
         ): PushSupport {
             val support = PushSupport()
-            val packages = support.fcm
+            // GMS is listed unconditionally, ahead of the rule below and
+            // regardless of what its Manifest says — and regardless of whether
+            // the query that produced `candidates` even returned it, which on
+            // HyperOS it may not.
+            //
+            // Markers alone do not carry it: the SDK lets an app point `RECEIVE`
+            // at a receiver of its own, so a client — GMS included — need not
+            // declare the components the rule looks for, and on-device it did
+            // not turn up. A list of "apps that support push" with no Google Play
+            // services in it reads as a broken module rather than as a strict
+            // filter, which is the wrong trade for the one package the module
+            // exists for. The check is a plain name test, not a marker count.
+            support.fcm.add(GMS_PACKAGE_NAME)
+            if (candidates == null) {
+                return support
+            }
+            // Markers 3 and 4, device-wide. Kept as two sets, not one: the rule
+            // counts them separately.
+            val byMessagingEvent = HashSet<String>()
+            val byReceive = HashSet<String>()
             try {
                 val services = pm.queryIntentServices(
                     Intent(Hooker.ACTION_MESSAGING_EVENT),
@@ -1317,7 +1447,7 @@ class MainActivity : AppCompatActivity() {
                 for (ri in services) {
                     // Services resolve into serviceInfo; activityInfo is the
                     // receiver/activity field and stays null here.
-                    packages.add(ri.serviceInfo.packageName)
+                    byMessagingEvent.add(ri.serviceInfo.packageName)
                 }
             } catch (t: Throwable) {
                 Log.w(TAG_UI, "Failed to query FCM messaging services", t)
@@ -1328,22 +1458,106 @@ class MainActivity : AppCompatActivity() {
                     PackageManager.ResolveInfoFlags.of(0)
                 )
                 for (ri in receivers) {
-                    packages.add(ri.activityInfo.packageName)
+                    byReceive.add(ri.activityInfo.packageName)
                 }
             } catch (t: Throwable) {
                 Log.w(TAG_UI, "Failed to query C2DM receivers", t)
             }
-            if (candidates != null) {
-                for (pkg in candidates) {
-                    if (!packages.contains(pkg) && declaresFcmComponent(pm, pkg)) {
-                        packages.add(pkg)
-                    }
-                    if (declaresMiPushService(pm, pkg)) {
-                        support.miPush.add(pkg)
-                    }
+            for (pkg in candidates) {
+                val hasMessagingService =
+                    declaresFirebaseMessagingService(pm, pkg)          // ①
+                val hasIidReceiver =
+                    declaresFirebaseInstanceIdReceiver(pm, pkg)         // ②
+                val hasMessagingEvent = byMessagingEvent.contains(pkg)  // ③
+                val hasReceive = byReceive.contains(pkg)                // ④
+                if (isFcmClient(
+                        hasMessagingService, hasIidReceiver,
+                        hasMessagingEvent, hasReceive
+                    )
+                ) {
+                    support.fcm.add(pkg)
+                }
+                if (declaresMiPushService(pm, pkg)) {
+                    support.miPush.add(pkg)
                 }
             }
             return support
+        }
+
+        /**
+         * The one rule, in one place: **any two of ②③④, or ② alone, or ③ alone.**
+         *
+         * Written out as an explicit table rather than as arithmetic on a count,
+         * because the three accepted shapes are not a count — "② alone" and
+         * "③ alone" are each one marker while ②+③ is two, and `④ alone` has to
+         * be rejected even though it is also one marker. A boolean table says
+         * that; `sum >= 2 || has2 || has3` hides it.
+         *
+         * ① is accepted as a *contributor* (it counts toward the two-of-three)
+         * but never on its own; see the caller for why.
+         */
+        private fun isFcmClient(
+            hasMessagingService: Boolean,
+            hasIidReceiver: Boolean,
+            hasMessagingEvent: Boolean,
+            hasReceive: Boolean
+        ): Boolean {
+            // ②③④: any two.
+            val amongActions =
+                (hasIidReceiver && hasMessagingEvent) ||
+                    (hasIidReceiver && hasReceive) ||
+                    (hasMessagingEvent && hasReceive)
+            if (amongActions) {
+                return true
+            }
+            // ② alone or ③ alone.
+            if (hasIidReceiver || hasMessagingEvent) {
+                return true
+            }
+            // Everything else: ① alone, ④ alone, or nothing.
+            return false
+        }
+
+        /**
+         * Marker ①: does `pkg` declare the SDK's messaging *service* class?
+         *
+         * `getServiceInfo` resolves a component directly with no intent-filter
+         * involved — the whole reason the class lookups exist, since the action
+         * queries cannot see a class that ships without a filter. Absence is
+         * reported by `NameNotFoundException`, so a throw is an answer, not a
+         * failure.
+         *
+         * Split from the receiver test because the two now carry different
+         * weight in [isFcmClient]: neither is sufficient alone, but ② alone is
+         * accepted and ① alone is not.
+         */
+        private fun declaresFirebaseMessagingService(pm: PackageManager, pkg: String): Boolean {
+            return try {
+                pm.getServiceInfo(ComponentName(pkg, Hooker.FCM_MESSAGING_SERVICE_CLASS), 0)
+                true
+            } catch (ignored: Throwable) {
+                // Not declared (or not visible to us).
+                false
+            }
+        }
+
+        /**
+         * Marker ②: does `pkg` declare the SDK's instance-id *receiver* class?
+         *
+         * A client is not obliged to — the receiver is the SDK's entry point and
+         * an app may instead point `RECEIVE` at a receiver of its own, which is
+         * the shape GMS itself uses. Its presence is still strong evidence, so it
+         * is accepted on its own; its absence proves nothing, which is why it is
+         * not required.
+         */
+        private fun declaresFirebaseInstanceIdReceiver(pm: PackageManager, pkg: String): Boolean {
+            return try {
+                pm.getReceiverInfo(ComponentName(pkg, Hooker.FCM_IID_RECEIVER_CLASS), 0)
+                true
+            } catch (ignored: Throwable) {
+                // Not declared.
+                false
+            }
         }
 
         /**
@@ -1370,31 +1584,6 @@ class MainActivity : AppCompatActivity() {
                 // Not declared (or not visible to us): no MiPush.
                 false
             }
-        }
-
-        /**
-         * Whether `pkg` declares either Firebase class under its own name.
-         *
-         * `getServiceInfo` / `getReceiverInfo` resolve a component
-         * directly, with no intent-filter involved — which is the whole reason this
-         * exists: the action queries above cannot see a class that ships without
-         * one. Absence is reported by `NameNotFoundException`, so a throw is
-         * an answer, not a failure.
-         */
-        private fun declaresFcmComponent(pm: PackageManager, pkg: String): Boolean {
-            try {
-                pm.getServiceInfo(ComponentName(pkg, Hooker.FCM_MESSAGING_SERVICE_CLASS), 0)
-                return true
-            } catch (ignored: Throwable) {
-                // Not declared (or not visible to us): fall through.
-            }
-            try {
-                pm.getReceiverInfo(ComponentName(pkg, Hooker.FCM_IID_RECEIVER_CLASS), 0)
-                return true
-            } catch (ignored: Throwable) {
-                // Not declared.
-            }
-            return false
         }
 
         private fun sameAppSnapshot(

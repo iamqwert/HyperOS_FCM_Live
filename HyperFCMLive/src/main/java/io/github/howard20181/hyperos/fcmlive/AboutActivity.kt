@@ -16,7 +16,11 @@ import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport
 import io.github.howard20181.hyperos.fcmlive.ui.AboutActions
 import io.github.howard20181.hyperos.fcmlive.ui.AboutScreen
+import io.github.howard20181.hyperos.fcmlive.ui.SwipeBackContainer
 import io.github.howard20181.hyperos.fcmlive.ui.UpdateOutcome
+import io.github.howard20181.hyperos.fcmlive.ui.WindowSnapshot
+import io.github.howard20181.hyperos.fcmlive.ui.finishSwipeBack
+import io.github.howard20181.hyperos.fcmlive.ui.startActivityWithSnapshot
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
@@ -39,6 +43,10 @@ import kotlinx.coroutines.launch
  * `startActivity`. The offer itself is screen state, so it is drawn by the same
  * dialog stack as the licences page — rather than a second, framework-owned one
  * the runtime palette could not reach.
+ *
+ * The page is wrapped in [SwipeBackContainer]: a rightward drag started on the
+ * screen body finishes it while it follows the finger, which is separate from
+ * the system's edge-only predictive back gesture.
  */
 class AboutActivity : AppCompatActivity() {
 
@@ -87,35 +95,47 @@ class AboutActivity : AppCompatActivity() {
         val composeView = ComposeView(this).apply {
             setContent {
                 HyperFCMLiveTheme {
-                    AboutScreen(
-                        onBack = { finish() },
-                        actions = AboutActions(
-                            onViewSource = { openLink(REPO_URL) },
-                            onLicenses = {
-                                startActivity(
-                                    Intent(this@AboutActivity, LicensesActivity::class.java)
-                                )
-                            },
-                            onPrivacy = {
-                                startActivity(
-                                    Intent(this@AboutActivity, PrivacyActivity::class.java)
-                                )
-                            },
-                            onExperiment = {
-                                startActivity(
-                                    Intent(this@AboutActivity, ExperimentActivity::class.java)
-                                )
-                            },
-                            onExport = ::exportAllowlist,
-                            onImport = ::importAllowlist,
-                            onHelp = { openLink(HELP_URL) },
-                            onCheckUpdate = ::checkForUpdates,
-                            onUpdateOpen = ::openPendingUpdate,
-                            versionLine = versionLine,
-                            onAppearanceChange = ::applyAppearanceChange
-                        ),
-                        snackbarHostState = snackbarHostState
-                    )
+                    SwipeBackContainer(
+                        // A committed swipe has already slid the page out, so
+                        // the exit transition is suppressed for that path only;
+                        // a back press that never moved the page still animates.
+                        onBack = { alreadySlidOut -> finishSwipeBack(alreadySlidOut) },
+                        // The page underneath, as it looked when this one was
+                        // opened. MainActivity's window is gone by now, so a
+                        // photograph taken on the way in is the only copy of
+                        // it. Null here just means the strip is flat.
+                        background = { WindowSnapshot.forParent(MainActivity::class.java) }
+                    ) {
+                        AboutScreen(
+                            onBack = { finishSwipeBack(alreadySlidOut = false) },
+                            actions = AboutActions(
+                                onViewSource = { openLink(REPO_URL) },
+                                onLicenses = {
+                                    startActivityWithSnapshot(
+                                        Intent(this@AboutActivity, LicensesActivity::class.java)
+                                    )
+                                },
+                                onPrivacy = {
+                                    startActivityWithSnapshot(
+                                        Intent(this@AboutActivity, PrivacyActivity::class.java)
+                                    )
+                                },
+                                onExperiment = {
+                                    startActivityWithSnapshot(
+                                        Intent(this@AboutActivity, ExperimentActivity::class.java)
+                                    )
+                                },
+                                onExport = ::exportAllowlist,
+                                onImport = ::importAllowlist,
+                                onHelp = { openLink(HELP_URL) },
+                                onCheckUpdate = ::checkForUpdates,
+                                onUpdateOpen = ::openPendingUpdate,
+                                versionLine = versionLine,
+                                onAppearanceChange = ::applyAppearanceChange
+                            ),
+                            snackbarHostState = snackbarHostState
+                        )
+                    }
                 }
             }
         }
@@ -199,10 +219,18 @@ class AboutActivity : AppCompatActivity() {
      * counter and the window chrome is repainted here. The old path was
      * `recreate()` — a whole-window rebuild that read as a visible jump every
      * time an appearance menu option was picked.
+     *
+     * The swipe-back snapshot is refreshed too. It is a photograph of the page
+     * *below* this one — Main — taken on the way in, so it is wearing the old
+     * palette the moment this runs; left alone, returning to Main would reveal
+     * the previous theme. Main is stopped but still alive and still laid out, so
+     * it can be redrawn here even though it is not on screen. See
+     * [WindowSnapshot.refreshForTheme].
      */
     private fun applyAppearanceChange() {
         ThemeEngine.invalidate()
         ThemeSupport.reapplyWindow(this)
+        WindowSnapshot.refreshForTheme()
     }
 
     private fun exportAllowlist() {

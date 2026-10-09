@@ -762,7 +762,7 @@ class Hooker : XposedModule() {
                             GMS_PERSISTENT_PROCESS_NAME == calleePkgName
                         if (ACTION_REMOTE_INTENT == action &&
                             (callerPkgIsGms || callerUidIsGms) &&
-                            moduleAppliesTo(calleePkgName, Tier.STRICT)
+                            moduleAppliesTo(calleePkgName)
                         ) {
                             broadcastGateAllowedCount++
                             if (!callerPkgIsGms) {
@@ -786,8 +786,8 @@ class Hooker : XposedModule() {
                         if (ACTION_REMOTE_INTENT == action &&
                             (callerPkgIsGms || callerUidIsGms)
                         ) {
-                            // Only reachable in strict mode with the callee off the
-                            // user's list. Counted so "an unselected app is treated
+                            // Reachable with the callee off the user's list.
+                            // Counted so "an unselected app is treated
                             // exactly like a phone without the module" is an
                             // observation rather than a claim — this is the path P0
                             // hands back to the ROM.
@@ -797,7 +797,7 @@ class Hooker : XposedModule() {
                                 log(
                                     Log.INFO, TAG,
                                     "isAllowBroadcast: c2dm not intercepted for " +
-                                        "callee=$calleePkgName (strict=$sStrictMode); " +
+                                        "callee=$calleePkgName (not on the allowlist); " +
                                         "left to the ROM policy"
                                 )
                             }
@@ -928,7 +928,7 @@ class Hooker : XposedModule() {
                 // broadcast that the isAllowBroadcast gate did not consume is
                 // genuinely handed back to the ROM's deferral policy. Zero here
                 // is not a failure — it means every c2dm was already allowed
-                // upstream (non-strict mode, or every callee on the list).
+                // upstream (every callee involved was on the list).
                 deferC2dmPassthroughCount++
                 if (!deferC2dmPassthroughLogged) {
                     deferC2dmPassthroughLogged = true
@@ -1222,7 +1222,7 @@ class Hooker : XposedModule() {
                     intent != null &&
                     ACTION_REMOTE_INTENT == intent.action &&
                     targetPackage != null &&
-                    moduleAppliesTo(targetPackage, Tier.WAKE)
+                    moduleAppliesTo(targetPackage)
                 ) {
                     return@intercept true
                 }
@@ -1286,7 +1286,7 @@ class Hooker : XposedModule() {
                     if (GMS_PACKAGE_NAME == callerPackage &&
                         intent != null &&
                         ACTION_REMOTE_INTENT == intent.action &&
-                        moduleAppliesTo(calleePackage, Tier.WAKE)
+                        moduleAppliesTo(calleePackage)
                     ) {
                         // Same reason string and caller uid the native pass-through
                         // path uses, so greeze bookkeeping stays consistent.
@@ -1337,7 +1337,7 @@ class Hooker : XposedModule() {
                     val packageName = chain.getArg(2) as? String
                     if (intent != null &&
                         ACTION_REMOTE_INTENT == intent.action &&
-                        moduleAppliesTo(packageName, Tier.WAKE)
+                        moduleAppliesTo(packageName)
                     ) {
                         return@intercept false
                     }
@@ -3437,9 +3437,6 @@ class Hooker : XposedModule() {
     @Volatile
     private var sAllowlist: Set<String> = emptySet()
 
-    @Volatile
-    private var sStrictMode = false
-
     /** Whitelist writes this process has seen WeChat dropped from (doze-keepout). */
     private var wechatDozeKeepoutCount = 0L
 
@@ -3449,8 +3446,7 @@ class Hooker : XposedModule() {
             val prefs = getRemotePreferences(Prefs.GROUP_CONFIG)
             val set = prefs.getStringSet(Prefs.KEY_ALLOWLIST, emptySet())
             val loaded = if (set != null) HashSet(set) else HashSet()
-            val strict = prefs.getBoolean(Prefs.KEY_STRICT_MODE, false)
-            if (loaded != sAllowlist || strict != sStrictMode) {
+            if (loaded != sAllowlist) {
                 // Log on content change, not on every read: the stale-path reload
                 // would otherwise repeat an identical line every ALLOWLIST_STALE_MS.
                 // The package count is deliberately not printed: without the names
@@ -3458,11 +3454,10 @@ class Hooker : XposedModule() {
                 // and a 9-to-5 edit read as the same line either way.
                 log(
                     Log.INFO, TAG,
-                    "allowlist loaded: selected=${loaded.isNotEmpty()}, strict=$strict"
+                    "allowlist loaded: selected=${loaded.isNotEmpty()}"
                 )
             }
             sAllowlist = loaded
-            sStrictMode = strict
             sAllowlistFreshMs = SystemClock.uptimeMillis()
             sAllowlistFailureStreak = 0
         } catch (e: Exception) {
@@ -3587,48 +3582,31 @@ class Hooker : XposedModule() {
     }
 
     /**
-     * Which tier of gate is asking.
+     * The single decision point: may the module act for [packageName]?
      *
-     * The module answers "does this package get module help?" with one rule, but the
-     * *tier* decides when the user allowlist actually narrows it — and that difference
-     * is deliberate, not drift (HELP §4 vs §5):
+     * The allowlist is the only control, and it always narrows — there is no
+     * global "release everything" switch any more:
      *
-     * - [Tier.WAKE] — the wake privileges: auto-start allowance
-     *   (`checkApplicationAutoStart`), thaw-on-c2dm (`isRestrictReceiver`), broadcast
-     *   caching (`isNeedCachedBroadcast`), stopped-package delivery plus the ~2s power
-     *   exemption (`ActivityManagerService#broadcastIntent`). The allowlist filters
-     *   these **unconditionally**: with a non-empty list an unselected app gets none of
-     *   them, strict mode or not.
-     * - [Tier.STRICT] — `isAllowBroadcast`, `isPushApp`, `isForceStopEnable`. These are
-     *   global by default (the module's default posture is a whole-device FCM fix) and
-     *   are narrowed to the allowlist **only under strict mode**.
+     * - an app on the list gets help;
+     * - an app off the list gets none of it, so the ROM's own verdict stands;
+     * - an **empty** list is "nothing is selected", so every app is off the list
+     *   and every restriction stays in force. The user releases restrictions one
+     *   app at a time by checking it.
+     *
+     * GMS is exempt unconditionally. That is the whole point of the module — the
+     * GMS/FCM chain itself is never narrowed, whatever the list holds — and it
+     * also keeps `isNeedCachedBroadcast` safe, the one call site that cannot
+     * check the caller and whose callee is sometimes GMS itself.
+     *
+     * 2026-10-02: replaced the former `shouldApply` + `shouldWake` pair.
+     * 2026-10-09: the `tier` argument and the old strict-mode escape are gone —
+     * the allowlist now narrows every gate alike, empty list included.
      */
-    private enum class Tier { WAKE, STRICT }
-
-    /**
-     * The single decision point: may the module act for [packageName] at this [tier]?
-     *
-     * GMS is exempt in both tiers. That is the whole point of the module — the GMS/FCM
-     * chain itself is never narrowed, no matter how the allowlist is configured — and it
-     * also keeps `isNeedCachedBroadcast` safe, the one call site that cannot check the
-     * caller and whose callee is sometimes GMS itself.
-     *
-     * 2026-10-02: replaces the former `shouldApply` + `shouldWake` pair. Those were two
-     * look-alike predicates whose real difference (which tier ignores strict mode) was
-     * invisible at the call site; the two behaviours are unchanged.
-     */
-    private fun moduleAppliesTo(packageName: String?, tier: Tier): Boolean {
-        val allowlist = getFcmAllowlist()
-        if (allowlist.isEmpty() ||
-            allowlist.contains(packageName) ||
-            GMS_PACKAGE_NAME == packageName ||
-            GMS_PERSISTENT_PROCESS_NAME == packageName
-        ) {
+    private fun moduleAppliesTo(packageName: String?): Boolean {
+        if (GMS_PACKAGE_NAME == packageName || GMS_PERSISTENT_PROCESS_NAME == packageName) {
             return true
         }
-        // Off the list: the wake tier is already narrowed, only the strict tier
-        // follows strict mode.
-        return tier == Tier.STRICT && !sStrictMode
+        return getFcmAllowlist().contains(packageName)
     }
 
     /**
@@ -3912,7 +3890,7 @@ class Hooker : XposedModule() {
                             chain.thisObject, chain.getArg(0)
                         ) &&
                         targetPackage != null &&
-                        moduleAppliesTo(targetPackage, Tier.WAKE)
+                        moduleAppliesTo(targetPackage)
                     ) {
                         // ponytail: only the flag is added — appOp is passed
                         //   through untouched. External modules raise OP_NONE to
@@ -4001,11 +3979,12 @@ class Hooker : XposedModule() {
      * The experiment's own allowlist gate: membership is required, so an empty
      * list means "no app" rather than "every app".
      *
-     * Deliberately not [moduleAppliesTo]. That one fails open on an empty list
-     * and exempts GMS, which is right for the shipped wake privileges — the
-     * module's default posture is a whole-device FCM fix — but wrong for the one
-     * experiment left here, which writes a user-visible ROM setting and whose
-     * description promises "only the checked apps".
+     * Kept separate from [moduleAppliesTo] for the GMS exemption only: that one
+     * lets GMS through unconditionally, which is right for the shipped wake
+     * privileges — the GMS/FCM chain must never be narrowed — but wrong for the
+     * experiments here, which write user-visible ROM settings and whose
+     * descriptions promise "only the checked apps". The empty-list behaviour of
+     * the two now agrees (both mean "no app"), so the two differ solely on GMS.
      */
     private fun wakeExplicitlyAllows(packageName: String): Boolean {
         return getFcmAllowlist().contains(packageName)
@@ -4478,7 +4457,7 @@ class Hooker : XposedModule() {
      *  - `allowed` counts c2dm the isAllowBroadcast gate admitted. `uid-fallback`
      *    is the subset the *uid* carried rather than the caller package string
      *    (P1) — a non-zero value means the fallback was load-bearing.
-     *  - `skipped` counts c2dm to callees the user did not select (strict mode).
+     *  - `skipped` counts c2dm to callees the user did not select.
      *    Those now fall through to the ROM policy, which is the P0 fix.
      *  - `reached-defer` counts c2dm that actually arrived at
      *    `DomesticPolicyManager#deferBroadcast` without being suppressed; a
@@ -5643,7 +5622,7 @@ class Hooker : XposedModule() {
         val systemServerCl = InternationalPolicyManagerClass.classLoader
         hookE(isPushAppMethod).intercept { chain: XposedInterface.Chain ->
             val pkg = chain.getArg(0) as? String
-            if (moduleAppliesTo(pkg, Tier.STRICT)) {
+            if (moduleAppliesTo(pkg)) {
                 try {
                     val fromRestrictNet = STACK_WALKER.walk { frames ->
                         frames.anyMatch { frame ->
@@ -5676,22 +5655,13 @@ class Hooker : XposedModule() {
      * `ProcessCleanerBase#isForceStopEnable` for apps that declare an FCM
      * component, so the ROM's cleaner leaves them alone.
      *
-     * The tier matters more than the return value. This gate is [Tier.STRICT],
-     * so the allowlist narrows it **only** under strict mode — verified
-     * 2026-10-03 with googlequicksearchbox:
+     * The allowlist governs it like every other gate: only a checked app is
+     * protected, and an unchecked one stays exposed to MIUI force-stop. That is
+     * the complete explanation for `No response to broadcast …` and
+     * `Failed to broadcast to stopped app` in an unchecked app's log — nothing
+     * regressed, the app is simply not on the list. Checking it is the fix.
      *
-     *  - strict mode **off** (the default): every app declaring an FCM component
-     *    is protected. That is the module's whole-device posture, and it is why
-     *    the default install needs no per-app selection.
-     *  - strict mode **on**: protection narrows to the allowlist, and an
-     *    unselected app is exposed to MIUI force-stop again. That is the
-     *    complete explanation for `No response to broadcast …` and
-     *    `Failed to broadcast to stopped app` in an unselected app's log:
-     *    nothing regressed, the user narrowed the module.
-     *
-     * So **turning strict mode on can never rescue an app that is not on the
-     * list** — the list is the only thing that helps an app. The two rules are
-     * restated for users in HELP §5 and §9.
+     * GMS is exempt as everywhere else: it is never narrowed.
      *
      * `policy == 13` is passed through untouched: that is the one code this hook
      * never overrides, because overriding it would fight an explicit stop
@@ -5723,7 +5693,7 @@ class Hooker : XposedModule() {
                 if (policy is Int && policy != 13 &&
                     pm != null &&
                     pkgName != null &&
-                    moduleAppliesTo(pkgName, Tier.STRICT) &&
+                    moduleAppliesTo(pkgName) &&
                     declaresFcmComponent(pm, pkgName)
                 ) {
                     return@intercept false
@@ -5742,6 +5712,23 @@ class Hooker : XposedModule() {
      * subclass, a `FirebaseInstanceIdReceiver` subclass, and the
      * `MESSAGING_EVENT` / `RECEIVE` intent actions (direct-boot included).
      * The same four drive the "FCM-supported" filter in the app list.
+     *
+     * **The rule: any two of ②③④ is enough; ② or ③ alone is also enough; ①
+     * alone, ④ alone, and nothing at all are out.** Kept identical to
+     * `MainActivity.isFcmClient` — asking it the same way is the point, and a
+     * divergence would show as an app the list shows but the cleaner leaves
+     * alone (or the reverse).
+     *
+     * Why ② is not required even though it is the SDK's own receiver: the SDK
+     * expects an app to hand the message to a receiver *it* declares, so a
+     * client can receive `RECEIVE` without ever declaring
+     * `FirebaseInstanceIdReceiver`. GMS is the case in hand. Why ① alone is out:
+     * `FirebaseMessagingService` is a public base class any app that merely
+     * links the SDK inherits, with no promise a push was ever wired up. Why ④
+     * alone is out: the pre-Firebase c2dm era left bare `RECEIVE` actions on
+     * components unrelated to messaging — `framework-res` still carries one on
+     * its factory-reset receiver, a remote-wipe leftover with no Firebase in it
+     * at all.
      *
      * Scope, recorded so it stops being re-litigated: this matches Firebase Cloud
      * Messaging only. The domestic push stacks (Mi Push, GeTui, HMS, Honor) are
@@ -5778,26 +5765,63 @@ class Hooker : XposedModule() {
     }
 
     private fun declaresFcmUncached(pm: PackageManager, packageName: String): Boolean {
-        val serviceIntent = Intent(ACTION_MESSAGING_EVENT)
-        serviceIntent.setPackage(packageName)
-        if (pm.queryIntentServices(serviceIntent, 0).isNotEmpty()) {
-            return true
-        }
-        val receiverIntent = Intent(ACTION_REMOTE_INTENT)
-        receiverIntent.setPackage(packageName)
-        if (pm.queryBroadcastReceivers(receiverIntent, 0).isNotEmpty()) {
-            return true
-        }
+        // Marker 1: the SDK's messaging service class.
+        var hasMessagingService = true
         try {
             pm.getServiceInfo(ComponentName(packageName, FCM_MESSAGING_SERVICE_CLASS), 0)
-            return true
         } catch (ignored: Throwable) {
+            hasMessagingService = false
         }
+        // Marker 2: the SDK's instance-id receiver class.
+        var hasIidReceiver = true
         try {
             pm.getReceiverInfo(ComponentName(packageName, FCM_IID_RECEIVER_CLASS), 0)
-            return true
         } catch (ignored: Throwable) {
+            hasIidReceiver = false
         }
+        // Marker 3: the MESSAGING_EVENT action. Asked with setPackage so this
+        // stays a per-package question.
+        val serviceIntent = Intent(ACTION_MESSAGING_EVENT)
+        serviceIntent.setPackage(packageName)
+        val hasMessagingEvent = pm.queryIntentServices(serviceIntent, 0).isNotEmpty()
+        // Marker 4: the c2dm RECEIVE action.
+        val receiverIntent = Intent(ACTION_REMOTE_INTENT)
+        receiverIntent.setPackage(packageName)
+        val hasReceive = pm.queryBroadcastReceivers(receiverIntent, 0).isNotEmpty()
+        return isFcmClient(hasMessagingService, hasIidReceiver, hasMessagingEvent, hasReceive)
+    }
+
+    /**
+     * The one rule, in one place: **any two of ②③④, or ② alone, or ③ alone.**
+     *
+     * Spelled out as a boolean table rather than arithmetic on a count: the
+     * accepted shapes are not a count — "② alone" and "③ alone" are each one
+     * marker while ②+③ is two, and `④ alone` has to be rejected even though it
+     * is also one marker. `sum >= 2 || has2 || has3` would say it in fewer lines
+     * and hide the three shapes.
+     *
+     * ① contributes to the two-of-three but is never sufficient on its own.
+     * Mirrors `MainActivity.isFcmClient`; keep the two in step.
+     */
+    private fun isFcmClient(
+        hasMessagingService: Boolean,
+        hasIidReceiver: Boolean,
+        hasMessagingEvent: Boolean,
+        hasReceive: Boolean
+    ): Boolean {
+        // ②③④: any two.
+        val amongActions =
+            (hasIidReceiver && hasMessagingEvent) ||
+                (hasIidReceiver && hasReceive) ||
+                (hasMessagingEvent && hasReceive)
+        if (amongActions) {
+            return true
+        }
+        // ② alone or ③ alone.
+        if (hasIidReceiver || hasMessagingEvent) {
+            return true
+        }
+        // Everything else: ① alone, ④ alone, or nothing.
         return false
     }
 

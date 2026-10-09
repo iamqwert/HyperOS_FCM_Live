@@ -144,10 +144,10 @@ private fun ExperimentBody(
     // the opposite: pure memory, nothing persists, so they follow the master.
     val writeRevealed = autostartGateRelease || wakeWriteAutostart
     // Both autostart rows do nothing on an empty FCM wake allowlist, and an
-    // empty list means the opposite here from what it means in the shipped
-    // feature — there, every app; here, no app. Read once, like the switch
-    // values above, and shown in both switch positions because the row does the
-    // same nothing either way.
+    // empty list means "no app" — the same as everywhere else now that the
+    // allowlist is the sole control. Read once, like the switch values above,
+    // and shown in both switch positions because the row does the same nothing
+    // either way.
     val emptyAllowlist = remember { Prefs.readLocalAllowlist(context).isEmpty() }
     val emptyAllowlistHint = if (emptyAllowlist) {
         stringResource(R.string.experiment_autostart_empty_list)

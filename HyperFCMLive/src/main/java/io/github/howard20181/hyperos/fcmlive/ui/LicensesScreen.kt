@@ -381,6 +381,29 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  * Color Utilities are compile-time or vendored, so they are never on the
  * runtime classpath and are listed for attribution.
  *
+ * Re-audited again on 2026-10-09, this time against **both** the resolved
+ * graph and the surviving classes in `mapping/release/mapping.txt`. Four rows
+ * had drifted and were corrected:
+ * - AndroidX Compose UI / Compose Foundation: 1.12.1 → **1.13.0-alpha01**
+ * - AndroidX Compose Material3: 1.5.0-alpha27 → **1.5.0-alpha29**
+ * - Kotlin Stdlib: 2.2.10 → **2.2.20**
+ * - Lifecycle Common / Runtime: 2.9.4 → **2.10.0**
+ * The Compose bump is not a BOM move: `compose-bom:2026.09.00` still pins the
+ * 1.12.x line, but `material3:1.5.0-alpha29` is declared above it and its
+ * `material3-android` POM constrains every `androidx.compose.*` module forward
+ * to 1.13.0-alpha01. That is also why the row for the BOM itself stays off:
+ * the number a reader would want is the one that wins, and the BOM is not it.
+ *
+ * No rows were added or removed in the 2026-10-09 pass. Several families that
+ * do ship classes (androidx.graphics, androidx.savedstate, androidx.window,
+ * androidx.emoji2, androidx.fragment, androidx.recyclerview, androidx.transition
+ * and the rest) are transitive, exactly like the ~39 families the policy note
+ * above already covers — they arrive behind material3/appcompat and get one row
+ * only when this app is *built on* them, not when it merely inherits them.
+ * `kotlinx.serialization` stays for the same reason `JUnit` does: it resolves
+ * onto the classpath but R8 removes all of it (225 classes in usage.txt, 0 in
+ * mapping.txt), so it ships nothing and is a licence statement only.
+ *
  * The 2026-10-05 pass added the two rows that were missing:
  * - **AndroidX ConstraintLayout** is the one AndroidX family here that is *not*
  *   in the `androidx/androidx` monorepo, so the shared ANDROIDX_URL row cannot
@@ -397,9 +420,9 @@ private val DEPS = arrayOf(
     arrayOf("AndroidX AppCompat", "1.8.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Arch Core", "2.2.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Collection", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose Foundation", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose Material3", "1.5.0-alpha27", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose UI", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose Foundation", "1.13.0-alpha01", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose Material3", "1.5.0-alpha29", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose UI", "1.13.0-alpha01", "Apache License 2.0", ANDROIDX_URL),
     // Separate repository, so ANDROIDX_URL does not cover it. Only on the
     // classpath behind Material Components, but its code does survive R8.
     arrayOf(
@@ -432,7 +455,7 @@ private val DEPS = arrayOf(
     // reason as the annotation-only rows: it is a third-party project in the
     // build with its own licence. EPL-1.0 (see licenseRawFor).
     arrayOf("JUnit", "4.13.2", "Eclipse Public License 1.0", "https://github.com/junit-team/junit4"),
-    arrayOf("Kotlin Stdlib", "2.2.10", "Apache License 2.0", "https://github.com/JetBrains/kotlin"),
+    arrayOf("Kotlin Stdlib", "2.2.20", "Apache License 2.0", "https://github.com/JetBrains/kotlin"),
     arrayOf(
         "Kotlinx Coroutines",
         "1.9.0",
@@ -448,8 +471,8 @@ private val DEPS = arrayOf(
     arrayOf("libxposed API", "102.0.0", "Apache License 2.0", "https://github.com/libxposed/api"),
     arrayOf("libxposed Interface", "102.0.0", "Apache License 2.0", "https://github.com/libxposed"),
     arrayOf("libxposed Service", "102.0.0", "Apache License 2.0", "https://github.com/libxposed/service"),
-    arrayOf("Lifecycle Common", "2.9.4", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("Lifecycle Runtime", "2.9.4", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("Lifecycle Common", "2.10.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("Lifecycle Runtime", "2.10.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf(
         "Material Components",
         "1.14.0",
@@ -475,6 +498,7 @@ private val REFERENCES = arrayOf(
     arrayOf("Howard20181/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/Howard20181/HyperOS_FCM_Live"),
     arrayOf("Kr328/HyperOSFCMFix", "MIT License", "https://github.com/Kr328/HyperOSFCMFix"),
     arrayOf("Kwensiu/DPIS", "GPL-3.0", "https://github.com/Kwensiu/DPIS"),
+    arrayOf("tiann/KernelSU", "GPL-3.0", "https://github.com/tiann/KernelSU"),
     // No LICENSE file in the repository — shown as 「—」, row opens nothing.
     arrayOf("onijiang0/fcmfix", "—", "https://github.com/onijiang0/fcmfix"),
     arrayOf("ReedGAOOO/FCMGuard-HyperOS", "MIT License", "https://github.com/ReedGAOOO/FCMGuard-HyperOS"),
