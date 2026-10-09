@@ -11,6 +11,8 @@ import android.view.PixelCopy
 import android.view.View
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
 import java.lang.ref.WeakReference
 
@@ -299,6 +301,24 @@ internal object WindowSnapshot {
         }
         val width = view.width
         val height = view.height
+        // Never redraw a page the user is standing on.
+        //
+        // A cached picture is only ever *revealed* by a child page's swipe-back,
+        // and while its own page is on screen no child can be up there — so this
+        // slot is unreachable right now, and it is re-photographed by [capture]
+        // the next time a child is launched from it. Dropping it is free.
+        //
+        // Redrawing it is not. [forceRecompose] disposes and rebuilds the whole
+        // composition, which on a live window costs a blank frame (the flash
+        // someone sees on the way back from a third-level page) and resets every
+        // plain `remember` on the page — including, once the rebuild lands under
+        // the finger, where the list is scrolled to. It is a stopped window's
+        // tree that can be brought forward and painted on demand; a resumed one
+        // has no reason to be touched at all.
+        if (isOnScreen(parent)) {
+            cache.remove(name)
+            return false
+        }
         val bitmap = try {
             Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         } catch (t: Throwable) {
@@ -319,6 +339,20 @@ internal object WindowSnapshot {
         entry.bitmap = bitmap.asImageBitmap()
         entry.generation = ThemeEngine.generation
         return true
+    }
+
+    /**
+     * True while [activity] is the page the user is looking at.
+     *
+     * `STARTED` is the visible state: an activity that a child has covered has
+     * gone back to `CREATED`, which is exactly the one this file is allowed to
+     * repaint. A host this cannot classify (no `LifecycleOwner`, which only a
+     * non-ComponentActivity would be) counts as *not* on screen, so the ordinary
+     * redraw still happens for it rather than silently losing the strip.
+     */
+    private fun isOnScreen(activity: Activity): Boolean {
+        val state = (activity as? LifecycleOwner)?.lifecycle?.currentState ?: return false
+        return state.isAtLeast(Lifecycle.State.STARTED)
     }
 
     /**

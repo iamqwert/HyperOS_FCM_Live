@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -157,13 +158,10 @@ fun SwipeBackContainer(
     val offsetPx = remember { Animatable(0f) }
     var widthPx by remember { mutableFloatStateOf(0f) }
 
-    // How far the page has been pushed aside, 0f (rest, covering everything) to
-    // 1f (fully off screen). Derived, not stored — see the note above.
-    val revealFraction = if (widthPx > 0f) {
-        (offsetPx.value / widthPx).coerceIn(0f, 1f)
-    } else {
-        0f
-    }
+    // How far the page has been pushed aside, and the strength of the wash that
+    // follows it, are deliberately **not** worked out here. See the draw call in
+    // the body below: both are read in the draw scope, off the same read of
+    // `offsetPx` that moves the sheet.
 
     // Corner radius of the sheet, derived from the measured width rather than
     // fixed in dp.
@@ -182,23 +180,19 @@ fun SwipeBackContainer(
         0.dp
     }
 
-    // Strength of the wash laid over 上一层页面, 0f..1f.
-    //
-    // Deepest while the page above still covers the card, lifting to nothing as
-    // the card is uncovered: the shadow comes OFF the previous page as it is
-    // returned to, rather than being added to it.
-    //
-    // Derived from `offsetPx` on every frame with no second piece of state. A
-    // shadow frozen or animated on its own clock drifts out of step with the
-    // page moving above it, and that drift is what flashed in an earlier
-    // version — the shadow stopped while the page kept tweening.
-    val shadowAlpha = MAX_SCRIM_ALPHA * (1f - revealFraction)
+    // The one thing about `offsetPx` the *composition* needs to know: whether the
+    // page is anywhere off its rest position, for the back press below. Solved to
+    // a Boolean through `derivedStateOf` so it only notifies when that flips.
+    // Read directly, `offsetPx.value != 0f` would recompose this composable — and
+    // with it the entire page handed to [content] — once per frame for the whole
+    // duration of every swipe.
+    val isDismissing by remember { derivedStateOf { offsetPx.value != 0f } }
 
     // A back press mid-gesture (or mid-settle) must finish at once rather than
     // stack a second transition on the one already running. `true` because the
     // page is already displaced: the system's exit animation is authored for a
     // window at rest, and playing it from a half-slid position reads as a jump.
-    BackHandler(enabled = offsetPx.value != 0f) { onBack(true) }
+    BackHandler(enabled = isDismissing) { onBack(true) }
 
     Box(
         modifier = Modifier
@@ -387,11 +381,35 @@ fun SwipeBackContainer(
                 .background(MaterialTheme.colorScheme.background)
                 .drawWithContent {
                     drawContent()
-                    // `offsetPx > 0f` guards rest: at rest the card is hidden
-                    // behind the page, and without the guard a wash at its
-                    // deepest would show for one frame before the page settles.
-                    if (shadowAlpha > 0f && offsetPx.value > 0f) {
-                        drawRect(color = scrimColor, alpha = shadowAlpha)
+                    // How far the page has been pushed aside, 0f (rest, covering
+                    // everything) to 1f (fully off screen), and the strength of the
+                    // wash that follows it — both computed *here*, in the draw
+                    // scope.
+                    //
+                    // This is the whole reason the shadow is drawn rather than
+                    // composed. `translationX` below is a draw-time read of
+                    // `offsetPx`, so the sheet moves once per frame; an alpha
+                    // worked out in composition would update once per
+                    // *recomposition*, and the two clocks are not the same one.
+                    // That gap is what flashed: the wash stopping while the page
+                    // kept tweening. Read from the same node on the same pass, the
+                    // wash cannot fall out of step with the sheet it is being
+                    // lifted off.
+                    //
+                    // Deepest while the page above still covers the card, lifting
+                    // to nothing as the card is uncovered: the shadow comes OFF the
+                    // previous page as it is returned to, rather than being added
+                    // to it. `travel > 0f` guards rest: at rest the card is hidden
+                    // behind the page, and without the guard a wash at its deepest
+                    // would show for one frame before the page settles.
+                    if (widthPx > 0f) {
+                        val travel = (offsetPx.value / widthPx).coerceIn(0f, 1f)
+                        if (travel > 0f) {
+                            drawRect(
+                                color = scrimColor,
+                                alpha = MAX_SCRIM_ALPHA * (1f - travel)
+                            )
+                        }
                     }
                 }
         ) {

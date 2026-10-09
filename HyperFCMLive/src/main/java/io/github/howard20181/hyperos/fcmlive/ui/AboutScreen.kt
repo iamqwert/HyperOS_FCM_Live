@@ -294,6 +294,9 @@ private fun AboutBody(
         modifier = modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 16.dp),
+        // The four appearance menus all re-skin the app on a pick, so this page is
+        // the one place a menu could visibly throw the reader back to the start.
+        state = rememberPageListState("about"),
         // The gesture-hint strip is scroll-through, not a hard stop: rows pass
         // under it while scrolling and only rest that far above the edge.
         contentPadding = PaddingValues(bottom = bottomPadding)

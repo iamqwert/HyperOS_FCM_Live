@@ -116,6 +116,7 @@ private fun LicensesBody(
         modifier = modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 16.dp),
+        state = rememberPageListState("licenses"),
         // The gesture-hint strip is scroll-through, not a hard stop.
         contentPadding = PaddingValues(bottom = bottomPadding)
     ) {

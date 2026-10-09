@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
@@ -30,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,6 +82,38 @@ fun SectionTitle(res: Int, modifier: Modifier = Modifier, first: Boolean = false
         fontWeight = FontWeight.Medium,
         style = MaterialTheme.typography.bodyMedium
     )
+}
+
+/**
+ * The scroll state of a whole-page list, held under an explicit saveable key.
+ *
+ * Every page body in the app is a `LazyColumn`, and every one of them owes its
+ * position to this rather than to `LazyColumn`'s default `rememberLazyListState()`.
+ * Two reasons, both learned the hard way here:
+ *
+ *  1. **The position has to outlive the composition, not just the recomposition.**
+ *     [WindowSnapshot] repaints a stopped page by detaching and re-attaching its
+ *     view tree, which disposes the composition wholesale. Only a saveable state
+ *     comes back from that.
+ *  2. **The key has to be named.** A saveable registered without one is keyed by
+ *     its *position in the registration order*, so anything that adds or removes
+ *     an earlier saveable in the same body moves the list's key along with it —
+ *     and the list silently restarts at the top because its value is now filed
+ *     under a key nobody asks for. A name removes the whole class: the list is
+ *     found by what it is, never by where it happens to sit.
+ *
+ * This is the contract behind the rule that **picking an option out of a dropdown
+ * must never scroll the page back to the top**. A menu pick changes state, and
+ * depending on the menu it may re-skin the app or ask [WindowSnapshot] to retake
+ * a picture; with the position held here, none of that can reach the viewport.
+ * Any new page list takes a [key], and any new dropdown on an existing page needs
+ * nothing done to it — the page it sits in already keeps its place.
+ */
+@Composable
+fun rememberPageListState(key: String): LazyListState {
+    return rememberSaveable(key = key, saver = LazyListState.Saver) {
+        LazyListState()
+    }
 }
 
 /** Gap between two rows of one connected group. */

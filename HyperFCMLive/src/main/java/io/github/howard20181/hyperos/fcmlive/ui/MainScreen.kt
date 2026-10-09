@@ -60,7 +60,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -171,19 +170,19 @@ fun MainScreen(
     onRefresh: () -> Unit,
     onDiagnostics: () -> Unit,
     modifier: Modifier = Modifier,
-    // Remembered *saveably*, inside the composition: the position has to survive
-    // both a rotation and the composition being torn down and rebuilt. The
-    // Activity used to build the state itself and hand it in, which is the one
-    // way to get a `LazyListState` nobody ever saves — the list came back at the
-    // top after a rotation, the opposite of what building it there was meant to
-    // achieve. So it stays internal, but through [rememberSaveable]: the
-    // saveable registry lives on the view, not the composition, so the position
-    // is restored even when the composition is disposed wholesale — which is
-    // what [io.github.howard20181.hyperos.fcmlive.ui.WindowSnapshot] does when it
-    // redraws this window to refresh the swipe-back picture.
-    lazyListState: LazyListState = rememberSaveable(saver = LazyListState.Saver) {
-        LazyListState()
-    },
+    // Remembered *saveably*, inside the composition, under a name: the position
+    // has to survive both a rotation and the composition being torn down and
+    // rebuilt. The Activity used to build the state itself and hand it in, which
+    // is the one way to get a `LazyListState` nobody ever saves — the list came
+    // back at the top after a rotation, the opposite of what building it there was
+    // meant to achieve. So it stays internal, but through
+    // [rememberPageListState]: the saveable registry lives on the view, not the
+    // composition, so the position is restored even when the composition is
+    // disposed wholesale — which is what
+    // [io.github.howard20181.hyperos.fcmlive.ui.WindowSnapshot] used to do to this
+    // window to refresh the swipe-back picture, and what it still does to any page
+    // that is stopped at the time.
+    lazyListState: LazyListState = rememberPageListState("app-list"),
     // The M3 feedback surface. Owned by the caller, because that is where the
     // messages originate; hosted here, because this is the tree on screen.
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },

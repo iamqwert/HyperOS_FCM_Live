@@ -57,6 +57,7 @@ private fun PrivacyBody(
         modifier = modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 16.dp),
+        state = rememberPageListState("privacy"),
         // The gesture-hint strip is scroll-through, not a hard stop.
         contentPadding = PaddingValues(bottom = bottomPadding)
     ) {

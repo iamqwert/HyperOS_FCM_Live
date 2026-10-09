@@ -161,6 +161,9 @@ private fun ExperimentBody(
         modifier = modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 16.dp),
+        // The signal-floor menu, and every menu added hereafter, must leave the
+        // reader where they were. See [rememberPageListState].
+        state = rememberPageListState("experiment"),
         // The gesture-hint strip is scroll-through, not a hard stop.
         contentPadding = PaddingValues(bottom = bottomPadding)
     ) {
