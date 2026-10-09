@@ -108,9 +108,9 @@
         <item>深色模式</item>
         <item>AMOLED</item>
     </string-array>
-    <!-- 与 ThemePrefs.UI_STYLE_* 的顺序一致。Miuix 是库名，保留原文。 -->
+    <!-- 与 ThemePrefs.UI_STYLE_* 的顺序一致。两个都是设计语言的名字，保留原文。 -->
     <string-array name="ui_style_entries">
-        <item>标准</item>
+        <item>Material</item>
         <item>Miuix</item>
     </string-array>
     <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格），选项保留英文原文。 -->

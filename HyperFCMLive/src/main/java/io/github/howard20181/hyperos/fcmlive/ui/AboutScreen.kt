@@ -207,6 +207,12 @@ private fun AboutBody(
     var updateBadge by remember { mutableStateOf(UpdateChecker.isUpdateAvailable(context)) }
     var themeMode by remember { mutableIntStateOf(ThemePrefs.themeMode(context)) }
     var uiStyle by remember { mutableIntStateOf(ThemePrefs.uiStyle(context)) }
+    // The whole theme section is scoped by this: 动态颜色 / 调色风格 / 颜色规格 are
+    // the app's own colour engine's controls, and the Miuix look does not go
+    // through that engine at all. A row that changes nothing has no business being
+    // on screen, and a row that is hidden but still feeding the look is worse —
+    // see MiuixStyleTheme, which stops reading them for exactly that reason.
+    val miuixStyle = uiStyle == ThemePrefs.UI_STYLE_MIUIX
     var miuixMonet by remember { mutableStateOf(ThemePrefs.miuixMonet(context)) }
     var paletteStyle by remember { mutableIntStateOf(ThemePrefs.paletteStyle(context).ordinal) }
     var colorSpec by remember { mutableIntStateOf(ThemePrefs.specVersion(context)) }
@@ -356,7 +362,7 @@ private fun AboutBody(
             // come from its engine and 动态颜色 below is the switch for them, so a
             // second Monet row would offer a choice that changes nothing — and the
             // one that does change something would be a row away from it.
-            if (uiStyle == ThemePrefs.UI_STYLE_MIUIX) {
+            if (miuixStyle) {
                 Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
                 SettingsSwitchCard(
                     iconRes = R.drawable.ic_dynamic_color,
@@ -369,67 +375,74 @@ private fun AboutBody(
                         actions.onAppearanceChange()
                     },
                     first = false,
-                    last = false
+                    // The last row of the section while the Miuix look is on.
+                    last = miuixStyle
                 )
             }
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
-            DynamicColorCard(
-                dynamic = dynamic,
-                seed = seed,
-                first = false,
-                last = false,
-                onDynamicChange = { checked ->
-                    ThemePrefs.setDynamicColor(context, checked)
-                    dynamic = checked
-                    actions.onAppearanceChange()
-                },
-                onSeedChange = { color ->
-                    ThemePrefs.setSeedColor(context, color)
-                    seed = color
-                    actions.onAppearanceChange()
-                }
-            )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
-            PopupCard(
-                iconRes = R.drawable.ic_palette_style,
-                title = stringResource(R.string.palette_style),
-                subtitle = stringResource(R.string.about_sub_palette_style),
-                // Entry index == Scheme.Variant.ordinal, which is how the
-                // string array is written; [paletteVariants] is that list minus
-                // whatever the spec in effect cannot render.
-                entries = paletteVariants.map { styleEntries[it.ordinal] },
-                currentIndex = paletteVariants.indexOf(paletteStyleNow),
-                first = false,
-                last = false,
-                onPick = { index ->
-                    // Mapping through the filtered list is what keeps the write
-                    // honest: the index is a position in *this* menu, not an
-                    // ordinal.
-                    ThemePrefs.setPaletteStyle(context, paletteVariants[index])
-                    paletteStyle = paletteVariants[index].ordinal
-                    // Changing the style can put the spec out of reach (see
-                    // ThemePrefs.specVersion), so the spec row re-reads the
-                    // resolved value instead of keeping its own copy — the two
-                    // rows can only ever move together.
-                    colorSpec = ThemePrefs.specVersion(context)
-                    actions.onAppearanceChange()
-                }
-            )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
-            PopupCard(
-                iconRes = R.drawable.ic_color_spec,
-                title = stringResource(R.string.color_spec),
-                subtitle = stringResource(R.string.about_sub_color_spec),
-                entries = specValues.map { specEntries[it] },
-                currentIndex = specValues.indexOf(colorSpec),
-                first = false,
-                last = true,
-                onPick = { index ->
-                    ThemePrefs.setSpecVersion(context, specValues[index])
-                    colorSpec = ThemePrefs.specVersion(context)
-                    actions.onAppearanceChange()
-                }
-            )
+            // Material only: these three drive the app's colour engine, and under
+            // the Miuix look the colours come from Miuix instead. Hidden, and — to
+            // keep the hiding honest — also unread by that look, so a choice nobody
+            // can see cannot decide anything nobody can explain.
+            if (!miuixStyle) {
+                Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                DynamicColorCard(
+                    dynamic = dynamic,
+                    seed = seed,
+                    first = false,
+                    last = false,
+                    onDynamicChange = { checked ->
+                        ThemePrefs.setDynamicColor(context, checked)
+                        dynamic = checked
+                        actions.onAppearanceChange()
+                    },
+                    onSeedChange = { color ->
+                        ThemePrefs.setSeedColor(context, color)
+                        seed = color
+                        actions.onAppearanceChange()
+                    }
+                )
+                Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                PopupCard(
+                    iconRes = R.drawable.ic_palette_style,
+                    title = stringResource(R.string.palette_style),
+                    subtitle = stringResource(R.string.about_sub_palette_style),
+                    // Entry index == Scheme.Variant.ordinal, which is how the
+                    // string array is written; [paletteVariants] is that list minus
+                    // whatever the spec in effect cannot render.
+                    entries = paletteVariants.map { styleEntries[it.ordinal] },
+                    currentIndex = paletteVariants.indexOf(paletteStyleNow),
+                    first = false,
+                    last = false,
+                    onPick = { index ->
+                        // Mapping through the filtered list is what keeps the write
+                        // honest: the index is a position in *this* menu, not an
+                        // ordinal.
+                        ThemePrefs.setPaletteStyle(context, paletteVariants[index])
+                        paletteStyle = paletteVariants[index].ordinal
+                        // Changing the style can put the spec out of reach (see
+                        // ThemePrefs.specVersion), so the spec row re-reads the
+                        // resolved value instead of keeping its own copy — the two
+                        // rows can only ever move together.
+                        colorSpec = ThemePrefs.specVersion(context)
+                        actions.onAppearanceChange()
+                    }
+                )
+                Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                PopupCard(
+                    iconRes = R.drawable.ic_color_spec,
+                    title = stringResource(R.string.color_spec),
+                    subtitle = stringResource(R.string.about_sub_color_spec),
+                    entries = specValues.map { specEntries[it] },
+                    currentIndex = specValues.indexOf(colorSpec),
+                    first = false,
+                    last = true,
+                    onPick = { index ->
+                        ThemePrefs.setSpecVersion(context, specValues[index])
+                        colorSpec = ThemePrefs.specVersion(context)
+                        actions.onAppearanceChange()
+                    }
+                )
+            }
         }
 
         item {
