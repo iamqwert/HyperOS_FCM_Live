@@ -36,7 +36,6 @@
     <string name="show_fcm_supported_apps">展示支持应用</string>
     <string name="exclude_mipush_apps">排除MiPush应用</string>
     <string name="mipush_badge">MiPush</string>
-    <string name="strict_mode">严格模式</string>
     <string name="no_fcm_apps_found">未发现支持FCM的应用</string>
     <!-- 列表为空且原因是筛选（而非扫描失败）时的提示。 -->
     <string name="no_apps_found">当前筛选条件下没有可显示的应用</string>
@@ -185,4 +184,6 @@
     <!-- 多选行状态，拼进整行的无障碍描述里 -->
     <string name="row_selected">已选中</string>
     <string name="row_unselected">未选中</string>
+    <!-- 不可勾选的行：GMS 恒生效。小字即其无障碍描述，故不再单列 a11y_* 副本 -->
+    <string name="gms_row_note">始终生效，无需勾选</string>
 </resources>

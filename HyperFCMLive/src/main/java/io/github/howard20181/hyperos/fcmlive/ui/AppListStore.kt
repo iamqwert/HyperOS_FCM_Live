@@ -46,6 +46,22 @@ class AppListStore(context: Context, private val onChanged: () -> Unit) {
         @JvmField
         var checked: Boolean = false
 
+        /**
+         * This row is exempt from the allowlist: the module always acts for it,
+         * so its checkbox carries no meaning. Drawn greyed out and made
+         * non-interactive by the row composable, which is why the flag lives
+         * here rather than being recomputed at each of the gesture call sites.
+         *
+         * [exemptNote] is the string resource explaining *why* this particular
+         * row is inert — the two cases have different reasons and a single
+         * shared sentence would be wrong for one of them.
+         */
+        @JvmField
+        var exempt: Boolean = false
+
+        @JvmField
+        var exemptNote: Int = 0
+
         /** Manifest components (Firebase service / receiver, or their actions). */
         @JvmField
         var supportFcm: Boolean = false

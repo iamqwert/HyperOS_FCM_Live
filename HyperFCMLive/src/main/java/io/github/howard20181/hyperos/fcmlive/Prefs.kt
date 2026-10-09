@@ -89,17 +89,25 @@ object Prefs {
      * [KEY_SHOW_FCM_ONLY] because it is the same kind of setting — a
      * question about what the list offers, not about what the hooks do, so it
      * stays out of [GROUP_CONFIG] and needs no broadcast.
+     *
+     * Defaults to **on** at the read site (`MainActivity`): a MiPush app is
+     * already reachable through the vendor channel, so it is not offered for the
+     * FCM wake list until the user turns the filter off.
      */
     const val KEY_EXCLUDE_MIPUSH = "exclude_mipush_apps"
     /**
-     * Remote + local: overflow menu "Strict mode". Unlike
-     * [KEY_SHOW_FCM_ONLY] this one decides what the hooks do, so it sits
-     * in [GROUP_CONFIG] next to the allowlist and is re-read by the same
-     * broadcast; the local mirror only carries the answer before libxposed binds.
+     * UI-only: overflow menu "Show system apps". Same kind of setting as
+     * [KEY_SHOW_FCM_ONLY] — it decides what the list offers, not what the hooks
+     * do, so it stays out of [GROUP_CONFIG] and needs no broadcast.
+     *
+     * Persisted rather than left to `onSaveInstanceState`: that bundle only
+     * survives a config change or a system-initiated process death, **not** a
+     * user swipe-away from Recents. Without this key the checkbox silently
+     * reset on every relaunch, which made the GMS row vanish with it.
+     *
+     * Defaults to **off** at the read site (`MainActivity`).
      */
-    const val KEY_STRICT_MODE = "strict_mode"
-    /** UI-only: set while the mirror holds a strict-mode change the module never saw. */
-    private const val KEY_STRICT_PENDING_PUSH = "strict_mode_pending_push"
+    const val KEY_SHOW_SYSTEM = "show_system_apps"
     /**
      * Remote + local: "keep WiFi up during sleep" experiment — the master
      * switch.
@@ -462,18 +470,6 @@ object Prefs {
         localPrefs(context).edit().putBoolean(KEY_PENDING_PUSH, false).apply()
     }
 
-    /** Strict mode as the UI last left it; the mirror is what the settings screen shows. */
-    @JvmStatic
-    fun readLocalStrictMode(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_STRICT_MODE, false)
-    }
-
-    /** Strict-mode counterpart of [hasPendingPush]. */
-    @JvmStatic
-    fun hasPendingStrictPush(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_STRICT_PENDING_PUSH, false)
-    }
-
     /** Sleep-keepalive value as the UI last left it; the mirror is what the experiment screen shows. */
     @JvmStatic
     fun readLocalSleepKeepalive(context: Context): Boolean {
@@ -489,7 +485,7 @@ object Prefs {
     /**
      * Write the sleep-keepalive flag and make it live.
      *
-     * Same shape as [writeStrictMode]. The hook lives in the PowerKeeper
+     * Same shape as [writeAllowlist]. The hook lives in the PowerKeeper
      * process and reads the remote value lazily at each qualifying call, so
      * flipping this takes effect on the next sleep entry without a reboot.
      */
@@ -576,7 +572,7 @@ object Prefs {
     /**
      * Write the WeChat-doze-keepout flag and make it live.
      *
-     * Same shape as [writeStrictMode]. The hook lives in the PowerKeeper
+     * Same shape as [writeAllowlist]. The hook lives in the PowerKeeper
      * process and reads the remote value lazily at each qualifying call, so
      * flipping this takes effect on the next whitelist write without a reboot.
      */
@@ -1013,42 +1009,6 @@ object Prefs {
     }
 
     /**
-     * Write strict mode and make it live.
-     *
-     * Same shape as [writeAllowlist]: the remote boolean is what the
-     * hooks read, and [broadcastAllowlistChanged] is what makes them
-     * re-read it — they load the whole [GROUP_CONFIG] group in one go, so
-     * one broadcast refreshes the allowlist and this flag together. When the
-     * module service is not bound yet the change stays in the mirror and is
-     * flagged, so the next bind pushes it up instead of dropping it.
-     */
-    @JvmStatic
-    fun writeStrictMode(
-        context: Context,
-        remotePrefs: SharedPreferences?,
-        enabled: Boolean
-    ) {
-        val app = appContext(context)
-        localPrefs(app).edit().putBoolean(KEY_STRICT_MODE, enabled).apply()
-        if (remotePrefs == null) {
-            localPrefs(app).edit().putBoolean(KEY_STRICT_PENDING_PUSH, true).apply()
-            broadcastAllowlistChanged(app)
-            return
-        }
-        localPrefs(app).edit().putBoolean(KEY_STRICT_PENDING_PUSH, false).apply()
-        WRITER.execute {
-            try {
-                remotePrefs.edit().putBoolean(KEY_STRICT_MODE, enabled).commit()
-            } catch (t: Throwable) {
-                // As with the allowlist: a failed write must not pass for a live
-                // change, so the next bind pushes the mirror up again.
-                localPrefs(app).edit().putBoolean(KEY_STRICT_PENDING_PUSH, true).apply()
-            }
-            broadcastAllowlistChanged(app)
-        }
-    }
-
-    /**
      * Keys of experiments this version no longer has.
      *
      * `wake_stopped_packages` (and its pending-push marker) is the first entry:
@@ -1066,6 +1026,11 @@ object Prefs {
      * answered. Its name survives only inside the autostart ladder's
      * `autostart_*` keys, which are different mechanisms with different keys.
      *
+     * `strict_mode` (and its pending-push marker) was retired on 2026-10-09:
+     * the allowlist is now the sole control and always narrows, so there is no
+     * flag to read. Nothing consults the key any more, and leaving it would let
+     * a dump of the module's config keep listing a switch that no longer exists.
+     *
      * Add to this list when a switch is removed. There is no expiry: the entry
      * has to outlast every version that could still read the key.
      */
@@ -1073,7 +1038,9 @@ object Prefs {
         "wake_stopped_packages",
         "wake_stopped_packages_pending_push",
         "wake_autostart_relaxed",
-        "wake_autostart_relaxed_pending_push"
+        "wake_autostart_relaxed_pending_push",
+        "strict_mode",
+        "strict_mode_pending_push"
     )
 
     /**
@@ -1194,8 +1161,8 @@ object Prefs {
      * in that window would otherwise be dropped and appear to need a refresh.
      *
      * Despite the name it is not allowlist-only: the receiver reloads
-     * [GROUP_CONFIG] wholesale, so this also carries a strict-mode change
-     * (see [writeStrictMode]) — which is why the two share one action.
+     * [GROUP_CONFIG] wholesale, so any remote config change rides the same
+     * action — which is why the writers share it.
      */
     @JvmStatic
     fun broadcastAllowlistChanged(context: Context) {

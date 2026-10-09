@@ -48,8 +48,8 @@ android {
         targetSdkVersion 37
         // Fixed (bumped by hand each release) so LSPosed update checks never treat
         // this fork as older than upstream builds that inherit a low jgit commitCount.
-        versionCode 46
-        versionName "3.7.1"
+        versionCode 47
+        versionName "3.7.2"
 
         // HyperOS modules ship arm64 only; drop armv7a / x86 / x86_64 natives.
         ndk {
@@ -138,6 +138,10 @@ dependencies {
     // 1.8.2 through appcompat today; declaring it explicitly means Dependabot
     // tracks it instead of the version silently riding along.
     implementation 'androidx.activity:activity:1.8.2'
+    // BackHandler for ui/SwipeBack.kt. Same version line as `activity` above:
+    // the Compose integration and the core artifact are versioned together, and
+    // declaring the pair keeps Dependabot moving them as one.
+    implementation 'androidx.activity:activity-compose:1.8.2'
     // Material Views: two real consumers keep this here — the
     // `Theme.Material3.DayNight.NoActionBar` parent the app theme inherits from,
     // and DynamicColors (wallpaper accent) in theme/ThemeSupport.kt. The

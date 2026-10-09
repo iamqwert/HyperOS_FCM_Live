@@ -58,6 +58,11 @@ findings/
 logcat_*.txt
 *2026-10-03*
 
+# 真机取证工作台（2026-10-09 新增）：greezer/proc/GCM 全量 dumpsys、adj 采样 tsv、
+# ROM 反汇编摘录。含**应用包名清单与设备状态**，属个人行为画像 ⇒ 绝不入库。
+# 与本文件上面「分析报告 / 内部日志」同一性质，只是文件名是英文，旧规则接不住。
+.forensics/
+
 # Windows folder customization
 desktop.ini
 

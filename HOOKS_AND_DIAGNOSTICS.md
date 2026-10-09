@@ -857,6 +857,60 @@ adb shell "logcat -s LSPosedLogDaemon | awk '/fcmlive,HyperGreeze/ {print; fflus
 3. ROM 取证与运行时 `dumpsys` **两端闭合**才能下"哪个实现生效"的结论。只看一边会把"存在"当成"生效"。
 4. 判极性要从字节码读，不要从方法名猜（`isNoRestrictApp` / `isRestrictNet` 都判错过）。
 
+### 4.6.1 分析对象清单：本模块触及的 ROM 目录与文件
+
+按「静态字节码源 → 运行时状态源 → 内核/持久态」三层归类。**静态层决定「有没有、怎么判」，运行时层决定「此刻是不是」，内核层决定「真正落点在哪」**——三者缺一不可（见取证规则 3）。
+
+**A. 静态字节码源（`adb exec-out "cat"` 拉取 → 本地 dexdump/反汇编）**
+
+| 路径 | 承载 | 本项目用途 |
+| --- | --- | --- |
+| `/system/framework/framework.jar` | AOSP 框架类 | `Intent.isExcludingStopped()`（stopped 判定掩码）、`BroadcastSkipPolicy`、AOSP 侧 AMS 调用点 |
+| `/system/framework/services.jar` | AOSP system_server | `ActivityManagerService`、`ActiveServices`、`ContentProviderHelper`、`IntentResolver`、`ProcessRecord` |
+| `/system_ext/framework/miui-services.jar` | **MIUI system_server 扩展（最大落点）** | `GreezeManagerService` / `AurogonImmobulusMode` / `PolicyMaker` / `DomesticPolicyManager` / `InternationalPolicyManager` / `PowerStrategyMode` / `BroadcastQueueModernStubImpl` / `ProcessCleanerBase` / `ProcessManagerService` / `AppStandbyController` |
+| `/system_ext/framework/miui-framework.jar` | MIUI 框架扩展 | `WhetstoneActivityManager`（客户端）+ `WhetstoneActivityManagerService`（服务端同 jar）、`MiuiNetworkManager` |
+| `/system_ext/framework/miui-wifi-service.jar` | MIUI WiFi 服务 | `AmlMiuiThirdPartScorer#notifyScoreAndIsUsable`（WiFi 弱信号实验） |
+| `/system_ext/app/PowerKeeper/PowerKeeper.apk` | **PowerKeeper 独立进程（非 system_server）** | `PhoneSleepModeController#applySleepConfig`、`UserConfigureHelper`、`ActiveStateController`、`PowerKeeperAppConfigure` |
+| `/system/bin/netd` | netd 守护进程 | UDP 包过滤 / `setMiuiFirewallRule` / `MiUiFirewallSharedUid`（`oemnetd` 独立进程不存在） |
+
+**取证注意**：dex 里查类/成员**必须用描述符形式** `Lcom/x/Y;`，点分形式在字符串池里查不到；`miui-services.jar` 可能位于 `/system/system_ext/...` 或 `/system_ext/...`，以 `pm path` / `ls` 实测为准。
+
+**B. 运行时状态源（`dumpsys` / `settings` / `logcat`）**
+
+| 入口 | 读出什么 | 判读要点 |
+| --- | --- | --- |
+| `dumpsys greezer` | 当前策略实现、冻结列表、per-uid 记账、`resCtrl:` | `mCurrentCNPolicy`；`frozen=0s`；`FZ`/`THAW` 事件 |
+| `dumpsys activity [service\|broadcasts\|processes\|recents]` | 广播史、进程记录、服务绑定、provider binding | `~3m17s` 反推进程启动（**优于 `/proc` starttime**） |
+| `dumpsys deviceidle` | doze 三段白名单 | user / system / system-excidle |
+| `dumpsys netpolicy` | 网络策略、睡眠白名单 size | `policy=4` = ALLOW_METERED_BACKGROUND |
+| `dumpsys powerkeeper` / `smartpower` | 省电场景、`userTable` | `bgControl`、`scenario` |
+| `dumpsys package <pkg>` | `versionName` / `lastUpdateTime` / `firstInstallTime` | 版本与更新时刻核对 |
+| `dumpsys activity service com.google.android.gms/.gcm.GcmService` | **FCM 台账（权威）** | `mCreationTimeMs` 判投递；见 §4.7 |
+| `cmd appops get <pkg> [10008\|10053]` | 自启动 AppOp | `rejectTime` 是硬判据 |
+| `settings get system MILLET_NO_RESTRICT_APP` | PowerKeeper 免限名单 | 应含 GMS |
+| `getprop ro.miui.region` / `ro.debuggable` / `ro.build.type` | 代次与可达性判定 | 决定 Domestic 是否生效 |
+| PowerKeeper 私有 CP `content://com.miui.powerkeeper.configure/userTable` | 省电策略表（**不在 Settings 三命名空间**） | 写入面之一 |
+| `logcat`（`LSPosedLogDaemon` tag）/ `events` 缓冲 | 钩子输出；`am_proc_start` / `am_kill` | **判 app 启动只用 am 事件，勿用 `/proc` starttime**（USAP 池化陷阱） |
+
+**C. 内核 / 持久态（真正落点）**
+
+| 路径 | 内容 | 用途 |
+| --- | --- | --- |
+| `/sys/fs/cgroup/apps/uid_<uid>/pid_<pid>/cgroup.freeze` | **greeze 冻结的真正落点（cgroup v2）** | 写 1 = 冻结；v1 `freezer/perf/*` 与 `/proc/sys/millet/freeze_pid` 在 A17 已不存在 |
+| `/proc/<pid>/oom_score_adj` | 缓存优先级（adj） | 与冻结**正交**，勿混（`cached_apps_freezer=disabled` 时 adj 只是优先级概念） |
+| `/proc/net/tcp`、`/proc/net/tcp6` | 连接表（socket 状态） | 自有长连接存活判定；`SYN_SENT` / `CLOSE_WAIT` |
+| `/proc/uptime`、`/proc/stat`（`btime`） | 时间基准 | starttime 换算，**仅作参照** |
+| `/data/system/deviceidle.xml` | doze 白名单持久文件 | 「禁止写回未优化名单」的写盘面 |
+| `/data/adb/lspd/log/` | LSPosed 管理器日志导出 | 夜间取证的唯一起点 |
+| `/data/local/tmp/*.{sh,log,txt}` | 自建取证脚本与产物 | 长窗刷盘、dexdump 中转 |
+
+**D. 三层的组合纪律**
+
+- **能不能钩** → 静态层（类/方法/签名是否存在，代次差异见 §2.3）。
+- **钩了有没有生效** → 运行时层（`allowlist loaded:` / `net release:` 等钩子自证据）。
+- **真正改变了什么** → 内核/持久层（`cgroup.freeze`、socket 表、`deviceidle.xml`）。
+- **只用一层必出错**：只查静态 = 把"存在"当"生效"；只看运行时日志 = "没出现"当"没发生"（弱证据，见 §6.4）；只读内核 = 不知道是谁写的。
+
 ### 4.7 GcmService dump 判读
 
 抓法（约 300 行，建议重定向到文件再 grep）：
