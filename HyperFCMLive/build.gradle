@@ -167,6 +167,24 @@ dependencies {
     // in transitively at 1.4.0, and nothing here references `Icons.*` any more.
     implementation 'androidx.compose.ui:ui-tooling-preview'
     debugImplementation 'androidx.compose.ui:ui-tooling'
+    // Miuix (compose-miuix-ui) — the theme behind 界面风格 = Miuix.
+    //
+    // Pinned to the last single-artifact release, and not to 0.9.x: 0.9.4 is
+    // published with Kotlin metadata 2.4.0, which this module's compiler cannot
+    // read. AGP 9.4.1 drives Kotlin through its built-in support at a 2.2.0
+    // compiler (which reads up to 2.3.0), and there is no way to raise it here:
+    // applying org.jetbrains.kotlin.android fails ("no longer required since AGP
+    // 9.0"), android.builtInKotlin=false then fails on an ApplicationExtension
+    // cast, and pulling the 2.4.20 Gradle plugins onto the classpath does not move
+    // the compiler. Verified by compiling: 0.9.4 dies with "Class 'kotlin.Unit' was
+    // compiled with an incompatible version of Kotlin", 0.8.8 builds clean.
+    //
+    // What that costs, and why it is acceptable: 0.8.x has no preference module
+    // (top.yukonga.miuix.kmp.preference only exists from 0.9.0), so the rows stay
+    // ours and Miuix supplies the colour scheme, the Monet derivation, the ripple
+    // and the overscroll. Revisit this when AGP's built-in Kotlin reaches 2.4 —
+    // then the rows themselves can move to miuix-preference.
+    implementation 'top.yukonga.miuix.kmp:miuix-android:0.8.8'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
     // Compile-time hidden-API signatures (not packaged in the APK).

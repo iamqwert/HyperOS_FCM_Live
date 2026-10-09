@@ -91,8 +91,12 @@
     <string name="hide_launcher_icon">隐藏桌面图标</string>
     <string name="theme_mode">主题模式</string>
     <string name="palette_style">调色风格</string>
+    <string name="ui_style">界面风格</string>
+    <string name="miuix_monet">莫奈颜色</string>
     <string name="color_spec">颜色规格</string>
     <string name="about_sub_theme_mode">调整应用的主题模式</string>
+    <string name="about_sub_ui_style">选择应用的外壳风格</string>
+    <string name="about_sub_miuix_monet">跟随壁纸为整套界面取色</string>
     <string name="about_sub_palette_style">选择动态取色风格</string>
     <string name="about_sub_color_spec">选择 Material 颜色规范</string>
     <string name="dynamic_color">动态颜色</string>
@@ -103,6 +107,11 @@
         <item>浅色模式</item>
         <item>深色模式</item>
         <item>AMOLED</item>
+    </string-array>
+    <!-- 与 ThemePrefs.UI_STYLE_* 的顺序一致。Miuix 是库名，保留原文。 -->
+    <string-array name="ui_style_entries">
+        <item>标准</item>
+        <item>Miuix</item>
     </string-array>
     <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格），选项保留英文原文。 -->
     <string-array name="palette_style_entries">

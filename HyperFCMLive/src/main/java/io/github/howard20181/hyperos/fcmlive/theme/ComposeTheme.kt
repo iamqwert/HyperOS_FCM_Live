@@ -9,23 +9,49 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
+import top.yukonga.miuix.kmp.theme.ColorSchemeMode
+import top.yukonga.miuix.kmp.theme.Colors
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.ThemeColorSpec
+import top.yukonga.miuix.kmp.theme.ThemeController
+import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 
 /**
  * Jetpack Compose theme bridge.
  *
- * Colors are **not** taken from Compose's own dynamic-color helpers. They are
- * mapped from [ThemeEngine]/[AppPalette] so the in-app palette style
- * (Tonal spot, Monochrome, …) and colour spec are the ones the settings page
- * offers, derived by the same Material colour utilities.
+ * Two looks, one entry point. Under the app's own look, colors are **not** taken
+ * from Compose's dynamic-color helpers: they are mapped from
+ * [ThemeEngine]/[AppPalette] so the in-app palette style (Tonal spot, Monochrome,
+ * …) and colour spec are the ones the settings page offers, derived by the same
+ * Material colour utilities. Under the Miuix look the authority moves — see
+ * [MiuixStyleTheme].
+ *
+ * Which one is in force is read here, off [ThemeEngine.generation], so a switch of
+ * 界面风格 re-skins in place exactly as changing a colour does: no window rebuild,
+ * no jump.
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val style = remember(context, ThemeEngine.generation) {
+        UiStyle.of(ThemePrefs.uiStyle(context))
+    }
+    when (style) {
+        UiStyle.Miuix -> MiuixStyleTheme(content)
+        UiStyle.Material -> MaterialStyleTheme(content)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MaterialStyleTheme(content: @Composable () -> Unit) {
     // isSystemInDarkTheme is only a fallback when no palette is applied yet;
     // ThemeEngine.palette already resolves the user's theme mode.
     // Keying on ThemeEngine.generation is what makes an in-place theme switch
@@ -89,11 +115,172 @@ fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
         CompositionLocalProvider(
             LocalAppShapes provides appShapes,
             LocalAppSurfaces provides appSurfaces,
-            LocalOverscrollFactory provides overscrollFactory
+            LocalOverscrollFactory provides overscrollFactory,
+            LocalUiStyle provides UiStyle.Material
         ) {
             content()
         }
     }
+}
+
+/**
+ * The Miuix look.
+ *
+ * Miuix owns the colours here: its fixed HyperOS scheme, or Monet when 莫奈颜色 is
+ * on. Everything the screens actually draw still comes through MaterialTheme, so
+ * the palettes are mapped across — two sources of truth on one page is exactly the
+ * failure this branch has to avoid, and it keeps the M3 widgets that have no Miuix
+ * counterpart (and the rows, which stay ours until miuix-preference is
+ * reachable — see the version note in build.gradle) wearing the same colours as
+ * anything Miuix draws.
+ *
+ * The three-level surface ramp is Miuix's own: `surface` is the page,
+ * `surfaceVariant` the cards (white in light, `#242424` in dark), and the top
+ * container the popup level. AMOLED keeps Miuix's dark ramp for the cards but
+ * drops the page to true black, which is the whole point of that mode.
+ *
+ * Miuix also supplies its own ripple and overscroll through its theme, and those
+ * are deliberately *not* overwritten: the press feedback and the edge glow are
+ * part of what makes the system's settings feel like the system's settings.
+ */
+@Composable
+private fun MiuixStyleTheme(content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    // Keyed on the generation the same way the Material branch keys its palette:
+    // ThemeEngine.invalidate() bumps it, this re-reads, and the appearance changes
+    // in place.
+    val generation = ThemeEngine.generation
+    val dark = remember(context, generation) { ThemePrefs.isDark(context) }
+    val amoled = remember(context, generation) { ThemePrefs.isAmoled(context) }
+    val monet = remember(context, generation) { ThemePrefs.miuixMonet(context) }
+    val dynamic = remember(context, generation) { ThemePrefs.dynamicColor(context) }
+    val seed = remember(context, generation) { ThemePrefs.seedColor(context) }
+    val spec = remember(context, generation) { ThemePrefs.specVersion(context) }
+    val variant = remember(context, generation) { ThemePrefs.paletteStyle(context) }
+    // The app's own seed still matters under Miuix: 动态颜色 off means "my colour,
+    // not the wallpaper's", and the only way to say that to Miuix is keyColor.
+    val keyColor = if (!dynamic && seed != 0) Color(seed) else null
+
+    // ThemeController publishes its inputs as snapshot state but they are `val`s,
+    // so a change is pushed by rebuilding it rather than by assignment. Cheap: the
+    // colours it hands back are remembered inside MiuixTheme across a rebuild, so
+    // components under it do not see a new scheme on an unrelated recomposition.
+    val controller = ThemeController(
+        colorSchemeMode = when {
+            monet && dark -> ColorSchemeMode.MonetDark
+            monet -> ColorSchemeMode.MonetLight
+            dark -> ColorSchemeMode.Dark
+            else -> ColorSchemeMode.Light
+        },
+        // Always resolved: the app can force light or dark independently of the
+        // device, and isSystemInDarkTheme() (what null falls back to) is the device.
+        isDark = dark,
+        keyColor = keyColor,
+        colorSpec = if (spec == ThemePrefs.SPEC_2025) {
+            ThemeColorSpec.Spec2025
+        } else {
+            ThemeColorSpec.Spec2021
+        },
+        paletteStyle = miuixPaletteStyle(variant)
+    )
+
+    MiuixTheme(controller = controller) {
+        val colors = MiuixTheme.colorScheme
+        val expressive = spec == ThemePrefs.SPEC_2025
+        val colorScheme = remember(colors, dark, expressive) { colors.toMaterialColorScheme(dark) }
+        val appSurfaces = remember(colors, colorScheme, amoled) {
+            AppSurfaces(
+                card = if (amoled) colors.surfaceContainerHigh else colors.surfaceVariant,
+                popup = if (dark) colors.surfaceContainerHighest else colors.surfaceContainer
+            )
+        }
+        val appShapes = remember(expressive) { appShapesFor(expressive) }
+        // The window chrome follows, too: it is View-side state no recomposition
+        // reaches, and under this look the page colour is Miuix's.
+        val pageArgb = (if (amoled) Color.Black else colors.surface).toArgb()
+        val pageDark = dark
+        val windowActivity = (context as? android.app.Activity)
+        SideEffect {
+            windowActivity?.let { ThemeSupport.reapplyWindow(it, pageArgb, pageDark) }
+        }
+        MaterialTheme(
+            colorScheme = if (amoled) {
+                colorScheme.copy(background = Color.Black, surface = Color.Black)
+            } else {
+                colorScheme
+            },
+            typography = HyperFCMLiveTypography,
+            shapes = HyperFCMLiveShapes,
+            motionScheme = motionSchemeFor(expressive),
+        ) {
+            CompositionLocalProvider(
+                LocalAppShapes provides appShapes,
+                LocalAppSurfaces provides appSurfaces,
+                LocalUiStyle provides UiStyle.Miuix
+            ) {
+                content()
+            }
+        }
+    }
+}
+
+/**
+ * Miuix's palette styles are the same nine Material families the app offers, under
+ * different names. Matching by ordinal against [Scheme.Variant] would be a silent
+ * lie if either list ever grew, so this is written out.
+ */
+private fun miuixPaletteStyle(variant: Scheme.Variant): ThemePaletteStyle = when (variant) {
+    Scheme.Variant.TONAL_SPOT -> ThemePaletteStyle.TonalSpot
+    Scheme.Variant.NEUTRAL -> ThemePaletteStyle.Neutral
+    Scheme.Variant.VIBRANT -> ThemePaletteStyle.Vibrant
+    Scheme.Variant.EXPRESSIVE -> ThemePaletteStyle.Expressive
+    Scheme.Variant.RAINBOW -> ThemePaletteStyle.Rainbow
+    Scheme.Variant.FRUIT_SALAD -> ThemePaletteStyle.FruitSalad
+    Scheme.Variant.MONOCHROME -> ThemePaletteStyle.Monochrome
+    Scheme.Variant.FIDELITY -> ThemePaletteStyle.Fidelity
+    Scheme.Variant.CONTENT -> ThemePaletteStyle.Content
+}
+
+/**
+ * Miuix [Colors] onto Material 3's [ColorScheme].
+ *
+ * Miuix names its roles for the HyperOS settings it was written for, so the
+ * mapping is by meaning, not by name: its `onSurfaceVariantSummary` is the
+ * secondary text colour a Material `onSurfaceVariant` carries, its `dividerLine`
+ * is `outlineVariant`, and `tertiaryContainer` is the accent-tinted plate a
+ * `primaryContainer` is in Material's language.
+ */
+private fun Colors.toMaterialColorScheme(dark: Boolean): ColorScheme {
+    val base = if (dark) darkColorScheme() else lightColorScheme()
+    return base.copy(
+        primary = primary,
+        onPrimary = onPrimary,
+        primaryContainer = tertiaryContainer,
+        onPrimaryContainer = onTertiaryContainer,
+        inversePrimary = primary,
+        secondary = primary,
+        onSecondary = onPrimary,
+        secondaryContainer = tertiaryContainer,
+        onSecondaryContainer = onTertiaryContainer,
+        tertiary = primary,
+        onTertiary = onPrimary,
+        error = error,
+        onError = onError,
+        errorContainer = errorContainer,
+        onErrorContainer = onErrorContainer,
+        background = surface,
+        onBackground = onBackground,
+        surface = surface,
+        onSurface = onSurface,
+        surfaceVariant = surfaceVariant,
+        onSurfaceVariant = onSurfaceVariantSummary,
+        surfaceContainer = surfaceContainer,
+        surfaceContainerHigh = surfaceContainerHigh,
+        surfaceContainerHighest = surfaceContainerHighest,
+        outline = outline,
+        outlineVariant = dividerLine,
+        scrim = windowDimming
+    )
 }
 
 /**

@@ -482,6 +482,28 @@ private val DEPS = arrayOf(
     ),
     // Vendored source under mcu/ (no Gradle artifact) — listed for attribution.
     arrayOf("Material Color Utilities", "", "Apache License 2.0", MCU_URL),
+    // The Miuix look (界面风格 = Miuix). 0.8.8 is the last release this module's
+    // Kotlin can read at all; the reason is written out by the dependency in
+    // build.gradle.
+    arrayOf(
+        "Miuix",
+        "0.8.8",
+        "Apache License 2.0",
+        "https://github.com/compose-miuix-ui/miuix"
+    ),
+    // What Miuix derives its Monet schemes from (莫奈颜色). Same upstream colour
+    // utilities as the vendored copy above, published as an artifact; both are in
+    // the APK and each dresses a different half of the UI.
+    arrayOf(
+        "Material Kolor Color Utilities",
+        "4.1.1",
+        "Apache License 2.0",
+        "https://github.com/jordond/materialkolor"
+    ),
+    // Two more things Miuix brings with it and does draw with: the predictive-back
+    // bridge, and the G2-continuous shapes behind its rounded corners.
+    arrayOf("NavigationEvent", "1.1.1", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("Shapes", "1.2.0", "Apache License 2.0", "https://github.com/Kyant0/Shapes"),
     arrayOf("VersionedParcelable", "1.1.1", "Apache License 2.0", ANDROIDX_URL),
 )
 

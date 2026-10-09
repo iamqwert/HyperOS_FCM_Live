@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppShapes
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
+import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
 import kotlin.math.max
 import kotlin.math.min
 
@@ -371,9 +372,20 @@ fun MenuItemRow(
  * The end inset must be applied *before* the size: written the other way round
  * it is carved out of the box and the glyph ends up squeezed into the sliver
  * left over instead of sitting 24dp wide with a gap after it.
+ *
+ * It also decides the one thing the Miuix look changes about every row, from the
+ * single place all rows already go through: under that look the icon is not
+ * drawn at all, so the text column moves into where it stood and the row reads
+ * like the system's own settings — title and summary against the card's margin,
+ * nothing in front of them. No row, and no row added later, has to agree to
+ * that; a row that stopped using this composable would simply stop honouring it,
+ * which is why every settings row draws its leading icon through here.
  */
 @Composable
 fun RowIcon(painter: Painter, modifier: Modifier = Modifier) {
+    if (!LocalUiStyle.current.showRowIcons) {
+        return
+    }
     Icon(
         painter = painter,
         contentDescription = null,

@@ -206,6 +206,8 @@ private fun AboutBody(
     var seed by remember { mutableIntStateOf(ThemePrefs.seedColor(context)) }
     var updateBadge by remember { mutableStateOf(UpdateChecker.isUpdateAvailable(context)) }
     var themeMode by remember { mutableIntStateOf(ThemePrefs.themeMode(context)) }
+    var uiStyle by remember { mutableIntStateOf(ThemePrefs.uiStyle(context)) }
+    var miuixMonet by remember { mutableStateOf(ThemePrefs.miuixMonet(context)) }
     var paletteStyle by remember { mutableIntStateOf(ThemePrefs.paletteStyle(context).ordinal) }
     var colorSpec by remember { mutableIntStateOf(ThemePrefs.specVersion(context)) }
     // The offer, while it is on screen. Keeping it here rather than in the
@@ -214,6 +216,7 @@ private fun AboutBody(
     var updateOffer by remember { mutableStateOf<UpdateOutcome.Available?>(null) }
 
     val modeEntries = stringArrayResource(R.array.theme_mode_entries)
+    val uiStyleEntries = stringArrayResource(R.array.ui_style_entries)
     val styleEntries = stringArrayResource(R.array.palette_style_entries)
     val specEntries = stringArrayResource(R.array.color_spec_entries)
 
@@ -334,6 +337,41 @@ private fun AboutBody(
                     actions.onAppearanceChange()
                 }
             )
+            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+            PopupCard(
+                iconRes = R.drawable.ic_apps,
+                title = stringResource(R.string.ui_style),
+                subtitle = stringResource(R.string.about_sub_ui_style),
+                entries = uiStyleEntries.toList(),
+                currentIndex = uiStyle,
+                first = false,
+                last = false,
+                onPick = { index ->
+                    ThemePrefs.setUiStyle(context, index)
+                    uiStyle = index
+                    actions.onAppearanceChange()
+                }
+            )
+            // Only the Miuix look reads this. Under the app's own look the colours
+            // come from its engine and 动态颜色 below is the switch for them, so a
+            // second Monet row would offer a choice that changes nothing — and the
+            // one that does change something would be a row away from it.
+            if (uiStyle == ThemePrefs.UI_STYLE_MIUIX) {
+                Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                SettingsSwitchCard(
+                    iconRes = R.drawable.ic_dynamic_color,
+                    title = stringResource(R.string.miuix_monet),
+                    description = stringResource(R.string.about_sub_miuix_monet),
+                    checked = miuixMonet,
+                    onCheckedChange = { checked ->
+                        ThemePrefs.setMiuixMonet(context, checked)
+                        miuixMonet = checked
+                        actions.onAppearanceChange()
+                    },
+                    first = false,
+                    last = false
+                )
+            }
             Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
             DynamicColorCard(
                 dynamic = dynamic,

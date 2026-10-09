@@ -25,6 +25,15 @@ object ThemePrefs {
     const val SPEC_2021 = 0
     const val SPEC_2025 = 1
 
+    /** Which look the app is dressed in. See [UiStyle]. */
+    const val UI_STYLE_MATERIAL = 0
+    /** Miuix: HyperOS row language — no leading icons, text to the margin. */
+    const val UI_STYLE_MIUIX = 1
+
+    private const val KEY_UI_STYLE = "ui_style"
+    /** Monet inside the Miuix style only; the Material style has 动态颜色. */
+    private const val KEY_MIUIX_MONET = "miuix_monet"
+
     private const val KEY_THEME_MODE = "theme_mode"
     private const val KEY_PALETTE_STYLE = "palette_style"
     private const val KEY_SPEC = "color_spec"
@@ -55,6 +64,37 @@ object ThemePrefs {
     @JvmStatic
     fun setThemeMode(context: Context, mode: Int) {
         prefs(context).edit().putInt(KEY_THEME_MODE, mode).apply()
+    }
+
+    /**
+     * Which look the app wears. Held as an int rather than the enum so this file
+     * keeps the same shape as every other accessor here, and so a value written by
+     * a newer build falls back to [UI_STYLE_MATERIAL] instead of throwing.
+     */
+    @JvmStatic
+    fun uiStyle(context: Context): Int {
+        val stored = prefs(context).getInt(KEY_UI_STYLE, UI_STYLE_MATERIAL)
+        return if (stored == UI_STYLE_MIUIX) UI_STYLE_MIUIX else UI_STYLE_MATERIAL
+    }
+
+    @JvmStatic
+    fun setUiStyle(context: Context, style: Int) {
+        prefs(context).edit().putInt(KEY_UI_STYLE, style).apply()
+    }
+
+    /**
+     * Monet inside the Miuix look. Only that look reads this: the Material one has
+     * its own 动态颜色 row, which drives the app's own colour engine, and the two
+     * must not be allowed to disagree about where colors come from.
+     */
+    @JvmStatic
+    fun miuixMonet(context: Context): Boolean {
+        return prefs(context).getBoolean(KEY_MIUIX_MONET, true)
+    }
+
+    @JvmStatic
+    fun setMiuixMonet(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_MIUIX_MONET, enabled).apply()
     }
 
     /**
