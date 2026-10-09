@@ -166,6 +166,7 @@ fun MainScreen(
     onRowClick: (AppListStore.AppEntry) -> Unit,
     onRowLongClick: (AppListStore.AppEntry) -> Unit,
     loadIcon: (AppListStore.AppEntry) -> Unit,
+    icons: Map<String, Drawable?> = emptyMap(),
     refreshing: Boolean,
     onRefresh: () -> Unit,
     onDiagnostics: () -> Unit,
@@ -273,6 +274,7 @@ fun MainScreen(
                     onRowClick = onRowClick,
                     onRowLongClick = onRowLongClick,
                     loadIcon = loadIcon,
+                    icons = icons,
                     bottomPadding = innerPadding.calculateBottomPadding() + FAB_CLEARANCE,
                     status = status,
                     onRetryStatus = onRetryStatus
@@ -679,6 +681,7 @@ fun AppListPane(
     onRowClick: (AppListStore.AppEntry) -> Unit,
     onRowLongClick: (AppListStore.AppEntry) -> Unit,
     loadIcon: (AppListStore.AppEntry) -> Unit,
+    icons: Map<String, Drawable?> = emptyMap(),
     bottomPadding: Dp,
     status: RuntimeStatus.Snapshot? = null,
     onRetryStatus: () -> Unit = {},
@@ -706,7 +709,7 @@ fun AppListPane(
             AppRow(
                 label = app.label,
                 packageName = app.packageName,
-                icon = app.icon,
+                icon = icons[app.packageName],
                 checked = app.checked,
                 supportMiPush = app.supportMiPush,
                 exempt = app.exempt,

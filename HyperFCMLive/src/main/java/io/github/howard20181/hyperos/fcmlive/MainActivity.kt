@@ -59,6 +59,13 @@ class MainActivity : AppCompatActivity() {
      * rows are composed from it, so the mutations here are what recomposes them.
      */
     private val filteredApps = mutableStateListOf<AppListStore.AppEntry>()
+
+    /**
+     * Row icons keyed by package, filled asynchronously by [store]. A per-package
+     * snapshot map (not a field on the entry) so an icon landing during a scroll
+     * recomposes only its own row instead of rebuilding the whole visible list.
+     */
+    private val iconsByPkg = androidx.compose.runtime.mutableStateMapOf<String, android.graphics.drawable.Drawable?>()
     private var allowlist: Set<String> = HashSet()
 
     /** Row icons: the only piece of the old adapter that survived. */
@@ -189,10 +196,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         ThemeSupport.onCreate(this)
         appliedPalette = ThemeEngine.palette(this)
-        // Row icons are loaded off-thread by the store; when a batch lands it
-        // re-emits the visible list so the rows recompose with their icons.
-        store = AppListStore(this) {
-            runOnUiThreadSafe { refreshVisibleRows() }
+        // Row icons are loaded off-thread by the store; each coalesced batch
+        // lands in the per-package map, recomposing only the rows that got one.
+        store = AppListStore(this) { batch ->
+            batch.forEach { (pkg, drawable) -> iconsByPkg[pkg] = drawable }
         }
 
         // Seed UI order from the local cache so allowlisted apps sit on top
@@ -293,6 +300,7 @@ class MainActivity : AppCompatActivity() {
                     onRowClick = { handleRowTap(it) },
                     onRowLongClick = { handleRowLongPress(it) },
                     loadIcon = { store?.loadIcon(it) },
+                    icons = iconsByPkg,
                     refreshing = refreshing,
                     onRefresh = { refreshing = true; loadApps(); refreshRuntimeStatus() },
                     onDiagnostics = { openFcmDiagnostics() },
@@ -344,9 +352,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Re-emit the visible rows so they recompose with the icons that just landed.
-     * `AppEntry.icon` is a plain field, so nothing else can tell the rows it
+     * Re-emit the visible rows so they recompose with a changed allowlist state.
+     * `AppEntry.checked` is a plain field, so nothing else can tell the rows it
      * changed — this replaces the `notifyDataSetChanged` the adapter used to send.
+     * Icons no longer route through here; they land in [iconsByPkg] per row.
      */
     private fun refreshVisibleRows() {
         if (filteredApps.isEmpty()) {
