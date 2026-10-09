@@ -90,6 +90,14 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.R
+import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
+import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
+import top.yukonga.miuix.kmp.basic.PullToRefresh as MiuixPullToRefresh
+import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
+import top.yukonga.miuix.kmp.basic.ListPopupColumn
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.overlay.OverlayListPopup
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import io.github.howard20181.hyperos.fcmlive.RuntimeStatus
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppShapes
@@ -182,7 +190,7 @@ fun MainScreen(
     // [io.github.howard20181.hyperos.fcmlive.ui.WindowSnapshot] used to do to this
     // window to refresh the swipe-back picture, and what it still does to any page
     // that is stopped at the time.
-    lazyListState: LazyListState = rememberPageListState("app-list"),
+    lazyListState: LazyListState = rememberPageListState(),
     // The M3 feedback surface. Owned by the caller, because that is where the
     // messages originate; hosted here, because this is the tree on screen.
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
@@ -219,12 +227,60 @@ fun MainScreen(
         wasRefreshing = refreshing
     }
 
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        // The Miuix frame: the Scaffold the overlay popups open into (the
+        // overflow menu below), a centred small title that stays put, and the
+        // system's own pull-to-refresh — the circle with the refresh text,
+        // not the M3 spinner.
+        MiuixScaffold(
+            modifier = modifier,
+            topBar = {
+                MainTopBar(
+                    state = topBarState,
+                    actions = actions,
+                    query = query,
+                    onQueryChange = onQueryChange
+                )
+            },
+            floatingActionButton = {
+                DiagnosticsFab(onClick = onDiagnostics)
+            }
+        ) { innerPadding ->
+            Box(modifier = Modifier.fillMaxSize()) {
+                MiuixPullToRefresh(
+                    isRefreshing = refreshing,
+                    onRefresh = onRefresh
+                ) {
+                    AppListPane(
+                        apps = apps,
+                        multiSelect = multiSelect,
+                        selected = selected,
+                        lazyListState = lazyListState,
+                        onRowClick = onRowClick,
+                        onRowLongClick = onRowLongClick,
+                        loadIcon = loadIcon,
+                        icons = icons,
+                        bottomPadding = innerPadding.calculateBottomPadding() + FAB_CLEARANCE,
+                        status = status,
+                        onRetryStatus = onRetryStatus,
+                        modifier = Modifier.padding(top = innerPadding.calculateTopPadding())
+                    )
+                }
+                SnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                )
+            }
+        }
+        return
+    }
     Scaffold(
         modifier = modifier,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         // `background`, not `surface`: it is the mapped `pageBg`, and it is
-        // also what the Activity paints the window with, so the strip under the
-        // status bar and the gesture hint line cannot end up a different tone.
+        // also what the Activity paints the window with, so the strip under
+        // the status bar and the gesture hint line cannot end up a different
+        // tone.
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             MainTopBar(
@@ -344,6 +400,68 @@ fun MainTopBar(
     onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // The Miuix bar: the title sits centred — the system settings' own frame —
+    // and stays put while the list scrolls under it. Search keeps the field in
+    // the bar's own bottom slot so the expansion still reads as the page opening
+    // its search, not a widget swapping in.
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        SmallTopAppBar(
+            title = if (state.searching) "" else state.title,
+            modifier = modifier,
+            navigationIcon = {
+                if (state.searching || state.multiSelect) {
+                    TopBarIconButton(
+                        painter = painterResource(R.drawable.ic_arrow_back),
+                        description = stringResource(
+                            if (state.multiSelect) R.string.exit_multi_select
+                            else R.string.exit_search
+                        ),
+                        onClick = actions.onBack
+                    )
+                }
+            },
+            actions = {
+                if (state.multiSelect) {
+                    TopBarIconButton(
+                        painter = painterResource(R.drawable.ic_batch_add),
+                        description = stringResource(R.string.batch_add_allowlist),
+                        onClick = actions.onBatchAdd
+                    )
+                    TopBarIconButton(
+                        painter = painterResource(R.drawable.ic_batch_remove),
+                        description = stringResource(R.string.batch_remove_allowlist),
+                        onClick = actions.onBatchRemove
+                    )
+                    TopBarIconButton(
+                        painter = painterResource(
+                            if (state.allVisibleSelected) R.drawable.ic_deselect_all
+                            else R.drawable.ic_select_all
+                        ),
+                        description = stringResource(
+                            if (state.allVisibleSelected) R.string.deselect_all
+                            else R.string.select_all
+                        ),
+                        onClick = actions.onSelectAll
+                    )
+                } else if (!state.searching) {
+                    TopBarIconButton(
+                        painter = painterResource(R.drawable.ic_search),
+                        description = stringResource(R.string.tooltip_search),
+                        onClick = actions.onSearch
+                    )
+                    OverflowMenu(state.overflow, actions)
+                }
+            },
+            bottomContent = {
+                SearchField(
+                    visible = state.searching,
+                    query = query,
+                    onQueryChange = onQueryChange
+                )
+            }
+        )
+        return
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -574,6 +692,63 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
     val shapes = LocalAppShapes.current
     var expanded by remember { mutableStateOf(false) }
     val moreLabel = stringResource(R.string.more_menu)
+    // The Miuix overflow: an overlay popup — the page dimmed behind it, the
+    // selected entry in the accent with a check — instead of the M3 dropdown
+    // window, which can neither dim what is behind it nor mark the current value
+    // without putting a plate behind it.
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        Box {
+            TooltipBox(
+                positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
+                    TooltipAnchorPosition.Below
+                ),
+                tooltip = {
+                    PlainTooltip { Text(moreLabel, style = MaterialTheme.typography.bodySmall) }
+                },
+                state = rememberTooltipState()
+            ) {
+                IconButton(onClick = { expanded = true }) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_more_vert),
+                        contentDescription = moreLabel,
+                        tint = MiuixTheme.colorScheme.onBackgroundVariant,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+            OverlayListPopup(
+                show = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                ListPopupColumn {
+                    MiuixPopupRow(
+                        label = stringResource(R.string.show_fcm_supported_apps),
+                        selected = state.showFcmSupportedOnly,
+                        onClick = { expanded = false; actions.onToggleShowFcmOnly() },
+                        trailing = { OverflowCheckbox(state.showFcmSupportedOnly) }
+                    )
+                    MiuixPopupRow(
+                        label = stringResource(R.string.exclude_mipush_apps),
+                        selected = state.excludeMiPushApps,
+                        onClick = { expanded = false; actions.onToggleExcludeMiPush() },
+                        trailing = { OverflowCheckbox(state.excludeMiPushApps) }
+                    )
+                    MiuixPopupRow(
+                        label = stringResource(R.string.show_system_apps),
+                        selected = state.showSystemApps,
+                        onClick = { expanded = false; actions.onToggleShowSystemApps() },
+                        trailing = { OverflowCheckbox(state.showSystemApps) }
+                    )
+                    MiuixPopupRow(
+                        label = stringResource(R.string.settings),
+                        selected = false,
+                        onClick = { expanded = false; actions.onAbout() }
+                    )
+                }
+            }
+        }
+        return
+    }
     Box {
         // Same long-press bubble as every other top-bar icon — the overflow
         // button lost it when the bar moved to Compose and never got it back.

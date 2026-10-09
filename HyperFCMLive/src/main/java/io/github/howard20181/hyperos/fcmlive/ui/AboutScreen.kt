@@ -83,6 +83,8 @@ import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppShapes
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
+import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
+import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.ThemePrefs
 import kotlinx.coroutines.launch
 
@@ -147,38 +149,32 @@ fun AboutScreen(
      */
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
 ) {
-    Scaffold(
+    PageScaffold(
+        titleRes = R.string.settings,
+        onBack = onBack,
         modifier = modifier,
-        // The page colour has to be `background`, not `surface`: `background`
-        // is the mapped `pageBg`, which is also what the Activity paints the
-        // window with. `surface` is one step off it, and under the status bar
-        // and the gesture strip — the two places where the window background is
-        // all there is — that step shows as a band.
-        containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            AppTopBar(titleRes = R.string.settings, onBack = onBack) {
-                val helpText = stringResource(R.string.help)
-                TooltipBox(
-                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
-                    // Below, as the old PopupWindow was: it sat under the icon
-                    // rather than squeezing itself between the icon and the
-                    // status bar.
-                    positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
-                        TooltipAnchorPosition.Below
-                    ),
-                    tooltip = { PlainTooltip { Text(text = helpText) } },
-                    state = rememberTooltipState(),
-                    content = {
-                        IconButton(onClick = actions.onHelp) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_help),
-                                contentDescription = helpText
-                            )
-                        }
+        snackbarHostState = snackbarHostState,
+        actions = {
+            val helpText = stringResource(R.string.help)
+            TooltipBox(
+                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+                // Below, as the old PopupWindow was: it sat under the icon
+                // rather than squeezing itself between the icon and the
+                // status bar.
+                positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
+                    TooltipAnchorPosition.Below
+                ),
+                tooltip = { PlainTooltip { Text(text = helpText) } },
+                state = rememberTooltipState(),
+                content = {
+                    IconButton(onClick = actions.onHelp) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_help),
+                            contentDescription = helpText
+                        )
                     }
-                )
-            }
+                }
+            )
         }
     ) { innerPadding ->
         AboutBody(
@@ -305,7 +301,7 @@ private fun AboutBody(
             .padding(start = 16.dp, end = 16.dp),
         // The four appearance menus all re-skin the app on a pick, so this page is
         // the one place a menu could visibly throw the reader back to the start.
-        state = rememberPageListState("about"),
+        state = rememberPageListState(),
         // The gesture-hint strip is scroll-through, not a hard stop: rows pass
         // under it while scrolling and only rest that far above the edge.
         contentPadding = PaddingValues(bottom = bottomPadding)
@@ -343,7 +339,7 @@ private fun AboutBody(
                     actions.onAppearanceChange()
                 }
             )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+            GroupRowGap()
             PopupCard(
                 iconRes = R.drawable.ic_apps,
                 title = stringResource(R.string.ui_style),
@@ -363,7 +359,7 @@ private fun AboutBody(
             // second Monet row would offer a choice that changes nothing — and the
             // one that does change something would be a row away from it.
             if (miuixStyle) {
-                Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                GroupRowGap()
                 SettingsSwitchCard(
                     iconRes = R.drawable.ic_dynamic_color,
                     title = stringResource(R.string.miuix_monet),
@@ -385,7 +381,7 @@ private fun AboutBody(
             // Material carries across instead of being silently dropped — the why is
             // argued at MiuixStyleTheme, where the reads live.
             if (!miuixStyle) {
-                Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                GroupRowGap()
                 DynamicColorCard(
                     dynamic = dynamic,
                     seed = seed,
@@ -402,7 +398,7 @@ private fun AboutBody(
                         actions.onAppearanceChange()
                     }
                 )
-                Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                GroupRowGap()
                 PopupCard(
                     iconRes = R.drawable.ic_palette_style,
                     title = stringResource(R.string.palette_style),
@@ -428,7 +424,7 @@ private fun AboutBody(
                         actions.onAppearanceChange()
                     }
                 )
-                Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                GroupRowGap()
                 PopupCard(
                     iconRes = R.drawable.ic_color_spec,
                     title = stringResource(R.string.color_spec),
@@ -456,7 +452,7 @@ private fun AboutBody(
                 first = true,
                 last = false
             )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+            GroupRowGap()
             NavCard(
                 iconRes = R.drawable.ic_import,
                 title = stringResource(R.string.import_allowlist),
@@ -512,7 +508,7 @@ private fun AboutBody(
                     }
                 }
             )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+            GroupRowGap()
             NavCard(
                 iconRes = R.drawable.ic_privacy,
                 title = stringResource(R.string.about_section_privacy),
@@ -521,7 +517,7 @@ private fun AboutBody(
                 first = false,
                 last = false
             )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+            GroupRowGap()
             NavCard(
                 iconRes = R.drawable.ic_view_source,
                 title = stringResource(R.string.view_source_code),
@@ -530,7 +526,7 @@ private fun AboutBody(
                 first = false,
                 last = false
             )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+            GroupRowGap()
             NavCard(
                 iconRes = R.drawable.ic_license,
                 title = stringResource(R.string.open_source_licenses),
@@ -569,6 +565,23 @@ private fun PopupCard(
     onPick: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Under the Miuix look this row is the shared menu row: the value, the
+    // up-down arrow beside it, and Miuix's own popup. The Material body below
+    // differs only in chrome, so nothing is lost by delegating.
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        SettingsMenuCard(
+            iconRes = iconRes,
+            title = title,
+            description = subtitle,
+            entries = entries,
+            currentIndex = currentIndex,
+            onPick = onPick,
+            modifier = modifier,
+            first = first,
+            last = last
+        )
+        return
+    }
     var expanded by remember { mutableStateOf(false) }
     val shapes = LocalAppShapes.current
     val current = entries.getOrNull(currentIndex) ?: ""

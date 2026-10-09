@@ -86,10 +86,15 @@ object ThemePrefs {
      * Monet inside the Miuix look. Only that look reads this: the Material one has
      * its own 动态颜色 row, which drives the app's own colour engine, and the two
      * must not be allowed to disagree about where colors come from.
+     *
+     * Off until the user says otherwise: switching into the Miuix look should land
+     * on Miuix's own HyperOS scheme, not silently repaint the app from the
+     * wallpaper. Once flipped, the choice persists like every other appearance
+     * setting.
      */
     @JvmStatic
     fun miuixMonet(context: Context): Boolean {
-        return prefs(context).getBoolean(KEY_MIUIX_MONET, true)
+        return prefs(context).getBoolean(KEY_MIUIX_MONET, false)
     }
 
     @JvmStatic

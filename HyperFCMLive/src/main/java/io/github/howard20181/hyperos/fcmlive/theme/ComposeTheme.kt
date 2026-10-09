@@ -40,9 +40,12 @@ import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 @Composable
 fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
-    val style = remember(context, ThemeEngine.generation) {
-        UiStyle.of(ThemePrefs.uiStyle(context))
-    }
+    // Read straight off the pref rather than through remember: the generation
+    // read on this line is what subscribes this scope, so a bump re-runs it and
+    // the very next line re-reads the style — no cached value sitting between the
+    // write and the read, which is how a style switch could land one screen late.
+    val generation = ThemeEngine.generation
+    val style = UiStyle.of(ThemePrefs.uiStyle(context))
     when (style) {
         UiStyle.Miuix -> MiuixStyleTheme(content)
         UiStyle.Material -> MaterialStyleTheme(content)

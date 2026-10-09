@@ -85,10 +85,10 @@ import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
  */
 @Composable
 fun ExperimentScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
-    Scaffold(
-        modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = { AppTopBar(titleRes = R.string.experiment, onBack = onBack) }
+    PageScaffold(
+        titleRes = R.string.experiment,
+        onBack = onBack,
+        modifier = modifier
     ) { innerPadding ->
         ExperimentBody(
             bottomPadding = innerPadding.calculateBottomPadding(),
@@ -163,7 +163,7 @@ private fun ExperimentBody(
             .padding(start = 16.dp, end = 16.dp),
         // The signal-floor menu, and every menu added hereafter, must leave the
         // reader where they were. See [rememberPageListState].
-        state = rememberPageListState("experiment"),
+        state = rememberPageListState(),
         // The gesture-hint strip is scroll-through, not a hard stop.
         contentPadding = PaddingValues(bottom = bottomPadding)
     ) {
@@ -206,7 +206,7 @@ private fun ExperimentBody(
                 exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
             ) {
                 Column {
-                    Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                    GroupRowGap()
                     SettingsMenuCard(
                         iconRes = R.drawable.ic_tune,
                         title = stringResource(R.string.experiment_wifi_weak_signal_floor),
@@ -252,7 +252,7 @@ private fun ExperimentBody(
                 first = true,
                 last = false
             )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+            GroupRowGap()
             SettingsSwitchCard(
                 iconRes = R.drawable.ic_android_cell_4_bar,
                 title = stringResource(R.string.experiment_sleep_keepalive_data),
@@ -307,7 +307,7 @@ private fun ExperimentBody(
                 exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
             ) {
                 Column {
-                    Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                    GroupRowGap()
                     SettingsSwitchCard(
                         iconRes = R.drawable.ic_restart_release,
                         title = stringResource(R.string.experiment_autostart_restart_release),
@@ -328,7 +328,7 @@ private fun ExperimentBody(
                         // always on screen right below.
                         last = false
                     )
-                    Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                    GroupRowGap()
                     SettingsSwitchCard(
                         iconRes = R.drawable.ic_root_release,
                         title = stringResource(R.string.experiment_autostart_root_release),
@@ -353,7 +353,7 @@ private fun ExperimentBody(
                 exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
             ) {
                 Column {
-                    Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                    GroupRowGap()
                     SettingsSwitchCard(
                         iconRes = R.drawable.ic_autostart_write,
                         title = stringResource(R.string.experiment_wake_autostart_write),
@@ -386,7 +386,7 @@ private fun ExperimentBody(
                         exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
                     ) {
                         Column {
-                            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                            GroupRowGap()
                             SettingsSwitchCard(
                                 iconRes = R.drawable.ic_autostart_switch_write,
                                 title = stringResource(

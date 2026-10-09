@@ -65,11 +65,11 @@ fun LicensesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    Scaffold(
+    PageScaffold(
+        titleRes = R.string.licenses_title,
+        onBack = onBack,
         modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = { AppTopBar(titleRes = R.string.licenses_title, onBack = onBack) }
+        snackbarHostState = snackbarHostState
     ) { innerPadding ->
         LicensesBody(
             bottomPadding = innerPadding.calculateBottomPadding(),
@@ -116,7 +116,7 @@ private fun LicensesBody(
         modifier = modifier
             .fillMaxWidth()
             .padding(start = 16.dp, end = 16.dp),
-        state = rememberPageListState("licenses"),
+        state = rememberPageListState(),
         // The gesture-hint strip is scroll-through, not a hard stop.
         contentPadding = PaddingValues(bottom = bottomPadding)
     ) {
@@ -358,7 +358,6 @@ private fun LicensesScreenPreview() {
 
 private const val ANDROIDX_URL = "https://github.com/androidx/androidx"
 private const val AOSP_URL = "https://android.googlesource.com/platform/frameworks/base"
-private const val JSPECIFY_URL = "https://github.com/jspecify/jspecify"
 private const val MCU_URL = "https://github.com/material-foundation/material-color-utilities"
 
 /**
@@ -436,22 +435,6 @@ private val DEPS = arrayOf(
     arrayOf("AndroidX Interpolator", "1.0.0", "Apache License 2.0", ANDROIDX_URL),
     // Build-only stubs vendored under hiddenapi/stubs; kept for attribution.
     arrayOf("AOSP Framework Annotations", "", "Apache License 2.0", AOSP_URL),
-    // Pulled in by Material Components at runtime scope; annotations only, so
-    // there is no code in the APK — the row is a licence statement, like
-    // JSpecify below.
-    arrayOf(
-        "Error Prone Annotations",
-        "2.15.0",
-        "Apache License 2.0",
-        "https://github.com/google/error-prone"
-    ),
-    arrayOf(
-        "JetBrains Annotations",
-        "23.0.0",
-        "Apache License 2.0",
-        "https://github.com/JetBrains/java-annotations"
-    ),
-    arrayOf("JSpecify", "1.0.0", "Apache License 2.0", JSPECIFY_URL),
     // Test scope only — nothing from it is in any APK. Listed for the same
     // reason as the annotation-only rows: it is a third-party project in the
     // build with its own licence. EPL-1.0 (see licenseRawFor).
@@ -462,12 +445,6 @@ private val DEPS = arrayOf(
         "1.9.0",
         "Apache License 2.0",
         "https://github.com/Kotlin/kotlinx.coroutines"
-    ),
-    arrayOf(
-        "Kotlinx Serialization",
-        "1.7.3",
-        "Apache License 2.0",
-        "https://github.com/Kotlin/kotlinx.serialization"
     ),
     arrayOf("libxposed API", "102.0.0", "Apache License 2.0", "https://github.com/libxposed/api"),
     arrayOf("libxposed Interface", "102.0.0", "Apache License 2.0", "https://github.com/libxposed"),
@@ -503,6 +480,9 @@ private val DEPS = arrayOf(
     ),
     // What Miuix hooks predictive back through on Android.
     arrayOf("NavigationEvent", "1.1.1", "Apache License 2.0", ANDROIDX_URL),
+    // Miuix's responsive-layout chain (material3-window-size-class): real code
+    // in the APK, 11 classes of it, verified against the R8 mapping.
+    arrayOf("AndroidX Window", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("VersionedParcelable", "1.1.1", "Apache License 2.0", ANDROIDX_URL),
 )
 
