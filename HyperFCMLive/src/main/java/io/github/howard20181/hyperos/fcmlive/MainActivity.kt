@@ -89,6 +89,14 @@ class MainActivity : AppCompatActivity() {
     private var refreshing by mutableStateOf(false)
 
     /**
+     * The read-only "运行状态" snapshot the list header renders. Null until the
+     * first probe lands (then it shows a "检测中…" line rather than guessing).
+     * Refreshed on service-bind, on resume, and on pull-to-refresh; it never
+     * writes anything — see [RuntimeStatus].
+     */
+    private var runtimeStatus by mutableStateOf<RuntimeStatus.Snapshot?>(null)
+
+    /**
      * The live search text. Compose state, not a plain field: the search field
      * reads it directly, so the text survives the field leaving composition —
      * which is what exit and multi-select do — and a restore re-composes the
@@ -286,8 +294,10 @@ class MainActivity : AppCompatActivity() {
                     onRowLongClick = { handleRowLongPress(it) },
                     loadIcon = { store?.loadIcon(it) },
                     refreshing = refreshing,
-                    onRefresh = { refreshing = true; loadApps() },
+                    onRefresh = { refreshing = true; loadApps(); refreshRuntimeStatus() },
                     onDiagnostics = { openFcmDiagnostics() },
+                    status = runtimeStatus,
+                    onRetryStatus = { refreshRuntimeStatus() },
                     snackbarHostState = snackbarHostState
                 )
             }
@@ -551,6 +561,9 @@ class MainActivity : AppCompatActivity() {
             ThemeSupport.reapplyWindow(this)
             appliedPalette = palette
         }
+        // A hot reload (scope toggle, module update) can have landed while the
+        // window was backgrounded; re-read the live hook state on every return.
+        refreshRuntimeStatus()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -955,6 +968,8 @@ class MainActivity : AppCompatActivity() {
                         // Remote prefs are the source of truth once bound.
                         reloadAllowlist()
                         loadApps()
+                        // The service is live now, so a target list is meaningful.
+                        refreshRuntimeStatus()
                     }
                 }
 
@@ -976,6 +991,28 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Throwable) {
             null
         }
+    }
+
+    /**
+     * Read the live hook state off the main thread and publish it to the header.
+     *
+     * `getRunningTargets` is a binder call into the Xposed framework and the GMS
+     * check reads a Settings row, so neither runs inline on the UI thread. The
+     * allowlist emptiness is snapshotted first (a plain field, cheap), then the
+     * probe publishes back through [runOnUiThreadSafe].
+     */
+    private fun refreshRuntimeStatus() {
+        val service = xposedService
+        val empty = allowlist.isEmpty()
+        val ctx = applicationContext
+        Thread {
+            val snap = try {
+                RuntimeStatus.probe(ctx, service, empty)
+            } catch (t: Throwable) {
+                null
+            }
+            runOnUiThreadSafe { runtimeStatus = snap }
+        }.start()
     }
 
     private fun reloadAllowlist() {

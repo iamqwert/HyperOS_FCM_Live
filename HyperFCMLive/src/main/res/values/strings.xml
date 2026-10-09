@@ -149,15 +149,15 @@
 
     <string name="experiment_section_sleep">睡眠模式</string>
     <string name="experiment_sleep_keepalive">保护 WiFi 不断网</string>
-    <string name="experiment_sleep_keepalive_desc">在睡眠模式下，WiFi 保持开启，FCM 通道不会整夜中断；夜间耗电增加</string>
+    <string name="experiment_sleep_keepalive_desc">在睡眠模式下，WiFi 保持开启，防止 FCM 通道中断；夜间耗电增加</string>
     <string name="experiment_sleep_keepalive_data">保护移动数据不断网</string>
     <string name="experiment_sleep_keepalive_data_desc">在睡眠模式下，移动数据保持开启，FCM 通道仍可用；夜间耗电更多</string>
 
     <!-- 自启动单列一节：主开关在运行时放行，副档逐层扩大覆盖面，写入档落持久设置，默认全关 -->
     <string name="experiment_section_autostart">自启动</string>
-    <string name="experiment_autostart_gate_release">放宽已勾选应用唤醒条件</string>
+    <string name="experiment_autostart_gate_release">放宽应用唤醒条件</string>
     <string name="experiment_autostart_gate_release_desc">放行已勾选应用的服务启动与进程启动</string>
-    <string name="experiment_autostart_restart_release">不冻结已勾选应用</string>
+    <string name="experiment_autostart_restart_release">不冻结应用</string>
     <string name="experiment_autostart_restart_release_desc">已勾选应用进程结束后，按正常路径重启而非被系统冻结</string>
     <string name="experiment_autostart_root_release">答复自启动查询为允许</string>
     <string name="experiment_autostart_root_release_desc">对于已勾选应用，系统查询自启动状态的统一入口均按允许答复，覆盖上方各档与其余全部读取点；系统可能不再记录这些应用的自启动记录</string>
@@ -165,14 +165,14 @@
     <string name="experiment_wake_autostart_write_desc">把自启动行为写入系统设置，不改手机管家的自启动开关；系统应用不写入；不随本开关关闭还原</string>
     <string name="experiment_wake_autostart_switch">同时写入自启动开关状态</string>
     <string name="experiment_wake_autostart_switch_desc">写入自启动设置的同时一并写入开关状态，应用管理将显示已勾选应用的自启动开关为开；系统应用不写入；不随本开关关闭还原</string>
-    <string name="experiment_autostart_empty_list">当前白名单为空，开关只作用于白名单内的应用，请先配置白名单</string>
+    <string name="experiment_autostart_empty_list">当前白名单为空，开关只作用于已勾选应用，请先配置白名单</string>
     <string name="experiment_autostart_write_confirm_title">写入系统自启动设置</string>
     <string name="experiment_autostart_write_confirm">写入只改变自启动行为，不改变手机管家的自启动开关，在应用管理里看不出变化\n为安全考虑，系统应用一律不写入\n写入后，关闭本开关不会还原；	撤销方式：在手机管家里把该应用的自启动先打开再关闭</string>
     <string name="experiment_autostart_write_confirm_ok">写入</string>
 
-    <!-- 后台网络单列一节：冻结期网络放宽，只作用于白名单内应用，默认关 -->
+    <!-- 后台网络单列一节：冻结期网络放宽，默认关 -->
     <string name="experiment_section_background_net">后台网络</string>
-    <string name="experiment_greeze_net_release">保持已勾选应用冻结期联网</string>
+    <string name="experiment_greeze_net_release">保持应用冻结期联网</string>
     <string name="experiment_greeze_net_release_desc">已勾选应用切至后台被冻时网络保持可用；本项并不优化 FCM 推送，而是保护这些应用的自有长连接</string>
 
     <!-- 模块状态页 -->
@@ -186,4 +186,29 @@
     <string name="row_unselected">未选中</string>
     <!-- 不可勾选的行：GMS 恒生效。小字即其无障碍描述，故不再单列 a11y_* 副本 -->
     <string name="gms_row_note">始终生效，无需勾选</string>
+
+    <!-- 运行状态自检卡（列表页顶部）：无需 root/adb，读框架注入状态与 GMS 免限制名单 -->
+    <string name="status_detecting">正在检测运行状态…</string>
+    <string name="status_active">推送保护已生效</string>
+    <string name="status_not_connected">未连接到 Xposed 框架服务</string>
+    <string name="status_not_injected">框架未注入：请在 LSPosed 勾选作用域并重启</string>
+    <string name="status_pending_reload">已注入，但 system_server 仍在运行旧版本（等待热重载或重启）</string>
+    <string name="status_api_unsupported">当前框架不支持注入状态查询，仅按 GMS 名单判断</string>
+    <string name="status_host_framework">系统框架 (system_server)</string>
+    <string name="status_host_powerkeeper">省电服务 (powerkeeper)</string>
+    <string name="status_host_up_to_date">已注入 · 当前版本</string>
+    <string name="status_host_stale">已注入 · 待热重载</string>
+    <string name="status_host_reloading">热重载中</string>
+    <string name="status_host_failed">热重载失败</string>
+    <string name="status_host_injected">已注入 · 运行中</string>
+    <string name="status_host_missing">未检测到</string>
+    <string name="status_gms_on">GMS 免省电限制：已生效</string>
+    <string name="status_gms_off">GMS 免省电限制：未检测到</string>
+    <string name="status_allowlist_empty">未选择应用：仅保护 GMS 推送通道，勾选后对应应用的推送才会被放行</string>
+    <string name="status_recheck">重新自检</string>
+    <string name="status_hooks_count">已装配 %1$d 个 hook（本机缺失 %2$d）</string>
+    <string name="status_session_counters">上次探针 %1$s · 本会话推送放行 %2$d · 自启动放行 %3$d</string>
+    <string name="status_probe_now">刚刚</string>
+    <string name="status_probe_seconds">%1$d 秒前</string>
+    <string name="status_probe_minutes">%1$d 分钟前</string>
 </resources>

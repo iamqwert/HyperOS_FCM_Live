@@ -4448,6 +4448,38 @@ class Hooker : XposedModule() {
             "uid=$uid ${trafficSinceLastProbe(uid)}"
         }
         log(Log.INFO, TAG, "gms probe [$reason]: $traffic; ${broadcastGateSummary()}")
+        writeRuntimeStatusSnapshot()
+    }
+
+    /**
+     * Publish the hook's own runtime counters to the [Prefs.GROUP_STATUS] remote
+     * prefs so the settings UI can show "本会话放行 N 次 / 已装配 M 个 hook" without
+     * the user reaching for `adb logcat`.
+     *
+     * Runs on the probe background thread (this is called only from
+     * [probeGmsTraffic], which is scheduled on [probeBackgroundHandler]) — never on
+     * a hook callback or the system_server main thread, so the `commit()` cannot
+     * stall a broadcast/alarm. Best-effort: any failure is swallowed, because the
+     * snapshot is a convenience readout, not part of any decision the hooks make.
+     * Only ever reached from system_server (the traffic probe lives in
+     * [systemServerGroups]), so the counts are system_server's.
+     */
+    private fun writeRuntimeStatusSnapshot() {
+        try {
+            val prefs = getRemotePreferences(Prefs.GROUP_STATUS) ?: return
+            val released = autostartGateReleaseCount +
+                autostartGateRestartReleaseCount + autostartRootReleaseCount
+            prefs.edit()
+                .putLong(Prefs.STATUS_PROBE_ELAPSED, SystemClock.elapsedRealtime())
+                .putInt(Prefs.STATUS_HOOKS, hooksInstalled)
+                .putInt(Prefs.STATUS_ABSENT, hookTargetsAbsent)
+                .putInt(Prefs.STATUS_PUSH_ALLOWED, broadcastGateAllowedCount)
+                .putInt(Prefs.STATUS_AUTOSTART_RELEASED, released)
+                .commit()
+        } catch (t: Throwable) {
+            // Deliberately silent: the log already carries these numbers, and a
+            // prefs hiccup must not spam system_server or fail the probe.
+        }
     }
 
     /**

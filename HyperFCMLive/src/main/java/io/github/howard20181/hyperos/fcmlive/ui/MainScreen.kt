@@ -91,6 +91,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.R
+import io.github.howard20181.hyperos.fcmlive.RuntimeStatus
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppShapes
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
@@ -184,7 +185,12 @@ fun MainScreen(
     },
     // The M3 feedback surface. Owned by the caller, because that is where the
     // messages originate; hosted here, because this is the tree on screen.
-    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+    // Read-only "运行状态" snapshot for the header above the list. Null until the
+    // Activity has probed once (the header then renders a "检测中…" line).
+    status: RuntimeStatus.Snapshot? = null,
+    // Re-run the status probe (the header's "重新自检" button).
+    onRetryStatus: () -> Unit = {}
 ) {
     val pullState = rememberPullToRefreshState()
 
@@ -267,7 +273,9 @@ fun MainScreen(
                     onRowClick = onRowClick,
                     onRowLongClick = onRowLongClick,
                     loadIcon = loadIcon,
-                    bottomPadding = innerPadding.calculateBottomPadding() + FAB_CLEARANCE
+                    bottomPadding = innerPadding.calculateBottomPadding() + FAB_CLEARANCE,
+                    status = status,
+                    onRetryStatus = onRetryStatus
                 )
             }
         )
@@ -672,6 +680,8 @@ fun AppListPane(
     onRowLongClick: (AppListStore.AppEntry) -> Unit,
     loadIcon: (AppListStore.AppEntry) -> Unit,
     bottomPadding: Dp,
+    status: RuntimeStatus.Snapshot? = null,
+    onRetryStatus: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -686,6 +696,12 @@ fun AppListPane(
         ),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        // The "运行状态" header rides along as the first item so it shares the
+        // list's horizontal inset and pull-to-refresh, and stays visible even
+        // when no rows are shown (the empty-allowlist hint matters most there).
+        item(key = "runtime-status") {
+            RuntimeStatusHeader(snapshot = status, onRetry = onRetryStatus)
+        }
         items(items = apps, key = { it.packageName }) { app ->
             AppRow(
                 label = app.label,
