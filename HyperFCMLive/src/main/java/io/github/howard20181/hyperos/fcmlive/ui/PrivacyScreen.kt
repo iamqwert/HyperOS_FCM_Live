@@ -51,10 +51,11 @@ private fun PrivacyBody(
     bottomPadding: Dp,
     modifier: Modifier = Modifier
 ) {
+    val inset = pageHorizontalInset()
     LazyColumn(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp),
+            .padding(start = inset, end = inset),
         state = rememberPageListState(),
         // The gesture-hint strip is scroll-through, not a hard stop.
         contentPadding = PaddingValues(bottom = bottomPadding)

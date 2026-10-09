@@ -29,25 +29,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TooltipAnchorPosition
-import androidx.compose.material3.TooltipBox
-import androidx.compose.material3.TooltipDefaults
-import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -156,24 +149,13 @@ fun AboutScreen(
         snackbarHostState = snackbarHostState,
         actions = {
             val helpText = stringResource(R.string.help)
-            TooltipBox(
-                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
-                // Below, as the old PopupWindow was: it sat under the icon
-                // rather than squeezing itself between the icon and the
-                // status bar.
-                positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
-                    TooltipAnchorPosition.Below
-                ),
-                tooltip = { PlainTooltip { Text(text = helpText) } },
-                state = rememberTooltipState(),
-                content = {
-                    IconButton(onClick = actions.onHelp) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_help),
-                            contentDescription = helpText
-                        )
-                    }
-                }
+            // The shared bar-icon action: bare under Material, Miuix's own quiet
+            // grey button under Miuix, with the same long-press tooltip either
+            // way.
+            TopBarIconButton(
+                painter = painterResource(R.drawable.ic_help),
+                description = helpText,
+                onClick = actions.onHelp
             )
         }
     ) { innerPadding ->
@@ -267,38 +249,26 @@ private fun AboutBody(
     }
 
     updateOffer?.let { offer ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { updateOffer = null },
-            // Popup level, like every panel drawn over the page. M3's dialog
-            // default is `surfaceContainerHigh`, which on this ramp is a tone
-            // *below* the page (92 against 94), so the dialog would have sat
-            // behind the surface it is drawn over. The popup level is where
-            // Material's own menus sit (`MenuTokens.ContainerColor` =
-            // `surfaceContainer`), and it is deliberately not the card's — see
-            // [AppSurfaces].
-            containerColor = LocalAppSurfaces.current.popup,
-            text = { Text(stringResource(R.string.update_found, offer.version)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    updateOffer = null
-                    // The badge is cleared where the URL is opened, so the
-                    // stored flag and what is on screen can only move together.
-                    updateBadge = false
-                    actions.onUpdateOpen()
-                }) {
-                    Text(updateOpenLabel)
-                }
+            title = stringResource(R.string.update_found_title),
+            // The badge is cleared where the URL is opened, so the stored flag
+            // and what is on screen can only move together.
+            text = stringResource(R.string.update_found, offer.version),
+            confirmLabel = updateOpenLabel,
+            onConfirm = {
+                updateBadge = false
+                actions.onUpdateOpen()
             },
-            dismissButton = {
-                TextButton(onClick = { updateOffer = null }) { Text(cancelLabel) }
-            }
+            dismissLabel = cancelLabel
         )
     }
 
+    val inset = pageHorizontalInset()
     LazyColumn(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp),
+            .padding(start = inset, end = inset),
         // The four appearance menus all re-skin the app on a pick, so this page is
         // the one place a menu could visibly throw the reader back to the start.
         state = rememberPageListState(),

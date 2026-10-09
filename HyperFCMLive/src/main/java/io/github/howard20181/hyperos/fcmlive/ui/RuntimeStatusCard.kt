@@ -13,6 +13,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
+import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
+import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,7 +47,13 @@ fun RuntimeStatusHeader(
     onRetry: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val shape = LocalAppShapes.current.card
+    // The Miuix card radius under that look — the card sits in the list among
+    // the app rows, which carry the same radius there.
+    val shape = if (LocalUiStyle.current == UiStyle.Miuix) {
+        androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+    } else {
+        LocalAppShapes.current.card
+    }
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = LocalAppSurfaces.current.card,
@@ -117,8 +126,15 @@ fun RuntimeStatusHeader(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(onClick = onRetry) {
-                        Text(stringResource(R.string.status_recheck))
+                    if (LocalUiStyle.current == UiStyle.Miuix) {
+                        MiuixTextButton(
+                            text = stringResource(R.string.status_recheck),
+                            onClick = onRetry
+                        )
+                    } else {
+                        TextButton(onClick = onRetry) {
+                            Text(stringResource(R.string.status_recheck))
+                        }
                     }
                 }
             }

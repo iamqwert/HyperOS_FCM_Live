@@ -98,6 +98,9 @@ import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Checkbox as MiuixCheckbox
+import top.yukonga.miuix.kmp.basic.FloatingActionButton as MiuixFloatingActionButton
+import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
 import io.github.howard20181.hyperos.fcmlive.RuntimeStatus
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppShapes
@@ -234,6 +237,10 @@ fun MainScreen(
         // not the M3 spinner.
         MiuixScaffold(
             modifier = modifier,
+            // The page colour, not Miuix's own default: under AMOLED the page is
+            // true black and a default-coloured scaffold would paint a grey
+            // window behind it.
+            containerColor = MaterialTheme.colorScheme.background,
             topBar = {
                 MainTopBar(
                     state = topBarState,
@@ -249,7 +256,13 @@ fun MainScreen(
             Box(modifier = Modifier.fillMaxSize()) {
                 MiuixPullToRefresh(
                     isRefreshing = refreshing,
-                    onRefresh = onRefresh
+                    onRefresh = onRefresh,
+                    // The bar's height is taken off the refresh container itself,
+                    // not the list inside it: the circle has to come down *below*
+                    // the bar or it spins where the bar hides it.
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = innerPadding.calculateTopPadding())
                 ) {
                     AppListPane(
                         apps = apps,
@@ -262,8 +275,7 @@ fun MainScreen(
                         icons = icons,
                         bottomPadding = innerPadding.calculateBottomPadding() + FAB_CLEARANCE,
                         status = status,
-                        onRetryStatus = onRetryStatus,
-                        modifier = Modifier.padding(top = innerPadding.calculateTopPadding())
+                        onRetryStatus = onRetryStatus
                     )
                 }
                 SnackbarHost(
@@ -371,6 +383,18 @@ private fun DiagnosticsFab(onClick: () -> Unit) {
         },
         state = rememberTooltipState()
     ) {
+        if (LocalUiStyle.current == UiStyle.Miuix) {
+            // Miuix's own FAB: the accent plate with the platform shadow, the
+            // system's own metrics — not an M3 plate recoloured.
+            MiuixFloatingActionButton(onClick = onClick) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_fcm_diagnostics),
+                    contentDescription = label,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+            return@TooltipBox
+        }
         FloatingActionButton(
             onClick = onClick,
             shape = LocalAppShapes.current.fab,
@@ -408,6 +432,9 @@ fun MainTopBar(
         SmallTopAppBar(
             title = if (state.searching) "" else state.title,
             modifier = modifier,
+            // Same reason as the scaffold: the bar is the page's own colour,
+            // which under AMOLED is black rather than Miuix's default.
+            color = MaterialTheme.colorScheme.background,
             navigationIcon = {
                 if (state.searching || state.multiSelect) {
                     TopBarIconButton(
@@ -562,7 +589,7 @@ fun MainTopBar(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TopBarIconButton(
+fun TopBarIconButton(
     painter: Painter,
     description: String,
     onClick: () -> Unit,
@@ -584,13 +611,26 @@ private fun TopBarIconButton(
         state = rememberTooltipState(),
         modifier = modifier
     ) {
-        IconButton(onClick = onClick) {
-            Icon(
-                painter = painter,
-                contentDescription = description,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(24.dp)
-            )
+        if (LocalUiStyle.current == UiStyle.Miuix) {
+            // Miuix's own button: its press feedback and its quiet grey, the one
+            // the reference apps' bar icons sit in.
+            MiuixIconButton(onClick = onClick) {
+                Icon(
+                    painter = painter,
+                    contentDescription = description,
+                    tint = MiuixTheme.colorScheme.onBackgroundVariant,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        } else {
+            IconButton(onClick = onClick) {
+                Icon(
+                    painter = painter,
+                    contentDescription = description,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
     }
 }
@@ -707,7 +747,7 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
                 },
                 state = rememberTooltipState()
             ) {
-                IconButton(onClick = { expanded = true }) {
+                MiuixIconButton(onClick = { expanded = true }) {
                     Icon(
                         painter = painterResource(R.drawable.ic_more_vert),
                         contentDescription = moreLabel,
@@ -720,24 +760,24 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
                 show = expanded,
                 onDismissRequest = { expanded = false }
             ) {
+                // Selection is the accent plus a check, the menu's own language
+                // (the reference apps' sort and mode menus) — a checkbox plate on
+                // top of it would be the same bit drawn twice.
                 ListPopupColumn {
                     MiuixPopupRow(
                         label = stringResource(R.string.show_fcm_supported_apps),
                         selected = state.showFcmSupportedOnly,
-                        onClick = { expanded = false; actions.onToggleShowFcmOnly() },
-                        trailing = { OverflowCheckbox(state.showFcmSupportedOnly) }
+                        onClick = { expanded = false; actions.onToggleShowFcmOnly() }
                     )
                     MiuixPopupRow(
                         label = stringResource(R.string.exclude_mipush_apps),
                         selected = state.excludeMiPushApps,
-                        onClick = { expanded = false; actions.onToggleExcludeMiPush() },
-                        trailing = { OverflowCheckbox(state.excludeMiPushApps) }
+                        onClick = { expanded = false; actions.onToggleExcludeMiPush() }
                     )
                     MiuixPopupRow(
                         label = stringResource(R.string.show_system_apps),
                         selected = state.showSystemApps,
-                        onClick = { expanded = false; actions.onToggleShowSystemApps() },
-                        trailing = { OverflowCheckbox(state.showSystemApps) }
+                        onClick = { expanded = false; actions.onToggleShowSystemApps() }
                     )
                     MiuixPopupRow(
                         label = stringResource(R.string.settings),
@@ -832,6 +872,14 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
  */
 @Composable
 private fun OverflowCheckbox(checked: Boolean) {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixCheckbox(
+            state = androidx.compose.ui.state.ToggleableState(checked),
+            onClick = null,
+            modifier = Modifier.clearAndSetSemantics {}
+        )
+        return
+    }
     Checkbox(
         checked = checked,
         onCheckedChange = null,
@@ -871,7 +919,11 @@ fun AppListPane(
         contentPadding = PaddingValues(
             start = 12.dp, top = 4.dp, end = 12.dp, bottom = bottomPadding
         ),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        // 12dp between cards under Miuix, the spacing the reference apps leave
+        // between their section cards; 8dp is the Material ramp's own choice.
+        verticalArrangement = Arrangement.spacedBy(
+            if (LocalUiStyle.current == UiStyle.Miuix) 12.dp else 8.dp
+        )
     ) {
         // The "运行状态" header rides along as the first item so it shares the
         // list's horizontal inset and pull-to-refresh, and stays visible even
@@ -936,7 +988,13 @@ private fun LazyItemScope.AppRow(
     modifier: Modifier = Modifier
 ) {
     val cardSelected = multiSelect && rowSelected
-    val shape = LocalAppShapes.current.card
+    // Miuix cards carry the one radius the library's own Card carries; the M3
+    // ramp (and its 2025 shape set) belongs to the other look.
+    val shape = if (LocalUiStyle.current == UiStyle.Miuix) {
+        androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+    } else {
+        LocalAppShapes.current.card
+    }
     // A selected row is `primaryContainer`, so all three foregrounds on it have
     // to come from that role's pair. `onSurface`, `onSurfaceVariant` and
     // `primary` each read fine on the card and each disappear here: MONOCHROME's

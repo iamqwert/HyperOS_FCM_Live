@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SwitchColors
 import androidx.compose.material3.SwitchDefaults
@@ -69,6 +70,7 @@ import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -77,6 +79,9 @@ import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
+import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.window.WindowDialog
 import kotlin.math.max
 import kotlin.math.min
 
@@ -166,6 +171,16 @@ fun GroupRowGap() {
 }
 
 /** Miuix CardDefaults.CornerRadius, the group radius under the Miuix look. */
+
+/**
+ * The horizontal inset of a settings page's list: 16dp under Material, where the
+ * M3 guideline puts it, and 12dp under Miuix, the margin the reference apps
+ * (and the system settings they imitate) leave around their cards.
+ */
+@Composable
+fun pageHorizontalInset(): Dp {
+    return if (LocalUiStyle.current == UiStyle.Miuix) 12.dp else 16.dp
+}
 private val MIUIX_CARD_RADIUS = 16.dp
 
 /**
@@ -841,6 +856,28 @@ fun NavCard(
     modifier: Modifier = Modifier,
     trailing: @Composable (() -> Unit)? = null
 ) {
+    // Under Miuix this is ArrowPreference, not a restyled card: the chevron, the
+    // margins and the press feedback are the library's, and the trailing slot
+    // (the update badge) lands before the chevron through endActions.
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            color = LocalAppSurfaces.current.card,
+            shape = connectedGroupShape(first, last)
+        ) {
+            ArrowPreference(
+                title = title,
+                summary = subtitle,
+                onClick = onClick,
+                endActions = if (trailing != null) {
+                    { trailing() }
+                } else {
+                    {}
+                }
+            )
+        }
+        return
+    }
     GroupRow(first = first, last = last, onClick = onClick, modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             RowIcon(painter = painterResource(iconRes))
@@ -959,13 +996,20 @@ fun PageScaffold(
         val scrollBehavior = MiuixScrollBehavior()
         MiuixScaffold(
             modifier = modifier,
+            // The page colour on both the scaffold and the bar, not Miuix's
+            // defaults: under AMOLED the page is true black and the defaults
+            // would paint grey behind it and in the bar.
+            containerColor = MaterialTheme.colorScheme.background,
             topBar = {
                 SmallTopAppBar(
                     title = stringResource(titleRes),
+                    color = MaterialTheme.colorScheme.background,
                     navigationIcon = {
                         val description = stringResource(io.github.howard20181.hyperos.fcmlive.R.string.back)
-                        androidx.compose.material3.IconButton(onClick = onBack) {
-                            androidx.compose.material3.Icon(
+                        // Miuix's own icon button, quietly grey like the bar's
+                        // other affordances; the Material look keeps its plate.
+                        IconButton(onClick = onBack) {
+                            Icon(
                                 painter = painterResource(
                                     io.github.howard20181.hyperos.fcmlive.R.drawable.ic_arrow_back
                                 ),
@@ -1057,4 +1101,93 @@ fun MiuixPopupRow(
             )
         }
     }
+}
+
+/**
+ * A dialog in whichever shell the app is wearing.
+ *
+ * Material is the M3 [androidx.compose.material3.AlertDialog] as before. Miuix is
+ * the system's own [WindowDialog] — the bottom-docked sheet with the dimmed page
+ * behind it — with [MiuixTextButton]s in the action row, laid out the way the
+ * reference apps lay theirs out: dismiss at the start, confirm at the end.
+ *
+ * [content] overrides [text] for bodies that are not one paragraph (the licence
+ * text is scrollable); it renders inside the dialog's own body slot.
+ */
+@Composable
+fun AppDialog(
+    onDismissRequest: () -> Unit,
+    title: String,
+    text: String? = null,
+    confirmLabel: String? = null,
+    onConfirm: () -> Unit = {},
+    dismissLabel: String? = null,
+    onDismiss: () -> Unit = {},
+    content: (@Composable () -> Unit)? = null
+) {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        WindowDialog(
+            show = true,
+            title = title,
+            summary = if (content == null) text else null,
+            onDismissRequest = onDismissRequest
+        ) {
+            Column {
+                if (content != null) {
+                    content()
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)
+                ) {
+                    if (dismissLabel != null) {
+                        MiuixTextButton(
+                            text = dismissLabel,
+                            onClick = {
+                                onDismiss()
+                                onDismissRequest()
+                            }
+                        )
+                    }
+                    if (confirmLabel != null) {
+                        MiuixTextButton(
+                            text = confirmLabel,
+                            onClick = {
+                                onConfirm()
+                                onDismissRequest()
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        return
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismissRequest,
+        // Popup level, like every panel drawn over the page: M3's dialog default
+        // is a tone *below* the page on this ramp, so the dialog would sit behind
+        // the surface it is drawn over.
+        containerColor = LocalAppSurfaces.current.popup,
+        title = { Text(title) },
+        text = {
+            if (content != null) {
+                content()
+            } else if (text != null) {
+                Text(text)
+            }
+        },
+        confirmButton = {
+            if (confirmLabel != null) {
+                TextButton(onClick = onConfirm) { Text(confirmLabel) }
+            }
+        },
+        dismissButton = {
+            if (dismissLabel != null) {
+                TextButton(onClick = onDismiss) { Text(dismissLabel) }
+            }
+        }
+    )
 }

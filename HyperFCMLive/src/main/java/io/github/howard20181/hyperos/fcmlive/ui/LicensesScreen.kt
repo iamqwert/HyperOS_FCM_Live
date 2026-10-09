@@ -15,15 +15,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +39,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.R
+import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
+import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import io.github.howard20181.hyperos.fcmlive.UiUtils
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
@@ -112,10 +111,11 @@ private fun LicensesBody(
         stringResource(R.string.license_mit) to R.raw.license_mit,
     )
 
+    val inset = pageHorizontalInset()
     LazyColumn(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp),
+            .padding(start = inset, end = inset),
         state = rememberPageListState(),
         // The gesture-hint strip is scroll-through, not a hard stop.
         contentPadding = PaddingValues(bottom = bottomPadding)
@@ -141,7 +141,7 @@ private fun LicensesBody(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-                if (!last) Spacer(modifier = Modifier.height(2.dp))
+                if (!last) GroupRowGap()
             }
         }
 
@@ -183,7 +183,7 @@ private fun LicensesBody(
                         )
                     }
                 }
-                if (!last) Spacer(modifier = Modifier.height(2.dp))
+                if (!last) GroupRowGap()
             }
         }
 
@@ -217,7 +217,7 @@ private fun LicensesBody(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-                if (!last) Spacer(modifier = Modifier.height(2.dp))
+                if (!last) GroupRowGap()
             }
         }
 
@@ -241,15 +241,12 @@ private fun LicenseDialog(
     val sourceLabel = stringResource(R.string.view_source_code)
     val closeLabel = stringResource(R.string.dialog_close)
 
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        // Raised container, as everywhere else — see LocalAppSurfaces. M3's
-        // dialog role sits a tone below the page in this pairing.
-        containerColor = LocalAppSurfaces.current.card,
-        title = {
-            Text(text = sheet.title, style = MaterialTheme.typography.titleLarge)
-        },
-        text = {
+        title = sheet.title,
+        confirmLabel = closeLabel,
+        onConfirm = onDismiss,
+        content = {
             // Without a ceiling the body grows to the dialog's full height and
             // the dialog itself takes over the screen — these files run to
             // hundreds of lines. Capping at part of the screen keeps the title
@@ -267,6 +264,18 @@ private fun LicenseDialog(
                 val px = LocalWindowInfo.current.containerSize.height
                 if (px <= 0) Dp.Infinity else (px * 0.55f).toDp()
             }
+            if (sheet.url != null) {
+                if (LocalUiStyle.current == UiStyle.Miuix) {
+                    MiuixTextButton(
+                        text = sourceLabel,
+                        onClick = { onOpenSource(sheet.url) }
+                    )
+                } else {
+                    TextButton(onClick = { onOpenSource(sheet.url) }) {
+                        Text(sourceLabel)
+                    }
+                }
+            }
             SelectionContainer {
                 Text(
                     modifier = Modifier
@@ -277,24 +286,6 @@ private fun LicenseDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Start
                 )
-            }
-        },
-        confirmButton = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (sheet.url != null) {
-                    OutlinedButton(
-                        modifier = Modifier.weight(1f),
-                        onClick = { onOpenSource(sheet.url) }
-                    ) {
-                        Text(sourceLabel)
-                    }
-                }
-                Button(modifier = Modifier.weight(1f), onClick = onDismiss) {
-                    Text(closeLabel)
-                }
             }
         }
     )
