@@ -379,10 +379,11 @@ private fun AboutBody(
                     last = miuixStyle
                 )
             }
-            // Material only: these three drive the app's colour engine, and under
-            // the Miuix look the colours come from Miuix instead. Hidden, and — to
-            // keep the hiding honest — also unread by that look, so a choice nobody
-            // can see cannot decide anything nobody can explain.
+            // Material only, on screen: these are the app's own colour engine's
+            // controls and the Miuix look is not dressed by that engine. Hidden here
+            // but still read by it, so a seed or a palette family picked while in
+            // Material carries across instead of being silently dropped — the why is
+            // argued at MiuixStyleTheme, where the reads live.
             if (!miuixStyle) {
                 Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
                 DynamicColorCard(

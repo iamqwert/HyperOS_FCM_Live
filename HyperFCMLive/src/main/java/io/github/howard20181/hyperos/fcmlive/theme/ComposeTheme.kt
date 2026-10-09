@@ -19,7 +19,9 @@ import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.ThemeColorSpec
 import top.yukonga.miuix.kmp.theme.ThemeController
+import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 
 /**
  * Jetpack Compose theme bridge.
@@ -130,8 +132,10 @@ private fun MaterialStyleTheme(content: @Composable () -> Unit) {
  * failure this branch has to avoid, and it keeps the M3 widgets that have no Miuix
  * counterpart wearing the same colours as anything Miuix draws.
  *
- * Only 主题模式 and 莫奈颜色 steer this look; see the note at the top of the body for
- * why the other three rows of the section are neither read nor shown here.
+ * 动态颜色 / 调色风格 / 颜色规格 are not offered here — they name Material concepts and
+ * this is not a Material look — but they are still *read*, and they still steer
+ * it. Deliberate, and worth a second before it gets "fixed": see the note in the
+ * body.
  *
  * The three-level surface ramp is Miuix's own: `surface` is the page,
  * `surfaceVariant` the cards (white in light, `#242424` in dark), and the top
@@ -149,16 +153,30 @@ private fun MiuixStyleTheme(content: @Composable () -> Unit) {
     // ThemeEngine.invalidate() bumps it, this re-reads, and the appearance changes
     // in place.
     val generation = ThemeEngine.generation
-    // Only 主题模式 and 莫奈颜色 are read here, because only those two are on screen
-    // in this look. 动态颜色 / 调色风格 / 颜色规格 belong to the app's own colour
-    // engine, are Material designs by construction, and are hidden while Miuix is
-    // chosen — so they are deliberately not consulted either. A look that ignored a
-    // setting on screen is a bug; a look quietly driven by a setting nobody can see
-    // is worse, because the row then still holds a value, and it even still changes
-    // this screen, from behind another screen's back.
     val dark = remember(context, generation) { ThemePrefs.isDark(context) }
     val amoled = remember(context, generation) { ThemePrefs.isAmoled(context) }
     val monet = remember(context, generation) { ThemePrefs.miuixMonet(context) }
+    // Read but not offered. The three below are the app's own colour engine's
+    // controls and they are hidden in this look, yet they keep feeding it, because
+    // Miuix's Monet derivation takes exactly those three arguments (a key colour, a
+    // palette family, a spec) — so a person's colour decisions follow them across a
+    // style switch instead of the screen changing face under their hands, which is
+    // the outcome they were making those decisions to avoid.
+    //
+    // What that trades away is honesty on one screen: these values are changeable
+    // only by switching back to Material, where the rows reappear, and while Miuix
+    // is on there is nothing on screen saying the seed or the style matter at all.
+    // Stated here because the alternative reading — that the reads were left behind
+    // by mistake — ends with someone deleting them and the look quietly changing
+    // again.
+    val dynamic = remember(context, generation) { ThemePrefs.dynamicColor(context) }
+    val seed = remember(context, generation) { ThemePrefs.seedColor(context) }
+    val spec = remember(context, generation) { ThemePrefs.specVersion(context) }
+    val variant = remember(context, generation) { ThemePrefs.paletteStyle(context) }
+    // 莫奈颜色 on with 动态颜色 off means "from my seed, not from the wallpaper" —
+    // the only way Miuix can be told that is keyColor; left null it reads the
+    // platform accent, which is the wallpaper.
+    val keyColor = if (!dynamic && seed != 0) Color(seed) else null
 
     // ThemeController publishes its inputs as snapshot state but they are `val`s,
     // so a change is pushed by rebuilding it rather than by assignment. Cheap: the
@@ -173,13 +191,21 @@ private fun MiuixStyleTheme(content: @Composable () -> Unit) {
         },
         // Always resolved: the app can force light or dark independently of the
         // device, and isSystemInDarkTheme() (what null falls back to) is the device.
-        isDark = dark
+        isDark = dark,
+        keyColor = keyColor,
+        colorSpec = if (spec == ThemePrefs.SPEC_2025) {
+            ThemeColorSpec.Spec2025
+        } else {
+            ThemeColorSpec.Spec2021
+        },
+        paletteStyle = miuixPaletteStyle(variant)
     )
 
     MiuixTheme(controller = controller) {
         val colors = MiuixTheme.colorScheme
-        // The 2021 ramp, unconditionally: which ramp the app dresses as is a
-        // Material spec decision, and the spec row is not part of this look.
+        // Which ramp the surfaces are dressed in follows 颜色规格 as well — hidden,
+        // but read, for the reason argued above.
+        val expressive = spec == ThemePrefs.SPEC_2025
         val colorScheme = remember(colors, dark) { colors.toMaterialColorScheme(dark) }
         val appSurfaces = remember(colors, colorScheme, amoled) {
             AppSurfaces(
@@ -187,7 +213,7 @@ private fun MiuixStyleTheme(content: @Composable () -> Unit) {
                 popup = if (dark) colors.surfaceContainerHighest else colors.surfaceContainer
             )
         }
-        val appShapes = remember { appShapesFor(false) }
+        val appShapes = remember(expressive) { appShapesFor(expressive) }
         // The window chrome follows, too: it is View-side state no recomposition
         // reaches, and under this look the page colour is Miuix's.
         val pageArgb = (if (amoled) Color.Black else colors.surface).toArgb()
@@ -204,7 +230,7 @@ private fun MiuixStyleTheme(content: @Composable () -> Unit) {
             },
             typography = HyperFCMLiveTypography,
             shapes = HyperFCMLiveShapes,
-            motionScheme = motionSchemeFor(false),
+            motionScheme = motionSchemeFor(expressive),
         ) {
             CompositionLocalProvider(
                 LocalAppShapes provides appShapes,
@@ -215,6 +241,24 @@ private fun MiuixStyleTheme(content: @Composable () -> Unit) {
             }
         }
     }
+}
+
+/**
+ * Miuix's palette styles are the same nine Material families the app offers, under
+ * different names. Matched by writing them out: an ordinal mapping would be a
+ * silent lie the first time either list grows, and it is exactly the kind of
+ * coupling a hidden row cannot warn about.
+ */
+private fun miuixPaletteStyle(variant: Scheme.Variant): ThemePaletteStyle = when (variant) {
+    Scheme.Variant.TONAL_SPOT -> ThemePaletteStyle.TonalSpot
+    Scheme.Variant.NEUTRAL -> ThemePaletteStyle.Neutral
+    Scheme.Variant.VIBRANT -> ThemePaletteStyle.Vibrant
+    Scheme.Variant.EXPRESSIVE -> ThemePaletteStyle.Expressive
+    Scheme.Variant.RAINBOW -> ThemePaletteStyle.Rainbow
+    Scheme.Variant.FRUIT_SALAD -> ThemePaletteStyle.FruitSalad
+    Scheme.Variant.MONOCHROME -> ThemePaletteStyle.Monochrome
+    Scheme.Variant.FIDELITY -> ThemePaletteStyle.Fidelity
+    Scheme.Variant.CONTENT -> ThemePaletteStyle.Content
 }
 
 /**
