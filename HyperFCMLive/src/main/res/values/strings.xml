@@ -206,9 +206,4 @@
     <string name="status_gms_off">GMS 免省电限制：未检测到</string>
     <string name="status_allowlist_empty">未选择应用：仅保护 GMS 推送通道，勾选后对应应用的推送才会被放行</string>
     <string name="status_recheck">重新自检</string>
-    <string name="status_hooks_count">已装配 %1$d 个 hook（本机缺失 %2$d）</string>
-    <string name="status_session_counters">上次探针 %1$s · 本会话推送放行 %2$d · 自启动放行 %3$d</string>
-    <string name="status_probe_now">刚刚</string>
-    <string name="status_probe_seconds">%1$d 秒前</string>
-    <string name="status_probe_minutes">%1$d 分钟前</string>
 </resources>

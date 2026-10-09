@@ -1,6 +1,5 @@
 package io.github.howard20181.hyperos.fcmlive.ui
 
-import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -135,27 +134,6 @@ fun RuntimeStatusHeader(
                     ),
                     caution = !snapshot.gmsUnrestricted
                 )
-                if (snapshot.hooksInstalled >= 0) {
-                    DetailLine(
-                        text = stringResource(
-                            R.string.status_hooks_count,
-                            snapshot.hooksInstalled,
-                            snapshot.hooksAbsent.coerceAtLeast(0)
-                        ),
-                        caution = false
-                    )
-                }
-                if (snapshot.probeElapsedRealtime > 0L) {
-                    DetailLine(
-                        text = stringResource(
-                            R.string.status_session_counters,
-                            probeAgeLabel(snapshot.probeElapsedRealtime),
-                            snapshot.pushAllowed,
-                            snapshot.autostartReleased
-                        ),
-                        caution = false
-                    )
-                }
                 if (snapshot.allowlistEmpty) {
                     DetailLine(
                         text = stringResource(R.string.status_allowlist_empty),
@@ -203,16 +181,5 @@ private fun DetailLine(text: String, caution: Boolean) {
         maxLines = 2,
         overflow = TextOverflow.Ellipsis
     )
-}
-
-/** "刚刚 / N 秒前 / N 分钟前", measured against the shared boot clock. */
-@Composable
-private fun probeAgeLabel(probeElapsed: Long): String {
-    val sec = ((SystemClock.elapsedRealtime() - probeElapsed) / 1000L).coerceAtLeast(0L)
-    return when {
-        sec < 5 -> stringResource(R.string.status_probe_now)
-        sec < 120 -> stringResource(R.string.status_probe_seconds, sec)
-        else -> stringResource(R.string.status_probe_minutes, sec / 60)
-    }
 }
 

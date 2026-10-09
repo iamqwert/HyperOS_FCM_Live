@@ -58,16 +58,6 @@ object RuntimeStatus {
         val gmsUnrestricted: Boolean,
         /** Whether the user's wake allowlist is empty (only the GMS channel is helped). */
         val allowlistEmpty: Boolean,
-        /**
-         * Hook-published runtime counters from [Prefs.GROUP_STATUS]. `0`/`-1` mean
-         * the hook has not written yet (fresh boot before the first probe, or a
-         * framework without remote-pref write support) — the UI hides them then.
-         */
-        val probeElapsedRealtime: Long = 0L,
-        val hooksInstalled: Int = -1,
-        val hooksAbsent: Int = -1,
-        val pushAllowed: Int = 0,
-        val autostartReleased: Int = 0,
     ) {
         data class Host(
             val present: Boolean,
@@ -153,37 +143,12 @@ object RuntimeStatus {
                 targetsSupported = false
             }
         }
-        // Hook-published counters (best-effort): absent group / unsupported remote
-        // prefs leave these at their "unknown" defaults and the UI omits them.
-        var probeElapsed = 0L
-        var hooks = -1
-        var absent = -1
-        var pushAllowed = 0
-        var autostartReleased = 0
-        try {
-            val status = service?.getRemotePreferences(Prefs.GROUP_STATUS)
-            if (status != null && status.contains(Prefs.STATUS_PROBE_ELAPSED)) {
-                probeElapsed = status.getLong(Prefs.STATUS_PROBE_ELAPSED, 0L)
-                hooks = status.getInt(Prefs.STATUS_HOOKS, -1)
-                absent = status.getInt(Prefs.STATUS_ABSENT, -1)
-                pushAllowed = status.getInt(Prefs.STATUS_PUSH_ALLOWED, 0)
-                autostartReleased = status.getInt(Prefs.STATUS_AUTOSTART_RELEASED, 0)
-            }
-        } catch (t: Throwable) {
-            // Remote prefs unsupported on this framework — signal 1/2 above stand.
-        }
-
         return Snapshot(
             serviceConnected = connected,
             targetsSupported = targetsSupported,
             hosts = hosts,
             gmsUnrestricted = gms,
             allowlistEmpty = allowlistEmpty,
-            probeElapsedRealtime = probeElapsed,
-            hooksInstalled = hooks,
-            hooksAbsent = absent,
-            pushAllowed = pushAllowed,
-            autostartReleased = autostartReleased,
         )
     }
 }

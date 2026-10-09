@@ -77,20 +77,6 @@ object Prefs {
     const val MODULE_PKG = "io.github.howard20181.hyperos.fcmlive"
     /** Remote prefs group shared by the app process and system_server. */
     const val GROUP_CONFIG = "config"
-    /**
-     * Remote prefs group the system_server hook writes its runtime snapshot
-     * into, and the settings UI reads. Deliberately separate from
-     * [GROUP_CONFIG]: the app owns every key there and the hook owns every key
-     * here, so the two directions never share a file and cannot clobber each
-     * other's `commit()`. The hook writes it only from its probe background
-     * thread (startup + every 30 min), best-effort — see `writeRuntimeStatusSnapshot`.
-     */
-    const val GROUP_STATUS = "status"
-    const val STATUS_PROBE_ELAPSED = "probe_elapsed"
-    const val STATUS_HOOKS = "hooks"
-    const val STATUS_ABSENT = "absent"
-    const val STATUS_PUSH_ALLOWED = "push_allowed"
-    const val STATUS_AUTOSTART_RELEASED = "autostart_released"
     const val KEY_ALLOWLIST = "allowlist"
     /** Local mirror group (UI-only; remote remains source of truth for hooks). */
     const val LOCAL_PREFS = "fcmlive_allowlist_cache"
