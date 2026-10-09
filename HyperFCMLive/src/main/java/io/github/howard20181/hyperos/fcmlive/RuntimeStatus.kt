@@ -2,6 +2,7 @@ package io.github.howard20181.hyperos.fcmlive
 
 import android.content.Context
 import android.provider.Settings
+import androidx.annotation.StringRes
 import io.github.libxposed.service.XposedService
 
 /**
@@ -93,6 +94,23 @@ object RuntimeStatus {
         val frameworkActive: Boolean
             get() = if (targetsSupported) serviceConnected && systemUpToDate
             else gmsUnrestricted
+
+        /**
+         * The one-line verdict, as a string resource so the card and the
+         * screen-reader announcement read the *same* sentence — the status is a
+         * silent text swap, so a TalkBack user only learns the outcome if it is
+         * also announced.
+         */
+        @get:StringRes
+        val headlineRes: Int
+            get() = when {
+                !serviceConnected -> R.string.status_not_connected
+                !targetsSupported ->
+                    if (gmsUnrestricted) R.string.status_active else R.string.status_api_unsupported
+                frameworkActive -> R.string.status_active
+                systemPendingReload -> R.string.status_pending_reload
+                else -> R.string.status_not_injected
+            }
     }
 
     /**

@@ -16,7 +16,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,45 +54,19 @@ fun RuntimeStatusHeader(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val headline: String
-            val iconRes: Int
-            val iconTint: Color
-            when {
-                snapshot == null -> {
-                    headline = stringResource(R.string.status_detecting)
-                    iconRes = R.drawable.ic_status_locked
-                    iconTint = MaterialTheme.colorScheme.onSurfaceVariant
-                }
-                !snapshot.serviceConnected -> {
-                    headline = stringResource(R.string.status_not_connected)
-                    iconRes = R.drawable.ic_status_disabled
-                    iconTint = MaterialTheme.colorScheme.error
-                }
-                !snapshot.targetsSupported -> {
-                    headline = stringResource(
-                        if (snapshot.gmsUnrestricted) R.string.status_active
-                        else R.string.status_api_unsupported
-                    )
-                    iconRes = if (snapshot.gmsUnrestricted) R.drawable.ic_status_enabled
-                    else R.drawable.ic_status_disabled
-                    iconTint = if (snapshot.gmsUnrestricted) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.error
-                }
-                snapshot.frameworkActive -> {
-                    headline = stringResource(R.string.status_active)
-                    iconRes = R.drawable.ic_status_enabled
-                    iconTint = MaterialTheme.colorScheme.primary
-                }
-                snapshot.systemPendingReload -> {
-                    headline = stringResource(R.string.status_pending_reload)
-                    iconRes = R.drawable.ic_status_locked
-                    iconTint = MaterialTheme.colorScheme.tertiary
-                }
-                else -> {
-                    headline = stringResource(R.string.status_not_injected)
-                    iconRes = R.drawable.ic_status_disabled
-                    iconTint = MaterialTheme.colorScheme.error
-                }
+            // The verdict sentence lives in the model (headlineRes) so the card and
+            // the screen-reader announcement never diverge; the icon + tint are just
+            // a visual mapping off that same resource.
+            val headlineRes = snapshot?.headlineRes ?: R.string.status_detecting
+            val (iconRes, iconTint) = when (headlineRes) {
+                R.string.status_active ->
+                    R.drawable.ic_status_enabled to MaterialTheme.colorScheme.primary
+                R.string.status_pending_reload ->
+                    R.drawable.ic_status_locked to MaterialTheme.colorScheme.tertiary
+                R.string.status_detecting ->
+                    R.drawable.ic_status_locked to MaterialTheme.colorScheme.onSurfaceVariant
+                else ->
+                    R.drawable.ic_status_disabled to MaterialTheme.colorScheme.error
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -105,7 +78,7 @@ fun RuntimeStatusHeader(
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
-                    text = headline,
+                    text = stringResource(headlineRes),
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 2,

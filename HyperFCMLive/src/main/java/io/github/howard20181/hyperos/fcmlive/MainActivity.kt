@@ -297,7 +297,7 @@ class MainActivity : AppCompatActivity() {
                     onRefresh = { refreshing = true; loadApps(); refreshRuntimeStatus() },
                     onDiagnostics = { openFcmDiagnostics() },
                     status = runtimeStatus,
-                    onRetryStatus = { refreshRuntimeStatus() },
+                    onRetryStatus = { refreshRuntimeStatus(announce = true) },
                     snackbarHostState = snackbarHostState
                 )
             }
@@ -1001,7 +1001,7 @@ class MainActivity : AppCompatActivity() {
      * allowlist emptiness is snapshotted first (a plain field, cheap), then the
      * probe publishes back through [runOnUiThreadSafe].
      */
-    private fun refreshRuntimeStatus() {
+    private fun refreshRuntimeStatus(announce: Boolean = false) {
         val service = xposedService
         val empty = allowlist.isEmpty()
         val ctx = applicationContext
@@ -1011,7 +1011,15 @@ class MainActivity : AppCompatActivity() {
             } catch (t: Throwable) {
                 null
             }
-            runOnUiThreadSafe { runtimeStatus = snap }
+            runOnUiThreadSafe {
+                runtimeStatus = snap
+                // Only the explicit "重新自检" speaks the result aloud: the verdict
+                // is otherwise a silent text swap, and announcing on every resume /
+                // bind / refresh would be noise.
+                if (announce && snap != null) {
+                    A11yUtils.announce(appListHost, getString(snap.headlineRes))
+                }
+            }
         }.start()
     }
 
