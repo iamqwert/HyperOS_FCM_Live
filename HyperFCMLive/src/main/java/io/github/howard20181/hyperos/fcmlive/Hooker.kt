@@ -3571,14 +3571,36 @@ class Hooker : XposedModule() {
         t.start()
     }
 
-    private fun getFcmAllowlist(): Set<String> {
+    /**
+     * Lazy-reload bookkeeping shared by every allowlist read: make sure the
+     * receiver is registered, and nudge a reload if the in-memory copy has gone
+     * stale without one. Split out so [allowlistContains] can do a membership test
+     * without the defensive copy [getFcmAllowlist] makes for callers that walk the
+     * set — the broadcast / autostart gates ask "is this package on the list"
+     * thousands of times and never need the list itself.
+     */
+    private fun touchAllowlistFreshness() {
         registerAllowlistReceiver()
         if (!allowlistReceiverRegistered &&
             SystemClock.uptimeMillis() - sAllowlistFreshMs >= ALLOWLIST_STALE_MS
         ) {
             requestAllowlistReload()
         }
+    }
+
+    private fun getFcmAllowlist(): Set<String> {
+        touchAllowlistFreshness()
+        // A copy: callers that walk this (the autostart write, the apply pass) must
+        // not see sAllowlist swapped out from under them mid-iteration by a reload.
         return HashSet(sAllowlist)
+    }
+
+    /** Membership without the copy — the hot path for the gates. */
+    private fun allowlistContains(packageName: String?): Boolean {
+        touchAllowlistFreshness()
+        // sAllowlist is only ever replaced wholesale (never mutated in place), so a
+        // volatile read is a stable snapshot; no copy needed for a single contains().
+        return sAllowlist.contains(packageName)
     }
 
     /**
@@ -3606,7 +3628,7 @@ class Hooker : XposedModule() {
         if (GMS_PACKAGE_NAME == packageName || GMS_PERSISTENT_PROCESS_NAME == packageName) {
             return true
         }
-        return getFcmAllowlist().contains(packageName)
+        return allowlistContains(packageName)
     }
 
     /**
@@ -3987,7 +4009,7 @@ class Hooker : XposedModule() {
      * the two now agrees (both mean "no app"), so the two differ solely on GMS.
      */
     private fun wakeExplicitlyAllows(packageName: String): Boolean {
-        return getFcmAllowlist().contains(packageName)
+        return allowlistContains(packageName)
     }
 
     /**
