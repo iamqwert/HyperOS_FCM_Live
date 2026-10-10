@@ -240,9 +240,10 @@ fun MainScreen(
 
     if (LocalUiStyle.current == UiStyle.Miuix) {
         // The Miuix frame: the Scaffold the overlay popups open into (the
-        // overflow menu below), a centred small title that stays put, and the
-        // system's own pull-to-refresh — the circle with the refresh text,
-        // not the M3 spinner.
+        // overflow menu below), the large title collapsing to the small centred
+        // one as the list scrolls, and the system's own pull-to-refresh — the
+        // circle with the refresh text, not the M3 spinner.
+        val scrollBehavior = MiuixScrollBehavior()
         MiuixScaffold(
             modifier = modifier,
             // The page colour, not Miuix's own default: under AMOLED the page is
@@ -254,7 +255,8 @@ fun MainScreen(
                     state = topBarState,
                     actions = actions,
                     query = query,
-                    onQueryChange = onQueryChange
+                    onQueryChange = onQueryChange,
+                    scrollBehavior = scrollBehavior
                 )
             },
             floatingActionButton = {
@@ -265,6 +267,9 @@ fun MainScreen(
                 MiuixPullToRefresh(
                     isRefreshing = refreshing,
                     onRefresh = onRefresh,
+                    // The circle tracks the bar's collapse too, so the two never
+                    // cross mid-drag.
+                    topAppBarScrollBehavior = scrollBehavior,
                     // The library's defaults are hard-coded English; the text is
                     // part of the indicator, so it localises here.
                     refreshTexts = listOf(
@@ -291,7 +296,19 @@ fun MainScreen(
                         icons = icons,
                         bottomPadding = innerPadding.calculateBottomPadding() + FAB_CLEARANCE,
                         status = status,
-                        onRetryStatus = onRetryStatus
+                        onRetryStatus = onRetryStatus,
+                        // The search card rides in the list (KernelSU's repo
+                        // search does the same), and the list reports its scroll
+                        // through this connection so the large title collapses.
+                        search = {
+                            MiuixSearchCard(
+                                query = query,
+                                onQueryChange = onQueryChange
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .nestedScroll(scrollBehavior.nestedScrollConnection)
                     )
                 }
                 SnackbarHost(
@@ -1354,10 +1371,12 @@ private fun MainScreenPreview() {
 }
 
 /**
- * The home search entry under the Miuix look: a card holding Miuix's own
- * [InputField], KernelSU-manager style — the field sits in the list between the
- * bar and the status card and scrolls away with the page, and because the field
- * *is* the entry, the bar carries no search icon in this look.
+ * The home search entry under the Miuix look: the library's own [InputField],
+ * bare — exactly as the reference apps and the official docs render it, with no
+ * card around it. The field's own body is the capsule (surfaceContainerHigh
+ * fill), the search glyph leading and the cleanup glyph trailing, so wrapping it
+ * in a card was a second capsule inside the first and read as a mistake, not as
+ * a container.
  *
  * The query plumbing is the same the Material look's search field uses: the text
  * lives in the Activity's state and every keystroke lands in its filter entry
@@ -1369,21 +1388,15 @@ private fun MiuixSearchCard(
     onQueryChange: (String) -> Unit
 ) {
     val hint = stringResource(R.string.search_hint)
-    androidx.compose.material3.Surface(
+    MiuixInputField(
+        query = query,
+        onQueryChange = onQueryChange,
+        onSearch = { },
+        expanded = true,
+        onExpandedChange = { },
+        label = hint,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 12.dp),
-        color = LocalAppSurfaces.current.card,
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
-    ) {
-        MiuixInputField(
-            query = query,
-            onQueryChange = onQueryChange,
-            onSearch = { },
-            expanded = true,
-            onExpandedChange = { },
-            label = hint,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-        )
-    }
+            .padding(bottom = 12.dp)
+    )
 }

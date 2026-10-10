@@ -147,16 +147,21 @@ fun AboutScreen(
         onBack = onBack,
         modifier = modifier,
         snackbarHostState = snackbarHostState,
-        actions = {
-            val helpText = stringResource(R.string.help)
-            // The shared bar-icon action: bare under Material, Miuix's own quiet
-            // grey button under Miuix, with the same long-press tooltip either
-            // way.
-            TopBarIconButton(
-                painter = painterResource(R.drawable.ic_help),
-                description = helpText,
-                onClick = actions.onHelp
-            )
+        // The help entry is an icon under Material and a section card under
+        // Miuix (the "其他" section at the foot of the page) — the system's
+        // settings put nothing but settings on the bar, and a lone icon is the
+        // Material way of saying "there is one more thing".
+        actions = if (LocalUiStyle.current == UiStyle.Miuix) {
+            {}
+        } else {
+            {
+                val helpText = stringResource(R.string.help)
+                TopBarIconButton(
+                    painter = painterResource(R.drawable.ic_help),
+                    description = helpText,
+                    onClick = actions.onHelp
+                )
+            }
         }
     ) { innerPadding ->
         AboutBody(
@@ -507,6 +512,23 @@ private fun AboutBody(
             )
         }
 
+        // Under Miuix the help entry lives here, as the one card of an "其他"
+        // section at the foot of the page, the way the system's own settings
+        // park their one-off rows. Under Material the top-bar icon is the entry
+        // and this section is not composed at all.
+        if (miuixStyle) {
+            item {
+                SectionTitle(R.string.about_section_other)
+                NavCard(
+                    iconRes = R.drawable.ic_help,
+                    title = stringResource(R.string.help),
+                    subtitle = stringResource(R.string.about_sub_help),
+                    onClick = actions.onHelp,
+                    first = true,
+                    last = true
+                )
+            }
+        }
         item { Spacer(modifier = Modifier.height(16.dp)) }
     }
 }

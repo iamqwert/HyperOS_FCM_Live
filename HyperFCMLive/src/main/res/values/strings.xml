@@ -47,6 +47,8 @@
     <string name="about_sub_experiment">实验性开关入口，默认不启用</string>
     <string name="about_section_privacy">隐私与权限</string>
     <string name="about_section_project">关于</string>
+    <string name="about_section_other">其他</string>
+    <string name="about_sub_help">查看在线使用说明</string>
     <string name="privacy_perm_query_all">读取应用列表</string>
     <string name="privacy_perm_query_all_desc">android.permission.QUERY_ALL_PACKAGES：在本地读取已安装应用</string>
     <string name="privacy_perm_get_installed">获取已安装应用</string>

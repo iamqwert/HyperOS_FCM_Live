@@ -3,6 +3,7 @@ package io.github.howard20181.hyperos.fcmlive.ui
 import android.content.Context
 import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,6 +22,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
+import top.yukonga.miuix.kmp.basic.Card as MiuixCard
+import top.yukonga.miuix.kmp.basic.CardDefaults as MiuixCardDefaults
+import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
+import top.yukonga.miuix.kmp.theme.LocalDismissState
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.window.WindowDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -241,6 +248,21 @@ private fun LicenseDialog(
     val sourceLabel = stringResource(R.string.view_source_code)
     val closeLabel = stringResource(R.string.dialog_close)
 
+    // Under Miuix this is InstallerX's licence dialog, not the generic one: the
+    // text rides in a card on the dialog's raised container, scrolls inside it
+    // with Miuix's own overscroll, and the actions are two full-width Miuix
+    // buttons at the foot. Under Material it stays the M3 dialog it always was.
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixLicenseDialog(
+            sheet = sheet,
+            body = body,
+            sourceLabel = sourceLabel,
+            closeLabel = closeLabel,
+            onDismiss = onDismiss,
+            onOpenSource = onOpenSource
+        )
+        return
+    }
     AppDialog(
         onDismissRequest = onDismiss,
         title = sheet.title,
@@ -498,3 +520,76 @@ private val REFERENCES = arrayOf(
     arrayOf("wxxsfxyzm/InstallerX-Revived", "GPL-3.0", "https://github.com/wxxsfxyzm/InstallerX-Revived"),
     arrayOf("zuohl/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/zuohl/HyperOS_FCM_Live"),
 )
+
+/**
+ * The licence text under the Miuix look, after InstallerX's manager: the body is
+ * a card on the dialog's raised container level, capped at the same share of the
+ * host window and scrolling inside; 查看源代码 and 关闭 are full-width Miuix text
+ * buttons in one row, the closing one in the accent.
+ */
+@Composable
+private fun MiuixLicenseDialog(
+    sheet: LicenseSheet,
+    body: String,
+    sourceLabel: String,
+    closeLabel: String,
+    onDismiss: () -> Unit,
+    onOpenSource: (String) -> Unit
+) {
+    WindowDialog(
+        show = true,
+        title = sheet.title,
+        onDismissRequest = onDismiss
+    ) {
+        val dismissState = LocalDismissState.current
+        val density = LocalDensity.current
+        val bodyHeight = with(density) {
+            val px = LocalWindowInfo.current.containerSize.height
+            if (px <= 0) Dp.Infinity else (px * 0.45f).toDp()
+        }
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Same ceiling idea as the Material dialog, measured from the window
+            // the dialog is actually in; 0.45 rather than 0.55 because the Miuix
+            // sheet is anchored to the foot and the buttons must stay below it.
+            SelectionContainer {
+                MiuixCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = bodyHeight),
+                    colors = MiuixCardDefaults.defaultColors(
+                        color = MiuixTheme.colorScheme.surfaceContainerHighest
+                    )
+                ) {
+                    Text(
+                        modifier = Modifier
+                            .verticalScroll(rememberScrollState())
+                            .padding(16.dp),
+                        text = body,
+                        color = MiuixTheme.colorScheme.onSurfaceContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Start
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (sheet.url != null) {
+                    MiuixTextButton(
+                        text = sourceLabel,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onOpenSource(sheet.url) }
+                    )
+                }
+                MiuixTextButton(
+                    text = closeLabel,
+                    modifier = Modifier.weight(1f),
+                    onClick = { dismissState?.invoke() },
+                    colors = MiuixButtonDefaults.textButtonColorsPrimary()
+                )
+            }
+        }
+    }
+}
