@@ -1066,53 +1066,6 @@ fun PageScaffold(
 }
 
 /**
- * One row of a Miuix [OverlayListPopup]: label on the start, optional mark on
- * the end. The selected row is the accent with a check beside it — the plate the
- * Material menus put behind the current value is not Miuix's language.
- */
-@Composable
-fun MiuixPopupRow(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    trailing: (@Composable () -> Unit)? = null
-) {
-    val color = if (selected) {
-        MiuixTheme.colorScheme.primary
-    } else {
-        MiuixTheme.colorScheme.onSurface
-    }
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 48.dp)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            color = color,
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.weight(1f)
-        )
-        if (trailing != null) {
-            Spacer(modifier = Modifier.width(8.dp))
-            trailing()
-        }
-        if (selected) {
-            Spacer(modifier = Modifier.width(8.dp))
-            Image(
-                imageVector = MiuixIcons.Basic.Check,
-                contentDescription = null,
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary)
-            )
-        }
-    }
-}
-
-/**
  * A dialog in whichever shell the app is wearing.
  *
  * Material is the M3 [androidx.compose.material3.AlertDialog] as before. Miuix is

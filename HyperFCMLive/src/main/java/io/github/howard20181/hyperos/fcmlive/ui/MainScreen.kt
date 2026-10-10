@@ -96,6 +96,12 @@ import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import top.yukonga.miuix.kmp.basic.PullToRefresh as MiuixPullToRefresh
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.DropdownImpl
+import top.yukonga.miuix.kmp.basic.DropdownItem
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.basic.InputField as MiuixInputField
 import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
@@ -495,15 +501,11 @@ fun MainTopBar(
     modifier: Modifier = Modifier,
     scrollBehavior: top.yukonga.miuix.kmp.basic.ScrollBehavior? = null
 ) {
-    // The Miuix bar: the title sits centred — the system settings' own frame —
-    // and stays put while the list scrolls under it. Search keeps the field in
-    // the bar's own bottom slot so the expansion still reads as the page opening
-    // its search, not a widget swapping in.
     if (LocalUiStyle.current == UiStyle.Miuix) {
         // The system settings' own bar: the large title at the left while the
         // page rests, collapsing to the small centred one as the list scrolls.
-        // The search field lives in the bar's bottom slot permanently in this
-        // look -- there is no search icon to press, the field is the entry.
+        // No search field here -- the page carries one in its list, and a second
+        // field in the bar was the same entry drawn twice.
         MiuixTopAppBar(
             title = state.title,
             largeTitle = state.title,
@@ -547,14 +549,7 @@ fun MainTopBar(
                     OverflowMenu(state.overflow, actions)
                 }
             },
-            scrollBehavior = scrollBehavior,
-            bottomContent = {
-                SearchField(
-                    visible = !state.multiSelect,
-                    query = query,
-                    onQueryChange = onQueryChange
-                )
-            }
+            scrollBehavior = scrollBehavior
         )
         return
     }
@@ -817,10 +812,14 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
                 state = rememberTooltipState()
             ) {
                 MiuixIconButton(onClick = { expanded = true }) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_more_vert),
+                    // The library's own overflow glyph: an M3 Material-Symbols
+                    // dot-triple beside Miuix's components is a different pen.
+                    Image(
+                        imageVector = MiuixIcons.More,
                         contentDescription = moreLabel,
-                        tint = MiuixTheme.colorScheme.onBackgroundVariant,
+                        colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(
+                            MiuixTheme.colorScheme.onBackgroundVariant
+                        ),
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -839,26 +838,62 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
                 // Selection is the accent plus a check, the menu's own language
                 // (the reference apps' sort and mode menus) — a checkbox plate on
                 // top of it would be the same bit drawn twice.
+                // The library's own option rows, so the panel gets what it is
+                // built with: the larger padding above the first row and below the
+                // last (a menu whose ink touches the panel edge reads as a list
+                // with no lid), the accent plus a check on the current value, and
+                // the chevron-and-button role for the row that navigates rather
+                // than toggles.
+                val toggleLabels = listOf(
+                    stringResource(R.string.show_fcm_supported_apps),
+                    stringResource(R.string.exclude_mipush_apps),
+                    stringResource(R.string.show_system_apps)
+                )
+                val toggled = listOf(
+                    state.showFcmSupportedOnly,
+                    state.excludeMiPushApps,
+                    state.showSystemApps
+                )
+                val toggles: List<() -> Unit> = listOf(
+                    actions.onToggleShowFcmOnly,
+                    actions.onToggleExcludeMiPush,
+                    actions.onToggleShowSystemApps
+                )
+                val settingsLabel = stringResource(R.string.settings)
+                val rowCount = toggleLabels.size + 1
                 ListPopupColumn {
-                    MiuixPopupRow(
-                        label = stringResource(R.string.show_fcm_supported_apps),
-                        selected = state.showFcmSupportedOnly,
-                        onClick = { expanded = false; actions.onToggleShowFcmOnly() }
+                    toggleLabels.forEachIndexed { index, label ->
+                        DropdownImpl(
+                            item = DropdownItem(text = label),
+                            optionSize = rowCount,
+                            isSelected = toggled[index],
+                            index = index,
+                            isFirst = index == 0,
+                            isLast = false,
+                            onSelectedIndexChange = {
+                                expanded = false
+                                toggles[index]()
+                            }
+                        )
+                    }
+                    // The seam is not decoration: the three rows above answer a
+                    // yes/no and mark themselves with a check, the row below goes
+                    // somewhere. Without the line they read as one kind.
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 6.dp)
                     )
-                    MiuixPopupRow(
-                        label = stringResource(R.string.exclude_mipush_apps),
-                        selected = state.excludeMiPushApps,
-                        onClick = { expanded = false; actions.onToggleExcludeMiPush() }
-                    )
-                    MiuixPopupRow(
-                        label = stringResource(R.string.show_system_apps),
-                        selected = state.showSystemApps,
-                        onClick = { expanded = false; actions.onToggleShowSystemApps() }
-                    )
-                    MiuixPopupRow(
-                        label = stringResource(R.string.settings),
-                        selected = false,
-                        onClick = { expanded = false; actions.onAbout() }
+                    DropdownImpl(
+                        item = DropdownItem(text = settingsLabel),
+                        optionSize = rowCount,
+                        isSelected = false,
+                        index = toggleLabels.size,
+                        hasSubmenu = true,
+                        isFirst = false,
+                        isLast = true,
+                        onSelectedIndexChange = {
+                            expanded = false
+                            actions.onAbout()
+                        }
                     )
                 }
             }
@@ -1232,7 +1267,20 @@ private fun LazyItemScope.AppRow(
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
-            if (exempt) {
+            if (LocalUiStyle.current == UiStyle.Miuix) {
+                // Miuix's capsule switch, mirroring the row's own tap. An exempt
+                // row is the library's own disabled case -- a switch locked in the
+                // on position, which is what "always in effect, nothing to check"
+                // looks like -- rather than a Material-Symbols padlock standing on
+                // a Miuix card. The row's description already carries the allowlist
+                // state, so the switch adds no second accessibility node.
+                MiuixSwitch(
+                    checked = if (exempt) true else checked,
+                    onCheckedChange = if (exempt) null else { _ -> onClick() },
+                    enabled = !exempt,
+                    modifier = Modifier.clearAndSetSemantics {}
+                )
+            } else if (exempt) {
                 // A lock rather than the on/off glyph: the checkbox states do
                 // not apply, and drawing an "off" tick would suggest the user
                 // could turn it on.

@@ -475,7 +475,7 @@ private val DEPS = arrayOf(
     // The Miuix look (界面风格 = Miuix). 0.9.1 is the last release this module's
     // Kotlin can read at all; the reason is written out by the dependency in
     // build.gradle. One row for the project, though it ships as miuix-ui,
-    // miuix-core and miuix-preference.
+    // miuix-core, miuix-preference and miuix-icons.
     arrayOf(
         "Miuix",
         "0.9.1",
