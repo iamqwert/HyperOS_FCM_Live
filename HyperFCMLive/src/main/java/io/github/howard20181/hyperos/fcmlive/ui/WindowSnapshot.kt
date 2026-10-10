@@ -18,7 +18,7 @@ import java.lang.ref.WeakReference
 
 /**
  * Launches [intent] from [activity], first photographing [activity]'s window so
- * [SwipeBackContainer] on the page being opened has a previous layer to reveal.
+ * [PredictiveBackContainer] on the page being opened has a previous layer to reveal.
  *
  * This is the single entry point every sub-page launch goes through, which is
  * what keeps the capture from being forgotten at one of the four call sites.
@@ -33,12 +33,14 @@ internal fun Activity.startActivityWithSnapshot(intent: Intent) {
 /**
  * Finishes a sub-page, choosing whether the system gets to animate the exit.
  *
- * [alreadySlidOut] comes from [SwipeBackContainer]: after a committed swipe the
- * page is already off screen, so the platform's exit animation — which is
- * authored for a window at rest — would replay a second, unrelated "return"
- * over an empty frame. Killing it for that case (and only that case) is what
- * removes the duplicate. A back press that never moved the page still gets the
- * normal transition, because there the page really is still there to animate.
+ * [alreadySlidOut] comes from [PredictiveBackContainer]: after a committed back
+ * the page is already off screen — its slide-out was drawn by the predictive
+ * preview — so the platform's exit animation, which is authored for a window at
+ * rest, would replay a second, unrelated "return" over an empty frame. Killing
+ * it for that case (and only that case) is what removes the duplicate. A finish
+ * that comes from the top-bar arrow while the page is still at rest still gets
+ * the normal transition, because there the page really is still there to
+ * animate.
  *
  * `overridePendingTransition(0, 0)` is deprecated from API 34 in favour of
  * `overrideActivityTransition`, which is why both are attempted: the old call
@@ -46,7 +48,7 @@ internal fun Activity.startActivityWithSnapshot(intent: Intent) {
  * is the only one honoured on 34+. Neither is fatal if a ROM ignores it — the
  * page simply keeps the platform default.
  */
-internal fun Activity.finishSwipeBack(alreadySlidOut: Boolean) {
+internal fun Activity.finishPredictiveBack(alreadySlidOut: Boolean) {
     if (alreadySlidOut) {
         suppressExitTransition()
     }
@@ -80,21 +82,21 @@ private const val TAG = "WindowSnapshot"
  *
  * Long enough to swallow a run of rapid menu picks and land after the row's
  * ripple has had its frames (M3's is about 300 ms end to end), short enough
- * that a user who picks once and immediately swipes back still finds the new
- * picture ready. A swipe-back cannot start inside this window anyway: it begins
- * with a touch-down, which is a later input event than the tap that scheduled
+ * that a user who picks once and immediately goes back still finds the new
+ * picture ready. A back gesture cannot begin inside this window anyway: it starts
+ * from the screen edge, a later input event than the tap that scheduled
  * this.
  */
 private const val REVIVE_DELAY_MS = 320L
 
 /**
  * Snapshots of a page, kept so the page *above* it has something to reveal
- * while a swipe-back is in flight.
+ * while a predictive back is in flight.
  *
- * Why this exists at all: the gesture in [SwipeBackContainer] is supposed to
- * show the previous page sliding out from under the current one, and the
- * swipe-dismiss this module models it on gets that for free — its navigation
- * layer keeps the previous entry composed. Here every page is its own
+ * Why this exists at all: the preview in [PredictiveBackContainer] is supposed
+ * to show the previous page sliding out from under the current one, and the
+ * navigation layer this module models it on gets that for free — its navigation
+ * keeps the previous entry composed. Here every page is its own
  * `Activity`, so the moment the next one is resumed the previous window is
  * gone and there is nothing left to reveal. The only way to have a previous
  * layer at that point is to have photographed it beforehand.
@@ -108,8 +110,8 @@ private const val REVIVE_DELAY_MS = 320L
  * **Failure is not fatal.** `PixelCopy` needs a real surface and a live window;
  * on the wrong thread, on a hardware surface that refuses the copy, or when the
  * window is going away it returns an error. Every path here falls back to
- * "no snapshot" rather than throwing, and [SwipeBackContainer] draws its
- * container colour in that case — the gesture still works, the revealed strip
+ * "no snapshot" rather than throwing, and [PredictiveBackContainer] draws its
+ * container colour in that case — the animation still works, the revealed layer
  * is simply flat.
  *
  * **One slot per parent, not one slot overall.** The pages nest — Main opens
@@ -149,7 +151,7 @@ internal object WindowSnapshot {
          *
          * Discarding on a theme change was the first fix here and it was wrong:
          * the revealed strip then fell back to the container colour, which is
-         * this page's own background, so a swipe-back showed a flat panel with
+         * this page's own background, so a back preview showed a flat panel with
          * no sign of the page being returned to. Holding the parent is what
          * allows the picture to be brought up to date instead of dropped.
          *
@@ -206,7 +208,7 @@ internal object WindowSnapshot {
      *
      * All slots, not just one: the user can change the theme from a page that
      * has several pages beneath it, and every one of them has to come back in
-     * the new palette — the next swipe only reveals the immediate parent, but
+     * the new palette — the next back preview only reveals the immediate parent, but
      * the one after that reveals the one below it.
      *
      * Called from the one place a theme change is initiated rather than from
@@ -220,7 +222,7 @@ internal object WindowSnapshot {
      * reached from a menu row's `onClick`, so doing it inline spends that time
      * inside the tap callback and starves the row's own ripple animation: the
      * user picks options quickly and the ripple visibly fails to keep up. The
-     * picture is only needed the next time a swipe-back starts, which is at the
+     * picture is only needed the next time a back preview starts, which is at
      * earliest after all input has settled, so there is nothing to gain by
      * finishing it here.
      *
@@ -251,7 +253,7 @@ internal object WindowSnapshot {
      * Runs any pending re-render **now** rather than at the end of the delay.
      *
      * For the one caller that cannot wait: a page is being left, and the picture
-     * of the page underneath is about to be needed for the swipe-back it is
+     * of the page underneath is about to be needed for the back preview it is
      * leaving with. [refreshForTheme] deliberately defers the work so a tap does
      * not pay for it, but "later" must not become "after the reveal has already
      * started" — that would show the strip one palette behind, which is the
@@ -303,7 +305,7 @@ internal object WindowSnapshot {
         val height = view.height
         // Never redraw a page the user is standing on.
         //
-        // A cached picture is only ever *revealed* by a child page's swipe-back,
+        // A cached picture is only ever *revealed* by a child page's back preview,
         // and while its own page is on screen no child can be up there — so this
         // slot is unreachable right now, and it is re-photographed by [capture]
         // the next time a child is launched from it. Dropping it is free.

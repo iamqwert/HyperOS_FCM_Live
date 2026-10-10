@@ -7,9 +7,9 @@ import androidx.compose.ui.platform.ComposeView
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport
 import io.github.howard20181.hyperos.fcmlive.ui.LicensesScreen
-import io.github.howard20181.hyperos.fcmlive.ui.SwipeBackContainer
+import io.github.howard20181.hyperos.fcmlive.ui.PredictiveBackContainer
 import io.github.howard20181.hyperos.fcmlive.ui.WindowSnapshot
-import io.github.howard20181.hyperos.fcmlive.ui.finishSwipeBack
+import io.github.howard20181.hyperos.fcmlive.ui.finishPredictiveBack
 
 /**
  * Open-source license list, opened from the About page.
@@ -21,9 +21,9 @@ import io.github.howard20181.hyperos.fcmlive.ui.finishSwipeBack
  * It still extends [AppCompatActivity] because [ThemeSupport.attach] expects
  * one.
  *
- * Wrapped in [SwipeBackContainer] so a rightward drag on the screen body
- * finishes the page while it follows the finger — separate from the system's
- * edge-only predictive back.
+ * Wrapped in [PredictiveBackContainer]: the system's predictive back gesture
+ * (or the back key) plays the Miuix-style slide-out preview before this
+ * Activity finishes.
  */
 class LicensesActivity : AppCompatActivity() {
 
@@ -38,14 +38,14 @@ class LicensesActivity : AppCompatActivity() {
         val composeView = ComposeView(this).apply {
             setContent {
                 HyperFCMLiveTheme {
-                    SwipeBackContainer(
-                        // A committed swipe has already slid the page out, so
+                    PredictiveBackContainer(
+                        // A committed back has already slid the page out, so
                         // the exit transition is suppressed for that path only;
-                        // a back press that never moved the page still animates.
-                        onBack = { alreadySlidOut -> finishSwipeBack(alreadySlidOut) },
+                        // a plain finish from the top-bar arrow still animates.
+                        onBack = { alreadySlidOut -> finishPredictiveBack(alreadySlidOut) },
                         background = { WindowSnapshot.forParent(AboutActivity::class.java) }
                     ) {
-                        LicensesScreen(onBack = { finishSwipeBack(alreadySlidOut = false) })
+                        LicensesScreen(onBack = { finishPredictiveBack(alreadySlidOut = false) })
                     }
                 }
             }

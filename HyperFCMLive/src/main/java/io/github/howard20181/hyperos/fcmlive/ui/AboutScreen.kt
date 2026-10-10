@@ -2,6 +2,7 @@ package io.github.howard20181.hyperos.fcmlive.ui
 
 import android.content.res.Configuration
 import android.view.HapticFeedbackConstants
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -77,6 +78,7 @@ import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppShapes
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
 import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
+import io.github.howard20181.hyperos.fcmlive.theme.MIUIX_ACCENT_OPTIONS
 import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.ThemePrefs
 import kotlinx.coroutines.launch
@@ -129,6 +131,12 @@ sealed interface UpdateOutcome {
     /** A newer release exists; [version] is what the offer names. */
     data class Available(val version: String) : UpdateOutcome
 }
+
+/** Theme modes in array order, i.e. [ThemePrefs.MODE_SYSTEM]..[ThemePrefs.MODE_AMOLED]. */
+private val ALL_THEME_MODES = listOf(0, 1, 2, 3)
+
+/** The modes the Miuix look offers: its own dark palette has no pure-black variant. */
+private val MODES_SYSTEM_LIGHT_DARK = listOf(0, 1, 2)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -197,6 +205,11 @@ private fun AboutBody(
     // see MiuixStyleTheme, which stops reading them for exactly that reason.
     val miuixStyle = uiStyle == ThemePrefs.UI_STYLE_MIUIX
     var miuixMonet by remember { mutableStateOf(ThemePrefs.miuixMonet(context)) }
+    // 强调色, the key colour the Miuix Monet derivation uses while 莫奈颜色 is on.
+    // Stored as ARGB with 0 meaning "follow the wallpaper"; the menu maps that
+    // 0 to its first entry, so an unpicked accent and a picked colour can never
+    // collide on one row.
+    var miuixAccent by remember { mutableIntStateOf(ThemePrefs.miuixAccent(context)) }
     var paletteStyle by remember { mutableIntStateOf(ThemePrefs.paletteStyle(context).ordinal) }
     var colorSpec by remember { mutableIntStateOf(ThemePrefs.specVersion(context)) }
     // The offer, while it is on screen. Keeping it here rather than in the
@@ -208,6 +221,11 @@ private fun AboutBody(
     val uiStyleEntries = stringArrayResource(R.array.ui_style_entries)
     val styleEntries = stringArrayResource(R.array.palette_style_entries)
     val specEntries = stringArrayResource(R.array.color_spec_entries)
+    // 强调色's menu: entry 0 is the stored 0 (跟随壁纸), the rest are
+    // [MIUIX_ACCENT_OPTIONS] in order. One list for labels, one for values, the
+    // same index over both — the mapping the pick writes through.
+    val accentEntries = stringArrayResource(R.array.miuix_accent_entries)
+    val accentValues = remember { listOf(0) + MIUIX_ACCENT_OPTIONS.toList() }
 
     // The two appearance menus are scoped by each other, because the settings
     // are not independent: the 2025 spec covers four palette styles and nothing
@@ -243,8 +261,17 @@ private fun AboutBody(
     val cancelLabel = stringResource(android.R.string.cancel)
     val hideText = stringResource(R.string.hide_icon_toast)
     val showText = stringResource(R.string.show_icon_toast)
+    // Read here, in composition, not inside show(): LocalUiStyle.current is a
+    // @Composable read and show() is a plain function.
+    val miuixNow = LocalUiStyle.current == UiStyle.Miuix
 
     fun show(text: String) {
+        if (miuixNow) {
+            // This look's one-line acknowledgment is the system toast, not the
+            // Material bar at the page's foot.
+            Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+            return
+        }
         scope.launch {
             // One line at a time: the message replacing the current one should
             // not have to wait out its predecessor's four seconds first.
@@ -300,23 +327,31 @@ private fun AboutBody(
 
         item {
             SectionTitle(R.string.about_section_theme)
+            // AMOLED is the Material engine's pure-black ramp; the Miuix look is
+            // dressed by Miuix's own dark palette and never reads this mode, so
+            // the entry is material-only — mirroring the colour rows below. The
+            // stored value survives the hiding: a mode picked while in Material
+            // still applies there after switching back. An index of -1 (AMOLED
+            // stored while this look is on) simply leaves the row without a
+            // highlighted entry; the dropdown tolerates it.
+            val visibleModes = if (miuixStyle) MODES_SYSTEM_LIGHT_DARK else ALL_THEME_MODES
             PopupCard(
                 iconRes = R.drawable.ic_theme_mode,
                 title = stringResource(R.string.theme_mode),
                 subtitle = stringResource(R.string.about_sub_theme_mode),
-                entries = modeEntries.toList(),
-                currentIndex = themeMode,
+                entries = visibleModes.map { modeEntries[it] },
+                currentIndex = visibleModes.indexOf(themeMode),
                 first = true,
                 last = false,
                 onPick = { index ->
-                    ThemePrefs.setThemeMode(context, index)
-                    themeMode = index
+                    ThemePrefs.setThemeMode(context, visibleModes[index])
+                    themeMode = visibleModes[index]
                     actions.onAppearanceChange()
                 }
             )
             GroupRowGap()
             PopupCard(
-                iconRes = R.drawable.ic_apps,
+                iconRes = R.drawable.ic_ui_style,
                 title = stringResource(R.string.ui_style),
                 subtitle = stringResource(R.string.about_sub_ui_style),
                 entries = uiStyleEntries.toList(),
@@ -346,9 +381,36 @@ private fun AboutBody(
                         actions.onAppearanceChange()
                     },
                     first = false,
-                    // The last row of the section while the Miuix look is on.
-                    last = miuixStyle
+                    // Last of the section while Monet is off; the 强调色 row
+                    // underneath takes the corner while it is on.
+                    last = !miuixMonet
                 )
+                // The key colour the Monet derivation starts from, offered as the
+                // reference manager (KernelSU's colour palette) offers its own:
+                // one menu, "follow the wallpaper" first, the preset swatches
+                // behind it. The row means nothing with Monet off — the palette
+                // is then Miuix's own HyperOS scheme, which no key colour
+                // reaches — so it only exists while the switch above is on,
+                // exactly the way the Material body hides its seed grid while
+                // dynamic colour runs.
+                if (miuixMonet) {
+                    GroupRowGap()
+                    PopupCard(
+                        iconRes = R.drawable.ic_palette_style,
+                        title = stringResource(R.string.miuix_accent),
+                        subtitle = stringResource(R.string.about_sub_miuix_accent),
+                        entries = accentEntries.toList(),
+                        currentIndex = accentValues.indexOf(miuixAccent)
+                            .takeIf { it >= 0 } ?: 0,
+                        first = false,
+                        last = true,
+                        onPick = { index ->
+                            ThemePrefs.setMiuixAccent(context, accentValues[index])
+                            miuixAccent = accentValues[index]
+                            actions.onAppearanceChange()
+                        }
+                    )
+                }
             }
             // Material only, on screen: these are the app's own colour engine's
             // controls and the Miuix look is not dressed by that engine. Hidden here
@@ -450,6 +512,26 @@ private fun AboutBody(
             )
         }
 
+        // Under Miuix the help entry lives in its own one-card "其他" section,
+        // right after 实验 — the material the help covers is the toggles on
+        // that page, so the two read together — and before 关于, which stays
+        // the closing group the way the system's own settings park their
+        // project rows at the foot. Under Material the top-bar icon is the
+        // entry and this section is not composed at all.
+        if (miuixStyle) {
+            item {
+                SectionTitle(R.string.about_section_other)
+                NavCard(
+                    iconRes = R.drawable.ic_help,
+                    title = stringResource(R.string.help_guide),
+                    subtitle = stringResource(R.string.about_sub_help),
+                    onClick = actions.onHelp,
+                    first = true,
+                    last = true
+                )
+            }
+        }
+
         item {
             // One group, as the XML had it: the update check, the privacy page
             // and both project links share the "关于" card. Splitting privacy
@@ -512,23 +594,6 @@ private fun AboutBody(
             )
         }
 
-        // Under Miuix the help entry lives here, as the one card of an "其他"
-        // section at the foot of the page, the way the system's own settings
-        // park their one-off rows. Under Material the top-bar icon is the entry
-        // and this section is not composed at all.
-        if (miuixStyle) {
-            item {
-                SectionTitle(R.string.about_section_other)
-                NavCard(
-                    iconRes = R.drawable.ic_help,
-                    title = stringResource(R.string.help),
-                    subtitle = stringResource(R.string.about_sub_help),
-                    onClick = actions.onHelp,
-                    first = true,
-                    last = true
-                )
-            }
-        }
         item { Spacer(modifier = Modifier.height(16.dp)) }
     }
 }

@@ -1,6 +1,7 @@
 package io.github.howard20181.hyperos.fcmlive.theme
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.foundation.rememberPlatformOverscrollFactory
 import androidx.compose.material3.ColorScheme
@@ -12,10 +13,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
+import top.yukonga.miuix.kmp.utils.MiuixIndication
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -37,6 +40,21 @@ import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
  * 界面风格 re-skins in place exactly as changing a colour does: no window rebuild,
  * no jump.
  */
+/**
+ * The Miuix look's **light-mode** primary, published apart from the active
+ * palette.
+ *
+ * HyperOS does not mute a floating-action plate when the theme turns dark —
+ * the FAB's blue is one colour all day — but the palette the active
+ * [MiuixTheme] hands out in the dark is the dark one, so a surface that keeps
+ * its light dress cannot read its colour from `MiuixTheme.colorScheme` without
+ * shifting shade at dusk. [MiuixStyleTheme] derives the light palette's primary
+ * for exactly one consumer and provides it here; the fallback is the library's
+ * own light primary, so a @Preview with no prefs behind it still renders the
+ * plate the look defaults to.
+ */
+val LocalMiuixLightPrimary = staticCompositionLocalOf { Color(0xFF3482FF) }
+
 @Composable
 fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
@@ -145,9 +163,11 @@ private fun MaterialStyleTheme(content: @Composable () -> Unit) {
  * container the popup level. AMOLED keeps Miuix's dark ramp for the cards but
  * drops the page to true black, which is the whole point of that mode.
  *
- * Miuix also supplies its own ripple and overscroll through its theme, and those
- * are deliberately *not* overwritten: the press feedback and the edge glow are
- * part of what makes the system's settings feel like the system's settings.
+ * Miuix also supplies its own press indication and overscroll through its
+ * theme. The overscroll factory survives the MaterialTheme wrapper untouched;
+ * the indication does not — MaterialTheme re-provides `LocalIndication` with an
+ * M3 ripple — so the indication is restated in the provider block below, with
+ * the construction MiuixTheme itself uses.
  */
 @Composable
 private fun MiuixStyleTheme(content: @Composable () -> Unit) {
@@ -179,7 +199,19 @@ private fun MiuixStyleTheme(content: @Composable () -> Unit) {
     // 莫奈颜色 on with 动态颜色 off means "from my seed, not from the wallpaper" —
     // the only way Miuix can be told that is keyColor; left null it reads the
     // platform accent, which is the wallpaper.
-    val keyColor = if (!dynamic && seed != 0) Color(seed) else null
+    //
+    // The 强调色 row sits in front of that linkage now: an explicit pick made on
+    // this look's own appearance page wins, 0 (follow the wallpaper) falls
+    // through to the seed above so a colour decision made under Material keeps
+    // steering this look exactly as before the row existed. Without the pick
+    // winning, the row would be able to switch colours on and then watch the
+    // stored seed override it — a choice that changes nothing.
+    val accent = remember(context, generation) { ThemePrefs.miuixAccent(context) }
+    val keyColor = when {
+        accent != 0 -> Color(accent)
+        !dynamic && seed != 0 -> Color(seed)
+        else -> null
+    }
 
     // ThemeController publishes its inputs as snapshot state but they are `val`s,
     // so a change is pushed by rebuilding it rather than by assignment. Cheap: the
@@ -204,13 +236,39 @@ private fun MiuixStyleTheme(content: @Composable () -> Unit) {
         paletteStyle = miuixPaletteStyle(variant)
     )
 
+    // The light anchor: this look's own colour derivation run once more with
+    // the light mode forced. The active palette cannot serve surfaces that
+    // keep their light dress in the dark (the FAB plate — see
+    // [LocalMiuixLightPrimary]), and there is no shortcut: the light primary
+    // is a product of keyColor, spec and style, so it is derived, not stored.
+    // Same inputs, same derivation, one mode pinned — and the anchor is a
+    // colour source, never mounted as a theme.
+    val lightAnchor = ThemeController(
+        colorSchemeMode = if (monet) ColorSchemeMode.MonetLight else ColorSchemeMode.Light,
+        isDark = false,
+        keyColor = keyColor,
+        colorSpec = if (spec == ThemePrefs.SPEC_2025) {
+            ThemeColorSpec.Spec2025
+        } else {
+            ThemeColorSpec.Spec2021
+        },
+        paletteStyle = miuixPaletteStyle(variant)
+    )
+
     MiuixTheme(controller = controller) {
         val colors = MiuixTheme.colorScheme
         // Which ramp the surfaces are dressed in follows 颜色规格 as well — hidden,
         // but read, for the reason argued above.
         val expressive = spec == ThemePrefs.SPEC_2025
-        val colorScheme = remember(colors, dark) { colors.toMaterialColorScheme(dark) }
-        val appSurfaces = remember(colors, colorScheme, amoled) {
+        // Both Material bridges key on `generation` as well as `colors`, and that
+        // second key is load-bearing: Miuix's `Colors` is a singleton whose roles
+        // mutate in place (state-backed fields, updated by updateColorsFrom), so
+        // its object identity never changes — an identity-keyed remember holds the
+        // old palette forever, which is exactly why a 莫奈颜色 flip used to land
+        // only after the screen was reopened. The generation bump (every
+        // appearance change invalidates) is what retires the stale mapping.
+        val colorScheme = remember(colors, dark, generation) { colors.toMaterialColorScheme(dark) }
+        val appSurfaces = remember(colors, colorScheme, amoled, generation) {
             AppSurfaces(
                 card = if (amoled) colors.surfaceContainerHigh else colors.surfaceVariant,
                 popup = if (dark) colors.surfaceContainerHighest else colors.surfaceContainer
@@ -222,8 +280,20 @@ private fun MiuixStyleTheme(content: @Composable () -> Unit) {
         val pageArgb = (if (amoled) Color.Black else colors.surface).toArgb()
         val pageDark = dark
         val windowActivity = (context as? android.app.Activity)
+        // Guarded, not bare: this block runs after *every* recomposition of
+        // this scope, and repainting the window (a fresh background drawable
+        // each time) on an unchanged palette was a needless full-window redraw
+        // queued behind unrelated state changes. Apply only when a value
+        // actually moved; the plain array carries no snapshot state, so the
+        // write cannot re-trigger composition.
+        val lastPainted = remember { IntArray(2) }
         SideEffect {
-            windowActivity?.let { ThemeSupport.reapplyWindow(it, pageArgb, pageDark) }
+            val darkBit = if (pageDark) 1 else 0
+            if (windowActivity != null && (lastPainted[0] != pageArgb || lastPainted[1] != darkBit)) {
+                ThemeSupport.reapplyWindow(windowActivity, pageArgb, pageDark)
+                lastPainted[0] = pageArgb
+                lastPainted[1] = darkBit
+            }
         }
         MaterialTheme(
             colorScheme = if (amoled) {
@@ -236,6 +306,20 @@ private fun MiuixStyleTheme(content: @Composable () -> Unit) {
             motionScheme = motionSchemeFor(expressive),
         ) {
             CompositionLocalProvider(
+                // MaterialTheme re-provides `LocalIndication` with an M3 ripple
+                // (verified in the 1.5.0-alpha29 bytecode: the provider block at
+                // MaterialTheme.kt:96 carries LocalIndication → ripple()), and it
+                // sits *inside* MiuixTheme here, so every press under this look
+                // — the overflow menu's rows, the dropdown-preference popups,
+                // the app rows' tap and long-press — read its default indication
+                // from M3, not from Miuix. Restate Miuix's own indication with
+                // the exact construction MiuixTheme itself uses (keyed on
+                // onBackground, the colour its overlay tints with), so the
+                // press feedback is the library's spring-dimmed overlay again.
+                LocalIndication provides remember(colors.onBackground) {
+                    MiuixIndication(color = colors.onBackground)
+                },
+                LocalMiuixLightPrimary provides lightAnchor.lightColors.primary,
                 LocalAppShapes provides appShapes,
                 LocalAppSurfaces provides appSurfaces,
                 LocalUiStyle provides UiStyle.Miuix

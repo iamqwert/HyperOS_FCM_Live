@@ -2,6 +2,8 @@ package io.github.howard20181.hyperos.fcmlive.ui
 
 import android.content.Context
 import android.content.res.Configuration
+import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -25,6 +28,8 @@ import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.CardDefaults as MiuixCardDefaults
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.theme.LocalDismissState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
@@ -36,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -70,6 +76,9 @@ fun LicensesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    // Read here, in composition — LocalUiStyle.current is a @Composable read
+    // and the dialog's callback below is a plain lambda.
+    val miuixNow = LocalUiStyle.current == UiStyle.Miuix
 
     PageScaffold(
         titleRes = R.string.licenses_title,
@@ -95,7 +104,13 @@ fun LicensesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 // something to say, and then the URL itself is the message.
                 openSheet = null
                 if (!UiUtils.openUrl(context, url)) {
-                    scope.launch { snackbarHostState.showSnackbar(url) }
+                    // The Miuix look acknowledges with the system toast; the
+                    // Material look keeps its bar at the page's foot.
+                    if (miuixNow) {
+                        Toast.makeText(context, url, Toast.LENGTH_SHORT).show()
+                    } else {
+                        scope.launch { snackbarHostState.showSnackbar(url) }
+                    }
                 }
             }
         )
@@ -112,6 +127,10 @@ private fun LicensesBody(
     modifier: Modifier = Modifier
 ) {
     val hint = stringResource(R.string.license_view_full_text)
+    // The Miuix look marks every row whose sheet carries a 查看源代码 door with
+    // the library's own chevron, the way its ArrowPreference does; the three
+    // plain licence texts open no repository and wear none.
+    val miuixRows = LocalUiStyle.current == UiStyle.Miuix
     val plainLicenses = listOf(
         stringResource(R.string.license_apache_2) to R.raw.license_apache2,
         stringResource(R.string.license_gpl_3) to R.raw.license_gpl3,
@@ -139,13 +158,13 @@ private fun LicensesBody(
                         Text(
                             text = name,
                             color = MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.bodyLarge
+                            style = pageBodyStyle()
                         )
                     }
                     Text(
                         text = hint,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall
+                        style = pageSecondaryStyle()
                     )
                 }
                 if (!last) GroupRowGap()
@@ -164,30 +183,37 @@ private fun LicensesBody(
                 GroupRow(first = first, last = last, onClick = {
                     onOpenSheet(LicenseSheet(name, licenseRawFor(name, license), url))
                 }) {
-                    // A name that would crowd the version truncates instead of
-                    // wrapping; the version sits on its own line, flush under
-                    // the name, with the license following.
-                    Text(
-                        text = name,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.bodyLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Row {
-                        if (version.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            // A name that would crowd the version truncates instead of
+                            // wrapping; the version sits on its own line, flush under
+                            // the name, with the license following.
                             Text(
-                                text = version,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall
+                                text = name,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = pageBodyStyle(),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Row {
+                                if (version.isNotEmpty()) {
+                                    Text(
+                                        text = version,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = pageSecondaryStyle()
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
+                                Text(
+                                    text = license,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = pageSecondaryStyle()
+                                )
+                            }
                         }
-                        Text(
-                            text = license,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                        if (miuixRows) {
+                            MiuixChevron()
+                        }
                     }
                 }
                 if (!last) GroupRowGap()
@@ -213,16 +239,24 @@ private fun LicensesBody(
                         onOpenSheet(LicenseSheet(name, licenseRawFor(name, license), url))
                     }
                 }) {
-                    Text(
-                        text = name,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                    Text(
-                        text = license,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = name,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = pageBodyStyle()
+                            )
+                            Text(
+                                text = license,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = pageSecondaryStyle()
+                            )
+                        }
+                        // The 「—」 row opens nothing, so it gets no door mark.
+                        if (miuixRows && !noLicense) {
+                            MiuixChevron()
+                        }
+                    }
                 }
                 if (!last) GroupRowGap()
             }
@@ -305,7 +339,7 @@ private fun LicenseDialog(
                         .verticalScroll(rememberScrollState()),
                     text = body,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = pageProseStyle(),
                     textAlign = TextAlign.Start
                 )
             }
@@ -338,13 +372,14 @@ private fun readLicenseText(context: Context, rawRes: Int): String {
 
 /**
  * Maps a row to the LICENSE body as published on that project's repository.
- * Shared SPDX texts live in one raw file each; the two MIT reference projects
+ * Shared SPDX texts live in one raw file each; the three MIT reference projects
  * ship their own copyright line, so they keep a dedicated copy. Repositories
  * carrying no LICENSE file are shown as 「—」 and never reach this function.
  */
 private fun licenseRawFor(name: String, licenseLabel: String): Int = when {
     name == "Kr328/HyperOSFCMFix" -> R.raw.license_mit_hyperosfcmfix
     name == "ReedGAOOO/FCMGuard-HyperOS" -> R.raw.license_mit_fcmguard
+    name == "1812z/HyperIsland" -> R.raw.license_mit_hyperisland
     licenseLabel.contains("Apache") -> R.raw.license_apache2
     licenseLabel.contains("GPL") -> R.raw.license_gpl3
     licenseLabel.contains("MIT") -> R.raw.license_mit
@@ -501,6 +536,10 @@ private val DEPS = arrayOf(
 
 /** name, license label, project URL. */
 private val REFERENCES = arrayOf(
+    // The batch mode's bar and row language — the entry beside the overflow,
+    // close/select-all/overflow on the selection bar, a checkbox on the row —
+    // follows this app's design.
+    arrayOf("1812z/HyperIsland", "MIT License", "https://github.com/1812z/HyperIsland"),
     arrayOf("250king/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/250king/HyperOS_FCM_Live"),
     arrayOf("billtv/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/billtv/HyperOS_FCM_Live"),
     arrayOf("dingwen07/hyperos-fcm-fix", "GPL-3.0", "https://github.com/dingwen07/hyperos-fcm-fix"),
@@ -517,15 +556,41 @@ private val REFERENCES = arrayOf(
     // No LICENSE file in the repository — shown as 「—」, row opens nothing.
     arrayOf("onijiang0/fcmfix", "—", "https://github.com/onijiang0/fcmfix"),
     arrayOf("ReedGAOOO/FCMGuard-HyperOS", "MIT License", "https://github.com/ReedGAOOO/FCMGuard-HyperOS"),
+    // The idea to put the settings icon at the home bar's leading edge came
+    // from this manager's own leading-edge placement.
+    arrayOf("Replica0110/Lyrico", "Apache License 2.0", "https://github.com/Replica0110/Lyrico"),
     arrayOf("wxxsfxyzm/InstallerX-Revived", "GPL-3.0", "https://github.com/wxxsfxyzm/InstallerX-Revived"),
     arrayOf("zuohl/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/zuohl/HyperOS_FCM_Live"),
 )
+
+/**
+ * The Miuix 「this leads somewhere」 mark, verbatim from the library's own
+ * [top.yukonga.miuix.kmp.preference.ArrowPreference]: its chevron, at its
+ * 10×16 footprint, in its quiet grey — so a row that opens a repository wears
+ * the same door mark the settings rows do.
+ */
+@Composable
+private fun MiuixChevron() {
+    Image(
+        modifier = Modifier.size(width = 10.dp, height = 16.dp),
+        imageVector = MiuixIcons.Basic.ArrowRight,
+        contentDescription = null,
+        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantActions)
+    )
+}
 
 /**
  * The licence text under the Miuix look, after InstallerX's manager: the body is
  * a card on the dialog's raised container level, capped at the same share of the
  * host window and scrolling inside; 查看源代码 and 关闭 are full-width Miuix text
  * buttons in one row, the closing one in the accent.
+ *
+ * No [SelectionContainer] here, deliberately. Selecting text in this sheet —
+ * long-pressing into the selection, then tapping it again — paints a stray dark
+ * blob at the foot of the screen (the platform selection toolbar/handles
+ * rendering into the dialog window), and the reference settings sheets offer no
+ * text copy of their own either. The text is static; drop the machinery rather
+ * than ship the artifact.
  */
 @Composable
 private fun MiuixLicenseDialog(
@@ -551,25 +616,23 @@ private fun MiuixLicenseDialog(
             // Same ceiling idea as the Material dialog, measured from the window
             // the dialog is actually in; 0.45 rather than 0.55 because the Miuix
             // sheet is anchored to the foot and the buttons must stay below it.
-            SelectionContainer {
-                MiuixCard(
+            MiuixCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = bodyHeight),
+                colors = MiuixCardDefaults.defaultColors(
+                    color = MiuixTheme.colorScheme.surfaceContainerHighest
+                )
+            ) {
+                Text(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = bodyHeight),
-                    colors = MiuixCardDefaults.defaultColors(
-                        color = MiuixTheme.colorScheme.surfaceContainerHighest
-                    )
-                ) {
-                    Text(
-                        modifier = Modifier
-                            .verticalScroll(rememberScrollState())
-                            .padding(16.dp),
-                        text = body,
-                        color = MiuixTheme.colorScheme.onSurfaceContainer,
-                        style = MaterialTheme.typography.bodyMedium,
-                        textAlign = TextAlign.Start
-                    )
-                }
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    text = body,
+                    color = MiuixTheme.colorScheme.onSurfaceContainer,
+                    style = pageProseStyle(),
+                    textAlign = TextAlign.Start
+                )
             }
             Spacer(modifier = Modifier.height(24.dp))
             Row(

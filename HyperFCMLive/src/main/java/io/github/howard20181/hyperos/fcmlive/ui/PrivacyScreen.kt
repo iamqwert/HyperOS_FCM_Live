@@ -90,7 +90,7 @@ private fun PrivacyBody(
                 Text(
                     text = stringResource(R.string.privacy_commitment_desc),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
+                    style = pageSecondaryStyle()
                 )
             }
         }
@@ -117,12 +117,12 @@ private fun PermRow(
                 Text(
                     text = stringResource(titleRes),
                     color = MaterialTheme.colorScheme.onSurface,
-                    style = MaterialTheme.typography.bodyLarge
+                    style = pageBodyStyle()
                 )
                 Text(
                     text = stringResource(descRes),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
+                    style = pageSecondaryStyle()
                 )
             }
         }
