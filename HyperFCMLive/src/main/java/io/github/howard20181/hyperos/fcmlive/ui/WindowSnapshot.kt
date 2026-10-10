@@ -27,7 +27,16 @@ import java.lang.ref.WeakReference
  * revealed strip its detail.
  */
 internal fun Activity.startActivityWithSnapshot(intent: Intent) {
-    WindowSnapshot.capture(this) { startActivity(intent) }
+    WindowSnapshot.capture(this) {
+        startActivity(intent)
+        // The photograph just taken was taken *during* the tap — that is what
+        // launching from a tap means — so it carries the tap's own motion: the
+        // press feedback still animating on the row, and the dimmed, half
+        // dismissed panel of any menu the tap came out of. Both live on the
+        // layer a predictive back reveals, so the page appears to come back
+        // wearing its own press. Retake it once that motion has finished.
+        WindowSnapshot.settle(this.javaClass)
+    }
 }
 
 /**
@@ -88,6 +97,18 @@ private const val TAG = "WindowSnapshot"
  * this.
  */
 private const val REVIVE_DELAY_MS = 320L
+
+/**
+ * How long after a child is launched the parent's photograph is retaken, in
+ * milliseconds.
+ *
+ * Long enough to clear the two things the first photograph catches mid-flight:
+ * the press feedback on the row that was tapped (the longest of them run a few
+ * hundred milliseconds) and the dismissal of any popup the tap came out of.
+ * Short enough that a user who launches a page and comes straight back still
+ * finds the retaken picture — the back gesture takes longer to start than this.
+ */
+private const val SETTLE_DELAY_MS = 480L
 
 /**
  * Snapshots of a page, kept so the page *above* it has something to reveal
@@ -238,6 +259,40 @@ internal object WindowSnapshot {
         handler.postDelayed(revive, REVIVE_DELAY_MS)
     }
 
+    /**
+     * Retakes the page that was just left, once the tap that left it has settled.
+     *
+     * The photograph taken on the way out is taken *during* the tap, so it
+     * catches whatever the tap set in motion — the press feedback on the row
+     * itself, and the panel of a menu mid-dismissal with the page already dimmed
+     * behind it. Those are transient; the page is not. A few hundred
+     * milliseconds later the same redraw a theme change uses produces the page
+     * and nothing else, from the retained tree ([rerender]'s stopped-window
+     * case, which is exactly what the parent is by then).
+     *
+     * One target at a time: a launch is a single event, and the last one is the
+     * only one whose picture can still be revealed without another launch
+     * between.
+     */
+    fun settle(parentClass: Class<out Activity>) {
+        val name = parentClass.name
+        if (!cache.containsKey(name)) return
+        settleTarget = name
+        handler.removeCallbacks(settleRun)
+        handler.postDelayed(settleRun, SETTLE_DELAY_MS)
+    }
+
+    /** [settle]'s target — the entry the pending retake belongs to. */
+    private var settleTarget: String? = null
+
+    /** The body of [settle]; runs once the tap's motion has finished. */
+    private val settleRun = Runnable {
+        val name = settleTarget ?: return@Runnable
+        settleTarget = null
+        val entry = cache[name] ?: return@Runnable
+        rerender(name, entry, dropIfVisible = false)
+    }
+
     /** The coalesced body of [refreshForTheme]; runs once input has settled. */
     private val revive = Runnable {
         if (cache.isEmpty()) return@Runnable
@@ -291,7 +346,7 @@ internal object WindowSnapshot {
      * call, which is why it is not one: it runs only when an appearance setting
      * actually changes, and only while a snapshot exists to refresh.
      */
-    private fun rerender(name: String, entry: Entry): Boolean {
+    private fun rerender(name: String, entry: Entry, dropIfVisible: Boolean = true): Boolean {
         val parent = entry.parent.get()
         val view = parent?.window?.decorView
         if (parent == null || view == null || view.width <= 0 || view.height <= 0) {
@@ -318,6 +373,13 @@ internal object WindowSnapshot {
         // tree that can be brought forward and painted on demand; a resumed one
         // has no reason to be touched at all.
         if (isOnScreen(parent)) {
+            // The settle retake does not get to make this call: it runs while
+            // the page it is retaking has only just been left, and dropping the
+            // picture there would trade a photograph that is one press too
+            // lively for no photograph at all. It keeps what it has.
+            if (!dropIfVisible) {
+                return true
+            }
             cache.remove(name)
             return false
         }

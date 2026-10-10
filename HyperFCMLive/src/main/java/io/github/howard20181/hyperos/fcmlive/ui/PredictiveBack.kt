@@ -19,6 +19,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -115,7 +116,6 @@ fun PredictiveBackContainer(
     // needs no second code path for RTL.
     val forward = if (layoutDirection == LayoutDirection.Ltr) 1f else -1f
 
-    val scrimColor = MaterialTheme.colorScheme.scrim
     val backdropColor = MaterialTheme.colorScheme.background
 
     // Displacement of the page from its resting place, in pixels, 0..width.
@@ -257,8 +257,17 @@ fun PredictiveBackContainer(
                     if (widthPx > 0f) {
                         val travel = (offsetPx.value / widthPx).coerceIn(0f, 1f)
                         if (travel > 0f) {
+                            // Pure black, not the theme's `scrim` role. That role
+                            // is Miuix's `windowDimming`, which is *already* an
+                            // alpha-carrying black (0.3 light, 0.6 dark) for
+                            // dialogs and menus; multiplying it by this dim left
+                            // the wash at 15% black in light mode against the
+                            // reference's 50%, which is exactly what "the shadow
+                            // is not deep enough" looked like. miuix-nav draws
+                            // this scrim as Color.Black at `dimAmount` (0.5), and
+                            // so does this.
                             drawRect(
-                                color = scrimColor,
+                                color = Color.Black,
                                 alpha = MAX_SCRIM_ALPHA * (1f - travel)
                             )
                         }
@@ -298,7 +307,12 @@ fun PredictiveBackContainer(
     }
 }
 
-/** Peak of the shadow laid over 上一层页面 as it is revealed — miuix-nav's default `dimAmount`. */
+/**
+ * Peak of the shadow laid over 上一层页面 as it is revealed — miuix-nav's default
+ * `dimAmount`, applied to an opaque black and lifting linearly as the page is
+ * uncovered, which is that library's own curve (`scrimFraction` follows the
+ * cover depth).
+ */
 private const val MAX_SCRIM_ALPHA = 0.5f
 
 /**
