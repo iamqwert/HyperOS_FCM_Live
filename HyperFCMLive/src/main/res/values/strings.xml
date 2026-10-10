@@ -188,6 +188,10 @@
     <!-- 模块状态页 -->
     <string name="status_yes">是</string>
     <string name="status_no">否</string>
+    <string name="refresh_pull_down">下拉刷新</string>
+    <string name="refresh_release">松开刷新</string>
+    <string name="refreshing">正在刷新…</string>
+    <string name="refresh_done">刷新成功</string>
     <string name="app_list_refreshed">应用列表已刷新</string>
     <string name="a11y_allowlist_on">已在白名单</string>
     <string name="a11y_allowlist_off">不在白名单</string>

@@ -305,11 +305,18 @@ fun SwipeBackContainer(
                         scope.launch { offsetPx.snapTo(dismissTravel) }
                     }
 
-                    // Release — velocity first, distance as the fallback.
+                    // Release — velocity first, distance as the fallback, and a
+                    // hard yank the other way vetoes the distance. Without the
+                    // veto, a drag that crossed the commit line and was then
+                    // flung back still finished: the exit tween swept the whole
+                    // previous page into view — its right side included, which no
+                    // reveal gesture is ever supposed to show — before the hand
+                    // that had said "no" could do anything about it.
                     val velocityX = tracker.calculateVelocity().x * forward
                     val progress = (dismissTravel / extent).coerceIn(0f, 1f)
-                    val committed = progress >= COMMIT_DISTANCE_FRACTION ||
-                        velocityX >= commitVelocityPx
+                    val committed = velocityX >= commitVelocityPx ||
+                        (progress >= COMMIT_DISTANCE_FRACTION &&
+                            velocityX > -commitVelocityPx)
 
                     if (committed) {
                         // Slide out under the finger's own momentum, then hand

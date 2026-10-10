@@ -71,7 +71,7 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.basic.TopAppBar as MiuixTopAppBar
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
@@ -100,11 +100,14 @@ fun SectionTitle(res: Int, modifier: Modifier = Modifier, first: Boolean = false
         // The Miuix header is the system settings' own: small, grey, part of the
         // page. Blue was the Material reading of a section break; under Miuix an
         // accent there is noise, and every reference app renders it as this grey.
+        // The header sits 28dp off the screen edge — the margin Miuix's own
+        // SmallTitle leaves — of which the page list already provides 12, so the
+        // rest is stated here. At 8 it read as flush with the cards below.
         SmallTitle(
             text = stringResource(res),
             modifier = modifier.fillMaxWidth(),
             insideMargin = PaddingValues(
-                start = 8.dp,
+                start = 16.dp,
                 top = if (first) 12.dp else 20.dp,
                 end = 8.dp,
                 bottom = 8.dp
@@ -994,6 +997,7 @@ fun PageScaffold(
 ) {
     if (LocalUiStyle.current == UiStyle.Miuix) {
         val scrollBehavior = MiuixScrollBehavior()
+        val title = stringResource(titleRes)
         MiuixScaffold(
             modifier = modifier,
             // The page colour on both the scaffold and the bar, not Miuix's
@@ -1001,8 +1005,13 @@ fun PageScaffold(
             // would paint grey behind it and in the bar.
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                SmallTopAppBar(
-                    title = stringResource(titleRes),
+                // The system settings' own bar: the large title at the left while
+                // the page is at rest, collapsing to the small centred one as the
+                // list scrolls up under it (the behaviour's wiring is the
+                // nestedScroll below).
+                MiuixTopAppBar(
+                    title = title,
+                    largeTitle = title,
                     color = MaterialTheme.colorScheme.background,
                     navigationIcon = {
                         val description = stringResource(io.github.howard20181.hyperos.fcmlive.R.string.back)

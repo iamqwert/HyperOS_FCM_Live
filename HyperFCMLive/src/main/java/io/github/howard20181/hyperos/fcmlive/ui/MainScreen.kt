@@ -6,6 +6,7 @@ import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -92,11 +93,18 @@ import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import top.yukonga.miuix.kmp.basic.PullToRefresh as MiuixPullToRefresh
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.InputField as MiuixInputField
 import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.basic.ListPopupColumn
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.basic.TopAppBar as MiuixTopAppBar
 import top.yukonga.miuix.kmp.overlay.OverlayListPopup
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Checkbox as MiuixCheckbox
 import top.yukonga.miuix.kmp.basic.FloatingActionButton as MiuixFloatingActionButton
@@ -257,6 +265,14 @@ fun MainScreen(
                 MiuixPullToRefresh(
                     isRefreshing = refreshing,
                     onRefresh = onRefresh,
+                    // The library's defaults are hard-coded English; the text is
+                    // part of the indicator, so it localises here.
+                    refreshTexts = listOf(
+                        stringResource(R.string.refresh_pull_down),
+                        stringResource(R.string.refresh_release),
+                        stringResource(R.string.refreshing),
+                        stringResource(R.string.refresh_done)
+                    ),
                     // The bar's height is taken off the refresh container itself,
                     // not the list inside it: the circle has to come down *below*
                     // the bar or it spins where the bar hides it.
@@ -352,6 +368,43 @@ fun MainScreen(
 }
 
 /**
+ * Where the overflow panel lands: the anchor's end edge, clamped inside the
+ * window.
+ *
+ * The library's default provider is start-aligned and unclamped; anchored to the
+ * overflow button at the screen's right corner it measured the panel rightwards
+ * and its right edge ran into the window edge. This is the provider KernelSU's
+ * manager uses for the same menu, kept verbatim.
+ */
+private val OverflowMenuPositionProvider = object : top.yukonga.miuix.kmp.basic.PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowBounds: IntRect,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+        popupMargin: IntRect,
+        alignment: top.yukonga.miuix.kmp.basic.PopupPositionProvider.Align
+    ): IntOffset {
+        val offsetX = anchorBounds.right - popupContentSize.width - popupMargin.right
+        val offsetY = anchorBounds.bottom + popupMargin.top
+        return IntOffset(
+            x = offsetX.coerceIn(
+                windowBounds.left,
+                (windowBounds.right - popupContentSize.width - popupMargin.right)
+                    .coerceAtLeast(windowBounds.left)
+            ),
+            y = offsetY.coerceIn(
+                (windowBounds.top + popupMargin.top)
+                    .coerceAtMost(windowBounds.bottom - popupContentSize.height - popupMargin.bottom),
+                windowBounds.bottom - popupContentSize.height - popupMargin.bottom
+            )
+        )
+    }
+
+    override fun getMargins(): PaddingValues = PaddingValues(start = 20.dp)
+}
+
+/**
  * Room the last card keeps between itself and the navigation-bar inset, so the
  * FAB never rests on it after a full scroll. Scaffold's `innerPadding` covers
  * the navigation-bar inset only — the FAB is not part of it — so the clearance
@@ -422,27 +475,30 @@ fun MainTopBar(
     actions: MainActions,
     query: String,
     onQueryChange: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    scrollBehavior: top.yukonga.miuix.kmp.basic.ScrollBehavior? = null
 ) {
     // The Miuix bar: the title sits centred — the system settings' own frame —
     // and stays put while the list scrolls under it. Search keeps the field in
     // the bar's own bottom slot so the expansion still reads as the page opening
     // its search, not a widget swapping in.
     if (LocalUiStyle.current == UiStyle.Miuix) {
-        SmallTopAppBar(
-            title = if (state.searching) "" else state.title,
+        // The system settings' own bar: the large title at the left while the
+        // page rests, collapsing to the small centred one as the list scrolls.
+        // The search field lives in the bar's bottom slot permanently in this
+        // look -- there is no search icon to press, the field is the entry.
+        MiuixTopAppBar(
+            title = state.title,
+            largeTitle = state.title,
             modifier = modifier,
             // Same reason as the scaffold: the bar is the page's own colour,
             // which under AMOLED is black rather than Miuix's default.
             color = MaterialTheme.colorScheme.background,
             navigationIcon = {
-                if (state.searching || state.multiSelect) {
+                if (state.multiSelect) {
                     TopBarIconButton(
                         painter = painterResource(R.drawable.ic_arrow_back),
-                        description = stringResource(
-                            if (state.multiSelect) R.string.exit_multi_select
-                            else R.string.exit_search
-                        ),
+                        description = stringResource(R.string.exit_multi_select),
                         onClick = actions.onBack
                     )
                 }
@@ -470,18 +526,14 @@ fun MainTopBar(
                         ),
                         onClick = actions.onSelectAll
                     )
-                } else if (!state.searching) {
-                    TopBarIconButton(
-                        painter = painterResource(R.drawable.ic_search),
-                        description = stringResource(R.string.tooltip_search),
-                        onClick = actions.onSearch
-                    )
+                } else {
                     OverflowMenu(state.overflow, actions)
                 }
             },
+            scrollBehavior = scrollBehavior,
             bottomContent = {
                 SearchField(
-                    visible = state.searching,
+                    visible = !state.multiSelect,
                     query = query,
                     onQueryChange = onQueryChange
                 )
@@ -758,7 +810,14 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
             }
             OverlayListPopup(
                 show = expanded,
-                onDismissRequest = { expanded = false }
+                onDismissRequest = { expanded = false },
+                // End-aligned to the anchor and clamped inside the window: the
+                // default start-aligned provider measures the panel from the
+                // anchor's left edge, and at the screen's right corner that put
+                // the panel's right edge against (and past) the window edge.
+                // This is KernelSU's MenuPositionProvider, verbatim.
+                popupPositionProvider = OverflowMenuPositionProvider,
+                alignment = top.yukonga.miuix.kmp.basic.PopupPositionProvider.Align.TopEnd
             ) {
                 // Selection is the accent plus a check, the menu's own language
                 // (the reference apps' sort and mode menus) — a checkbox plate on
@@ -907,7 +966,8 @@ fun AppListPane(
     bottomPadding: Dp,
     status: RuntimeStatus.Snapshot? = null,
     onRetryStatus: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    search: (@Composable () -> Unit)? = null
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -928,6 +988,9 @@ fun AppListPane(
         // The "运行状态" header rides along as the first item so it shares the
         // list's horizontal inset and pull-to-refresh, and stays visible even
         // when no rows are shown (the empty-allowlist hint matters most there).
+        if (search != null) {
+            item(key = "search-card") { search() }
+        }
         item(key = "runtime-status") {
             RuntimeStatusHeader(snapshot = status, onRetry = onRetryStatus)
         }
@@ -1087,7 +1150,16 @@ private fun LazyItemScope.AppRow(
                 } else {
                     Modifier.combinedClickable(
                         interactionSource = interactionSource,
-                        indication = ripple(),
+                        // Under Miuix the row press is the library's own feedback,
+                        // not an M3 ripple: LocalIndication carries Miuix's
+                        // indication from the theme, so reading it here keeps one
+                        // press language per look instead of a Material ripple on
+                        // a Miuix screen.
+                        indication = if (LocalUiStyle.current == UiStyle.Miuix) {
+                            LocalIndication.current
+                        } else {
+                            ripple()
+                        },
                         onLongClick = onLongClick,
                         onClick = {
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -1277,6 +1349,41 @@ private fun MainScreenPreview() {
             refreshing = false,
             onRefresh = {},
             onDiagnostics = {}
+        )
+    }
+}
+
+/**
+ * The home search entry under the Miuix look: a card holding Miuix's own
+ * [InputField], KernelSU-manager style — the field sits in the list between the
+ * bar and the status card and scrolls away with the page, and because the field
+ * *is* the entry, the bar carries no search icon in this look.
+ *
+ * The query plumbing is the same the Material look's search field uses: the text
+ * lives in the Activity's state and every keystroke lands in its filter entry
+ * point, so nothing about how a search behaves changes between the looks.
+ */
+@Composable
+private fun MiuixSearchCard(
+    query: String,
+    onQueryChange: (String) -> Unit
+) {
+    val hint = stringResource(R.string.search_hint)
+    androidx.compose.material3.Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp),
+        color = LocalAppSurfaces.current.card,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+    ) {
+        MiuixInputField(
+            query = query,
+            onQueryChange = onQueryChange,
+            onSearch = { },
+            expanded = true,
+            onExpandedChange = { },
+            label = hint,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
         )
     }
 }
