@@ -134,14 +134,25 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.8.0'
     // Declared for the ActivityResultContracts imports: CreateDocument and
     // OpenDocument in AboutActivity (allowlist export / import) and
-    // RequestPermission in MainActivity (the diagnostics log). Resolves at
-    // 1.8.2 through appcompat today; declaring it explicitly means Dependabot
-    // tracks it instead of the version silently riding along.
-    implementation 'androidx.activity:activity:1.8.2'
+    // RequestPermission in MainActivity (the diagnostics log).
+    //
+    // 1.13.0, not 1.8.2, and that is a hard floor now: Miuix's overlay popups
+    // register their back handlers through NavigationEventDispatcherOwner, and it
+    // is ComponentActivity 1.13 that sets that owner on the decor view (and on
+    // every ComponentDialog's). With 1.8.2 the owner is never installed, and
+    // opening the home overflow under the Miuix look crashed with "No
+    // NavigationEventDispatcher was provided via LocalNavigationEventDispatcherOwner"
+    // — verified on device, and verified against 1.13.0's own sources, where
+    // ComponentActivity.onCreate does window.decorView.setViewTree...(this).
+    implementation 'androidx.activity:activity:1.13.0'
     // BackHandler for ui/SwipeBack.kt. Same version line as `activity` above:
     // the Compose integration and the core artifact are versioned together, and
     // declaring the pair keeps Dependabot moving them as one.
-    implementation 'androidx.activity:activity-compose:1.8.2'
+    implementation 'androidx.activity:activity-compose:1.13.0'
+    // What Miuix's popups register their back handlers through. Comes in at 1.1.1
+    // with miuix 0.9.1; declared so Dependabot sees it, pinned to what miuix asks
+    // for rather than the 1.1.2 KernelSU uses with its newer miuix.
+    implementation 'androidx.navigationevent:navigationevent-compose:1.1.1'
     // Material Views: two real consumers keep this here — the
     // `Theme.Material3.DayNight.NoActionBar` parent the app theme inherits from,
     // and DynamicColors (wallpaper accent) in theme/ThemeSupport.kt. The
