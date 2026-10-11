@@ -69,3 +69,5 @@ desktop.ini
 # JVM / Gradle heap dumps from local runs
 *.hprof
 java_pid*.hprof
+
+/miuix-0.9.1/
