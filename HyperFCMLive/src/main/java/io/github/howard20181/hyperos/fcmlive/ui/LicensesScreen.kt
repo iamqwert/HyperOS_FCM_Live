@@ -30,9 +30,8 @@ import top.yukonga.miuix.kmp.basic.CardDefaults as MiuixCardDefaults
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
-import top.yukonga.miuix.kmp.theme.LocalDismissState
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -80,6 +79,23 @@ fun LicensesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     // and the dialog's callback below is a plain lambda.
     val miuixNow = LocalUiStyle.current == UiStyle.Miuix
 
+    // Opens a repository, with the page's fallback when nothing can take the
+    // URL: a system toast under Miuix, a snackbar under Material. It backs both
+    // a licence dialog's 查看源代码 and, directly, the rows that ship no licence
+    // text yet still link to their repository (onijiang0/fcmfix).
+    val openUrl: (String) -> Unit = { url ->
+        // Dismiss any open dialog first: a toast/snackbar raised while it is up
+        // would be drawn behind the dialog window and never seen.
+        openSheet = null
+        if (!UiUtils.openUrl(context, url)) {
+            if (miuixNow) {
+                Toast.makeText(context, url, Toast.LENGTH_SHORT).show()
+            } else {
+                scope.launch { snackbarHostState.showSnackbar(url) }
+            }
+        }
+    }
+
     PageScaffold(
         titleRes = R.string.licenses_title,
         onBack = onBack,
@@ -89,31 +105,22 @@ fun LicensesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         LicensesBody(
             bottomPadding = innerPadding.calculateBottomPadding(),
             onOpenSheet = { openSheet = it },
+            onOpenUrl = openUrl,
             modifier = Modifier.padding(top = innerPadding.calculateTopPadding())
         )
-    }
-
-    openSheet?.let { sheet ->
-        LicenseDialog(
-            sheet = sheet,
-            onDismiss = { openSheet = null },
-            onOpenSource = { url ->
-                // The dialog is dismissed first, as it always was — a snackbar
-                // raised while it is up would be drawn behind a dialog window
-                // and never seen. Only if nothing can take the URL is there
-                // something to say, and then the URL itself is the message.
-                openSheet = null
-                if (!UiUtils.openUrl(context, url)) {
-                    // The Miuix look acknowledges with the system toast; the
-                    // Material look keeps its bar at the page's foot.
-                    if (miuixNow) {
-                        Toast.makeText(context, url, Toast.LENGTH_SHORT).show()
-                    } else {
-                        scope.launch { snackbarHostState.showSnackbar(url) }
-                    }
-                }
-            }
-        )
+        // Inside the scaffold's subtree, deliberately: the Miuix licence sheet
+        // is an OverlayDialog, and those render through the enclosing
+        // MiuixScaffold's popup host — composed outside it (where this sat
+        // while the sheet was a WindowDialog) the host is never found and the
+        // tap raises nothing. The M3 dialog does not care where it sits, so
+        // both branches live here.
+        openSheet?.let { sheet ->
+            LicenseDialog(
+                sheet = sheet,
+                onDismiss = { openSheet = null },
+                onOpenSource = openUrl
+            )
+        }
     }
 }
 
@@ -124,12 +131,14 @@ private data class LicenseSheet(val title: String, val rawRes: Int, val url: Str
 private fun LicensesBody(
     bottomPadding: Dp,
     onOpenSheet: (LicenseSheet) -> Unit,
+    onOpenUrl: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val hint = stringResource(R.string.license_view_full_text)
-    // The Miuix look marks every row whose sheet carries a 查看源代码 door with
-    // the library's own chevron, the way its ArrowPreference does; the three
-    // plain licence texts open no repository and wear none.
+    // The Miuix look marks every row whose tap leads somewhere — a licence sheet
+    // or a repository — with the library's own chevron, the way its
+    // ArrowPreference does. The plain licence texts open a sheet like any dep
+    // row does, so they wear the mark too.
     val miuixRows = LocalUiStyle.current == UiStyle.Miuix
     val plainLicenses = listOf(
         stringResource(R.string.license_apache_2) to R.raw.license_apache2,
@@ -154,18 +163,23 @@ private fun LicensesBody(
                 GroupRow(first = first, last = last, onClick = {
                     onOpenSheet(LicenseSheet(name, rawRes, url = null))
                 }) {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(
-                            text = name,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            style = pageBodyStyle()
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = name,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = pageBodyStyle()
+                            )
+                            Text(
+                                text = hint,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = pageSecondaryStyle()
+                            )
+                        }
+                        if (miuixRows) {
+                            MiuixChevron()
+                        }
                     }
-                    Text(
-                        text = hint,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = pageSecondaryStyle()
-                    )
                 }
                 if (!last) GroupRowGap()
             }
@@ -228,17 +242,20 @@ private fun LicensesBody(
                 val url = ref[2]
                 val first = index == 0
                 val last = index == REFERENCES.lastIndex
-                // 「—」 marks a repository that ships no LICENSE file: there is
-                // no text to show, so the tap keeps its feedback but opens
-                // nothing.
+                // 「—」 marks a repository that ships no LICENSE file, so there
+                // is no text to open a sheet for. Such a row is inert only when
+                // it also has no link; if it carries a URL (onijiang0/fcmfix)
+                // the tap opens that repository directly, same as a 查看源代码.
                 val noLicense = license == "—"
-                GroupRow(first = first, last = last, onClick = if (noLicense) {
-                    {}
-                } else {
-                    {
+                val hasUrl = url.isNotEmpty()
+                val click: () -> Unit = when {
+                    noLicense && hasUrl -> ({ onOpenUrl(url) })
+                    noLicense -> ({})
+                    else -> ({
                         onOpenSheet(LicenseSheet(name, licenseRawFor(name, license), url))
-                    }
-                }) {
+                    })
+                }
+                GroupRow(first = first, last = last, onClick = click) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -252,8 +269,11 @@ private fun LicensesBody(
                                 style = pageSecondaryStyle()
                             )
                         }
-                        // The 「—」 row opens nothing, so it gets no door mark.
-                        if (miuixRows && !noLicense) {
+                        // The door mark shows whenever the tap leads somewhere —
+                        // a licence sheet, or the repository link on a
+                        // no-licence row. A truly inert (no link, no licence)
+                        // row wears none.
+                        if (miuixRows && (!noLicense || hasUrl)) {
                             MiuixChevron()
                         }
                     }
@@ -375,8 +395,11 @@ private fun readLicenseText(context: Context, rawRes: Int): String {
  * Shared SPDX texts live in one raw file each; the three MIT reference projects
  * ship their own copyright line, so they keep a dedicated copy. Repositories
  * carrying no LICENSE file are shown as 「—」 and never reach this function.
+ *
+ * `internal` so the unit tests can pin the mapping down — the branch order here
+ * has bitten once already (see the Eclipse note below).
  */
-private fun licenseRawFor(name: String, licenseLabel: String): Int = when {
+internal fun licenseRawFor(name: String, licenseLabel: String): Int = when {
     name == "Kr328/HyperOSFCMFix" -> R.raw.license_mit_hyperosfcmfix
     name == "ReedGAOOO/FCMGuard-HyperOS" -> R.raw.license_mit_fcmguard
     name == "1812z/HyperIsland" -> R.raw.license_mit_hyperisland
@@ -385,7 +408,9 @@ private fun licenseRawFor(name: String, licenseLabel: String): Int = when {
     licenseLabel.contains("MIT") -> R.raw.license_mit
     // JUnit is EPL-1.0, and the fallback below is Apache — without this branch the
     // row would have shown the wrong licence text under a correct-looking label.
-    licenseLabel.contains("Eclipse") -> R.raw.license_epl1
+    // Both spellings are accepted because SPDX ships the short form ("EPL-1.0",
+    // "EPL-2.0") that carries no "Eclipse" substring.
+    licenseLabel.contains("Eclipse") || licenseLabel.contains("EPL-") -> R.raw.license_epl1
     else -> R.raw.license_apache2
 }
 
@@ -442,6 +467,14 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  * to 1.13.0-alpha01. That is also why the row for the BOM itself stays off:
  * the number a reader would want is the one that wins, and the BOM is not it.
  *
+ * The 2026-10-11 pass changed two versions and one status:
+ * - AndroidX Activity: 1.8.2 → **1.13.0** (the build.gradle bump that installed
+ *   the NavigationEventDispatcher owner Miuix's overlay popups need; the row
+ *   had been left behind at 1.8.2 by the previous pass).
+ * - Kotlinx Coroutines: 1.9.0 → **1.10.2**, and it stops being a licence-only
+ *   row: UpdateChecker's network check now runs through an explicitly declared
+ *   `kotlinx-coroutines-android` dependency, so its classes ship in the APK.
+ *
  * No rows were added or removed in the 2026-10-09 pass. Several families that
  * do ship classes (androidx.graphics, androidx.savedstate, androidx.window,
  * androidx.emoji2, androidx.fragment, androidx.recyclerview, androidx.transition
@@ -463,7 +496,7 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  *   and orphaned src/test.
  */
 private val DEPS = arrayOf(
-    arrayOf("AndroidX Activity", "1.8.2", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Activity", "1.13.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Annotation", "1.9.1", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX AppCompat", "1.8.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Arch Core", "2.2.0", "Apache License 2.0", ANDROIDX_URL),
@@ -488,9 +521,12 @@ private val DEPS = arrayOf(
     // build with its own licence. EPL-1.0 (see licenseRawFor).
     arrayOf("JUnit", "4.13.2", "Eclipse Public License 1.0", "https://github.com/junit-team/junit4"),
     arrayOf("Kotlin Stdlib", "2.2.20", "Apache License 2.0", "https://github.com/JetBrains/kotlin"),
+    // Declared explicitly in build.gradle since UpdateChecker's network check
+    // moved onto Dispatchers.IO: real runtime code in the APK now, not a
+    // licence statement for a transitive leftover.
     arrayOf(
         "Kotlinx Coroutines",
-        "1.9.0",
+        "1.10.2",
         "Apache License 2.0",
         "https://github.com/Kotlin/kotlinx.coroutines"
     ),
@@ -553,7 +589,9 @@ private val REFERENCES = arrayOf(
     arrayOf("Kr328/HyperOSFCMFix", "MIT License", "https://github.com/Kr328/HyperOSFCMFix"),
     arrayOf("Kwensiu/DPIS", "GPL-3.0", "https://github.com/Kwensiu/DPIS"),
     arrayOf("tiann/KernelSU", "GPL-3.0", "https://github.com/tiann/KernelSU"),
-    // No LICENSE file in the repository — shown as 「—」, row opens nothing.
+    // No LICENSE file in the repository — shown as 「—」. There is no text to
+    // open a sheet for, but the row links to the project, so a tap opens that
+    // URL directly and it still wears the right-side chevron.
     arrayOf("onijiang0/fcmfix", "—", "https://github.com/onijiang0/fcmfix"),
     arrayOf("ReedGAOOO/FCMGuard-HyperOS", "MIT License", "https://github.com/ReedGAOOO/FCMGuard-HyperOS"),
     // The idea to put the settings icon at the home bar's leading edge came
@@ -601,12 +639,11 @@ private fun MiuixLicenseDialog(
     onDismiss: () -> Unit,
     onOpenSource: (String) -> Unit
 ) {
-    WindowDialog(
+    OverlayDialog(
         show = true,
         title = sheet.title,
         onDismissRequest = onDismiss
     ) {
-        val dismissState = LocalDismissState.current
         val density = LocalDensity.current
         val bodyHeight = with(density) {
             val px = LocalWindowInfo.current.containerSize.height
@@ -649,7 +686,7 @@ private fun MiuixLicenseDialog(
                 MiuixTextButton(
                     text = closeLabel,
                     modifier = Modifier.weight(1f),
-                    onClick = { dismissState?.invoke() },
+                    onClick = onDismiss,
                     colors = MiuixButtonDefaults.textButtonColorsPrimary()
                 )
             }
