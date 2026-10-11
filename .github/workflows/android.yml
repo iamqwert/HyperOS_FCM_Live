@@ -7,6 +7,15 @@
 #   ⑤ `gh pr merge <n> --merge`
 #   ⑥ `gh workflow run android.yml --ref main -f publish_release=true`
 #
+# ## ⚠️ 同一版本号不要重复 dispatch（2026-10-11 实测事故）
+# release job 用 softprops/action-gh-release 上传，遇到已存在的同名 release 会**先删同名旧资产
+# 再重传**。所以对同一个 tag 重复触发本工作流、又在传包途中取消，就会留下「有发行说明、
+# 没安装包」的空壳 release。判别方法：`gh run list --workflow android.yml` 里找本次
+# `workflow_dispatch` 的 run，确认它不是已完成（completed/success 已发过同 tag）再触发；
+# 一旦误删资产，**不要用本地包顶上**（本地通常是 debug 签名，CI 包是 key.jks 正式签名，
+# 混传会破坏升级签名链），从出包 run 的 artifact（gh run download <run-id> --name
+# hyperos-fcm-live-release）取回 APK 再 `gh release upload <tag> <apk> --clobber`。
+#
 # ## agent 沙箱怎么推（2026-10-04 两次实测，与人工终端不同）
 # **`gh` 是有的**（`gh auth status` 已登录 iamqwert，scopes 含 repo/workflow），不要再自己
 # 取 token + curl。**`github.com:443` 的 git 通道是间歇故障，不是永久不通**——同一天内
