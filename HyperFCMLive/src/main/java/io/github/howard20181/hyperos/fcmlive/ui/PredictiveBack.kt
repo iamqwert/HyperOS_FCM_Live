@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -111,6 +112,14 @@ fun PredictiveBackContainer(
     // so a theme change re-reads it instead of serving a stale photograph.
     val backgroundBitmap = background()
 
+    // flushForPreview() retakes the parent picture into a plain, non-observable
+    // cache at the very start of the gesture. The read above is a composition-
+    // time capture, so it would still hold the stale null taken just after the
+    // appearance pick and never notice the cache being repaired. Hold the fresh
+    // picture in observable state so the preview layer recomposes onto it.
+    var gestureBackground by remember { mutableStateOf<ImageBitmap?>(null) }
+    val previewBitmap = gestureBackground ?: backgroundBitmap
+
     // +1 when the dismissing direction is toward the end edge (LTR rightward),
     // -1 under RTL. Every sign below is written in screen terms so the file
     // needs no second code path for RTL.
@@ -147,13 +156,17 @@ fun PredictiveBackContainer(
         var settled = false
 
         override fun onBackStarted(event: NavigationEvent) {
-            // The picture underneath may be one palette behind: an appearance
-            // change defers its re-render so the tap that made it does not pay
-            // for a full-screen redraw (see WindowSnapshot.refreshForTheme).
-            // The gesture's start is the first moment that picture might be
-            // needed, so force any pending re-render through now, before
-            // anything moves.
-            WindowSnapshot.flushForTheme()
+            // The picture underneath may be one palette behind, or still
+            // carrying the press that left the page: an appearance change and a
+            // launch both defer their retake so the tap that caused them does
+            // not pay for a full-screen redraw. The gesture's start is the last
+            // moment that picture can be fixed before it is needed, so everything
+            // pending is run through now — before anything moves.
+            WindowSnapshot.flushForPreview()
+            // Pick up the picture just retaken into the non-observable cache;
+            // writing observable state recomposes the preview onto it before the
+            // first progress frame.
+            gestureBackground = background()
             onGesture(event)
         }
 
@@ -175,6 +188,10 @@ fun PredictiveBackContainer(
 
         override fun onBackCancelled() {
             if (settled) return
+            // Drop the gesture-time capture so the resting read takes over again;
+            // the state write itself recomposes this body, re-reading background()
+            // from the now-current cache.
+            gestureBackground = null
             // Spring back to rest from wherever the finger left it. The system
             // reports no release velocity for a cancelled gesture, so the
             // spring starts from rest; a non-bouncy spec cannot overshoot and
@@ -274,9 +291,9 @@ fun PredictiveBackContainer(
                     }
                 }
         ) {
-            if (backgroundBitmap != null) {
+            if (previewBitmap != null) {
                 Image(
-                    bitmap = backgroundBitmap,
+                    bitmap = previewBitmap,
                     contentDescription = null,
                     // FillBounds, not Crop: the snapshot is already exactly the
                     // window's size, so it must be placed 1:1.

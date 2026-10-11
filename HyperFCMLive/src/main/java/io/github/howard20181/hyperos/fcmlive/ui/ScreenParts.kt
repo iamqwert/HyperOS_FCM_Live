@@ -64,7 +64,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -92,18 +91,21 @@ import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
 import top.yukonga.miuix.kmp.preference.ArrowPreference
-import top.yukonga.miuix.kmp.window.WindowDialog
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Group heading shared by the secondary pages.
+ * Group heading shared by every page, in both looks' languages.
  *
- * Mirrors the XML the View screens still use: `BodyMedium` at sans-medium in
- * `md_primary`, 8dp of side padding and a 28dp gap above (12dp for the first
- * heading, which only needs to clear the top bar). `titleSmall` was the
- * earlier Compose choice, but it carries 0.1sp tracking the XML side does not,
- * so the two read slightly differently on the same screen.
+ * The Material branch reads as the M3 settings templates print a section
+ * break: `labelLarge` in the accent, 8dp of side padding and a 28dp gap above
+ * (12dp for the first heading, which only needs to clear the top bar).
+ * `titleSmall` was the earlier choice, but its 0.1sp tracking read as a
+ * subtitle rather than a break. The Miuix branch is the system settings' own
+ * `SmallTitle` — small, grey, no accent — see the body. Both branches declare
+ * the heading semantics: a screen reader must not lose the section structure
+ * the moment the look is switched.
  */
 @Composable
 fun SectionTitle(res: Int, modifier: Modifier = Modifier, first: Boolean = false) {
@@ -116,7 +118,12 @@ fun SectionTitle(res: Int, modifier: Modifier = Modifier, first: Boolean = false
         // rest is stated here. At 8 it read as flush with the cards below.
         SmallTitle(
             text = stringResource(res),
-            modifier = modifier.fillMaxWidth(),
+            // The Material branch declares the section break a heading; the
+            // Miuix branch must too, or a screen reader loses the section
+            // structure the moment the look is switched.
+            modifier = modifier
+                .fillMaxWidth()
+                .semantics { heading() },
             insideMargin = PaddingValues(
                 start = 16.dp,
                 top = if (first) 12.dp else 20.dp,
@@ -138,8 +145,11 @@ fun SectionTitle(res: Int, modifier: Modifier = Modifier, first: Boolean = false
                 bottom = 12.dp
             ),
         color = MaterialTheme.colorScheme.primary,
-        fontWeight = FontWeight.Medium,
-        style = MaterialTheme.typography.bodyMedium
+        // labelLarge is the style M3 settings templates print section headers
+        // in — small, medium-weight, tracked — not the body size this wore
+        // before. The primary tone itself stays: that is the reference
+        // reading of a section break.
+        style = MaterialTheme.typography.labelLarge
     )
 }
 
@@ -290,6 +300,12 @@ fun GroupRow(
     content: @Composable () -> Unit
 ) {
     val shape = connectedGroupShape(first, last)
+    // Row metrics follow the list spec on both looks. 56dp is the single-line
+    // row height — M3's list minimum, and [BasicComponent]'s own floor
+    // (BasicComponentDefaults.InsideMargin under Miuix) — and two-line content
+    // reaches M3's 72dp double-line height on its own (24+20 of type against
+    // 28dp of vertical padding), so neither look needs a taller floor.
+    val miuixRow = LocalUiStyle.current == UiStyle.Miuix
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = LocalAppSurfaces.current.card,
@@ -312,8 +328,13 @@ fun GroupRow(
         }
         Column(
             modifier = clickModifier
-                .heightIn(min = 72.dp)
-                .padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 14.dp),
+                .heightIn(min = 56.dp)
+                .padding(
+                    start = 16.dp,
+                    top = if (miuixRow) 16.dp else 14.dp,
+                    end = 16.dp,
+                    bottom = if (miuixRow) 16.dp else 14.dp
+                ),
             verticalArrangement = Arrangement.Center
         ) {
             content()
@@ -1028,9 +1049,21 @@ internal fun MiuixSwitchSlice(
             title = title,
             summary = summary,
             onClick = toggle,
+            // What the library's own switch row declares (SwitchPreference puts
+            // role = Role.Switch on its BasicComponent): the whole row reads as a
+            // switch to a screen reader, not a plain button.
+            role = Role.Switch,
             endActions = {
                 key(generation) {
-                    MiuixSwitch(checked = checked, onCheckedChange = { toggle() })
+                    // The library's switch rows leave 8dp between the control and
+                    // the row's own 16dp inside margin (SwitchPreference's end
+                    // padding) — without it the switch sits tighter to the card
+                    // edge than every library row.
+                    MiuixSwitch(
+                        checked = checked,
+                        onCheckedChange = { toggle() },
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                 }
             }
         )
@@ -1159,11 +1192,14 @@ fun pageProseStyle(): TextStyle =
  * A dialog in whichever shell the app is wearing.
  *
  * Material is the M3 [androidx.compose.material3.AlertDialog] as before. Miuix is
- * the system's own [WindowDialog] — the bottom-docked sheet with the dimmed page
- * behind it — with [MiuixTextButton]s in the action row, laid out the way the
- * reference apps lay theirs out: dismiss at the start, confirm at the end, the
- * confirm in the primary fill. The body prints left-aligned in the page's prose
- * style; the licence text goes through [content] as a scrollable card.
+ * the system's own [OverlayDialog] — the HyperOS sheet rendered through the
+ * scaffold's [top.yukonga.miuix.kmp.basic.Scaffold] popup host, the path the
+ * library's own dialog demo takes (the window-level variant is the desktop
+ * shell) — with [MiuixTextButton]s in the action row, laid out the way the
+ * reference apps and the library demo lay theirs out: dismiss at the start,
+ * confirm at the end, the confirm in the primary fill. The body prints
+ * left-aligned in the page's prose style; the licence text goes through
+ * [content] as a scrollable card.
  *
  * [content] overrides [text] for bodies that are not one paragraph (the licence
  * text is scrollable); it renders inside the dialog's own body slot.
@@ -1180,7 +1216,7 @@ fun AppDialog(
     content: (@Composable () -> Unit)? = null
 ) {
     if (LocalUiStyle.current == UiStyle.Miuix) {
-        WindowDialog(
+        OverlayDialog(
             show = true,
             title = title,
             onDismissRequest = onDismissRequest

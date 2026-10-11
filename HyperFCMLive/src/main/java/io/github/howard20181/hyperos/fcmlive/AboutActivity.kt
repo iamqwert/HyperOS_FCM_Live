@@ -12,7 +12,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.platform.ComposeView
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
-import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport
 import io.github.howard20181.hyperos.fcmlive.ui.AboutActions
 import io.github.howard20181.hyperos.fcmlive.ui.AboutScreen
@@ -215,10 +214,13 @@ class AboutActivity : AppCompatActivity() {
     }
 
     /**
-     * In-place re-skin: the Compose tree follows ThemeEngine's generation
-     * counter and the window chrome is repainted here. The old path was
-     * `recreate()` — a whole-window rebuild that read as a visible jump every
-     * time an appearance menu option was picked.
+     * In-place re-skin. The palette invalidation itself lives in the
+     * [AppearanceState] setters — each appearance write bumps ThemeEngine's
+     * generation counter and the Compose tree follows it — so what is left here
+     * is the View-side half no recomposition reaches: the window chrome repaint
+     * and the back-preview snapshot. The old path was `recreate()` — a
+     * whole-window rebuild that read as a visible jump every time an appearance
+     * menu option was picked.
      *
      * The back-preview snapshot is refreshed too. It is a photograph of the
      * *below* this one — Main — taken on the way in, so it is wearing the old
@@ -228,7 +230,6 @@ class AboutActivity : AppCompatActivity() {
      * [WindowSnapshot.refreshForTheme].
      */
     private fun applyAppearanceChange() {
-        ThemeEngine.invalidate()
         ThemeSupport.reapplyWindow(this)
         WindowSnapshot.refreshForTheme()
     }

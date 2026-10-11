@@ -44,7 +44,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -74,6 +73,7 @@ import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.UpdateChecker
 import io.github.howard20181.hyperos.fcmlive.mcu.Hct
 import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
+import io.github.howard20181.hyperos.fcmlive.theme.AppearanceState
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppShapes
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
@@ -93,8 +93,11 @@ import kotlinx.coroutines.launch
  * menu and a canvas, so both collapse to a few lines each.
  *
  * Side effects the screen cannot own stay in [AboutActions]: the SAF
- * import/export needs an `ActivityResultRegistry`, and rebuilding the theme is
- * the Activity's `recreate`.
+ * import/export needs an `ActivityResultRegistry`, and the theme's View-side
+ * half — window chrome and the back-preview snapshot — is the Activity's
+ * `applyAppearanceChange`. The palette itself never reaches the Activity: the
+ * appearance rows write through [AppearanceState], whose setters invalidate
+ * the engine, and the theme re-skins in place.
  */
 data class AboutActions(
     val onViewSource: () -> Unit,
@@ -110,7 +113,12 @@ data class AboutActions(
     val onUpdateOpen: () -> Unit,
     /** Version line, read from PackageManager — the update check's own source. */
     val versionLine: String,
-    /** Invalidates the palette and rebuilds, as a theme change must. */
+    /**
+     * Repaints the View-side chrome a theme change must move but no
+     * recomposition reaches: the window background and the back-preview
+     * snapshot. The palette itself is invalidated by the [AppearanceState]
+     * setters — this callback never touches it.
+     */
     val onAppearanceChange: () -> Unit
 )
 
@@ -190,28 +198,29 @@ private fun AboutBody(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // Read once per screen. Every writer below re-renders locally *and* asks
-    // the Activity to rebuild, so the mirror cannot go stale on screen.
+    // Everything appearance-related reads its live value straight from
+    // [AppearanceState] — the Compose state layer over ThemePrefs — so there is
+    // no remembered mirror to keep in step: a setter writes the pref, the state
+    // every reader subscribes to, and the palette engine in one call. Only the
+    // two non-appearance values keep local state: the launcher-icon visibility
+    // is a system-side setting with no palette behind it, and the update badge
+    // is screen state by definition.
     var hideIcon by remember { mutableStateOf(LauncherIcon.isHidden(context)) }
-    var dynamic by remember { mutableStateOf(ThemePrefs.dynamicColor(context)) }
-    var seed by remember { mutableIntStateOf(ThemePrefs.seedColor(context)) }
     var updateBadge by remember { mutableStateOf(UpdateChecker.isUpdateAvailable(context)) }
-    var themeMode by remember { mutableIntStateOf(ThemePrefs.themeMode(context)) }
-    var uiStyle by remember { mutableIntStateOf(ThemePrefs.uiStyle(context)) }
+    val themeMode by AppearanceState.themeMode
+    val uiStyle by AppearanceState.uiStyle
+    val dynamic by AppearanceState.dynamicColor
+    val seed by AppearanceState.seedColor
+    val miuixMonet by AppearanceState.miuixMonet
+    val miuixAccent by AppearanceState.miuixAccent
+    val paletteStyle by AppearanceState.paletteStyle
+    val colorSpec by AppearanceState.colorSpec
     // The whole theme section is scoped by this: 动态颜色 / 调色风格 / 颜色规格 are
     // the app's own colour engine's controls, and the Miuix look does not go
     // through that engine at all. A row that changes nothing has no business being
     // on screen, and a row that is hidden but still feeding the look is worse —
     // see MiuixStyleTheme, which stops reading them for exactly that reason.
     val miuixStyle = uiStyle == ThemePrefs.UI_STYLE_MIUIX
-    var miuixMonet by remember { mutableStateOf(ThemePrefs.miuixMonet(context)) }
-    // 强调色, the key colour the Miuix Monet derivation uses while 莫奈颜色 is on.
-    // Stored as ARGB with 0 meaning "follow the wallpaper"; the menu maps that
-    // 0 to its first entry, so an unpicked accent and a picked colour can never
-    // collide on one row.
-    var miuixAccent by remember { mutableIntStateOf(ThemePrefs.miuixAccent(context)) }
-    var paletteStyle by remember { mutableIntStateOf(ThemePrefs.paletteStyle(context).ordinal) }
-    var colorSpec by remember { mutableIntStateOf(ThemePrefs.specVersion(context)) }
     // The offer, while it is on screen. Keeping it here rather than in the
     // Activity is what makes the dialog a Compose dialog: it is screen state,
     // and the Activity only supplies the URL it would open.
@@ -344,8 +353,7 @@ private fun AboutBody(
                 first = true,
                 last = false,
                 onPick = { index ->
-                    ThemePrefs.setThemeMode(context, visibleModes[index])
-                    themeMode = visibleModes[index]
+                    AppearanceState.setThemeMode(context, visibleModes[index])
                     actions.onAppearanceChange()
                 }
             )
@@ -359,8 +367,7 @@ private fun AboutBody(
                 first = false,
                 last = false,
                 onPick = { index ->
-                    ThemePrefs.setUiStyle(context, index)
-                    uiStyle = index
+                    AppearanceState.setUiStyle(context, index)
                     actions.onAppearanceChange()
                 }
             )
@@ -376,8 +383,7 @@ private fun AboutBody(
                     description = stringResource(R.string.about_sub_miuix_monet),
                     checked = miuixMonet,
                     onCheckedChange = { checked ->
-                        ThemePrefs.setMiuixMonet(context, checked)
-                        miuixMonet = checked
+                        AppearanceState.setMiuixMonet(context, checked)
                         actions.onAppearanceChange()
                     },
                     first = false,
@@ -405,8 +411,7 @@ private fun AboutBody(
                         first = false,
                         last = true,
                         onPick = { index ->
-                            ThemePrefs.setMiuixAccent(context, accentValues[index])
-                            miuixAccent = accentValues[index]
+                            AppearanceState.setMiuixAccent(context, accentValues[index])
                             actions.onAppearanceChange()
                         }
                     )
@@ -425,13 +430,11 @@ private fun AboutBody(
                     first = false,
                     last = false,
                     onDynamicChange = { checked ->
-                        ThemePrefs.setDynamicColor(context, checked)
-                        dynamic = checked
+                        AppearanceState.setDynamicColor(context, checked)
                         actions.onAppearanceChange()
                     },
                     onSeedChange = { color ->
-                        ThemePrefs.setSeedColor(context, color)
-                        seed = color
+                        AppearanceState.setSeedColor(context, color)
                         actions.onAppearanceChange()
                     }
                 )
@@ -450,14 +453,12 @@ private fun AboutBody(
                     onPick = { index ->
                         // Mapping through the filtered list is what keeps the write
                         // honest: the index is a position in *this* menu, not an
-                        // ordinal.
-                        ThemePrefs.setPaletteStyle(context, paletteVariants[index])
-                        paletteStyle = paletteVariants[index].ordinal
-                        // Changing the style can put the spec out of reach (see
+                        // ordinal. The setter refreshes the resolved spec with it —
+                        // changing the style can put the spec out of reach (see
                         // ThemePrefs.specVersion), so the spec row re-reads the
                         // resolved value instead of keeping its own copy — the two
                         // rows can only ever move together.
-                        colorSpec = ThemePrefs.specVersion(context)
+                        AppearanceState.setPaletteStyle(context, paletteVariants[index])
                         actions.onAppearanceChange()
                     }
                 )
@@ -471,8 +472,7 @@ private fun AboutBody(
                     first = false,
                     last = true,
                     onPick = { index ->
-                        ThemePrefs.setSpecVersion(context, specValues[index])
-                        colorSpec = ThemePrefs.specVersion(context)
+                        AppearanceState.setSpecVersion(context, specValues[index])
                         actions.onAppearanceChange()
                     }
                 )

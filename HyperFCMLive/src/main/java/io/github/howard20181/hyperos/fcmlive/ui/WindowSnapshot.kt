@@ -9,8 +9,11 @@ import android.os.Looper
 import android.util.Log
 import android.view.PixelCopy
 import android.view.View
+import android.view.ViewGroup
+import androidx.compose.runtime.Recomposer
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.findViewTreeCompositionContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
@@ -189,7 +192,21 @@ internal object WindowSnapshot {
          * [ThemeEngine.generation]). Reading this back is what tells
          * [forParent] a picture needs retaking before it is handed over.
          */
-        var generation: Int
+        var generation: Int,
+        /**
+         * Set by [refreshForTheme] when an appearance change invalidates this
+         * picture, and consumed by [flushForPreview] at the start of the next
+         * back gesture.
+         *
+         * It exists because the coalesced [revive] retake runs on a fixed timer
+         * and can photograph the stopped page while its recomposition / layer
+         * re-record is still in flight on the global frames, which left the
+         * large title blank yet stamped the entry as current — so a plain
+         * generation check would skip it at gesture start and lock the blank in.
+         * The flag forces one more, by-then-settled retake exactly when the
+         * picture is about to be revealed. Not part of any identity comparison.
+         */
+        var wantsForcedFlush: Boolean = false
     )
 
     /**
@@ -254,7 +271,23 @@ internal object WindowSnapshot {
      */
     fun refreshForTheme() {
         if (cache.isEmpty()) return
-        if (cache.values.all { it.generation == ThemeEngine.generation }) return
+        var stale = false
+        for (entry in cache.values) {
+            if (entry.generation != ThemeEngine.generation) {
+                // Remember this picture must be re-taken once more at gesture
+                // start even if the timed revive below stamps it current early.
+                entry.wantsForcedFlush = true
+                // Let the stopped page run frames now: its appearance colours are
+                // animated (the top-bar title colour tweens), and a stopped
+                // window's frame clock is paused, freezing those animations at
+                // the old value. Resuming lets the foreground-driven frames play
+                // them out during the wait below, so the retake records the new
+                // palette whole rather than a title in the old colour.
+                entry.parent.get()?.let { resumeFrameClock(it) }
+                stale = true
+            }
+        }
+        if (!stale) return
         handler.removeCallbacks(revive)
         handler.postDelayed(revive, REVIVE_DELAY_MS)
     }
@@ -305,22 +338,86 @@ internal object WindowSnapshot {
     }
 
     /**
-     * Runs any pending re-render **now** rather than at the end of the delay.
+     * Puts every picture in its best state **now**, on the frame a reveal starts.
      *
-     * For the one caller that cannot wait: a page is being left, and the picture
-     * of the page underneath is about to be needed for the back preview it is
-     * leaving with. [refreshForTheme] deliberately defers the work so a tap does
+     * For the one caller that cannot wait: a page is about to be left, and the
+     * picture of the page underneath is about to be needed for the back preview.
+     * [refreshForTheme] and [settle] deliberately defer their work so a tap does
      * not pay for it, but "later" must not become "after the reveal has already
-     * started" — that would show the strip one palette behind, which is the
-     * whole bug the refresh exists to fix.
+     * started" — a strip one palette behind, or still carrying the press, is the
+     * whole bug those two exist to fix.
      *
-     * A no-op when nothing is pending, so callers may run it unconditionally.
-     * Cheap in that case: one `removeCallbacks` and a map probe.
+     * The stale sweep at the end is the repair of last resort. A retake whose
+     * timer fired and failed, or that had not been scheduled at all, leaves a
+     * picture behind the current palette; [forParent] refuses those, so the
+     * preview would come up flat. This is the last moment before that picture is
+     * needed, so it is retaken here instead of being refused.
+     *
+     * A no-op when everything is already current, so callers may run it
+     * unconditionally; cheap in that case: two `hasCallbacks` and a map walk over
+     * at most four entries.
      */
-    fun flushForTheme() {
-        if (!handler.hasCallbacks(revive)) return
-        handler.removeCallbacks(revive)
-        revive.run()
+    fun flushForPreview() {
+        if (handler.hasCallbacks(revive)) {
+            handler.removeCallbacks(revive)
+            revive.run()
+        }
+        if (handler.hasCallbacks(settleRun)) {
+            handler.removeCallbacks(settleRun)
+            settleRun.run()
+        }
+        for (name in cache.keys.toList()) {
+            val entry = cache[name] ?: continue
+            // A picture invalidated by an appearance pick is re-taken here even
+            // when the timed revive already stamped it current: that pass can
+            // have caught the stopped page mid-recompose with its title layer
+            // blank. By gesture start the composition is settled, so the forced
+            // retake records it whole. The flag is one-shot.
+            val force = entry.wantsForcedFlush
+            entry.wantsForcedFlush = false
+            if (!force && entry.generation == ThemeEngine.generation) continue
+            if (force) entry.parent.get()?.let { resumeFrameClock(it) }
+            rerender(name, entry)
+        }
+    }
+
+    /**
+     * Resumes [activity]'s composition frame clock if it has been paused.
+     *
+     * A stopped Compose window pauses its Recomposer frame clock (see
+     * `createLifecycleAwareWindowRecomposer`'s `ON_STOP`), so appearance
+     * animations such as the top-bar title colour tween freeze at their old
+     * value and a software retake would record the title in the old colour —
+     * near-invisible against the new background. The Recomposer is keyed off the
+     * window root; resuming lets the (foreground-driven, shared main-thread)
+     * Choreographer frames advance those animations while the page stays
+     * stopped. Idempotent and failure-tolerant: anything unexpected just leaves
+     * the clock as the lifecycle left it.
+     */
+    private fun resumeFrameClock(activity: Activity) {
+        try {
+            val root = activity.window?.decorView ?: return
+            // The Recomposer tag is installed on the window's *content child*
+            // (a descendant of the decor view), and findViewTreeCompositionContext
+            // only searches upward, so starting at decorView misses it. Walk the
+            // tree until a view exposes one.
+            val recomposer = findRecomposer(root) ?: return
+            recomposer.resumeCompositionFrameClock()
+            Log.i(TAG, "Resumed stopped composition frame clock")
+        } catch (t: Throwable) {
+            Log.w(TAG, "Could not resume the composition frame clock", t)
+        }
+    }
+
+    /** Depth-first search for the window's [Recomposer], starting at [view]. */
+    private fun findRecomposer(view: View): Recomposer? {
+        (view.findViewTreeCompositionContext() as? Recomposer)?.let { return it }
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                findRecomposer(view.getChildAt(i))?.let { return it }
+            }
+        }
+        return null
     }
 
     /**
@@ -337,27 +434,36 @@ internal object WindowSnapshot {
      * still laid out and still holds the composed Compose nodes, so it paints
      * the page as it stands.
      *
-     * **The tree has to be brought forward first.** A stopped `Activity` gets no
-     * frames, so Compose's invalidation from the generation bump is still
-     * pending when this runs; drawing straight away would photograph the *old*
-     * palette and the retake would be pointless. Re-attaching the content view
-     * is what forces a synchronous recomposition, and layout follows from it,
-     * so the draw that comes after sees the new colours. Heavy for a routine
-     * call, which is why it is not one: it runs only when an appearance setting
-     * actually changes, and only while a snapshot exists to refresh.
+     * **The retained composition is already current when this runs.** The
+     * generation bump invalidates the stopped page, and — unlike rendering —
+     * recomposition keeps running on the global, shared Recomposer while the
+     * page is stopped (the foreground page drives those frames). Re-measuring the
+     * still-attached view rebuilds its display list from that recomposed state,
+     * and the draw that follows records the new colours without ever detaching the
+     * tree. It runs only when an appearance setting actually changes and only
+     * while a snapshot exists to refresh.
      */
     private fun rerender(name: String, entry: Entry, dropIfVisible: Boolean = true): Boolean {
         val parent = entry.parent.get()
         val view = parent?.window?.decorView
-        if (parent == null || view == null || view.width <= 0 || view.height <= 0) {
-            // The parent is gone, so this slot can never be refreshed again.
-            // Dropping it lets forParent fall back to a flat strip instead of
-            // serving a picture in the old palette.
+        if (parent == null || view == null) {
+            // Gone for good, so this slot can never be refreshed again. Dropping
+            // it lets forParent fall back to a flat strip instead of serving a
+            // picture in the old palette.
             cache.remove(name)
             return false
         }
         val width = view.width
         val height = view.height
+        if (width <= 0 || height <= 0) {
+            // Alive but not laid out — a stopped window between passes, or one a
+            // previous retake left detached before it could be measured. There is
+            // nothing to measure against *yet* and the page is still there, so
+            // the picture is kept and stamped as the best available rather than
+            // dropped: dropping here is how a preview went missing for good.
+            entry.generation = ThemeEngine.generation
+            return false
+        }
         // Never redraw a page the user is standing on.
         //
         // A cached picture is only ever *revealed* by a child page's back preview,
@@ -365,20 +471,22 @@ internal object WindowSnapshot {
         // slot is unreachable right now, and it is re-photographed by [capture]
         // the next time a child is launched from it. Dropping it is free.
         //
-        // Redrawing it is not. [forceRecompose] disposes and rebuilds the whole
-        // composition, which on a live window costs a blank frame (the flash
-        // someone sees on the way back from a third-level page) and resets every
-        // plain `remember` on the page — including, once the rebuild lands under
-        // the finger, where the list is scrolled to. It is a stopped window's
-        // tree that can be brought forward and painted on demand; a resumed one
-        // has no reason to be touched at all.
+        // Redrawing it is not. Even a non-destructive re-measure on a live window
+        // costs a blank frame (the flash someone sees on the way back from a
+        // third-level page) and can fight the gesture for the main thread; an
+        // earlier destructive version also reset every plain `remember` on the
+        // page — including, once the rebuild landed under the finger, where the
+        // list is scrolled to. It is a stopped window's tree that can be brought
+        // forward and painted on demand; a resumed one has no reason to be
+        // touched at all.
         if (isOnScreen(parent)) {
             // The settle retake does not get to make this call: it runs while
             // the page it is retaking has only just been left, and dropping the
             // picture there would trade a photograph that is one press too
             // lively for no photograph at all. It keeps what it has.
             if (!dropIfVisible) {
-                return true
+                entry.generation = ThemeEngine.generation
+                return false
             }
             cache.remove(name)
             return false
@@ -387,22 +495,50 @@ internal object WindowSnapshot {
             Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         } catch (t: Throwable) {
             Log.w(TAG, "Cannot allocate snapshot bitmap for retake", t)
-            cache.remove(name)
+            // Keep the picture we have and let the preview use it: a page in last
+            // week's colours beats a flat panel, and the next capture replaces it.
+            entry.generation = ThemeEngine.generation
             return false
         }
-        forceRecompose(view)
-        // Re-measure and lay out: a re-attached view has no valid size of its
-        // own until it is measured, and drawing an unmeasured tree paints
-        // nothing.
-        view.measure(
-            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
-        )
-        view.layout(view.left, view.top, view.left + width, view.top + height)
-        redrawFallback(view, bitmap)
-        entry.bitmap = bitmap.asImageBitmap()
-        entry.generation = ThemeEngine.generation
-        return true
+        // Guarded end to end. This runs from a main-looper Runnable, and an
+        // exception escaping one does not "fail a retake", it kills the app —
+        // the one thing this file promises a snapshot may never do. A failed
+        // redraw also must not be *stored*: a freshly allocated bitmap is
+        // transparent, and storing one is how the preview turned into a blank
+        // panel, which reads as "there is no previous page" rather than as a
+        // picture that needs another try.
+        return try {
+            // No detach/reattach: the generation bump already invalidated the
+            // retained composition, and a stopped Compose view keeps recompose on
+            // the *global* frame loop (the Recomposer is shared and the foreground
+            // page drives those frames), so by the time this runs its colours are
+            // current. Re-measuring and laying out here only rebuilds the display
+            // list from that already-recomposed state; drawing an unmeasured tree
+            // would paint nothing.
+            val widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
+            val heightSpec = View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
+            // Two passes to converge: the first layout can itself fire
+            // onSizeChanged (the large-title height is reported during placement)
+            // and re-dirty the bar; the second pass lays the settled tree out, so
+            // the title layer is whole when recorded. Idempotent, and this whole
+            // function only runs on an appearance change.
+            view.measure(widthSpec, heightSpec)
+            view.layout(view.left, view.top, view.left + width, view.top + height)
+            view.measure(widthSpec, heightSpec)
+            view.layout(view.left, view.top, view.left + width, view.top + height)
+            if (!redraw(view, bitmap)) {
+                Log.w(TAG, "Retake drew nothing; keeping the previous picture")
+                entry.generation = ThemeEngine.generation
+                return false
+            }
+            entry.bitmap = bitmap.asImageBitmap()
+            entry.generation = ThemeEngine.generation
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "Retake failed; keeping the previous picture", t)
+            entry.generation = ThemeEngine.generation
+            false
+        }
     }
 
     /**
@@ -419,42 +555,17 @@ internal object WindowSnapshot {
         return state.isAtLeast(Lifecycle.State.STARTED)
     }
 
-    /**
-     * Forces [view]'s subtree to rebuild its display list instead of reusing the
-     * cached one, which is what a stopped window would otherwise hand to
-     * `View.draw`.
-     *
-     * **Why not simply detach and re-attach.** That was the first shape of this,
-     * and it works — re-attaching makes Compose dispose and rebuild, so the draw
-     * that follows sees the new palette. What it also does is discard every
-     * `remember` in the tree, including the `LazyColumn`'s scroll position: the
-     * app list would jump back to the top because the user picked a colour. That
-     * is a worse bug than the one being fixed.
-     *
-     * **How that is handled without this file knowing anything about the parent.**
-     * The scroll position is held by `MainScreen` through `rememberSaveable`
-     * rather than plain `remember`, so it is restored from the view's saveable
-     * registry — which outlives the composition being disposed. Nothing has to be
-     * carried across by hand here, and this stays free of any knowledge of what
-     * the parent renders. The rule for anything else the parent wants to keep
-     * across a retake is the same: hold it saveably, do not expect the
-     * composition to survive.
-     *
-     * All of it is guarded: an unexpected view shape must cost the strip its
-     * detail, never crash the settings screen the user is standing on.
-     */
-    private fun forceRecompose(view: View) {
-        try {
-            val content = (view as? android.view.ViewGroup)?.getChildAt(0) ?: return
-            val parent = content.parent as? android.view.ViewGroup ?: return
-            val index = parent.indexOfChild(content)
-            if (index < 0) return
-            parent.removeViewAt(index)
-            parent.addView(content, index)
-        } catch (t: Throwable) {
-            Log.w(TAG, "Cannot force recompose for snapshot retake", t)
-        }
-    }
+    // No force-recompose step here any more. An earlier version detached and
+    // re-attached the retained content view to force a synchronous recompose of a
+    // stopped page. That is both unnecessary and unsafe: a stopped Compose view
+    // keeps recompose on the global, shared Recomposer (the foreground page drives
+    // the frames), so the generation bump has already brought its colours current
+    // by the time [rerender] measures — and a detach/reattach disposes the whole
+    // composition, discarding every plain `remember` (e.g. the list's scroll
+    // position when it is not held saveably) and racing the platform back gesture,
+    // which produced a missing preview and, on some ROMs, a native crash during the
+    // forced re-attach/draw. Re-measuring the still-attached view rebuilds its
+    // display list from the already-recomposed state without any of that.
 
     /**
      * Photograph [activity]'s window and cache it, then run [onCaptured] on the
@@ -496,8 +607,9 @@ internal object WindowSnapshot {
                     store(activity, bitmap)
                 } else {
                     Log.w(TAG, "PixelCopy failed with result=$result; redrawing instead")
-                    redrawFallback(view, bitmap)
-                    store(activity, bitmap)
+                    if (redraw(view, bitmap)) {
+                        store(activity, bitmap)
+                    }
                 }
                 onCaptured()
             }, handler)
@@ -506,8 +618,9 @@ internal object WindowSnapshot {
             // no hardware renderer, ...). The redraw is a real fallback, not a
             // placeholder — it is what the old View-based screenshot did.
             Log.w(TAG, "PixelCopy unavailable; redrawing instead", t)
-            redrawFallback(view, bitmap)
-            store(activity, bitmap)
+            if (redraw(view, bitmap)) {
+                store(activity, bitmap)
+            }
             onCaptured()
         }
     }
@@ -538,11 +651,22 @@ internal object WindowSnapshot {
         )
     }
 
-    private fun redrawFallback(view: View, bitmap: Bitmap) {
-        try {
+    /**
+     * Paints [view] into [bitmap], and says whether anything came of it.
+     *
+     * The flag matters: a caller that stores a bitmap it did not manage to draw
+     * into is storing a transparent rectangle, and a transparent rectangle on the
+     * layer a back preview reveals is indistinguishable from "there is no page
+     * underneath" — a flat panel. Failure has to leave the previous picture in
+     * place instead.
+     */
+    private fun redraw(view: View, bitmap: Bitmap): Boolean {
+        return try {
             view.draw(Canvas(bitmap))
+            true
         } catch (t: Throwable) {
             Log.w(TAG, "Redraw fallback failed too", t)
+            false
         }
     }
 }

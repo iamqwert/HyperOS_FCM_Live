@@ -13,6 +13,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -64,9 +65,20 @@ fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
     // write and the read, which is how a style switch could land one screen late.
     val generation = ThemeEngine.generation
     val style = UiStyle.of(ThemePrefs.uiStyle(context))
-    when (style) {
-        UiStyle.Miuix -> MiuixStyleTheme(content)
-        UiStyle.Material -> MaterialStyleTheme(content)
+    // Each look gets its own saveable scope. The two style branches are
+    // different composables at the same source position, so a switch replaces
+    // the whole subtree — and without a provider here the switcher's own page
+    // (设置) loses its scroll position, because plain positional saveable keys
+    // no longer match across the branch boundary. Scoped per style, the state
+    // each look's pages saved is retained by the holder and restored when that
+    // look comes back: switching 界面风格 reads as re-dressing the same page,
+    // not as landing on a fresh one.
+    val styleScope = rememberSaveableStateHolder()
+    styleScope.SaveableStateProvider(style) {
+        when (style) {
+            UiStyle.Miuix -> MiuixStyleTheme(content)
+            UiStyle.Material -> MaterialStyleTheme(content)
+        }
     }
 }
 

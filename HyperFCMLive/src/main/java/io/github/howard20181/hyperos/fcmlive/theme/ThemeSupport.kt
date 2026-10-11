@@ -120,6 +120,9 @@ object ThemeSupport {
     /** Call before `setContentView`. Must never throw: UI setup is best-effort. */
     @JvmStatic
     fun onCreate(activity: Activity) {
+        // Sync the Compose-visible appearance state with disk before any
+        // composable reads it — see [AppearanceState].
+        AppearanceState.hydrate(activity)
         try {
             applyDynamicColors(activity)
         } catch (ignored: Throwable) {
