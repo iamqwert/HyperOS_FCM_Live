@@ -169,14 +169,14 @@ internal object GreezeHooks {
             )
             getPackageNameFromUidMethod?.isAccessible = true
             if (getPackageNameFromUidMethod == null) {
-                module.log(
+                module.logGated(
                     Log.INFO, HookerSupport.TAG,
                     "GreezeManagerService#getPackageNameFromUid absent;" +
                         " isAllowBroadcast falls back to the raw callee argument"
                 )
             }
             if (isAllowBroadcastMethod == null) {
-                module.log(Log.ERROR, HookerSupport.TAG, "GreezeManagerService#isAllowBroadcast absent, skip")
+                module.logGated(Log.ERROR, HookerSupport.TAG, "GreezeManagerService#isAllowBroadcast absent, skip")
             } else {
                 val uidLookup = getPackageNameFromUidMethod
                 hookE(isAllowBroadcastMethod).intercept { chain: XposedInterface.Chain ->
@@ -199,7 +199,7 @@ internal object GreezeHooks {
                                 }
                             }
                         } catch (e: Exception) {
-                            module.log(Log.ERROR, HookerSupport.TAG, "Failed to get callee package name", e)
+                            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to get callee package name", e)
                         }
                     }
                     val action = chain.getArg(4)
@@ -224,7 +224,7 @@ internal object GreezeHooks {
                             }
                             if (!broadcastGateAllowedLogged) {
                                 broadcastGateAllowedLogged = true
-                                module.log(
+                                module.logGated(
                                     Log.INFO, HookerSupport.TAG,
                                     "isAllowBroadcast: c2dm allowed for callee=$calleePkgName " +
                                         "(callerUid=$callerUid, callerPkg=$callerPkg, " +
@@ -248,7 +248,7 @@ internal object GreezeHooks {
                             broadcastGateSkippedCount++
                             if (!broadcastGateSkippedLogged) {
                                 broadcastGateSkippedLogged = true
-                                module.log(
+                                module.logGated(
                                     Log.INFO, HookerSupport.TAG,
                                     "isAllowBroadcast: c2dm not intercepted for " +
                                         "callee=$calleePkgName (not on the allowlist); " +
@@ -260,13 +260,13 @@ internal object GreezeHooks {
                     chain.proceed()
                 }
                 module.deoptimize(isAllowBroadcastMethod)
-                module.log(
+                module.logGated(
                     Log.INFO, HookerSupport.TAG,
                     "P1: isAllowBroadcast hooked; caller-uid fallback armed (arg0=callerUid)"
                 )
             }
         } catch (e: Exception) {
-            module.log(Log.ERROR, HookerSupport.TAG, "Failed to hook GreezeManagerService#isAllowBroadcast", e)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook GreezeManagerService#isAllowBroadcast", e)
         }
         try {
             val deferBroadcastForMiuiMethod = GreezeManagerServiceClass.getDeclaredMethod(
@@ -280,7 +280,7 @@ internal object GreezeHooks {
             }
             module.deoptimize(deferBroadcastForMiuiMethod)
         } catch (e: Exception) {
-            module.log(Log.ERROR, HookerSupport.TAG, "Failed to hook GreezeManagerService#deferBroadcastForMiui", e)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook GreezeManagerService#deferBroadcastForMiui", e)
         }
         // ponytail: mGmsLimitEnabled is cleared on every call, never once at
         //   install. It is pure runtime state — constructor-initialised to true,
@@ -309,13 +309,13 @@ internal object GreezeHooks {
                         GreezeManagerServiceClass.getDeclaredField("mGmsLimitEnabled")
                     UnsafeUtils.setBooleanField(mGmsLimitEnabled, chain.thisObject, false)
                 } catch (t: Throwable) {
-                    module.log(Log.ERROR, HookerSupport.TAG, "Failed to clear mGmsLimitEnabled", t)
+                    module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to clear mGmsLimitEnabled", t)
                 }
                 chain.proceed()
             }
             module.deoptimize(triggerGMSLimitActionMethod)
         } catch (e: Throwable) {
-            module.log(Log.ERROR, HookerSupport.TAG, "Failed to hook GreezeManagerService#triggerGMSLimitAction", e)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook GreezeManagerService#triggerGMSLimitAction", e)
         }
         forceBooleanArg(
             GreezeManagerServiceClass,
@@ -394,7 +394,7 @@ internal object GreezeHooks {
                 deferC2dmPassthroughCount++
                 if (!deferC2dmPassthroughLogged) {
                     deferC2dmPassthroughLogged = true
-                    module.log(
+                    module.logGated(
                         Log.INFO, HookerSupport.TAG,
                         "deferBroadcast: c2dm reached the ROM policy " +
                             "(P0: no longer bypassed here)"
@@ -404,7 +404,7 @@ internal object GreezeHooks {
             chain.proceed()
         }
         module.deoptimize(deferBroadcastMethod)
-        module.log(
+        module.logGated(
             Log.INFO, HookerSupport.TAG,
             "P0: DomesticPolicyManager#deferBroadcast hooked; c2dm bypass removed, " +
                 "CN reconnect actions only"
@@ -468,7 +468,7 @@ internal object GreezeHooks {
                     // isPushApp stack-walk branch and must not be consumed here.
                     if (!gmsRestrictNetLogged) {
                         gmsRestrictNetLogged = true
-                        module.log(
+                        module.logGated(
                             Log.INFO, HookerSupport.TAG,
                             "DomesticPolicyManager#isRestrictNet: kept GMS (uid $uid) unrestricted"
                         )
@@ -484,7 +484,7 @@ internal object GreezeHooks {
                         // each freeze would only spend log bytes.
                         synchronized(greezeNetReleaseLoggedUids) {
                             if (greezeNetReleaseLoggedUids.add(uid)) {
-                                module.log(
+                                module.logGated(
                                     Log.INFO, HookerSupport.TAG,
                                     "greeze net release: kept checked app " +
                                         "$checkedPkg (uid $uid) unrestricted"
@@ -497,7 +497,7 @@ internal object GreezeHooks {
                 chain.proceed()
             }
             module.deoptimize(isRestrictNetMethod)
-            module.log(
+            module.logGated(
                 Log.INFO, HookerSupport.TAG,
                 "DomesticPolicyManager#isRestrictNet hooked for GMS; " +
                     "checked apps follow greeze_net_release"
@@ -555,7 +555,7 @@ internal object GreezeHooks {
                 if (uid is Int && allow && isGmsUid(uid)) {
                     if (!gmsUdpFilterLogged) {
                         gmsUdpFilterLogged = true
-                        module.log(
+                        module.logGated(
                             Log.INFO, HookerSupport.TAG,
                             "udpPackageRestrict: skipped UDP filter for GMS (uid $uid)"
                         )
@@ -565,7 +565,7 @@ internal object GreezeHooks {
                 chain.proceed()
             }
             module.deoptimize(udpPackageRestrictMethod)
-            module.log(Log.INFO, HookerSupport.TAG, "GreezeManagerService#udpPackageRestrict hooked for GMS")
+            module.logGated(Log.INFO, HookerSupport.TAG, "GreezeManagerService#udpPackageRestrict hooked for GMS")
         } catch (e: ClassNotFoundException) {
             logSkip("GreezeManagerService absent, udpPackageRestrict skip")
         } catch (e: NoSuchMethodException) {
@@ -587,7 +587,7 @@ internal object GreezeHooks {
             try {
                 mSystemBlackListField = ListAppsManagerClass.getDeclaredField("SYSTEM_BLACK_LIST")
             } catch (ex: NoSuchFieldException) {
-                module.log(
+                module.logGated(
                     Log.ERROR, HookerSupport.TAG,
                     "Failed to find ListAppsManager.mSystemBlackList or ListAppsManager.SYSTEM_BLACK_LIST",
                     e
@@ -614,14 +614,14 @@ internal object GreezeHooks {
                             val removed = mSystemBlackList?.remove(HookerSupport.GMS_PACKAGE_NAME)
                             if (removed != null && !listAppsBlacklistPruneLogged) {
                                 listAppsBlacklistPruneLogged = true
-                                module.log(
+                                module.logGated(
                                     Log.INFO, HookerSupport.TAG,
                                     "ListAppsManager: pruned GMS from system blacklist " +
                                         "(was present=$removed)"
                                 )
                             }
                         } catch (e: Exception) {
-                            module.log(Log.ERROR, HookerSupport.TAG, "Failed to modify system blacklist", e)
+                            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to modify system blacklist", e)
                         }
                     }
                 }
@@ -640,7 +640,7 @@ internal object GreezeHooks {
                     mUseDataWhiteListField =
                         ListAppsManagerClass.getDeclaredField("USE_DATA_WHITE_LIST")
                 } catch (ex: NoSuchFieldException) {
-                    module.log(
+                    module.logGated(
                         Log.ERROR, HookerSupport.TAG,
                         "Failed to find ListAppsManager.mUseDataWhiteList or ListAppsManager.USE_DATA_WHITE_LIST",
                         e
@@ -662,20 +662,20 @@ internal object GreezeHooks {
                         // use-data query for every package.
                         if (added != null && !listAppsUseDataAddLogged) {
                             listAppsUseDataAddLogged = true
-                            module.log(
+                            module.logGated(
                                 Log.INFO, HookerSupport.TAG,
                                 "ListAppsManager: added GMS to use-data whitelist " +
                                     "(was absent=$added)"
                             )
                         }
                     } catch (e: Exception) {
-                        module.log(Log.ERROR, HookerSupport.TAG, "Failed to modify use data whitelist", e)
+                        module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to modify use data whitelist", e)
                     }
                     chain.proceed()
                 }
             }
         } catch (e: NoSuchMethodException) {
-            module.log(Log.ERROR, HookerSupport.TAG, "Failed to hook ListAppsManager#isInWhiteList", e)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook ListAppsManager#isInWhiteList", e)
         }
     }
 
@@ -725,7 +725,7 @@ internal object GreezeHooks {
                 // GMS on every broadcast the module cares about, and with all
                 // four experiment switches off push still arrived.
             } catch (e: Exception) {
-                module.log(
+                module.logGated(
                     Log.ERROR, HookerSupport.TAG,
                     "Failed to modify BroadcastQueueModernStubImpl#checkApplicationAutoStart", e
                 )
@@ -784,7 +784,7 @@ internal object GreezeHooks {
                         return@intercept false
                     }
                 } catch (e: Exception) {
-                    module.log(
+                    module.logGated(
                         Log.ERROR, HookerSupport.TAG,
                         "Failed to modify GreezeManagerService#isRestrictReceiver", e
                     )
@@ -839,7 +839,7 @@ internal object GreezeHooks {
                         return@intercept false
                     }
                 } catch (e: Exception) {
-                    module.log(
+                    module.logGated(
                         Log.ERROR, HookerSupport.TAG,
                         "Failed to modify GreezeManagerService#isNeedCachedBroadcast", e
                     )
@@ -885,7 +885,7 @@ internal object GreezeHooks {
                     return@intercept whiteList
                 }
             } catch (t: Throwable) {
-                module.log(Log.ERROR, HookerSupport.TAG, "Failed to extend ProcessPolicy white list", t)
+                module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to extend ProcessPolicy white list", t)
             }
             result
         }
@@ -916,7 +916,7 @@ internal object GreezeHooks {
                     try {
                         pruneGmsFromNoNetworkBlacklist(module, mNoNetworkBlackUidsField, chain.thisObject, gmsUid)
                     } catch (t: Throwable) {
-                        module.log(
+                        module.logGated(
                             Log.ERROR, HookerSupport.TAG,
                             "Failed to modify AwareResourceControl.mNoNetworkBlackUids", t
                         )
@@ -943,13 +943,13 @@ internal object GreezeHooks {
         val uid = gmsUid()
         val removedByUid = uid != null && blacklist.remove(uid)
         if (removedByUid || removedByName) {
-            module.log(
+            module.logGated(
                 Log.INFO, HookerSupport.TAG, "Removed GMS from NoNetworkBlackUids (by " +
                     (if (removedByUid) "uid $uid" else "package name") + ")"
             )
         } else if (!noNetworkBlacklistMismatchLogged) {
             noNetworkBlacklistMismatchLogged = true
-            module.log(
+            module.logGated(
                 Log.INFO, HookerSupport.TAG, "NoNetworkBlackUids (size=" + blacklist.size +
                     ") matched neither the GMS package name nor its uid" +
                     (if (uid == null) " (uid not resolvable yet)" else "")

@@ -244,14 +244,14 @@ internal object SystemProbes {
                 val all = chain.getArg(2) as? Boolean
                 val gmsHit = uids?.any { isGmsUid(it) } ?: false
                 if (gmsHit || n <= 10) {
-                    module.log(
+                    module.logGated(
                         Log.INFO, HookerSupport.TAG,
                         "socket-teardown probe[$label]: $methodName #$n " +
                             "(pkg=$pkg uids=${uids?.contentToString()} all=$all gmsHit=$gmsHit)"
                     )
                 }
             } catch (t: Throwable) {
-                module.log(Log.ERROR, HookerSupport.TAG, "Failed to inspect socket-teardown args ($label)", t)
+                module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to inspect socket-teardown args ($label)", t)
             }
             result
         }
@@ -281,7 +281,7 @@ internal object SystemProbes {
             val clazz = try {
                 classLoader.loadClass(name)
             } catch (t: Throwable) {
-                module.log(Log.INFO, HookerSupport.TAG, "whetstone probe: $name NOT resolvable here")
+                module.logGated(Log.INFO, HookerSupport.TAG, "whetstone probe: $name NOT resolvable here")
                 continue
             }
             resolvable++

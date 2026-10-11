@@ -394,6 +394,28 @@ object Prefs {
     private const val KEY_GREEZE_NET_RELEASE_PENDING_PUSH =
         "greeze_net_release_pending_push"
 
+    /**
+     * Remote + local: "show debug logs".
+     *
+     * Off — the default — the module's log goes quiet unless something is
+     * actually wrong: warnings, errors and the fatal tier are the only lines
+     * that still reach the module log, so an everyday, healthy run writes
+     * nothing at all. On, the full stream returns: install passes, per-push
+     * verdicts, probe findings — what a troubleshooting session needs. The
+     * gate itself lives in [HookLog]; this key only feeds it.
+     *
+     * The lines are written either way ("never infer that a hook worked from
+     * the absence of a log line" still holds — the absence is now the gate's
+     * doing); what the switch changes is emission, not bookkeeping. Flipping
+     * it rides the ordinary config reload, so it lands without a reboot.
+     *
+     * Default **off**, like every other experiment: the volume it restores is
+     * exactly what an everyday run should not carry.
+     */
+    const val KEY_DEBUG_LOG = "debug_log"
+    /** UI-only: set while the mirror holds a debug-log change the module never saw. */
+    private const val KEY_DEBUG_LOG_PENDING_PUSH = "debug_log_pending_push"
+
     /** Action the app broadcasts after writing, to refresh system_server. */
     const val ACTION_ALLOWLIST_CHANGED = MODULE_PKG + ".ALLOWLIST_CHANGED"
 
@@ -1003,6 +1025,53 @@ object Prefs {
             } catch (t: Throwable) {
                 localPrefs(app).edit()
                     .putBoolean(KEY_GREEZE_NET_RELEASE_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+        }
+    }
+
+    /** Debug-log switch value as the UI last left it. */
+    @JvmStatic
+    fun readLocalDebugLog(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_DEBUG_LOG, false)
+    }
+
+    /** Debug-log counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingDebugLogPush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_DEBUG_LOG_PENDING_PUSH, false)
+    }
+
+    /**
+     * Write the debug-log switch and make it live.
+     *
+     * Same shape as [writeGreezeNetRelease]: the system_server gate refreshes
+     * from the remote group on the reload broadcast this write announces, and
+     * the PowerKeeper-side hooks refresh it at their own lazy reads, so the
+     * value takes effect without a reboot.
+     */
+    @JvmStatic
+    fun writeDebugLog(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean
+    ) {
+        val app = appContext(context)
+        localPrefs(app).edit().putBoolean(KEY_DEBUG_LOG, enabled).apply()
+        if (remotePrefs == null) {
+            localPrefs(app).edit()
+                .putBoolean(KEY_DEBUG_LOG_PENDING_PUSH, true).apply()
+            broadcastAllowlistChanged(app)
+            return
+        }
+        localPrefs(app).edit()
+            .putBoolean(KEY_DEBUG_LOG_PENDING_PUSH, false).apply()
+        WRITER.execute {
+            try {
+                remotePrefs.edit().putBoolean(KEY_DEBUG_LOG, enabled).commit()
+            } catch (t: Throwable) {
+                localPrefs(app).edit()
+                    .putBoolean(KEY_DEBUG_LOG_PENDING_PUSH, true).apply()
             }
             broadcastAllowlistChanged(app)
         }

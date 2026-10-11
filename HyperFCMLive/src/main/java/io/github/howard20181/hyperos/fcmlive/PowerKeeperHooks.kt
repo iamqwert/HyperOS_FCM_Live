@@ -118,7 +118,7 @@ internal object PowerKeeperHooks {
                         val uid = args[0] as Int
                         if (isGmsUid(uid) && java.lang.Boolean.TRUE != args[1]) {
                             args[1] = true
-                            module.log(
+                            module.logGated(
                                 Log.INFO, HookerSupport.TAG,
                                 "AppStandbyController#setUidState: kept GMS (uid $uid) allowed"
                             )
@@ -131,7 +131,7 @@ internal object PowerKeeperHooks {
                 // package-ready pass (every hot reload re-runs it), so a raw
                 // count reads like several hooks when setId() has in fact
                 // collapsed them into a single live one.
-                module.log(
+                module.logGated(
                     Log.INFO, HookerSupport.TAG,
                     "AppStandbyController#setUidState hooked for GMS allow re-assert" +
                         " (pkg=$packageName, userId=${android.os.Process.myUid() / 100000})"
@@ -193,12 +193,12 @@ internal object PowerKeeperHooks {
                         return@intercept copy
                     }
                 } catch (t: Throwable) {
-                    module.log(Log.ERROR, HookerSupport.TAG, "Failed to extend getNoRestrictApps", t)
+                    module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to extend getNoRestrictApps", t)
                 }
                 try {
                     GmsSupport.ensureGmsUserTableBgControl(module, systemContext)
                 } catch (t: Throwable) {
-                    module.log(Log.WARN, HookerSupport.TAG, "Failed to write back userTable.bgControl", t)
+                    module.logGated(Log.WARN, HookerSupport.TAG, "Failed to write back userTable.bgControl", t)
                 }
                 result
             }
@@ -240,7 +240,7 @@ internal object PowerKeeperHooks {
                                 val a = copy[i]
                                 if (a is String && a != HookerSupport.GMS_PACKAGE_NAME && a != HookerSupport.COL_BG_CONTROL) {
                                     copy[i] = HookerSupport.BG_CONTROL_NO_RESTRICT
-                                    module.log(
+                                    module.logGated(
                                         Log.INFO, HookerSupport.TAG,
                                         "setBgControl: forced GMS control $a -> ${HookerSupport.BG_CONTROL_NO_RESTRICT}"
                                     )
@@ -253,7 +253,7 @@ internal object PowerKeeperHooks {
                     try {
                         GmsSupport.ensureGmsUserTableBgControl(module, systemContext)
                     } catch (t: Throwable) {
-                        module.log(Log.WARN, HookerSupport.TAG, "userTable re-assert after ${method.name} failed", t)
+                        module.logGated(Log.WARN, HookerSupport.TAG, "userTable re-assert after ${method.name} failed", t)
                     }
                     result
                 }
@@ -261,7 +261,7 @@ internal object PowerKeeperHooks {
                 reAssertHooked.add(method.name)
             }
             if (reAssertHooked.isNotEmpty()) {
-                module.log(
+                module.logGated(
                     Log.INFO, HookerSupport.TAG,
                     "UserConfigureHelper#${reAssertHooked.joinToString("/")} " +
                         "hooked for userTable re-assert"
@@ -284,7 +284,7 @@ internal object PowerKeeperHooks {
                 try {
                     GmsSupport.ensureGmsInMilletSetting(module, systemContext)
                 } catch (t: Throwable) {
-                    module.log(Log.ERROR, HookerSupport.TAG, "Failed to repair MILLET_NO_RESTRICT_APP", t)
+                    module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to repair MILLET_NO_RESTRICT_APP", t)
                 }
             }
             module.deoptimize(dealNoRestrictAppMethod)
@@ -363,7 +363,7 @@ internal object PowerKeeperHooks {
             val kept = pkgs.filter { it != HookerSupport.WECHAT_PACKAGE_NAME }.toTypedArray()
             val dropped = ++wechatDozeKeepoutCount
             if (dropped == 1L || dropped % 10L == 0L) {
-                module.log(
+                module.logGated(
                     Log.INFO, HookerSupport.TAG,
                     "doze-keepout: dropped WeChat from a battery-optimization " +
                         "whitelist write #$dropped"
@@ -376,7 +376,7 @@ internal object PowerKeeperHooks {
         module.deoptimize(addMethod)
         // Sentinel wording, per the misread that cost a night: hooked does not
         // mean active, and active does not mean the stored entry was cleared.
-        module.log(
+        module.logGated(
             Log.INFO, HookerSupport.TAG,
             "CommonAdapter#addPowerSaveWhitelistApps hooked (doze-keepout, default " +
                 "off): idle until the experiment switch is on, then WeChat is left " +
@@ -393,6 +393,7 @@ internal object PowerKeeperHooks {
     private fun isWechatDozeKeepoutEnabled(module: XposedInterface): Boolean {
         return try {
             module.getRemotePreferences(Prefs.GROUP_CONFIG)
+                .also { HookLog.refresh(it) }
                 .getBoolean(Prefs.KEY_WECHAT_DOZE_KEEPOUT, false)
         } catch (ignored: Throwable) {
             // Fail closed: an unreadable switch must not start deciding

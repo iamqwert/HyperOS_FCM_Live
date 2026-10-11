@@ -128,7 +128,7 @@ internal object SleepModeGate {
         // One install-time line for both arms, so "no sentinel fired" is never
         // the only evidence: the log states which arms exist on this ROM and
         // what a FIRED line would mean.
-        module.log(
+        module.logGated(
             Log.INFO, HookerSupport.TAG,
             "Sleep-mode legacy per-uid chain armed: whitelist=$whitelistArmed, " +
                 "chain=$chainArmed (sentinel: V816 cuts the network in PowerKeeper, " +
@@ -165,7 +165,7 @@ internal object SleepModeGate {
         hookE(applyMethod).intercept { chain: XposedInterface.Chain ->
             if (!sSleepWhitelistPathFired) {
                 sSleepWhitelistPathFired = true
-                module.log(
+                module.logGated(
                     Log.INFO, HookerSupport.TAG,
                     "sleep-mode sentinel: legacy path FIRED — " +
                         "#setSleepModeWhitelistUidRules ran on this ROM, so this " +
@@ -176,7 +176,7 @@ internal object SleepModeGate {
             try {
                 addGmsToSleepModeWhitelist(module, whitelistField, chain.thisObject, gmsUid)
             } catch (t: Throwable) {
-                module.log(Log.ERROR, HookerSupport.TAG, "Failed to extend sleep-mode network whitelist", t)
+                module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to extend sleep-mode network whitelist", t)
             }
             chain.proceed()
         }
@@ -220,7 +220,7 @@ internal object SleepModeGate {
                 // the logs. Record it, plus the size we are about to iterate over.
                 if (!sSleepChainPathFired) {
                     sSleepChainPathFired = true
-                    module.log(
+                    module.logGated(
                         Log.INFO, HookerSupport.TAG,
                         "sleep-mode sentinel: legacy path FIRED — " +
                             "#enableSleepModeChain ran on this ROM; sleep enters " +
@@ -228,7 +228,7 @@ internal object SleepModeGate {
                             "PowerKeeper's radio cutoff"
                     )
                 }
-                module.log(
+                module.logGated(
                     Log.INFO, HookerSupport.TAG,
                     "Sleep mode entering: chain enabled, whitelist size " +
                         sleepModeWhitelistSize(whitelistField, chain.thisObject)
@@ -250,7 +250,7 @@ internal object SleepModeGate {
                     // link was down. The line names the assumption rather than
                     // leaving it to be re-derived; the cross-generation gap is
                     // tracked in HOOKS_AND_DIAGNOSTICS.md §3.8.6.
-                    module.log(
+                    module.logGated(
                         Log.INFO, HookerSupport.TAG,
                         "Sleep mode exited: GMS was kept on the whitelist, " +
                             "skipping recovery nudge (MCS untouched; assumes the " +
@@ -258,7 +258,7 @@ internal object SleepModeGate {
                             "also cuts them in PowerKeeper this skip is wrong)"
                     )
                 } else {
-                    module.log(
+                    module.logGated(
                         Log.INFO, HookerSupport.TAG,
                         "Sleep mode exited: GMS not whitelisted (network was cut), " +
                             "nudging GMS to reconnect"
@@ -306,7 +306,7 @@ internal object SleepModeGate {
         val raw = whitelistField.get(owner)
         if (raw !is MutableCollection<*>) {
             sGmsKeptOnSleepWhitelist = false
-            module.log(
+            module.logGated(
                 Log.WARN, HookerSupport.TAG,
                 "Sleep mode entering: whitelist field is ${raw?.javaClass?.name ?: "null"}, " +
                     "not a mutable collection, GMS not added"
@@ -318,7 +318,7 @@ internal object SleepModeGate {
         val uid = gmsUid()
         if (uid == null) {
             sGmsKeptOnSleepWhitelist = false
-            module.log(
+            module.logGated(
                 Log.WARN, HookerSupport.TAG,
                 "Sleep mode entering: GMS uid unresolved, GMS not added"
             )
@@ -326,7 +326,7 @@ internal object SleepModeGate {
         }
         if (whitelist.add(uid)) {
             sGmsKeptOnSleepWhitelist = true
-            module.log(
+            module.logGated(
                 Log.INFO, HookerSupport.TAG,
                 "Sleep mode entering: kept GMS (uid $uid) on the network whitelist"
             )
@@ -334,7 +334,7 @@ internal object SleepModeGate {
             // Already present: either the ROM populated the set itself (which the
             // static analysis says it never does) or a previous pass left it there.
             sGmsKeptOnSleepWhitelist = true
-            module.log(
+            module.logGated(
                 Log.INFO, HookerSupport.TAG,
                 "Sleep mode entering: GMS (uid $uid) already whitelisted, size ${whitelist.size}"
             )
@@ -472,7 +472,7 @@ internal object SleepModeGate {
             // must not stop either: take the vendor's own no-cutoff branch
             // instead, which keeps both radios up for the whole night.
             hookSleepModeEarthquakeFlag(module, classLoader, hookE, logSkip)
-            module.log(
+            module.logGated(
                 Log.INFO, HookerSupport.TAG,
                 "Sleep-mode network keepalive: cutoff hooks incomplete, degraded " +
                     "to PowerKeeper's own no-cutoff branch (both radios stay up " +
@@ -490,13 +490,13 @@ internal object SleepModeGate {
             // One line per sleep entry either way, so the night's log states
             // which policy ran instead of leaving it to be inferred.
             if (!isSleepKeepaliveEnabled(module)) {
-                module.log(
+                module.logGated(
                     Log.INFO, HookerSupport.TAG,
                     "sleep-mode: WiFi left to the ROM policy (keepalive master switch off)"
                 )
                 return@intercept chain.proceed()
             }
-            module.log(
+            module.logGated(
                 Log.INFO, HookerSupport.TAG,
                 "sleep-mode: kept WiFi on (sleep would have turned it off)"
             )
@@ -517,7 +517,7 @@ internal object SleepModeGate {
             // the data switch was gated by the WiFi one; the two are peers now,
             // so there is exactly one way this hook declines.
             if (!isSleepKeepaliveDataEnabled(module)) {
-                module.log(
+                module.logGated(
                     Log.INFO, HookerSupport.TAG,
                     "sleep-mode: mobile data left to the ROM policy " +
                         "(keepalive data switch off)"
@@ -527,7 +527,7 @@ internal object SleepModeGate {
             // No pairing rule with the WiFi hook: each radio follows its own
             // switch, and a night where only one of them is kept up is a
             // configuration the user can ask for.
-            module.log(
+            module.logGated(
                 Log.INFO, HookerSupport.TAG,
                 "sleep-mode: kept mobile data on (keepalive data switch is on)"
             )
@@ -538,7 +538,7 @@ internal object SleepModeGate {
         // Say plainly that nothing happens yet: both switches are off by
         // default, and a hooked-but-idle hook must not read as a working one.
         // That misread already cost a night of diagnosis.
-        module.log(
+        module.logGated(
             Log.INFO, HookerSupport.TAG,
             "Sleep-mode network keepalive hooked: idle until an experiment " +
                 "switch is on, then each radio stays up under its own switch " +
@@ -624,7 +624,7 @@ internal object SleepModeGate {
             ) {
                 return@intercept chain.proceed()
             }
-            module.log(
+            module.logGated(
                 Log.INFO, HookerSupport.TAG,
                 "sleep-mode: reported life-safety reachability on, " +
                     "PowerKeeper will skip the network cutoff"
@@ -645,6 +645,7 @@ internal object SleepModeGate {
     private fun isSleepKeepaliveEnabled(module: XposedInterface): Boolean {
         return try {
             module.getRemotePreferences(Prefs.GROUP_CONFIG)
+                .also { HookLog.refresh(it) }
                 .getBoolean(Prefs.KEY_SLEEP_KEEPALIVE, false)
         } catch (ignored: Throwable) {
             false
@@ -668,6 +669,7 @@ internal object SleepModeGate {
     private fun isSleepKeepaliveDataEnabled(module: XposedInterface): Boolean {
         return try {
             module.getRemotePreferences(Prefs.GROUP_CONFIG)
+                .also { HookLog.refresh(it) }
                 .getBoolean(Prefs.KEY_SLEEP_KEEPALIVE_DATA, false)
         } catch (ignored: Throwable) {
             false
@@ -711,7 +713,7 @@ internal object SleepModeGate {
                                 val hasGms = result.contains(HookerSupport.GMS_PACKAGE_NAME)
                                 if (!sDozeSentinelReachedLogged) {
                                     sDozeSentinelReachedLogged = true
-                                    module.log(
+                                    module.logGated(
                                         Log.INFO, HookerSupport.TAG,
                                         "doze-wl-sentinel: reached (arg=${argType.simpleName}), " +
                                             "size=${result.size}, hasGms=$hasGms"
@@ -722,7 +724,7 @@ internal object SleepModeGate {
                                     if (sDozeSentinelInjectCount == 1 ||
                                         sDozeSentinelInjectCount % 10 == 0
                                     ) {
-                                        module.log(
+                                        module.logGated(
                                             Log.INFO, HookerSupport.TAG,
                                             "doze-wl-sentinel: GMS missing from doze whitelist, " +
                                                 "injected #$sDozeSentinelInjectCount (size ${result.size})"
@@ -736,7 +738,7 @@ internal object SleepModeGate {
                                 }
                             }
                         } catch (t: Throwable) {
-                            module.log(Log.ERROR, HookerSupport.TAG, "Failed to extend doze white list", t)
+                            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to extend doze white list", t)
                         }
                         result
                     }
@@ -748,7 +750,7 @@ internal object SleepModeGate {
                 }
             }
         } catch (e: ClassNotFoundException) {
-            module.log(Log.ERROR, HookerSupport.TAG, "Failed to hook GlobalFeatureConfigureHelper", e)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook GlobalFeatureConfigureHelper", e)
         }
     }
 }

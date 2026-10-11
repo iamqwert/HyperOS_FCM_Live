@@ -166,7 +166,7 @@ internal object GmsSupport {
                         ) {
                             val skipped = ++standbyFirewallSkipCount
                             if (skipped == 1 || skipped % 10 == 0) {
-                                module.log(
+                                module.logGated(
                                     Log.INFO, HookerSupport.TAG,
                                     "standby-firewall: suppressed 'enablemiuistandby enable' #$skipped"
                                 )
@@ -186,7 +186,7 @@ internal object GmsSupport {
                 logSkip("NetdExecutor#execute not found, skip command-level GMS net hooks")
             }
         } catch (e: ClassNotFoundException) {
-            module.log(Log.ERROR, HookerSupport.TAG, "Failed to hook NetdExecutor", e)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook NetdExecutor", e)
         }
         try {
             val GmsObserverClass = classLoader.loadClass("com.miui.powerkeeper.utils.GmsObserver")
@@ -244,7 +244,7 @@ internal object GmsSupport {
                 // that drifts across ROM generations, and a silent failure here
                 // would look identical to the hook working. This line is the
                 // drift alarm — its absence after a ROM update is a finding.
-                module.log(
+                module.logGated(
                     Log.INFO, HookerSupport.TAG,
                     "GmsObserver#c (obfuscated connected-bridge) hooked, forced connected=true"
                 )
@@ -252,7 +252,7 @@ internal object GmsSupport {
                 logSkip("GmsObserver#c (obfuscated connected-bridge) absent, skip")
             }
         } catch (e: ClassNotFoundException) {
-            module.log(Log.ERROR, HookerSupport.TAG, "Failed to hook GmsObserver", e)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook GmsObserver", e)
         }
         var disconnectHooked = false
         for (i in 1..8) {
@@ -266,7 +266,7 @@ internal object GmsSupport {
                     hookE(disconnectMethod).intercept { _: XposedInterface.Chain -> null }
                     module.deoptimize(disconnectMethod)
                     disconnectHooked = true
-                    module.log(Log.INFO, HookerSupport.TAG, listenerName + "#googleNetworkDisconnect hooked")
+                    module.logGated(Log.INFO, HookerSupport.TAG, listenerName + "#googleNetworkDisconnect hooked")
                 } catch (ignored: NoSuchMethodException) {
                 }
             } catch (ignored: ClassNotFoundException) {
@@ -326,7 +326,7 @@ internal object GmsSupport {
                     val scenario = scenarioField.getInt(cfg)
                     if (scenario == HookerSupport.SCENARIO_MUI_AUTO_GMS) {
                         scenarioField.setInt(cfg, HookerSupport.SCENARIO_NO_RESTRICT)
-                        module.log(
+                        module.logGated(
                             Log.INFO, HookerSupport.TAG,
                             "P3: rewrote GMS scenario ${HookerSupport.SCENARIO_MUI_AUTO_GMS} → ${HookerSupport.SCENARIO_NO_RESTRICT}"
                         )
@@ -334,15 +334,15 @@ internal object GmsSupport {
                     try {
                         ensureGmsUserTableBgControl(module, getSystemContext)
                     } catch (t: Throwable) {
-                        module.log(Log.WARN, HookerSupport.TAG, "P3: userTable write-back failed", t)
+                        module.logGated(Log.WARN, HookerSupport.TAG, "P3: userTable write-back failed", t)
                     }
                 } catch (t: Throwable) {
-                    module.log(Log.ERROR, HookerSupport.TAG, "P3: failed to rewrite GMS scenario", t)
+                    module.logGated(Log.ERROR, HookerSupport.TAG, "P3: failed to rewrite GMS scenario", t)
                 }
                 null
             }
             module.deoptimize(method)
-            module.log(Log.INFO, HookerSupport.TAG, "PowerKeeperAppConfigure#fillScenarioContent($paramCount args) hooked for P3")
+            module.logGated(Log.INFO, HookerSupport.TAG, "PowerKeeperAppConfigure#fillScenarioContent($paramCount args) hooked for P3")
         }
     }
 
@@ -426,12 +426,12 @@ internal object GmsSupport {
                     }
                     module.deoptimize(method)
                 }
-                module.log(Log.INFO, HookerSupport.TAG, "AurogonImmobulusMode#triggerQuickFreeze hooked")
+                module.logGated(Log.INFO, HookerSupport.TAG, "AurogonImmobulusMode#triggerQuickFreeze hooked")
             }
         } catch (e: ClassNotFoundException) {
             logSkip("AurogonImmobulusMode class absent, skip")
         } catch (e: Throwable) {
-            module.log(Log.ERROR, HookerSupport.TAG, "Failed to hook AurogonImmobulusMode", e)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook AurogonImmobulusMode", e)
         }
 
         // PolicyMaker.isAllowFreeze(uid): int return (CANNOT_FREEZE when in the
@@ -456,13 +456,13 @@ internal object GmsSupport {
                         chain.proceed()
                     }
                     module.deoptimize(method)
-                    module.log(Log.INFO, HookerSupport.TAG, "PolicyMaker#isAllowFreeze hooked (${method.returnType.simpleName})")
+                    module.logGated(Log.INFO, HookerSupport.TAG, "PolicyMaker#isAllowFreeze hooked (${method.returnType.simpleName})")
                 }
             }
         } catch (e: ClassNotFoundException) {
             logSkip("PolicyMaker class absent, skip")
         } catch (e: Throwable) {
-            module.log(Log.ERROR, HookerSupport.TAG, "Failed to hook PolicyMaker#isAllowFreeze", e)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook PolicyMaker#isAllowFreeze", e)
         }
     }
 
@@ -502,7 +502,7 @@ internal object GmsSupport {
             entries.joinToString(", ") + ", " + HookerSupport.GMS_PACKAGE_NAME
         }
         android.provider.Settings.System.putString(resolver, HookerSupport.MILLET_NO_RESTRICT_APP_KEY, updated)
-        module.log(Log.INFO, HookerSupport.TAG, "MILLET_NO_RESTRICT_APP: appended GMS (was: $raw)")
+        module.logGated(Log.INFO, HookerSupport.TAG, "MILLET_NO_RESTRICT_APP: appended GMS (was: $raw)")
         // P4: if GMS was frozen during the missing-entry window, nudge it awake.
         recoverGmsConnection(module, context)
     }
@@ -527,10 +527,10 @@ internal object GmsSupport {
             val sys = getSystemContext()
             val context = pk ?: sys
             if (context == null) {
-                module.log(Log.WARN, HookerSupport.TAG, "userTable: no Context (powerKeeper=$pk system=$sys), skip write-back")
+                module.logGated(Log.WARN, HookerSupport.TAG, "userTable: no Context (powerKeeper=$pk system=$sys), skip write-back")
                 return
             }
-            module.log(Log.INFO, HookerSupport.TAG, "userTable: ensure GMS bgControl via ${if (pk != null) "powerkeeper" else "system"}")
+            module.logGated(Log.INFO, HookerSupport.TAG, "userTable: ensure GMS bgControl via ${if (pk != null) "powerkeeper" else "system"}")
             val uri = android.net.Uri.parse(HookerSupport.USER_TABLE_URI)
             var current: String? = null
             try {
@@ -546,10 +546,10 @@ internal object GmsSupport {
                     }
                 }
             } catch (t: Throwable) {
-                module.log(Log.WARN, HookerSupport.TAG, "userTable: query failed", t)
+                module.logGated(Log.WARN, HookerSupport.TAG, "userTable: query failed", t)
                 return
             }
-            module.log(Log.INFO, HookerSupport.TAG, "userTable: GMS current bgControl=$current")
+            module.logGated(Log.INFO, HookerSupport.TAG, "userTable: GMS current bgControl=$current")
             if (current == HookerSupport.BG_CONTROL_NO_RESTRICT) return
 
             val values = android.content.ContentValues()
@@ -561,22 +561,22 @@ internal object GmsSupport {
                     "${HookerSupport.COL_PKG_NAME} = ?",
                     arrayOf(HookerSupport.GMS_PACKAGE_NAME)
                 )
-                module.log(Log.INFO, HookerSupport.TAG, "userTable: update $current -> ${HookerSupport.BG_CONTROL_NO_RESTRICT} count=$updated")
+                module.logGated(Log.INFO, HookerSupport.TAG, "userTable: update $current -> ${HookerSupport.BG_CONTROL_NO_RESTRICT} count=$updated")
                 if (updated > 0) return
             } catch (t: Throwable) {
-                module.log(Log.WARN, HookerSupport.TAG, "userTable: update failed", t)
+                module.logGated(Log.WARN, HookerSupport.TAG, "userTable: update failed", t)
             }
             values.put(HookerSupport.COL_PKG_NAME, HookerSupport.GMS_PACKAGE_NAME)
             values.put(HookerSupport.COL_USER_ID, 0)
             values.put(HookerSupport.COL_LAST_CONFIGURED, System.currentTimeMillis())
             try {
                 val inserted = context.contentResolver.insert(uri, values)
-                module.log(Log.INFO, HookerSupport.TAG, "userTable: insert result=$inserted")
+                module.logGated(Log.INFO, HookerSupport.TAG, "userTable: insert result=$inserted")
             } catch (t: Throwable) {
-                module.log(Log.WARN, HookerSupport.TAG, "userTable: insert GMS row failed", t)
+                module.logGated(Log.WARN, HookerSupport.TAG, "userTable: insert GMS row failed", t)
             }
         } catch (t: Throwable) {
-            module.log(Log.WARN, HookerSupport.TAG, "userTable: ensure failed", t)
+            module.logGated(Log.WARN, HookerSupport.TAG, "userTable: ensure failed", t)
         } finally {
             userTableReassertInFlight = false
         }
@@ -600,18 +600,18 @@ internal object GmsSupport {
                     intent.setPackage(target)
                     context.sendBroadcast(intent)
                 } catch (t: Throwable) {
-                    module.log(Log.WARN, HookerSupport.TAG, "Failed to send $action to $target", t)
+                    module.logGated(Log.WARN, HookerSupport.TAG, "Failed to send $action to $target", t)
                 }
             }
         }
-        module.log(Log.INFO, HookerSupport.TAG, "P4: recovery broadcasts sent to GMS+GSF")
+        module.logGated(Log.INFO, HookerSupport.TAG, "P4: recovery broadcasts sent to GMS+GSF")
         try {
             val uri = android.net.Uri.parse(HookerSupport.CHIMERA_PROVIDER_URI)
             val cursor = context.contentResolver.query(uri, null, null, null, null)
             cursor?.close()
-            module.log(Log.INFO, HookerSupport.TAG, "Chimera provider query completed")
+            module.logGated(Log.INFO, HookerSupport.TAG, "Chimera provider query completed")
         } catch (t: Throwable) {
-            module.log(Log.WARN, HookerSupport.TAG, "Chimera provider query failed (non-fatal)", t)
+            module.logGated(Log.WARN, HookerSupport.TAG, "Chimera provider query failed (non-fatal)", t)
         }
     }
 

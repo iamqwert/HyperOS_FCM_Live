@@ -32,7 +32,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.Prefs
 import io.github.howard20181.hyperos.fcmlive.R
+import io.github.howard20181.hyperos.fcmlive.theme.AppearanceState
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
+import io.github.howard20181.hyperos.fcmlive.theme.ThemePrefs
 
 /**
  * Experiment switches: everything here is off by default and reaches into
@@ -133,6 +135,9 @@ private fun ExperimentBody(
     }
     var greezeNetRelease by remember {
         mutableStateOf(Prefs.readLocalGreezeNetRelease(context))
+    }
+    var debugLog by remember {
+        mutableStateOf(Prefs.readLocalDebugLog(context))
     }
     // The write rows are on screen while either persistent switch says so: the
     // settings they write outlive every runtime switch, and each hook reads its
@@ -439,6 +444,31 @@ private fun ExperimentBody(
                 // just as inert until at least one app is checked.
                 stateLine = emptyAllowlistHint,
                 stateLineOff = emptyAllowlistHint
+            )
+        }
+        item {
+            // The debug section: a pure emission switch. Nothing here changes
+            // what a hook decides — only whether the log line describing it is
+            // written out — so it is a section of one row with no confirm
+            // dialog and no allowlist dependency.
+            SectionTitle(R.string.experiment_section_debug)
+            SettingsSwitchCard(
+                // Style-dependent icon: under Material 3 the row carries the
+                // filled bug_report glyph — the "log a defect report" reading —
+                // while the MIUIX style keeps the diagnostics glyph it shares
+                // with the module-status page.
+                iconRes = if (AppearanceState.uiStyle.intValue == ThemePrefs.UI_STYLE_MATERIAL) {
+                    R.drawable.ic_bug_report
+                } else {
+                    R.drawable.ic_fcm_diagnostics
+                },
+                title = stringResource(R.string.experiment_debug_log),
+                description = stringResource(R.string.experiment_debug_log_desc),
+                checked = debugLog,
+                onCheckedChange = { checked ->
+                    Prefs.writeDebugLog(context, Prefs.remote(), checked)
+                    debugLog = checked
+                }
             )
         }
         // The same 16dp tail the settings page ends on, so the last card does

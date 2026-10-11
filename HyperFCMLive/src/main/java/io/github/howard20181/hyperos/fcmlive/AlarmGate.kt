@@ -120,7 +120,7 @@ internal object AlarmGate {
                                 // "the gate is never reached".
                                 if (!alarmGateBypassLogged) {
                                     alarmGateBypassLogged = true
-                                    module.log(
+                                    module.logGated(
                                         Log.INFO, HookerSupport.TAG,
                                         "checkAlarmIsAllowedSend: re-allowed denied GMS alarm" +
                                             " (creatorUid=$uid)"
@@ -131,7 +131,7 @@ internal object AlarmGate {
                         }
                     }
                 } catch (t: Throwable) {
-                    module.log(Log.ERROR, HookerSupport.TAG, "Failed to evaluate alarm gate", t)
+                    module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to evaluate alarm gate", t)
                 }
                 try {
                     // Counterpart of the one-shot above: proves the gate is
@@ -143,7 +143,7 @@ internal object AlarmGate {
                             val uid = field.getInt(alarm)
                             if (isGmsUid(uid)) {
                                 alarmGateSeenLogged = true
-                                module.log(
+                                module.logGated(
                                     Log.INFO, HookerSupport.TAG,
                                     "checkAlarmIsAllowedSend: GMS alarm allowed by ROM" +
                                         " (creatorUid=$uid)"
@@ -152,12 +152,12 @@ internal object AlarmGate {
                         }
                     }
                 } catch (t: Throwable) {
-                    module.log(Log.ERROR, HookerSupport.TAG, "Failed to evaluate alarm gate (allow path)", t)
+                    module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to evaluate alarm gate (allow path)", t)
                 }
                 result
             }
             module.deoptimize(method)
-            module.log(
+            module.logGated(
                 Log.INFO, HookerSupport.TAG,
                 "checkAlarmIsAllowedSend hooked on ${method.declaringClass?.simpleName}"
             )

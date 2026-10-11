@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.0.1 (49)
+
+- 实验功能新增「显示调试日志」；从本版本开始，默认只输出警告和错误，如需排查与反馈问题，需前往实验功能开启该选项
+
 ## 4.0.0 (48)
 
 - 设置页新增 MIUIX 的界面风格，其中相关布局参考了 [KernelSU](https://github.com/tiann/KernelSU)（MIUIX 整体框架、莫奈强调色）、[HyperIsland](https://github.com/1812z/HyperIsland)（批量操作）、[Lyrico](https://github.com/Replica0110/Lyrico)（主页左上角设置）、[InstallerX Revived](https://github.com/wxxsfxyzm/InstallerX-Revived)（弹窗风格、预测性返回手势动画），特此感谢
