@@ -1,70 +1,138 @@
 package io.github.howard20181.hyperos.fcmlive.ui
 
 import android.view.HapticFeedbackConstants
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SwitchColors
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppShapes
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
+import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
+import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
+import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
+import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
+import top.yukonga.miuix.kmp.basic.ListPopupColumn
+import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
+import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.TopAppBar as MiuixTopAppBar
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.ArrowRight
+import top.yukonga.miuix.kmp.icon.basic.Check
+import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.overlay.OverlayListPopup
+import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
+import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Group heading shared by the secondary pages.
+ * Group heading shared by every page, in both looks' languages.
  *
- * Mirrors the XML the View screens still use: `BodyMedium` at sans-medium in
- * `md_primary`, 8dp of side padding and a 28dp gap above (12dp for the first
- * heading, which only needs to clear the top bar). `titleSmall` was the
- * earlier Compose choice, but it carries 0.1sp tracking the XML side does not,
- * so the two read slightly differently on the same screen.
+ * The Material branch reads as the M3 settings templates print a section
+ * break: `labelLarge` in the accent, 8dp of side padding and a 28dp gap above
+ * (12dp for the first heading, which only needs to clear the top bar).
+ * `titleSmall` was the earlier choice, but its 0.1sp tracking read as a
+ * subtitle rather than a break. The Miuix branch is the system settings' own
+ * `SmallTitle` — small, grey, no accent — see the body. Both branches declare
+ * the heading semantics: a screen reader must not lose the section structure
+ * the moment the look is switched.
  */
 @Composable
 fun SectionTitle(res: Int, modifier: Modifier = Modifier, first: Boolean = false) {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        // The Miuix header is the system settings' own: small, grey, part of the
+        // page. Blue was the Material reading of a section break; under Miuix an
+        // accent there is noise, and every reference app renders it as this grey.
+        // The header sits 28dp off the screen edge — the margin Miuix's own
+        // SmallTitle leaves — of which the page list already provides 12, so the
+        // rest is stated here. At 8 it read as flush with the cards below.
+        SmallTitle(
+            text = stringResource(res),
+            // The Material branch declares the section break a heading; the
+            // Miuix branch must too, or a screen reader loses the section
+            // structure the moment the look is switched.
+            modifier = modifier
+                .fillMaxWidth()
+                .semantics { heading() },
+            insideMargin = PaddingValues(
+                start = 16.dp,
+                top = if (first) 12.dp else 20.dp,
+                end = 8.dp,
+                bottom = 8.dp
+            )
+        )
+        return
+    }
     Text(
         text = stringResource(res),
         modifier = modifier
@@ -77,13 +145,99 @@ fun SectionTitle(res: Int, modifier: Modifier = Modifier, first: Boolean = false
                 bottom = 12.dp
             ),
         color = MaterialTheme.colorScheme.primary,
-        fontWeight = FontWeight.Medium,
-        style = MaterialTheme.typography.bodyMedium
+        // labelLarge is the style M3 settings templates print section headers
+        // in — small, medium-weight, tracked — not the body size this wore
+        // before. The primary tone itself stays: that is the reference
+        // reading of a section break.
+        style = MaterialTheme.typography.labelLarge
     )
+}
+
+/**
+ * The scroll state of a whole-page list.
+ *
+ * Every page body in the app is a `LazyColumn`, and every one of them owes its
+ * position to this rather than to `LazyColumn`'s default so the rule is named in
+ * one place: the position has to outlive the composition, not just the
+ * recomposition — [WindowSnapshot] repaints a stopped page by detaching and
+ * re-attaching its view tree, which disposes the composition wholesale, and only
+ * a saveable state comes back from that.
+ *
+ * Deliberately positional (no custom saveable key): upstream deprecated keyed
+ * `rememberSaveable` — a name bypasses positional scoping and can share or lose
+ * state across bodies (r.android.com/3610053). What actually keeps a page in
+ * place here is the positional saveable plus the fix that stopped a live page
+ * being rebuilt under the reader, not the key the earlier version of this passed.
+ */
+@Composable
+fun rememberPageListState(): LazyListState {
+    return rememberSaveable(saver = LazyListState.Saver) {
+        LazyListState()
+    }
 }
 
 /** Gap between two rows of one connected group. */
 val GROUP_ROW_GAP = 2.dp
+
+/**
+ * The long-press bubble on a top-bar control — or, under the Miuix look, the
+ * deliberate absence of one.
+ *
+ * Material keeps the M3 tooltip it has always had. Miuix drops the bubble on
+ * purpose: HyperOS's own control language has no long-press hint at all, its
+ * controls answer a press with the library's dim/sink feedback, and an M3
+ * bubble floating above that is a second design language on the same pixel —
+ * the same reason the Miuix look borrows Miuix's icons and press states
+ * everywhere else. The label still reaches the reader, because every bar icon
+ * carries its own `contentDescription`.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LongPressTooltip(
+    label: String,
+    position: TooltipAnchorPosition = TooltipAnchorPosition.Below,
+    content: @Composable () -> Unit
+) {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        content()
+        return
+    }
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(position),
+        tooltip = { PlainTooltip { Text(label, style = MaterialTheme.typography.bodySmall) } },
+        state = rememberTooltipState()
+    ) {
+        content()
+    }
+}
+
+/**
+ * The seam between two rows of one connected group.
+ *
+ * Under Material it is the 2dp sliver the group's cards leave between them. Under
+ * Miuix it is nothing at all: the group is one continuous card and the rows sit
+ * flush in it, which is the whole difference between "a stack of cards" and the
+ * system settings' one card per section.
+ */
+@Composable
+fun GroupRowGap() {
+    if (LocalUiStyle.current != UiStyle.Miuix) {
+        Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+    }
+}
+
+/** Miuix CardDefaults.CornerRadius, the group radius under the Miuix look. */
+
+/**
+ * The horizontal inset of a settings page's list: 16dp under Material, where the
+ * M3 guideline puts it, and 12dp under Miuix, the margin the reference apps
+ * (and the system settings they imitate) leave around their cards.
+ */
+@Composable
+fun pageHorizontalInset(): Dp {
+    return if (LocalUiStyle.current == UiStyle.Miuix) 12.dp else 16.dp
+}
+private val MIUIX_CARD_RADIUS = 16.dp
 
 /**
  * The shape of one slot in a connected group of cards: the outer corners take
@@ -95,6 +249,21 @@ val GROUP_ROW_GAP = 2.dp
  */
 @Composable
 fun connectedGroupShape(first: Boolean, last: Boolean): Shape {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        // Miuix cards: one radius on the group's outer ends, square seams inside.
+        // The radius is CardDefaults.CornerRadius, so a group reads exactly like
+        // a Miuix Card with the rows stacked in it.
+        return when {
+            first && last -> RoundedCornerShape(MIUIX_CARD_RADIUS)
+            first -> RoundedCornerShape(
+                topStart = MIUIX_CARD_RADIUS, topEnd = MIUIX_CARD_RADIUS
+            )
+            last -> RoundedCornerShape(
+                bottomStart = MIUIX_CARD_RADIUS, bottomEnd = MIUIX_CARD_RADIUS
+            )
+            else -> RectangleShape
+        }
+    }
     val shapes = LocalAppShapes.current
     return when {
         first && last -> shapes.menu
@@ -131,6 +300,12 @@ fun GroupRow(
     content: @Composable () -> Unit
 ) {
     val shape = connectedGroupShape(first, last)
+    // Row metrics follow the list spec on both looks. 56dp is the single-line
+    // row height — M3's list minimum, and [BasicComponent]'s own floor
+    // (BasicComponentDefaults.InsideMargin under Miuix) — and two-line content
+    // reaches M3's 72dp double-line height on its own (24+20 of type against
+    // 28dp of vertical padding), so neither look needs a taller floor.
+    val miuixRow = LocalUiStyle.current == UiStyle.Miuix
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = LocalAppSurfaces.current.card,
@@ -153,8 +328,13 @@ fun GroupRow(
         }
         Column(
             modifier = clickModifier
-                .heightIn(min = 72.dp)
-                .padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 14.dp),
+                .heightIn(min = 56.dp)
+                .padding(
+                    start = 16.dp,
+                    top = if (miuixRow) 16.dp else 14.dp,
+                    end = 16.dp,
+                    bottom = if (miuixRow) 16.dp else 14.dp
+                ),
             verticalArrangement = Arrangement.Center
         ) {
             content()
@@ -337,9 +517,20 @@ fun MenuItemRow(
  * The end inset must be applied *before* the size: written the other way round
  * it is carved out of the box and the glyph ends up squeezed into the sliver
  * left over instead of sitting 24dp wide with a gap after it.
+ *
+ * It also decides the one thing the Miuix look changes about every row, from the
+ * single place all rows already go through: under that look the icon is not
+ * drawn at all, so the text column moves into where it stood and the row reads
+ * like the system's own settings — title and summary against the card's margin,
+ * nothing in front of them. No row, and no row added later, has to agree to
+ * that; a row that stopped using this composable would simply stop honouring it,
+ * which is why every settings row draws its leading icon through here.
  */
 @Composable
 fun RowIcon(painter: Painter, modifier: Modifier = Modifier) {
+    if (!LocalUiStyle.current.showRowIcons) {
+        return
+    }
     Icon(
         painter = painter,
         contentDescription = null,
@@ -474,6 +665,18 @@ fun SettingsSwitchCard(
     first: Boolean = true,
     last: Boolean = true
 ) {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixSwitchSlice(
+            title = title,
+            summary = miuixSummary(stateLine, stateLineOff, checked, description),
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            first = first,
+            last = last,
+            modifier = modifier
+        )
+        return
+    }
     val shape = connectedGroupShape(first, last)
     val view = LocalView.current
     // One toggle path for both hit areas — the row and the switch itself — so
@@ -580,6 +783,26 @@ fun SettingsMenuCard(
     first: Boolean = true,
     last: Boolean = true
 ) {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            color = LocalAppSurfaces.current.card,
+            shape = connectedGroupShape(first, last)
+        ) {
+            // Miuix's own dropdown row: the value with the up-down arrow beside
+            // it, a menu whose selected entry is blue with a check, and the page
+            // dimmed behind the popup. Needs the Miuix Scaffold, which
+            // [PageScaffold] supplies under this look.
+            OverlayDropdownPreference(
+                items = entries,
+                selectedIndex = currentIndex,
+                title = title,
+                summary = description.ifEmpty { null },
+                onSelectedIndexChange = onPick
+            )
+        }
+        return
+    }
     var expanded by remember { mutableStateOf(false) }
     val shapes = LocalAppShapes.current
     val shape = connectedGroupShape(first, last)
@@ -700,6 +923,28 @@ fun NavCard(
     modifier: Modifier = Modifier,
     trailing: @Composable (() -> Unit)? = null
 ) {
+    // Under Miuix this is ArrowPreference, not a restyled card: the chevron, the
+    // margins and the press feedback are the library's, and the trailing slot
+    // (the update badge) lands before the chevron through endActions.
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            color = LocalAppSurfaces.current.card,
+            shape = connectedGroupShape(first, last)
+        ) {
+            ArrowPreference(
+                title = title,
+                summary = subtitle,
+                onClick = onClick,
+                endActions = if (trailing != null) {
+                    { trailing() }
+                } else {
+                    {}
+                }
+            )
+        }
+        return
+    }
     GroupRow(first = first, last = last, onClick = onClick, modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             RowIcon(painter = painterResource(iconRes))
@@ -718,6 +963,341 @@ fun NavCard(
             if (trailing != null) {
                 trailing()
             }
+            if (LocalUiStyle.current == UiStyle.Miuix) {
+                // The Miuix "this leads somewhere" mark: a chevron after the
+                // trailing slot, in the quiet grey of the bar's other affordances.
+                Spacer(modifier = Modifier.width(8.dp))
+                Image(
+                    imageVector = MiuixIcons.Basic.ArrowRight,
+                    contentDescription = null,
+                    colorFilter = ColorFilter.tint(
+                        MiuixTheme.colorScheme.onSurfaceVariantActions
+                    )
+                )
+            }
         }
     }
+}
+
+/**
+ * One summary line for a Miuix row: the Material card carries a state line and
+ * a description at the same time, [top.yukonga.miuix.kmp.basic.BasicComponent]
+ * carries one summary — the state the row is in wins, because that is the line
+ * that changes under the user's finger.
+ */
+internal fun miuixSummary(
+    stateLine: String?,
+    stateLineOff: String?,
+    checked: Boolean,
+    description: String
+): String? {
+    val state = when {
+        checked && stateLine != null -> stateLine
+        !checked && stateLineOff != null -> stateLineOff
+        else -> null
+    }
+    return state ?: description.ifEmpty { null }
+}
+
+/**
+ * A switch row under the Miuix look: Miuix's own [BasicComponent] body with
+ * Miuix's own [MiuixSwitch] as the end action, sitting in this app's group card
+ * so a section still reads as one card.
+ *
+ * The switch is Miuix's rather than Material's on purpose: no on/off mark inside
+ * the thumb (the track colour says it), no press shadow around it, and the row
+ * press is Miuix's sink feedback rather than a ripple.
+ *
+ * The switch is keyed on [ThemeEngine.generation], and that key is load-bearing.
+ * An appearance change (莫奈颜色, 强调色, dark mode) bumps the generation and
+ * Miuix's `Colors` singleton mutates in place — at which point the library's
+ * own `Switch` runs its `animateColorAsState` track/thumb ramps, roughly
+ * 300 ms of spring, from the old palette to the new one. Every visible switch
+ * on the page drifts through that ramp together while everything else on the
+ * page (text, cards, the window) repaints instantly, and the drift is what
+ * read as "the other switches flicker". Rebuilding the node on a generation
+ * bump gives `animateColorAsState` a fresh initial value — its first
+ * composition snaps to the target — so the switches change colour the same
+ * instant the page does. An ordinary toggle touches no generation and keeps
+ * the library's own flip animation untouched.
+ */
+@Composable
+internal fun MiuixSwitchSlice(
+    title: String,
+    summary: String?,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    first: Boolean,
+    last: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val view = LocalView.current
+    val toggle: () -> Unit = {
+        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        onCheckedChange(!checked)
+    }
+    // Reading the generation here is what subscribes this row to appearance
+    // changes; without the read the row would be skipped as unchanged and the
+    // key below would never move.
+    val generation = ThemeEngine.generation
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = LocalAppSurfaces.current.card,
+        shape = connectedGroupShape(first, last)
+    ) {
+        BasicComponent(
+            title = title,
+            summary = summary,
+            onClick = toggle,
+            // What the library's own switch row declares (SwitchPreference puts
+            // role = Role.Switch on its BasicComponent): the whole row reads as a
+            // switch to a screen reader, not a plain button.
+            role = Role.Switch,
+            endActions = {
+                key(generation) {
+                    // The library's switch rows leave 8dp between the control and
+                    // the row's own 16dp inside margin (SwitchPreference's end
+                    // padding) — without it the switch sits tighter to the card
+                    // edge than every library row.
+                    MiuixSwitch(
+                        checked = checked,
+                        onCheckedChange = { toggle() },
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                }
+            }
+        )
+    }
+}
+
+/**
+ * The page frame every secondary page uses, in whichever shell the app is
+ * wearing.
+ *
+ * Material is the frame as it has always been. Miuix is the system settings'
+ * own: the large-title bar that collapses to the small centred one as the page
+ * scrolls up under it, and — load-bearing, not cosmetic — Miuix's Scaffold,
+ * because the Miuix overlay popups ([OverlayDropdownPreference],
+ * [OverlayListPopup]) render into the Scaffold's popup host and dim the page
+ * behind them. Without this frame those menus have nowhere to open into.
+ */
+@Composable
+fun PageScaffold(
+    titleRes: Int,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    actions: @Composable RowScope.() -> Unit = {},
+    snackbarHostState: SnackbarHostState? = null,
+    content: @Composable (PaddingValues) -> Unit
+) {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        val title = stringResource(titleRes)
+        val scrollBehavior = MiuixScrollBehavior()
+        MiuixScaffold(
+            modifier = modifier,
+            // The page colour on both the scaffold and the bar, not Miuix's
+            // defaults: under AMOLED the page is true black and the defaults
+            // would paint grey behind it and in the bar.
+            containerColor = MaterialTheme.colorScheme.background,
+            topBar = {
+                // The system settings' own bar: the large title at the left
+                // while the page is at rest, collapsing to the small centred
+                // one as the list scrolls up under it — the user picked this
+                // over the fixed small bar.
+                MiuixTopAppBar(
+                    title = title,
+                    largeTitle = title,
+                    color = MaterialTheme.colorScheme.background,
+                    navigationIcon = {
+                        val description = stringResource(io.github.howard20181.hyperos.fcmlive.R.string.back)
+                        // The library's own arrow in the library's own button,
+                        // in the bar's ink; the Material look keeps its plate.
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = MiuixIcons.Back,
+                                contentDescription = description,
+                                tint = MiuixTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    },
+                    actions = actions,
+                    scrollBehavior = scrollBehavior
+                )
+            }
+        ) { innerPadding ->
+            // No snackbar host on this look: its acknowledgments are the system
+            // toast (see the About and Licenses pages), not a bar at the foot.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // The bar reads the list's scroll through this connection;
+                    // the page bodies all scroll, so putting it here covers them
+                    // all without each page having to opt in.
+                    .nestedScroll(scrollBehavior.nestedScrollConnection)
+            ) {
+                content(innerPadding)
+            }
+        }
+        return
+    }
+    androidx.compose.material3.Scaffold(
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = {
+            if (snackbarHostState != null) SnackbarHost(snackbarHostState)
+        },
+        topBar = {
+            AppTopBar(titleRes = titleRes, onBack = onBack, actions = actions)
+        }
+    ) { innerPadding ->
+        content(innerPadding)
+    }
+}
+
+/**
+ * Text styles for the plain-prose pages (licences, privacy). Under the Miuix
+ * look these are the library's own HyperOS sizes, so those pages read like the
+ * settings page instead of wearing Material's type scale over Miuix colours —
+ * the mismatch the page looked wrong through. The lookup is a @Composable
+ * call, so each branch only ever touches its own theme's accessor.
+ */
+@Composable
+fun pageBodyStyle(): TextStyle =
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixTheme.textStyles.main
+    } else {
+        MaterialTheme.typography.bodyLarge
+    }
+
+/** Secondary line under [pageBodyStyle]: Miuix footnote against M3 bodySmall. */
+@Composable
+fun pageSecondaryStyle(): TextStyle =
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixTheme.textStyles.footnote1
+    } else {
+        MaterialTheme.typography.bodySmall
+    }
+
+/** Running prose (dialog bodies, paragraphs): Miuix body2 against M3 bodyMedium. */
+@Composable
+fun pageProseStyle(): TextStyle =
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        MiuixTheme.textStyles.body2
+    } else {
+        MaterialTheme.typography.bodyMedium
+    }
+
+/**
+ * A dialog in whichever shell the app is wearing.
+ *
+ * Material is the M3 [androidx.compose.material3.AlertDialog] as before. Miuix is
+ * the system's own [OverlayDialog] — the HyperOS sheet rendered through the
+ * scaffold's [top.yukonga.miuix.kmp.basic.Scaffold] popup host, the path the
+ * library's own dialog demo takes (the window-level variant is the desktop
+ * shell) — with [MiuixTextButton]s in the action row, laid out the way the
+ * reference apps and the library demo lay theirs out: dismiss at the start,
+ * confirm at the end, the confirm in the primary fill. The body prints
+ * left-aligned in the page's prose style; the licence text goes through
+ * [content] as a scrollable card.
+ *
+ * [content] overrides [text] for bodies that are not one paragraph (the licence
+ * text is scrollable); it renders inside the dialog's own body slot.
+ */
+@Composable
+fun AppDialog(
+    onDismissRequest: () -> Unit,
+    title: String,
+    text: String? = null,
+    confirmLabel: String? = null,
+    onConfirm: () -> Unit = {},
+    dismissLabel: String? = null,
+    onDismiss: () -> Unit = {},
+    content: (@Composable () -> Unit)? = null
+) {
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        OverlayDialog(
+            show = true,
+            title = title,
+            onDismissRequest = onDismissRequest
+        ) {
+            Column {
+                if (content != null) {
+                    content()
+                } else if (text != null) {
+                    // Printed by hand rather than handed to the library's
+                    // summary slot: that slot centres its text, which shredded
+                    // a multi-line caution into a centred wall. Left-aligned in
+                    // the page's prose style, in the summary's own color slot —
+                    // the same reading order the Material branch prints with.
+                    Text(
+                        text = text,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        style = pageProseStyle(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                // The system dialog's own action row: two equal-width buttons,
+                // dismiss leading and confirm trailing — not a right-aligned
+                // pair of text links, which is what read as "not Miuix". The
+                // confirm side carries the primary fill, the way the licence
+                // sheet's closing button does: one look at the row and the
+                // forward action is the filled one.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (dismissLabel != null) {
+                        MiuixTextButton(
+                            text = dismissLabel,
+                            onClick = {
+                                onDismiss()
+                                onDismissRequest()
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (confirmLabel != null) {
+                        MiuixTextButton(
+                            text = confirmLabel,
+                            onClick = {
+                                onConfirm()
+                                onDismissRequest()
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = MiuixButtonDefaults.textButtonColorsPrimary()
+                        )
+                    }
+                }
+            }
+        }
+        return
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismissRequest,
+        // Popup level, like every panel drawn over the page: M3's dialog default
+        // is a tone *below* the page on this ramp, so the dialog would sit behind
+        // the surface it is drawn over.
+        containerColor = LocalAppSurfaces.current.popup,
+        title = { Text(title) },
+        text = {
+            if (content != null) {
+                content()
+            } else if (text != null) {
+                Text(text)
+            }
+        },
+        confirmButton = {
+            if (confirmLabel != null) {
+                TextButton(onClick = onConfirm) { Text(confirmLabel) }
+            }
+        },
+        dismissButton = {
+            if (dismissLabel != null) {
+                TextButton(onClick = onDismiss) { Text(dismissLabel) }
+            }
+        }
+    )
 }

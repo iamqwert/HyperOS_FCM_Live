@@ -12,14 +12,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.platform.ComposeView
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
-import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport
 import io.github.howard20181.hyperos.fcmlive.ui.AboutActions
 import io.github.howard20181.hyperos.fcmlive.ui.AboutScreen
-import io.github.howard20181.hyperos.fcmlive.ui.SwipeBackContainer
+import io.github.howard20181.hyperos.fcmlive.ui.PredictiveBackContainer
 import io.github.howard20181.hyperos.fcmlive.ui.UpdateOutcome
 import io.github.howard20181.hyperos.fcmlive.ui.WindowSnapshot
-import io.github.howard20181.hyperos.fcmlive.ui.finishSwipeBack
+import io.github.howard20181.hyperos.fcmlive.ui.finishPredictiveBack
 import io.github.howard20181.hyperos.fcmlive.ui.startActivityWithSnapshot
 import java.io.BufferedReader
 import java.io.IOException
@@ -44,9 +43,9 @@ import kotlinx.coroutines.launch
  * dialog stack as the licences page — rather than a second, framework-owned one
  * the runtime palette could not reach.
  *
- * The page is wrapped in [SwipeBackContainer]: a rightward drag started on the
- * screen body finishes it while it follows the finger, which is separate from
- * the system's edge-only predictive back gesture.
+ * The page is wrapped in [PredictiveBackContainer]: the system's predictive
+ * back gesture (or the back key) plays the Miuix-style slide-out preview before
+ * this Activity finishes.
  */
 class AboutActivity : AppCompatActivity() {
 
@@ -95,11 +94,11 @@ class AboutActivity : AppCompatActivity() {
         val composeView = ComposeView(this).apply {
             setContent {
                 HyperFCMLiveTheme {
-                    SwipeBackContainer(
-                        // A committed swipe has already slid the page out, so
-                        // the exit transition is suppressed for that path only;
-                        // a back press that never moved the page still animates.
-                        onBack = { alreadySlidOut -> finishSwipeBack(alreadySlidOut) },
+                    PredictiveBackContainer(
+                        // A committed back has already slid the page out, so the
+                        // exit transition is suppressed for that path only; a back
+                        // press that never moved the page still animates.
+                        onBack = { alreadySlidOut -> finishPredictiveBack(alreadySlidOut) },
                         // The page underneath, as it looked when this one was
                         // opened. MainActivity's window is gone by now, so a
                         // photograph taken on the way in is the only copy of
@@ -107,7 +106,7 @@ class AboutActivity : AppCompatActivity() {
                         background = { WindowSnapshot.forParent(MainActivity::class.java) }
                     ) {
                         AboutScreen(
-                            onBack = { finishSwipeBack(alreadySlidOut = false) },
+                            onBack = { finishPredictiveBack(alreadySlidOut = false) },
                             actions = AboutActions(
                                 onViewSource = { openLink(REPO_URL) },
                                 onLicenses = {
@@ -215,12 +214,15 @@ class AboutActivity : AppCompatActivity() {
     }
 
     /**
-     * In-place re-skin: the Compose tree follows ThemeEngine's generation
-     * counter and the window chrome is repainted here. The old path was
-     * `recreate()` — a whole-window rebuild that read as a visible jump every
-     * time an appearance menu option was picked.
+     * In-place re-skin. The palette invalidation itself lives in the
+     * [AppearanceState] setters — each appearance write bumps ThemeEngine's
+     * generation counter and the Compose tree follows it — so what is left here
+     * is the View-side half no recomposition reaches: the window chrome repaint
+     * and the back-preview snapshot. The old path was `recreate()` — a
+     * whole-window rebuild that read as a visible jump every time an appearance
+     * menu option was picked.
      *
-     * The swipe-back snapshot is refreshed too. It is a photograph of the page
+     * The back-preview snapshot is refreshed too. It is a photograph of the
      * *below* this one — Main — taken on the way in, so it is wearing the old
      * palette the moment this runs; left alone, returning to Main would reveal
      * the previous theme. Main is stopped but still alive and still laid out, so
@@ -228,7 +230,6 @@ class AboutActivity : AppCompatActivity() {
      * [WindowSnapshot.refreshForTheme].
      */
     private fun applyAppearanceChange() {
-        ThemeEngine.invalidate()
         ThemeSupport.reapplyWindow(this)
         WindowSnapshot.refreshForTheme()
     }

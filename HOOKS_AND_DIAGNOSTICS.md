@@ -10,7 +10,7 @@
 
 | 维度   | 说明                                                                            |
 | ---- | ----------------------------------------------------------------------------- |
-| 描述对象 | `Hooker.kt`（模块唯一 Xposed 入口）及其依赖 `Prefs.kt`、`UnsafeUtils.kt`、`hiddenapi:stubs` |
+| 描述对象 | `Hooker.kt`（模块唯一 Xposed 入口）及其拆分出的同目录钩点族文件（`GreezeHooks.kt`、`WifiWeakSignalSwitch.kt`、`GmsSupport.kt`、`AllowlistGate.kt`、`AutostartGate.kt`、`SleepModeGate.kt`、`TrafficProbe.kt`、`HookerSupport.kt`），依赖 `Prefs.kt`、`UnsafeUtils.kt`、`hiddenapi:stubs`。行为与本文描述一致，仅文件位置随零行为重构分散 |
 | 描述层级 | 方法级钩点、判定极性、数据来源、失效模式                                                          |
 | 不覆盖  | Compose UI、主题引擎、更新检查、licensing                                                |
 | 证据来源 | 源码注释中的字节码偏移结论、ROM 静态取证、运行时 `dumpsys`、LSPosed 导出的 `modules_*.log`              |
@@ -457,7 +457,7 @@ OS4/V816 的睡眠断网**不是**按 uid 掐网：`PhoneSleepModeController#app
 
 #### 3.8.2 门控矩阵与两个对等的实验开关
 
-现役钩点与**两个对等**的实验开关（全在 `Hooker.kt`，每次 cutoff 调用惰性读远端值）。2026-10-05 起两个开关不再分主副：各自对应 `applySleepConfig` 切断的一条无线电，hook 侧各读自己的键，界面两行常显、没有 `AnimatedVisibility`。
+现役钩点与**两个对等**的实验开关（钩点在 `SleepModeGate.kt`，自 `Hooker.kt` 零行为拆出；每次 cutoff 调用惰性读远端值）。2026-10-05 起两个开关不再分主副：各自对应 `applySleepConfig` 切断的一条无线电，hook 侧各读自己的键，界面两行常显、没有 `AnimatedVisibility`。
 
 | 钩点                                                                        | 闸门                                         | 放行 / 拦截时的日志                                                                                                      |
 | ------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
@@ -466,7 +466,7 @@ OS4/V816 的睡眠断网**不是**按 uid 掐网：`PhoneSleepModeController#app
 
 **两个开关互不依赖**（2026-10-05 改；改之前是主 + 副，现在是「一条无线电一个开关」）：
 
-- 服务端：`isSleepKeepaliveDataEnabled()` **只读自己的键**（`Hooker.kt:2251`），不再 AND 主开关。⇒「只保移动数据、让 WiFi 照 ROM 的关」是可达配置，两行各自独立。
+- 服务端：`isSleepKeepaliveDataEnabled()` **只读自己的键**（现为 `SleepModeGate.kt` 内私有函数，原 `Hooker.kt:2251`），不再 AND 主开关。⇒「只保移动数据、让 WiFi 照 ROM 的关」是可达配置，两行各自独立。
 - 界面：两行**常显**、各自独立，没有 `AnimatedVisibility`；同标题、同连通组，`first` / `last` 只决定两端圆角。
 - 降级路径（3.8.3）是唯一无法只保一条无线电的场合：它整段跳过关网调用，因此布防条件改为「任一开关开」，安装期日志会明说走的是这条。
 - 离线镜像：`MainActivity#reloadAllowlist()` 对两个键都做 pending 修复，绑定后把界面值推上行，而不是被旧的远端值覆盖。
@@ -1573,7 +1573,7 @@ adb shell dumpsys deviceidle whitelist                 # 条件 ③ 是否成立
 
 **源码（本次逐项核对）**
 
-- `HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/Hooker.kt`（4706 行，模块唯一 Xposed 入口）
+- `HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/Hooker.kt`（模块唯一 Xposed 入口；整理时为 4706 行，此后的零行为重构把冻结策略族、GMS 支持族、睡眠门、自启门、流量探针、Wi-Fi 弱信号切换等整族拆到同目录的 `GreezeHooks.kt` / `GmsSupport.kt` / `SleepModeGate.kt` / `AutostartGate.kt` / `AllowlistGate.kt` / `TrafficProbe.kt` / `WifiWeakSignalSwitch.kt` / `HookerSupport.kt`，行为不变）
 - 同目录 `Prefs.kt`（配置键与 pending 机制）、`UnsafeUtils.kt`（`static final` 写入）
 - `HyperFCMLive/src/main/AndroidManifest.xml`、`META-INF/xposed/scope.list` 与 `java_init.list`（注入域）
 
@@ -1621,3 +1621,217 @@ S1–S9，详见 5.3。S7 / S8 的分析脚本与 S6 的 GcmService dump 均为�
 2.3.1 的结论来自对 `miui-services.jar` 中 `classes2.dex` 的 `dexdump -d` 静态取证，与 `dumpsys greezer` 的 `mCurrentCNPolicy` / `mSetForceCnGlobal` 读数、`getprop`（`ro.miui.region`、`ro.debuggable`、`ro.build.type`）交叉核对。取回的 jar 与 dexdump 产物为本地临时文件，未纳入版本库。
 
 `dumpsys greezer force_cn_global set <N>` **仅在静态层面判读，未在设备上执行**：它会改动整机 greeze 的运行时策略状态，属于未确证的行为改动。本文对该命令的两条结论（本机被 `IS_DEBUGGABLE` 挡掉、即便可达也指定不了实现）均由字节码直接得出，不依赖执行结果。
+
+## 附录 E：实机取证补录（2026-10-08 → 10-09）
+
+本附录整合三份本地取证报告的结论与关键数据：① GMS adj 全生命周期 × greeze 冻结正交性实测；② OOM/ADJ 接管面（`MiuiOomAdjusterImpl`）静态取证；③ `persist.sys.adjust_maxfree.enable` 全链路取证。原始 dump（tsv 采样帧、`dumpsys` 全量台账、dexdump 反汇编现场）为本地取证素材，未纳入版本库，已随取证现场清理删除，本附录只保留结论与关键数据。取证设备与 2.1 验证平台同机（myron / Android 17 / HyperOS OS4.0），时间信息按附录 D 约定只记时长与相对次序；第三方应用按本文脱敏约定改写为类别（微信为已对外公开的例外）。
+
+### E.1 GMS adj 全生命周期 × greeze 冻结：正交性实测
+
+2h40m 连续取证，观测对象 `com.google.android.gms` 主进程（UID 10133，电池白名单 `system-excidle` + `system` + `user` 三档全在）。三个相位：亮屏基线（密集采样 24 点）→ 熄屏 deep doze（断充电，全程未插电）→ 亮屏复归（16 点）。观测量五元组（adj 四值 / `curProcState` / `curCapability` / `uidState` / `cgroup.freeze`）加三辅助（`mCurSchedGroup` / `hasClientActivities` / greeze 与 GCM 台账），冻结实态直读 `/sys/fs/cgroup/apps/uid_10133/pid_<pid>/cgroup.freeze`。
+
+**结论**：「adj 与冻结正交」从推论升级为实测，且比预期更强——不是两条曲线互不干扰，而是其中一条根本不存在：
+
+| 命题 | 判定 | 证据等级 |
+|---|---|---|
+| 熄屏后 GMS adj 是否掉进 900+ 缓存区 | **否**，全程恒定 100 | 实测（28 采样点，横跨亮屏→deep doze→亮屏完整周期） |
+| GMS 是否被 MIUI 特殊名单钉住 | **是**，机制 = `USE_DATA_WHITE_LIST` + `no_freeze:invisible` 状态 | 代码 + 运行时 |
+| adj 掉进缓存区那一刻 vs greeze 冻结 | **不存在这个时刻** —— GMS 全程 `frozen=0s` | 实测（greeze 台账全量） |
+| doze 期 FCM 为何不到 | **服务端扣住**（GCM 客户端已进 doze，等待退出） | 实测（GCM 台账） |
+
+关键数据：
+
+- **adj 曲线全程恒定**：`adj(cur/set)=100/100`、`procState=5`（BFGS）、`capability=---NFUATI`、`freeze=0`。`/proc/<pid>/oom_score_adj` 与 AMS adj 两层一致。`adjSeq` 持续缓增而结果不变，说明 AMS 周期重算但被钉住。capability 的 L/C/M 位是动态的（早前快照曾为 `LCMNFUATI`）。
+- **冻结曲线全程零事件**：greeze 自身台账在 2h21m 观测窗内记 `frozen=0s / bg=8446s / live=8461s / rate=0.00`；`noControl` 两条记录（`no_freeze:bg_process` → `no_freeze:invisible`），其中 `no_freeze:invisible` **全机唯一持有者就是 GMS**。
+- **对照证明 greeze 引擎同期活跃**：同一 doze 窗口内，某社交应用（uid 10277）展示了完整的「包到达→`thawUid(reason=packet)` 解冻→超时再 `FZ` 冻结」振荡，另有 16 个 uid 在 doze 退出时被批量超时解冻——GMS 不在其中任何一条事件里。**正交的真实来源是「GMS 从未进入冻结候选集」，而不是「冻结时恰好 adj 很高」。**
+
+机制还原（两层）：
+
+- **adj 侧：AOSP bound-service 规则钉住。** GMS 段有 30+ 个 `ServiceRecord`、10 条含 `WACT` 标志的 `ConnectionRecord`，`hasStartedServices=true` + `hasClientActivities=true` 亮/熄屏均保持，`cached=false`。AOSP `computeOomAdjLocked` 因「被客户端绑定的服务 + 客户 Activity 绑定」把 GMS 钉在 `VISIBLE_APP_ADJ=100`，与屏幕状态无关，澎湃未改这条规则。
+- **冻结侧：三重豁免叠加。**
+  1. `ListAppsManager.USE_DATA_WHITE_LIST`（数据白名单）：`isInWhiteList` 第一分支与屏幕状态无关恒真，`com.google.android.gms` 在 `dumpsys greezer` 的 `local:` 段中；`power_greeze_config.xml`（122 行）grep 无任何 GMS 条目，保护不来自该 xml。
+  2. `AppNoControlInfoData` 的 `no_freeze:invisible` 状态：MIUI 在 AOSP ProcessState 之外维护了第二套应用状态机（`AppStateManager`，含 `hibernation/idle/maintenance/inactive/background/invisible/visible/died`），greeze 据此跳过冻结。
+  3. `GreezeManagerService.isAllowByGoogleFreeze(uid, pkg)`：Google 应用在组件事件（start/bind service、provider、broadcast）路径上有专门放行分支（CTS 模式全放行；非国行且 `mPowerMilletEnable` 时跳过；否则按 `isGoogleApps` 包名/uid 判定）。
+- **FCM 应用（可冻结侧）的实际落地路径**：`GreezeManagerService.reportNet(uid)` 捕获网络包 → `thawUid(uid, "packet")` 解冻 → 应用处理 → 超时再冻结。GMS 不在此路径中，因为它从不被冻、无需解冻。
+- **doze 期 FCM 扣住的旁证**：18 分钟 doze 窗口内服务端只发心跳（Server HB，230s 周期）未下发数据；退出 doze 后**立即**收到积压 `IqStanza`。期间一条 `No response to broadcast ... time=3ms` 是目标应用主进程未启动的应用侧问题，与冻结无关（GMS 自己没被冻）。再次确认：NORMAL doze 期 FCM 被服务端扣住，设备端不可干预。
+
+未闭合项（不臆测）：`USE_DATA_WHITE_LIST` 的填充来源未定位（疑似 cloud 下发或 sysconfig）；`AppStateManager` 的 `invisible` 判定条件部分还原；GMS 某次状态翻转的触发者未定位；`mCurSchedGroup` 亮/熄屏读数与直觉相反，疑采样脚本 awk 段边界误读，该项未交叉验证、不引用（adj/procState/capability/freeze 四项已与两本台账互证无偏移）。
+
+处置：正交性实测结论与 GMS 三重豁免机制为 confirmed，与 5.4 结论 5 互证；`USE_DATA_WHITE_LIST` 内容随 ROM 更新变化属 watchlist——若某代 ROM 把 GMS 移出该名单，冻结行为会变，大版本更新后应复核 `dumpsys greezer` 里 GMS 的 per-uid 统计块。
+
+### E.2 OOM/ADJ 接管面：`MiuiOomAdjusterImpl` 私有改写机制
+
+静态取证回答「MIUI 是否对特定包名（尤指 GMS）做私有 adj 特殊化」。**结论：有私有机制、本机默认开启，但规则是普遍性的（非针对 GMS），且方向是把系统应用往保护侧推。**
+
+调用链（AOSP 尾部注入点）：
+
+```
+OomAdjusterImpl.computeOomAdjLSP
+  └─ 尾部注入点
+       ├─ MiuiOomAdjusterStub.computeOomAdjLocked(...)   ← services.jar，空桩（恒 false）
+       ├─ [AOSP 原生收尾] 照常执行
+       └─ if (Flags.sprdEnabled())
+            └─ UFW.setProcessProtectedIfNeeded(app)       ← miui-services，空桩
+
+OomAdjusterImpl.computeOomAdjForRecentApp   ← 私有入口
+  ├─ if (!RECENT_APP_PROTECT_ENABLE) return false;      ★ 总开关（getprop 可控）
+  ├─ if (!isEligibleForRecentAppImprovement(...)) return false;
+  └─ adjustOomAdjBasedOnAppType(app, adj, procState)
+        ├─ isSystemApp(app) ?  modifyProcessRecordAdj(app, 400, ..., "recent-previous-improve")
+        └─ adj > 701        ?  modifyProcessRecordAdj(app, 701, ..., "recent-previous-improve")
+```
+
+要点：
+
+- **Stub/Impl 分置两 jar**：`MiuiOomAdjusterStub`（services.jar）十个方法全空桩；真实现 `MiuiOomAdjusterImpl extends MiuiOomAdjusterStub`（miui-services.jar）。只查一个 jar 会得出「机制不存在」的错误结论（方法论红线见 E.4）。
+- **改写动作是直接写、无回算**：`setCurRawAdj / setCurRawProcState / setAdjType("recent-previous-improve")`。
+- **唯一硬编码偏好**（`isSpecialApp`）：系统相机 / 微信 / 游戏（`SystemPressureController.isGameApp`）。**GMS 不在其中。**
+- **准入门**（`isEligibleForRecentAppImprovement`）：`adj >= 700` 不准入；仅主进程（`processName == packageName`）；pid 须在近期队列 `sRecentAppPidQueue`；队列前两名要求后台时长 < 30 分钟，其余要求 > 20 分钟。
+- **总开关可 getprop 直读**：`persist.sys.miui.recent.app.protect.enable`，默认值依物理内存（> 8GB 为 true）。本机未设置、`MemTotal ≈ 14.7GB` ⇒ **默认 true，机制在本机开着**。
+- **阈值常量**：前任分级 adj 701/702/730；前任保护 20 min；前两名 30 min；近期队列容量 >8GB 机 5 个；`IMPROVE_RESIDENT_APP_ADJ_ENABLE` / `SCALE_BACKGROUND_APP_ADJ_ENABLE` 等均为 false。
+- **GMS 的实际处境**：不在 `isSpecialApp` 名单；但运行时位于 `/data/app/~~…/`（原始位置 `/product/priv-app/GmsCore`）⇒ `isUpdatedSystemApp()==true` 命中 `isSystemApp`，若进入该路径会被「改善」到 adj=400（HEAVY_WEIGHT），即被**保护**而非被压制。**未证部分**：是否实际命中取决于 `sRecentAppPidQueue` 是否含其 pid 且时间窗吻合——该队列无公开 dump 接口（`dumpPrevious*Apps` 为 private，`dumpsys activity` 不输出 `adjType`），只能靠 adj 数值间接证据（若被钉在 400 则说明命中；实测恒 100 说明未走该路径，见 E.1）。
+
+与既有结论互锁：本轮推翻了首轮「接管面全空」的论证（那是只看 services.jar 空桩得出的误判），但「澎湃未改 AOSP 对 GMS 的优先级」这一大方向结论不变，真实理由由 E.2 的 1–4 条给出。
+
+### E.3 `persist.sys.adjust_maxfree.enable`：ART 堆参数动态化（与保活无因果）
+
+**一句话结论**：该属性**不是保活开关**，也不是 ProcessList / `max_cached_processes` 的旋钮，而是 **ART 堆 GC 参数（`dalvik.vm.heapmaxfree`）的按应用动态化开关**——命中名单的应用在 `bindApplication` 时由 system_server 下发一个 `heapConfig` 位图，应用侧解出阈值后反射调用 MIUI 打进 libart 的私有方法，**放宽该应用的堆增长上限与 GC 触发阈值**。方向是「给内存」，不是「防杀」，与 FCM 保活无因果。
+
+链路摘要（跨 4 jar + 1 so）：
+
+```
+persist.sys.adjust_maxfree.enable=true
+  → ActivityManagerServiceImpl.initHeapConfig()（唯一读属性点，miui-services.jar）
+      Settings.System 两个键（本机均 null ⇒ 走资源兜底名单，32 项）
+  → encodeHeapConfig(processName)：位图编码，仅名单内应用置位
+  → services.jar attachApplicationLocked：写入 ApplicationInfo.heapConfig
+  → ActivityThreadImpl.handleBindApplication（真实现 miui-framework.jar）
+      bit0 → VMRuntime.clearGrowthLimit()；阈值 → 反射 VMRuntime.setAdjustMaxFreeParse(t0, t1)
+  → libart.so（MIUI 私有扩展，AOSP 无）
+      基础参数：heapmaxfree=32m / heapminfree=8m / heapgrowthlimit=256m / heapsize=512m
+```
+
+关键数据：
+
+- **位图格式**：bit0 = isExpendApp，bit1 = isDynamicMaxFree 入口门，bit2-5 / bit6-9 = 两个阈值 ×10（精度 0.1、范围 0.0–1.5）。本机 `threshold = {0.0, 0.7}` ⇒ 位图低 10 位 = `0x1C0`。编码逻辑由 dexdump `.locals` 实名还原，非推测。
+- **名单画像**：32 项清一色国产头部应用（社交/短视频/长视频/电商/资讯/阅读/直播/支付/导航/浏览器各若干，按脱敏约定不列真名），外加 `com.android.systemui`。**GMS 与任何 Google 应用都不在名单内。**
+- **运行时 A/B 验证**：命中组（微信 + 某几类电商/本地生活应用批量）出现 `adjust maxFree enable. Threshold is 0.0 and 0.7.` 日志；对照组（名单外 5 个进程）全部走到 `Miui Feature Init done` 但该行为 0 ⇒ 不是没启动，是确实没进这个分支。
+- **名单已现包名漂移**：某短视频应用的名单条目是旧包名，设备上实际包名已带后缀 ⇒ 未命中。其余条目是否都有效未逐个核。
+- **命名辨析**（防误读）：`adjust_maxfree` 指的是 ART GC 的 `heapmaxfree`，不是「最大空闲内存」策略；`mExpendCapacity` 的 Expend 是 expand 的拼写错误（MIUI 源码即如此），方向是放宽不是消耗；`persist.sys.dynamicbuffer.max_adjust_num` 属另一条独立链路，与本链无引用关系。
+
+处置：**不改属性、不动名单（can't-fix / 无需介入）**——方向是「多给内存」，对推送无负作用，与 FCM 保活的关系属旁路效应且未做实验验证，不写进模块文案或帮助页。`com.android.systemui` 在名单内属 watchlist，异常时优先怀疑。
+
+### E.4 方法论红线（本轮取证沉淀）
+
+> **「某类在 jar A 里是空桩」≠「该机制不存在」——必须在全部相关 jar 里查同族类。** 本轮两例同构：`MiuiOomAdjusterStub`(services.jar) / `MiuiOomAdjusterImpl`(miui-services.jar)；`ActivityThreadStub`(framework.jar) / `ActivityThreadImpl`(miui-framework.jar)。只看一个必误判。
+
+其余在本轮复现或新增的纪律：
+
+1. **真实现 jar 常在 `/system_ext/framework/`**（miui-services.jar / miui-framework.jar），只查 `/system/framework/` 会得出「全是空桩」的结论。
+2. **资源包按 package id 找**：`0x11` = framework-ext-res（`/system_ext/framework/framework-ext-res/framework-ext-res.apk`），不是 `0x01` 的 framework-res.apk；资源 ID 用 `aapt2 dump resources` 反查，不硬猜。
+3. **`fill-array-data` 的默认值只能从 dex 原始字节解**：dexdump 打印 payload 时会截断成一行，需按 payload 布局搜字节序列再解（本轮 `{0.0, 0.7}` 即此法还原）。
+4. **属性名 ≠ 行为**：必须落到位图 → 反射 → 私有 native 方法全链路才敢定名。
+5. **dumpsys 的 per-process 字段必须用 awk 限定目标进程段**，否则会抓到别的进程的同名字段（曾误抓 `-700`）。
+
+## 附录 F：实验功能：原理与取舍
+
+以下内容自独立的《实验功能》文档（EXPERIMENT.md）整合而来，与「设置 → 关于 → 实验功能」的四个开关对应。本文档只写能左右使用效果的部分：干预发生在哪一步、哪些行为仍然按系统本意执行、以及哪些结论还没有实测支撑。使用方法见 HELP.md，此处不重复。
+
+### F.1 睡眠模式：被拦下的只有两个动作
+
+OS4 代的睡眠断网**不是**按应用掐网。系统直接进入睡眠配置的那一段，它做的是两次整机级别的调用：
+
+- 关闭移动数据
+- 关闭 WiFi
+
+两者同时还记账到睡眠状态里，退出睡眠时按记录恢复。
+
+模块只在这两个调用上拦。这是「保护 WiFi 不断网」和「保护移动数据不断网」两个开关的全部作用域，没有别的。
+
+> 系统里那条按应用过滤睡眠网络的旧名单，在本代系统上的关网路径已经没有任何读取点，属于上一代机制的残骸。针对它的钩子保留下来当升级防御位，但在拿到新的运行时证据前不把它当成有效保护
+
+### F.2 睡眠模式：仍然按系统本意执行的部分
+
+睡眠配置的那一段不止上面两个调用。同一段里还跑着几项按位处理的系统行为，模块**全部照原样放行**：
+
+| 位 | 系统行为 | 入睡时 |
+|---|---|---|
+| 数据位 | 关闭移动数据 | 记录原值，恢复时写回 |
+| WiFi 位 | 关闭 WiFi | 记录原值，恢复时写回 |
+| 通知位 | 关闭「锁屏通知点亮屏幕」 | 写入 0，恢复时写回 |
+| 指纹位 | 关闭屏下指纹的息屏常显 | 记录原值，恢复时写回 |
+| 抬手位 | 关闭抬手亮屏 | 记录原值，恢复时写回 |
+
+模块只拦前两行。
+
+其中最需要注意的是通知位：**睡眠期间锁屏上的通知不再点亮屏幕**。这一项是系统省电与免打扰的一部分，模块特意不动它。
+
+反过来也想清楚了：如果为了「夜里通知照常亮屏」去阻止这一项执行，丢掉的正是系统给出的那部分省电与免打扰。
+
+### F.3 「充电时插着挂一夜」检验不了睡眠保活
+
+实测一夜：充电、息屏，模块侧**零条**相关日志。而这个子系统只要断网动作真的发生，每次必定留下一条。
+
+由此可以反向确证：**那一夜系统压根没有走到断网那一段。**
+
+所以「挂一整夜但插着充电器」得到的是**零样本**。它既不能证明保活有效，也不能证明保活在空转，两种结论都站不住。
+
+真正能检验的做法始终是一个：**拔掉充电器、断开 USB，挂一整夜。**
+
+### F.4 「仅在充电时」这个子选项为什么已被移除
+
+它曾经和今天的「保护 WiFi 不断网」并列。删除它的理由是逐层推下来的：
+
+1. **它是纯收窄。** 判定为真就放行原调用，效果的上限等同于主开关单独打开。它永远不可能把「本来会断的网」变成「不断」。
+2. **充电的夜里，开与关无法区分。** 因为如上一节所证，充电夜并不发生断网，两种取值的行为完全相同。它不是省了电，而是让一件本来就不发生的事继续不发生。
+3. **真的会断网的夜确实存在。** 实测过一次完整的睡眠配置执行，整夜网络不可达超过五个半小时。只是那一夜是否充电没有留下记录。
+4. ⇒ 唯一能让它产生差别的场景，恰恰是**最需要保活的那一夜**：没充电，且断网真的发生了。而在那个场景里，它做的事是主动放弃保活。
+5. **附加的失效模式**：充电状态的读取是三态，读不到时按「未充电」处理。一个读不出来的电池服务会让保活静默失效，而日志只会写「读不到」，不会写「保护没生效」。
+6. 它立项时的前提后来被推翻了：当时以为「充电时系统否决入睡」，实测更正为——真正不睡的原因是 USB 活动让它保持唤醒，与充电无关。前提塌了，收益论证随之失效。
+
+⇒ 结论：在当前系统版本上没有正向收益，只有负向代价。
+
+### F.5 网络：评分低于多少才介入
+
+「放宽 WiFi 弱信号切换」原本是二值的：系统给的分数低于阈值就一律改判为可用，49 分和 33 分得到完全相同的处理，不存在「救到多深为止」。
+
+后来补了一个唯一的梯度旋钮，就是「调整 WiFi 弱信号标准」。它的语义是：
+
+| 系统原始评分 | 行为 |
+|---|---|
+| 达到系统自己的可用线 | 不介入。那本来就是系统做出的可用判决，改写它等于替系统编一个它没有做出的决定 |
+| 落在所选档位与可用线之间 | 抬到可用，调用结束后立刻还原 |
+| 低于所选档位 | 原样放行，并留一行日志 |
+
+可选 45 / 40 / 35 / 30，**默认 45**。
+
+**这是一次行为收窄**：升级前一律保，升级后默认「不低于 45 才保」。用两局实测样本量化它的落差：
+
+| 样本 | 低分总数 | 低于 45 | 低于 40 | 低于 35 | 低于 30 |
+|---|---|---|---|---|---|
+| 第一局 | 188 | 67 | 25 | 4 | 0 |
+| 第二局 | 50 | 3（全是 44） | 0 | 0 | 0 |
+
+默认档在第二局只放弃 3/50 个采样时刻，但在第一局会放弃 67/188，也就是三分之一的低分事件。所以「轻微下调」是相对完全不加限制而言，并非在所有场景都轻微。
+
+**30 这一档目前零实测样本**（两局最低分别是 33 与 44），它作为刻度末端提供，没有被测量证明过。
+
+两个分支都留了正记录，各有节流且各自独立计数 —— 共用窗口会让更吵的那一路把另一路饿死，稀有的那一路就会看起来「从未发生过」。
+
+### F.6 保持应用冻结期联网：冻结决策不动，只放行网络
+
+「保持应用冻结期联网」（默认关）作用于系统冻结引擎 greeze 的网络侧，语义刻意收得很窄：
+
+- 系统在冻结一个应用时，会先问 `DomesticPolicyManager#isRestrictNet(uid)`：这个 uid 冻结期间要不要连带掐网。开关打开后，模块对**已勾选应用**的 uid 一律回答「不限制」。
+- **冻结本身照常发生。** 应用照样被挂起、被记账，变少的只有冻结附带的网络限制——这正是它保护的对象：已勾选应用自己的长连接（心跳、自有协议推送），让它们在被冻结期间仍能收发。
+- 本项**不优化 FCM 推送**。GMS 的 uid 另有固定回答，不走这条分支，两件事的计数也分开，互不掺和。
+- 允许清单为空时它答不了任何 uid；开关读不到时按「关」处理。两种失效都安静，靠日志里每次放行的 `net-released` 计数行区分「系统从未冻结过已勾选应用」与「冻结了但没放行」。
+
+### F.7 仍未取证的部分
+
+以下四条写得清楚是为了不让它们被当成已确证：
+
+- **睡眠保活本体是否真的有用，没有证据。** 缺乏对照夜。验证方法不变：拔掉充电器、断开 USB，挂一整夜。
+- **上面四个档位的实际效果目前只有推演，没有实测对照。** 最低限度的验证，是等 WiFi 跌到系统可用线以下时，看记下来的是「已介入」还是「已放行」那一行。
+- **切换理由不止一条，且共用同一处出口，模块铰的是那个出口而不是逐条理由。** 此外系统还有一处绕开评分的切换路径未被覆盖，实测在这条路径上未曾观察到切换 —— 这只说明未观察到，不代表它不会发生。
+- **「保持应用冻结期联网」没有实测对照夜。** 验证方法：开启后等系统真的冻结一个已勾选应用（`adb shell dumpsys greezer` 的冻结历史可见），再看日志里是否出现放行明细行与 `net-released` 计数的增长。

@@ -34,12 +34,10 @@ import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
  */
 @Composable
 fun PrivacyScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
-    Scaffold(
-        modifier = modifier,
-        // `surface` is what the bridge maps the page background onto, which is
-        // the View-layer `md_page_bg` — one step below the cards.
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = { AppTopBar(titleRes = R.string.about_section_privacy, onBack = onBack) }
+    PageScaffold(
+        titleRes = R.string.about_section_privacy,
+        onBack = onBack,
+        modifier = modifier
     ) { innerPadding ->
         PrivacyBody(
             bottomPadding = innerPadding.calculateBottomPadding(),
@@ -53,10 +51,12 @@ private fun PrivacyBody(
     bottomPadding: Dp,
     modifier: Modifier = Modifier
 ) {
+    val inset = pageHorizontalInset()
     LazyColumn(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp),
+            .padding(start = inset, end = inset),
+        state = rememberPageListState(),
         // The gesture-hint strip is scroll-through, not a hard stop.
         contentPadding = PaddingValues(bottom = bottomPadding)
     ) {
@@ -90,7 +90,7 @@ private fun PrivacyBody(
                 Text(
                     text = stringResource(R.string.privacy_commitment_desc),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
+                    style = pageSecondaryStyle()
                 )
             }
         }
@@ -117,12 +117,12 @@ private fun PermRow(
                 Text(
                     text = stringResource(titleRes),
                     color = MaterialTheme.colorScheme.onSurface,
-                    style = MaterialTheme.typography.bodyLarge
+                    style = pageBodyStyle()
                 )
                 Text(
                     text = stringResource(descRes),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
+                    style = pageSecondaryStyle()
                 )
             }
         }

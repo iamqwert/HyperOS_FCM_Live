@@ -48,8 +48,8 @@ android {
         targetSdkVersion 37
         // Fixed (bumped by hand each release) so LSPosed update checks never treat
         // this fork as older than upstream builds that inherit a low jgit commitCount.
-        versionCode 47
-        versionName "3.7.2"
+        versionCode 48
+        versionName "4.0.0"
 
         // HyperOS modules ship arm64 only; drop armv7a / x86 / x86_64 natives.
         ndk {
@@ -134,14 +134,25 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.8.0'
     // Declared for the ActivityResultContracts imports: CreateDocument and
     // OpenDocument in AboutActivity (allowlist export / import) and
-    // RequestPermission in MainActivity (the diagnostics log). Resolves at
-    // 1.8.2 through appcompat today; declaring it explicitly means Dependabot
-    // tracks it instead of the version silently riding along.
-    implementation 'androidx.activity:activity:1.8.2'
+    // RequestPermission in MainActivity (the diagnostics log).
+    //
+    // 1.13.0, not 1.8.2, and that is a hard floor now: Miuix's overlay popups
+    // register their back handlers through NavigationEventDispatcherOwner, and it
+    // is ComponentActivity 1.13 that sets that owner on the decor view (and on
+    // every ComponentDialog's). With 1.8.2 the owner is never installed, and
+    // opening the home overflow under the Miuix look crashed with "No
+    // NavigationEventDispatcher was provided via LocalNavigationEventDispatcherOwner"
+    // — verified on device, and verified against 1.13.0's own sources, where
+    // ComponentActivity.onCreate does window.decorView.setViewTree...(this).
+    implementation 'androidx.activity:activity:1.13.0'
     // BackHandler for ui/SwipeBack.kt. Same version line as `activity` above:
     // the Compose integration and the core artifact are versioned together, and
     // declaring the pair keeps Dependabot moving them as one.
-    implementation 'androidx.activity:activity-compose:1.8.2'
+    implementation 'androidx.activity:activity-compose:1.13.0'
+    // What Miuix's popups register their back handlers through. Comes in at 1.1.1
+    // with miuix 0.9.1; declared so Dependabot sees it, pinned to what miuix asks
+    // for rather than the 1.1.2 KernelSU uses with its newer miuix.
+    implementation 'androidx.navigationevent:navigationevent-compose:1.1.1'
     // Material Views: two real consumers keep this here — the
     // `Theme.Material3.DayNight.NoActionBar` parent the app theme inherits from,
     // and DynamicColors (wallpaper accent) in theme/ThemeSupport.kt. The
@@ -167,10 +178,48 @@ dependencies {
     // in transitively at 1.4.0, and nothing here references `Icons.*` any more.
     implementation 'androidx.compose.ui:ui-tooling-preview'
     debugImplementation 'androidx.compose.ui:ui-tooling'
+    // Miuix (compose-miuix-ui) — the theme behind 界面风格 = Miuix.
+    //
+    // The ceiling here is not Miuix's, it is our compiler's: AGP 9.4.1 drives
+    // Kotlin through its built-in support at a **2.2.0** compiler, which reads
+    // binary metadata up to **2.3.0**. Verified by compiling, including the two
+    // ways of trying to raise it — applying org.jetbrains.kotlin.android fails
+    // ("no longer required since AGP 9.0"), and android.builtInKotlin=false then
+    // dies on an ApplicationExtension cast. Putting the 2.4.20 Gradle plugins on
+    // the classpath does not move the compiler either: 0.9.4 fails with
+    // "Class 'kotlin.Unit' was compiled with an incompatible version of Kotlin".
+    // The newest stable AGP is 9.4.1 (9.5.0 exists only as alpha09).
+    //
+    // Miuix moved to Kotlin 2.4.0 at its 0.9.2 (its own release notes say so), so
+    // **0.9.1 is the last release this module can compile against** — and it is a
+    // good stopping point rather than a bad one: the module split (miuix-ui +
+    // miuix-preference) happened at 0.9.0, so 0.9.1 already carries the preference
+    // rows. Between 0.9.1 and 0.9.4 the preference package is the same files plus
+    // Slider/RangeSlider, so the docs at compose-miuix-ui.github.io still describe
+    // what is on the classpath. Note for the next step: 0.9.1 publishes the leaf
+    // rows (SwitchPreference, ArrowPreference, Checkbox/RadioButtonPreference,
+    // Overlay*/Window* dropdown + spinner) but no public base Preference container,
+    // so a row that is neither a switch nor an arrow still has to be composed from
+    // Miuix's basic parts.
+    //
+    // Raise this the moment AGP's built-in Kotlin reaches 2.4: same coordinates,
+    // just newer versions, and the rows can move onto Miuix's own preference
+    // components for real.
+    implementation 'top.yukonga.miuix.kmp:miuix-ui-android:0.9.1'
+    implementation 'top.yukonga.miuix.kmp:miuix-preference-android:0.9.1'
+    // The library's own icon set, used for the overflow glyph so the bar speaks
+    // one icon language per look. Independent of miuix-ui, same version line.
+    implementation 'top.yukonga.miuix.kmp:miuix-icons-android:0.9.1'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
     // Compile-time hidden-API signatures (not packaged in the APK).
     compileOnly project(":hiddenapi:stubs")
+    // Coroutines: UpdateChecker's network check runs on Dispatchers.IO through a
+    // scope (was a raw Thread), and the Compose side's rememberCoroutineScope /
+    // LaunchedEffect land on the same artifacts. The Compose BOM resolves these
+    // transitively already; declared here so the version the module compiles
+    // against is pinned in this file rather than inherited by accident.
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
     // JVM unit tests (no device / ADB). Release 3.5.3 dropped this line while
     // keeping src/test, which left both test classes importing org.junit with no
     // provider on the classpath: `:HyperFCMLive:testDebugUnitTest` did not even

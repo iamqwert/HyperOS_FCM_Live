@@ -2,6 +2,7 @@ package io.github.howard20181.hyperos.fcmlive.ui
 
 import android.content.res.Configuration
 import android.view.HapticFeedbackConstants
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -29,28 +30,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TooltipAnchorPosition
-import androidx.compose.material3.TooltipBox
-import androidx.compose.material3.TooltipDefaults
-import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -80,9 +73,13 @@ import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.UpdateChecker
 import io.github.howard20181.hyperos.fcmlive.mcu.Hct
 import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
+import io.github.howard20181.hyperos.fcmlive.theme.AppearanceState
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppShapes
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
+import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
+import io.github.howard20181.hyperos.fcmlive.theme.MIUIX_ACCENT_OPTIONS
+import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.ThemePrefs
 import kotlinx.coroutines.launch
 
@@ -96,8 +93,11 @@ import kotlinx.coroutines.launch
  * menu and a canvas, so both collapse to a few lines each.
  *
  * Side effects the screen cannot own stay in [AboutActions]: the SAF
- * import/export needs an `ActivityResultRegistry`, and rebuilding the theme is
- * the Activity's `recreate`.
+ * import/export needs an `ActivityResultRegistry`, and the theme's View-side
+ * half — window chrome and the back-preview snapshot — is the Activity's
+ * `applyAppearanceChange`. The palette itself never reaches the Activity: the
+ * appearance rows write through [AppearanceState], whose setters invalidate
+ * the engine, and the theme re-skins in place.
  */
 data class AboutActions(
     val onViewSource: () -> Unit,
@@ -113,7 +113,12 @@ data class AboutActions(
     val onUpdateOpen: () -> Unit,
     /** Version line, read from PackageManager — the update check's own source. */
     val versionLine: String,
-    /** Invalidates the palette and rebuilds, as a theme change must. */
+    /**
+     * Repaints the View-side chrome a theme change must move but no
+     * recomposition reaches: the window background and the back-preview
+     * snapshot. The palette itself is invalidated by the [AppearanceState]
+     * setters — this callback never touches it.
+     */
     val onAppearanceChange: () -> Unit
 )
 
@@ -135,6 +140,12 @@ sealed interface UpdateOutcome {
     data class Available(val version: String) : UpdateOutcome
 }
 
+/** Theme modes in array order, i.e. [ThemePrefs.MODE_SYSTEM]..[ThemePrefs.MODE_AMOLED]. */
+private val ALL_THEME_MODES = listOf(0, 1, 2, 3)
+
+/** The modes the Miuix look offers: its own dark palette has no pure-black variant. */
+private val MODES_SYSTEM_LIGHT_DARK = listOf(0, 1, 2)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(
@@ -147,36 +158,24 @@ fun AboutScreen(
      */
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
 ) {
-    Scaffold(
+    PageScaffold(
+        titleRes = R.string.settings,
+        onBack = onBack,
         modifier = modifier,
-        // The page colour has to be `background`, not `surface`: `background`
-        // is the mapped `pageBg`, which is also what the Activity paints the
-        // window with. `surface` is one step off it, and under the status bar
-        // and the gesture strip — the two places where the window background is
-        // all there is — that step shows as a band.
-        containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            AppTopBar(titleRes = R.string.settings, onBack = onBack) {
+        snackbarHostState = snackbarHostState,
+        // The help entry is an icon under Material and a section card under
+        // Miuix (the "其他" section at the foot of the page) — the system's
+        // settings put nothing but settings on the bar, and a lone icon is the
+        // Material way of saying "there is one more thing".
+        actions = if (LocalUiStyle.current == UiStyle.Miuix) {
+            {}
+        } else {
+            {
                 val helpText = stringResource(R.string.help)
-                TooltipBox(
-                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
-                    // Below, as the old PopupWindow was: it sat under the icon
-                    // rather than squeezing itself between the icon and the
-                    // status bar.
-                    positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
-                        TooltipAnchorPosition.Below
-                    ),
-                    tooltip = { PlainTooltip { Text(text = helpText) } },
-                    state = rememberTooltipState(),
-                    content = {
-                        IconButton(onClick = actions.onHelp) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_help),
-                                contentDescription = helpText
-                            )
-                        }
-                    }
+                TopBarIconButton(
+                    painter = painterResource(R.drawable.ic_help),
+                    description = helpText,
+                    onClick = actions.onHelp
                 )
             }
         }
@@ -199,23 +198,43 @@ private fun AboutBody(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // Read once per screen. Every writer below re-renders locally *and* asks
-    // the Activity to rebuild, so the mirror cannot go stale on screen.
+    // Everything appearance-related reads its live value straight from
+    // [AppearanceState] — the Compose state layer over ThemePrefs — so there is
+    // no remembered mirror to keep in step: a setter writes the pref, the state
+    // every reader subscribes to, and the palette engine in one call. Only the
+    // two non-appearance values keep local state: the launcher-icon visibility
+    // is a system-side setting with no palette behind it, and the update badge
+    // is screen state by definition.
     var hideIcon by remember { mutableStateOf(LauncherIcon.isHidden(context)) }
-    var dynamic by remember { mutableStateOf(ThemePrefs.dynamicColor(context)) }
-    var seed by remember { mutableIntStateOf(ThemePrefs.seedColor(context)) }
     var updateBadge by remember { mutableStateOf(UpdateChecker.isUpdateAvailable(context)) }
-    var themeMode by remember { mutableIntStateOf(ThemePrefs.themeMode(context)) }
-    var paletteStyle by remember { mutableIntStateOf(ThemePrefs.paletteStyle(context).ordinal) }
-    var colorSpec by remember { mutableIntStateOf(ThemePrefs.specVersion(context)) }
+    val themeMode by AppearanceState.themeMode
+    val uiStyle by AppearanceState.uiStyle
+    val dynamic by AppearanceState.dynamicColor
+    val seed by AppearanceState.seedColor
+    val miuixMonet by AppearanceState.miuixMonet
+    val miuixAccent by AppearanceState.miuixAccent
+    val paletteStyle by AppearanceState.paletteStyle
+    val colorSpec by AppearanceState.colorSpec
+    // The whole theme section is scoped by this: 动态颜色 / 调色风格 / 颜色规格 are
+    // the app's own colour engine's controls, and the Miuix look does not go
+    // through that engine at all. A row that changes nothing has no business being
+    // on screen, and a row that is hidden but still feeding the look is worse —
+    // see MiuixStyleTheme, which stops reading them for exactly that reason.
+    val miuixStyle = uiStyle == ThemePrefs.UI_STYLE_MIUIX
     // The offer, while it is on screen. Keeping it here rather than in the
     // Activity is what makes the dialog a Compose dialog: it is screen state,
     // and the Activity only supplies the URL it would open.
     var updateOffer by remember { mutableStateOf<UpdateOutcome.Available?>(null) }
 
     val modeEntries = stringArrayResource(R.array.theme_mode_entries)
+    val uiStyleEntries = stringArrayResource(R.array.ui_style_entries)
     val styleEntries = stringArrayResource(R.array.palette_style_entries)
     val specEntries = stringArrayResource(R.array.color_spec_entries)
+    // 强调色's menu: entry 0 is the stored 0 (跟随壁纸), the rest are
+    // [MIUIX_ACCENT_OPTIONS] in order. One list for labels, one for values, the
+    // same index over both — the mapping the pick writes through.
+    val accentEntries = stringArrayResource(R.array.miuix_accent_entries)
+    val accentValues = remember { listOf(0) + MIUIX_ACCENT_OPTIONS.toList() }
 
     // The two appearance menus are scoped by each other, because the settings
     // are not independent: the 2025 spec covers four palette styles and nothing
@@ -251,8 +270,17 @@ private fun AboutBody(
     val cancelLabel = stringResource(android.R.string.cancel)
     val hideText = stringResource(R.string.hide_icon_toast)
     val showText = stringResource(R.string.show_icon_toast)
+    // Read here, in composition, not inside show(): LocalUiStyle.current is a
+    // @Composable read and show() is a plain function.
+    val miuixNow = LocalUiStyle.current == UiStyle.Miuix
 
     fun show(text: String) {
+        if (miuixNow) {
+            // This look's one-line acknowledgment is the system toast, not the
+            // Material bar at the page's foot.
+            Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+            return
+        }
         scope.launch {
             // One line at a time: the message replacing the current one should
             // not have to wait out its predecessor's four seconds first.
@@ -262,38 +290,29 @@ private fun AboutBody(
     }
 
     updateOffer?.let { offer ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { updateOffer = null },
-            // Popup level, like every panel drawn over the page. M3's dialog
-            // default is `surfaceContainerHigh`, which on this ramp is a tone
-            // *below* the page (92 against 94), so the dialog would have sat
-            // behind the surface it is drawn over. The popup level is where
-            // Material's own menus sit (`MenuTokens.ContainerColor` =
-            // `surfaceContainer`), and it is deliberately not the card's — see
-            // [AppSurfaces].
-            containerColor = LocalAppSurfaces.current.popup,
-            text = { Text(stringResource(R.string.update_found, offer.version)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    updateOffer = null
-                    // The badge is cleared where the URL is opened, so the
-                    // stored flag and what is on screen can only move together.
-                    updateBadge = false
-                    actions.onUpdateOpen()
-                }) {
-                    Text(updateOpenLabel)
-                }
+            title = stringResource(R.string.update_found_title),
+            // The badge is cleared where the URL is opened, so the stored flag
+            // and what is on screen can only move together.
+            text = stringResource(R.string.update_found, offer.version),
+            confirmLabel = updateOpenLabel,
+            onConfirm = {
+                updateBadge = false
+                actions.onUpdateOpen()
             },
-            dismissButton = {
-                TextButton(onClick = { updateOffer = null }) { Text(cancelLabel) }
-            }
+            dismissLabel = cancelLabel
         )
     }
 
+    val inset = pageHorizontalInset()
     LazyColumn(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp),
+            .padding(start = inset, end = inset),
+        // The four appearance menus all re-skin the app on a pick, so this page is
+        // the one place a menu could visibly throw the reader back to the start.
+        state = rememberPageListState(),
         // The gesture-hint strip is scroll-through, not a hard stop: rows pass
         // under it while scrolling and only rest that far above the edge.
         contentPadding = PaddingValues(bottom = bottomPadding)
@@ -317,78 +336,147 @@ private fun AboutBody(
 
         item {
             SectionTitle(R.string.about_section_theme)
+            // AMOLED is the Material engine's pure-black ramp; the Miuix look is
+            // dressed by Miuix's own dark palette and never reads this mode, so
+            // the entry is material-only — mirroring the colour rows below. The
+            // stored value survives the hiding: a mode picked while in Material
+            // still applies there after switching back. An index of -1 (AMOLED
+            // stored while this look is on) simply leaves the row without a
+            // highlighted entry; the dropdown tolerates it.
+            val visibleModes = if (miuixStyle) MODES_SYSTEM_LIGHT_DARK else ALL_THEME_MODES
             PopupCard(
                 iconRes = R.drawable.ic_theme_mode,
                 title = stringResource(R.string.theme_mode),
                 subtitle = stringResource(R.string.about_sub_theme_mode),
-                entries = modeEntries.toList(),
-                currentIndex = themeMode,
+                entries = visibleModes.map { modeEntries[it] },
+                currentIndex = visibleModes.indexOf(themeMode),
                 first = true,
                 last = false,
                 onPick = { index ->
-                    ThemePrefs.setThemeMode(context, index)
-                    themeMode = index
+                    AppearanceState.setThemeMode(context, visibleModes[index])
                     actions.onAppearanceChange()
                 }
             )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
-            DynamicColorCard(
-                dynamic = dynamic,
-                seed = seed,
-                first = false,
-                last = false,
-                onDynamicChange = { checked ->
-                    ThemePrefs.setDynamicColor(context, checked)
-                    dynamic = checked
-                    actions.onAppearanceChange()
-                },
-                onSeedChange = { color ->
-                    ThemePrefs.setSeedColor(context, color)
-                    seed = color
-                    actions.onAppearanceChange()
-                }
-            )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+            GroupRowGap()
             PopupCard(
-                iconRes = R.drawable.ic_palette_style,
-                title = stringResource(R.string.palette_style),
-                subtitle = stringResource(R.string.about_sub_palette_style),
-                // Entry index == Scheme.Variant.ordinal, which is how the
-                // string array is written; [paletteVariants] is that list minus
-                // whatever the spec in effect cannot render.
-                entries = paletteVariants.map { styleEntries[it.ordinal] },
-                currentIndex = paletteVariants.indexOf(paletteStyleNow),
+                iconRes = R.drawable.ic_ui_style,
+                title = stringResource(R.string.ui_style),
+                subtitle = stringResource(R.string.about_sub_ui_style),
+                entries = uiStyleEntries.toList(),
+                currentIndex = uiStyle,
                 first = false,
                 last = false,
                 onPick = { index ->
-                    // Mapping through the filtered list is what keeps the write
-                    // honest: the index is a position in *this* menu, not an
-                    // ordinal.
-                    ThemePrefs.setPaletteStyle(context, paletteVariants[index])
-                    paletteStyle = paletteVariants[index].ordinal
-                    // Changing the style can put the spec out of reach (see
-                    // ThemePrefs.specVersion), so the spec row re-reads the
-                    // resolved value instead of keeping its own copy — the two
-                    // rows can only ever move together.
-                    colorSpec = ThemePrefs.specVersion(context)
+                    AppearanceState.setUiStyle(context, index)
                     actions.onAppearanceChange()
                 }
             )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
-            PopupCard(
-                iconRes = R.drawable.ic_color_spec,
-                title = stringResource(R.string.color_spec),
-                subtitle = stringResource(R.string.about_sub_color_spec),
-                entries = specValues.map { specEntries[it] },
-                currentIndex = specValues.indexOf(colorSpec),
-                first = false,
-                last = true,
-                onPick = { index ->
-                    ThemePrefs.setSpecVersion(context, specValues[index])
-                    colorSpec = ThemePrefs.specVersion(context)
-                    actions.onAppearanceChange()
+            // Only the Miuix look reads this. Under the app's own look the colours
+            // come from its engine and 动态颜色 below is the switch for them, so a
+            // second Monet row would offer a choice that changes nothing — and the
+            // one that does change something would be a row away from it.
+            if (miuixStyle) {
+                GroupRowGap()
+                SettingsSwitchCard(
+                    iconRes = R.drawable.ic_dynamic_color,
+                    title = stringResource(R.string.miuix_monet),
+                    description = stringResource(R.string.about_sub_miuix_monet),
+                    checked = miuixMonet,
+                    onCheckedChange = { checked ->
+                        AppearanceState.setMiuixMonet(context, checked)
+                        actions.onAppearanceChange()
+                    },
+                    first = false,
+                    // Last of the section while Monet is off; the 强调色 row
+                    // underneath takes the corner while it is on.
+                    last = !miuixMonet
+                )
+                // The key colour the Monet derivation starts from, offered as the
+                // reference manager (KernelSU's colour palette) offers its own:
+                // one menu, "follow the wallpaper" first, the preset swatches
+                // behind it. The row means nothing with Monet off — the palette
+                // is then Miuix's own HyperOS scheme, which no key colour
+                // reaches — so it only exists while the switch above is on,
+                // exactly the way the Material body hides its seed grid while
+                // dynamic colour runs.
+                if (miuixMonet) {
+                    GroupRowGap()
+                    PopupCard(
+                        iconRes = R.drawable.ic_palette_style,
+                        title = stringResource(R.string.miuix_accent),
+                        subtitle = stringResource(R.string.about_sub_miuix_accent),
+                        entries = accentEntries.toList(),
+                        currentIndex = accentValues.indexOf(miuixAccent)
+                            .takeIf { it >= 0 } ?: 0,
+                        first = false,
+                        last = true,
+                        onPick = { index ->
+                            AppearanceState.setMiuixAccent(context, accentValues[index])
+                            actions.onAppearanceChange()
+                        }
+                    )
                 }
-            )
+            }
+            // Material only, on screen: these are the app's own colour engine's
+            // controls and the Miuix look is not dressed by that engine. Hidden here
+            // but still read by it, so a seed or a palette family picked while in
+            // Material carries across instead of being silently dropped — the why is
+            // argued at MiuixStyleTheme, where the reads live.
+            if (!miuixStyle) {
+                GroupRowGap()
+                DynamicColorCard(
+                    dynamic = dynamic,
+                    seed = seed,
+                    first = false,
+                    last = false,
+                    onDynamicChange = { checked ->
+                        AppearanceState.setDynamicColor(context, checked)
+                        actions.onAppearanceChange()
+                    },
+                    onSeedChange = { color ->
+                        AppearanceState.setSeedColor(context, color)
+                        actions.onAppearanceChange()
+                    }
+                )
+                GroupRowGap()
+                PopupCard(
+                    iconRes = R.drawable.ic_palette_style,
+                    title = stringResource(R.string.palette_style),
+                    subtitle = stringResource(R.string.about_sub_palette_style),
+                    // Entry index == Scheme.Variant.ordinal, which is how the
+                    // string array is written; [paletteVariants] is that list minus
+                    // whatever the spec in effect cannot render.
+                    entries = paletteVariants.map { styleEntries[it.ordinal] },
+                    currentIndex = paletteVariants.indexOf(paletteStyleNow),
+                    first = false,
+                    last = false,
+                    onPick = { index ->
+                        // Mapping through the filtered list is what keeps the write
+                        // honest: the index is a position in *this* menu, not an
+                        // ordinal. The setter refreshes the resolved spec with it —
+                        // changing the style can put the spec out of reach (see
+                        // ThemePrefs.specVersion), so the spec row re-reads the
+                        // resolved value instead of keeping its own copy — the two
+                        // rows can only ever move together.
+                        AppearanceState.setPaletteStyle(context, paletteVariants[index])
+                        actions.onAppearanceChange()
+                    }
+                )
+                GroupRowGap()
+                PopupCard(
+                    iconRes = R.drawable.ic_color_spec,
+                    title = stringResource(R.string.color_spec),
+                    subtitle = stringResource(R.string.about_sub_color_spec),
+                    entries = specValues.map { specEntries[it] },
+                    currentIndex = specValues.indexOf(colorSpec),
+                    first = false,
+                    last = true,
+                    onPick = { index ->
+                        AppearanceState.setSpecVersion(context, specValues[index])
+                        actions.onAppearanceChange()
+                    }
+                )
+            }
         }
 
         item {
@@ -401,7 +489,7 @@ private fun AboutBody(
                 first = true,
                 last = false
             )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+            GroupRowGap()
             NavCard(
                 iconRes = R.drawable.ic_import,
                 title = stringResource(R.string.import_allowlist),
@@ -422,6 +510,26 @@ private fun AboutBody(
                 first = true,
                 last = true
             )
+        }
+
+        // Under Miuix the help entry lives in its own one-card "其他" section,
+        // right after 实验 — the material the help covers is the toggles on
+        // that page, so the two read together — and before 关于, which stays
+        // the closing group the way the system's own settings park their
+        // project rows at the foot. Under Material the top-bar icon is the
+        // entry and this section is not composed at all.
+        if (miuixStyle) {
+            item {
+                SectionTitle(R.string.about_section_other)
+                NavCard(
+                    iconRes = R.drawable.ic_help,
+                    title = stringResource(R.string.help_guide),
+                    subtitle = stringResource(R.string.about_sub_help),
+                    onClick = actions.onHelp,
+                    first = true,
+                    last = true
+                )
+            }
         }
 
         item {
@@ -457,7 +565,7 @@ private fun AboutBody(
                     }
                 }
             )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+            GroupRowGap()
             NavCard(
                 iconRes = R.drawable.ic_privacy,
                 title = stringResource(R.string.about_section_privacy),
@@ -466,7 +574,7 @@ private fun AboutBody(
                 first = false,
                 last = false
             )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+            GroupRowGap()
             NavCard(
                 iconRes = R.drawable.ic_view_source,
                 title = stringResource(R.string.view_source_code),
@@ -475,7 +583,7 @@ private fun AboutBody(
                 first = false,
                 last = false
             )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+            GroupRowGap()
             NavCard(
                 iconRes = R.drawable.ic_license,
                 title = stringResource(R.string.open_source_licenses),
@@ -514,6 +622,23 @@ private fun PopupCard(
     onPick: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Under the Miuix look this row is the shared menu row: the value, the
+    // up-down arrow beside it, and Miuix's own popup. The Material body below
+    // differs only in chrome, so nothing is lost by delegating.
+    if (LocalUiStyle.current == UiStyle.Miuix) {
+        SettingsMenuCard(
+            iconRes = iconRes,
+            title = title,
+            description = subtitle,
+            entries = entries,
+            currentIndex = currentIndex,
+            onPick = onPick,
+            modifier = modifier,
+            first = first,
+            last = last
+        )
+        return
+    }
     var expanded by remember { mutableStateOf(false) }
     val shapes = LocalAppShapes.current
     val current = entries.getOrNull(currentIndex) ?: ""

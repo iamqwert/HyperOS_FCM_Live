@@ -1,36 +1,63 @@
 # Changelog
 
+## 4.0.0 (48)
+
+- 设置页新增 MIUIX 的界面风格，其中相关布局参考了 [KernelSU](https://github.com/tiann/KernelSU)（MIUIX 整体框架、莫奈强调色）、[HyperIsland](https://github.com/1812z/HyperIsland)（批量操作）、[Lyrico](https://github.com/Replica0110/Lyrico)（主页左上角设置）、[InstallerX Revived](https://github.com/wxxsfxyzm/InstallerX-Revived)（弹窗风格、预测性返回手势动画），特此感谢
+
+- “横向返回手势支持”优化困难，已取消，更新采用 InstallerX Revived 的 MIUIX 预测性返回样式
+
+- 补齐无障碍缺口
+
+⚠️ 目前软件所用 AGP 内置的 Kotlin 版本太低，无法使用最新的 MIUIX 和 AndroidLiquidGlass，暂时没法采用顶栏模糊效果
+
 ## 3.7.2 (47)
+
 - 调整主界面更多选项弹层内的选项排序
+
 - 模块废弃白名单全空=主线功能全放行的逻辑，必须配置白名单，同时废弃严格模式选项，目前模块只能处在严格模式下
+
 - 新增"横向返回手势支持"，默认启用且不外显设置，参考 KernelSU 的实现方法
+
 - 优化 FCM 应用的判定方法，并锁定 GMS；事实上无论是否勾选 GMS 都不影响 GMS 本身，给 GMS 配置白名单无意义
+
 - 修复设置 - 主题点击水波纹的问题
 
 ## 3.7.1
+
 - 实验功能新增后台网络 - 保持已勾选应用冻结期联网；大量知名 App 采用了“FCM + 自有长连接”的双轨架构，以满足毫秒级低延迟、极高并发通信、绕过 FCM 频次限制等需求 ，而澎湃系统却会对后台被冻结应用断网，可能影响一部分推送；该功能并不改善 FCM 推送
+
 - **模块功能基本开发完毕**
 
 ## 3.7.0
 
 - 删掉「放宽推送广播的自启动检查」，该开关本意是扩大推送广播的自启动放行范围，然而所有 FCM 应用的 FCM 广播 caller 几乎就是 GMS，这点在没有本实验开关前就已经实现了，该开关属于冗余开关；
+
 - 删除「投递广播到已停止的应用」，该开关同上被删除的开关一样，都是建立在“广播不是 GMS 发的"的基础上，与本模块要实现的不相干；
+
 - 修改「把应用的自启动权限写为允许」的文案描述，该开关本质上是自启动开关，先前版本只写入 MIUIOP 10008（应用自启动行为），而没有写入 MIUIOP 10053（手机管家 - 应用管理 -自启动开关），给人自己没有给他自启动权限的错觉，实则开启本开关后已勾选应用就被允许自启动了，关闭要自行前往手机管家手动开启再关闭自启动选项
+
 - 新增「放宽已勾选应用唤醒条件」「不冻结已勾选应用」「答复自启动查询为允许」「同时写入系统自启动设置」（原「把应用的自启动权限写为允许」）、「同时写入自启动开关状态」；以上选项逐层递进（其中最后一个选项，旨在解决倒数第二个选项开了自启动却不知道自己已经开了自启动的问题），开的越多越有利于应用自启动
 
 ## 3.6.2
 
 - 修复一处日志 warning
+
 - 优化日志输出
 
 ## 3.6.1
 
 - 安装包体积大幅优化
+
 - 实验功能新增「放宽推送广播的自启动检查」和「把应用的自启动权限写为允许」
+
 - 睡眠模式实验功能 WiFi / 移动数据不断网改为平级 UI，不再做成主副开关
+
 - 修复在主界面取消勾选某一应用时，下拉刷新会导致页面乱跑到下方的问题
+
 - 桌面长按快捷方式的图标使用自适应图标
+
 - 开放源代码许可页补全依赖
+
 - 更新设置行图标
 
 ## 3.6.0
@@ -68,35 +95,49 @@
 🚀 推送修复
 
 - 严格模式下未勾选的应用，现如今其行为真正回到与未装模块一致
+
 - `isAllowBroadcast` 的 GMS 判定补上调用方 uid 兜底：包名或 uid 任一命中 GMS 即放行
 
 🔍 诊断
 
 - 新增广播唤醒路径只读探针（`WakePathChecker#checkBroadcastWakePath`），记录安全中心链式启动引擎对广播的放行与拒绝
+
 - c2dm 的放行、跳过、落到 ROM 策略各自计数，随 GMS 流量探针一并输出
+
 - 睡眠模式联网保活每次进入都留一行结果
+
 - 睡眠模式的两条旧机制（按 uid 白名单、退出时请求重连）补「首次真正触发」诊断，日志若出现 `sleep-mode sentinel: legacy path FIRED` 即说明机型跑到了旧机制上，据此重新判断；两条机制改为独立挂载，其中一条在当前 ROM 上缺失不再连带另一条一起失效
+
 - 合并「是否对该应用生效」的两个内部判据为带层级的单一入口，行为不变，仅让调用点看得出「唤醒特权」与「严格模式」两层
 
 🧪 实验
 
 - 新增睡眠模式联网保活，分三项且默认关闭：主开关「保护 WiFi 不断网」，子项「保护移动数据不断网」（移动数据一并保住）与「仅在充电时不断网」（未充电时保持系统原有的睡眠断网以省电）
+
 - 子项只在主开关开启时生效，主开关关闭即整组收起；保活只拦下关闭 WiFi / 移动数据这两步，睡眠模式的其余动作（锁屏通知、联网状态记录）与退出时的恢复都保持原生
+
 - 新增「禁止系统将微信写回电池未优化名单」，默认关闭；原有的「禁止系统恢复微信省电策略」改为它的子项，同样只在主开关开启时生效
 
 ✨ 界面与文案
 
 - 界面完全采用 Jetpack Compose + Material 3 Expressive
+
 - 补充上版本缺失的 Tooltip
+
 - 继续适配无障碍相关内容
+
 - 新增 Baseline Profile，优化性能
+
 - 睡眠保活说明补全：夜间仍在联网的除了名单内的应用，还有系统定期开放的维护窗口，以及代持长连接的推送服务进程
+
 - 帮助文档与 README 同步严格模式一节写明「防止被强停」只对勾选的应用生效，未勾选的应用从最近任务划掉会被真正强停
 
 📄 文档
 
 - 许可证页依赖条目改版
+
 - 许可证页依赖版本与实际解析版本对齐
+
 - 本次更新参考了 [onijiang0/fcmfix](https://github.com/onijiang0/fcmfix)  \` getDozeWhiteListApps \` 实现办法
 
 🧹 维护
@@ -108,13 +149,17 @@
 🚀 推送修复
 
 - 修复原先退出睡眠模式后会向 GMS 发重连广播，导致当前的 MCS 长连接被拆（在 FCM 诊断里留下 Close 记录），与保连接的初衷相反的问题。现仅当 GMS 未被成功留在睡眠白名单、退出时确有断网风险时才触发
+
 - `setuiddnsrule` 的 DNS 规则改写增加 uid 门控：仅当目标是 GMS 时才改写为「allow」，其他应用的规则原样透传
 
 🔍 诊断
 
 - 热重载后旧一代探针自动退役（`superseded, retire`），不再多代并行采样
+
 - allowlist 读取拆分「新鲜度 / 成功读取」两个时间戳，并对持续失败加指数退避（1s×2ⁿ 封顶 10s），远端读取失败时不再高频重试
+
 - doze 白名单钩补充可验证性日志：每次开机装配必打一条 `reached`（证明钩子存活），云控将 GMS 移出 doze 白名单时会出现 `injected` 计数（首条 + 每 10 条）
+
 - 睡眠防火墙跳过计数（首条 + 每 10 条）、wake-path 拒绝按调用方聚合汇总（30 分钟节流）、`GmsObserver#c` 安装确认日志
 
 🧪 实验
@@ -126,7 +171,9 @@
 🔍 诊断
 
 - 新增 GMS 流量探针：每 30 分钟采样一次 GMS 的收发字节增量，睡眠模式退出前后各补采一次，用来回答「睡眠结束时主动让 GMS 重连这一步究竟有没有必要」——此前这个问题只能靠推断
+
 - 睡眠模式断网链路上原本有四处不打日志就返回的情况（进入时未记录、白名单字段类型不符、GMS 的 uid 未解析、GMS 已在白名单内），现各补一行日志：此前「回调压根没跑」和「跑了但白名单是空的」在日志里完全一样，无法区分
+
 - 探针中读取内核 socket 表的一路已移除：该文件在系统服务进程内恒不可读，而且真正让 GMS 断流的 DNS 拦截与防火墙丢包都不会改变 socket 状态，读得到也只会把一条死连接报告成健康连接，不如只看流量计数
 
 > 本次全部是只读观测：不改任何返回值，也不新增任何触发，推送行为与 3.4.0 完全一致
@@ -140,7 +187,9 @@
 🚀 推送修复
 
 - 补上 greeze 的**国内版**网络限制分支：原先只覆盖国际版策略实现，而 HyperOS V816 实测走的是国内版（该实现没有 `isPushApp`，旧钩子在这类 ROM 上从未执行），帮助文档里承诺的「推送免网络限制」等于没有落地。现 `DomesticPolicyManager#isRestrictNet` 遇到 GMS 时强制判定为「不限制」
+
 - 新增 greeze 的 UDP 包过滤路径 `GreezeManagerService#udpPackageRestrict`：这是八轮取证里一直被漏掉的一条**国内版同样会走**的真实分支（还会继续调用 `PowerInsightService#setUidNetworkFilter`），对 GMS 直接跳过
+
 - 新增 MIUI 闹钟送达门控 `AlarmManagerServiceStubImpl#checkAlarmIsAllowedSend`：属于 GMS 的闹钟被判为不放行时改为放行（GMS 的重连与心跳依赖它）
 
 > 以上三项都是**防御位**：测试机上 ROM 尚未对 GMS 真正判过「限制」或「拒绝」（闹钟门控确实读到过 GMS 的闹钟，但 ROM 予以放行），正常情况下不改变行为，只在 ROM 真的要拦时才起作用
@@ -152,7 +201,9 @@
 ✨ 界面与文案
 
 - 「检查更新」下方的版本号不再写死，改为运行时读取（此前一直显示 2.6.0）
+
 - 修正一条与实际行为相反的日志：热重载原本建议重启，实测重载打完这条后几十毫秒内整组钩子就已重挂完毕，现改为如实说明
+
 - HELP.md 同步更新：补充闹钟门控一行、写明严格模式「免网络限制」一项依赖国际版策略带来的实际收权差异
 
 ## 3.2.0
@@ -160,14 +211,19 @@
 🚀 推送修复
 
 - 修复 `setGmsChainState` 极性错误：原先传 `true` 会启用 `gms_wall` 防火墙链、把 GMS 拦掉，现改为强制 `false` 关闭该链路
+
 - 新增 `AppStandbyController#setUidState` 钩子：PowerKeeper 收紧 GMS 待机限制时强制改写为允许，保证 GMS 不被限速/限网
+
 - `shouldWake` 在非空白名单下仍对 GMS 本身豁免，避免「勾了应用后 GMS 自己反而拿不到唤醒特权」
+
 - `deferBroadcast` 对 c2dm 增加一次性成功日志，便于确认推送投递确实走到该钩子
 
 ✨ 体验与文档
 
 - 帮助页迁出应用，改为浏览器打开在线文档 [HELP.md](HELP.md)：文案只保留一份在仓库里，改完即生效，不必发版
+
 - 桌面「帮助」快捷方式同步改为打开在线帮助
+
 - README 全面改写：补充工作原理、安装步骤、功能表、已知边界与隐私说明
 
 ## 3.0.2
@@ -182,11 +238,16 @@
 
 🚀 推送修复
 
-- 把 GMS 写入 MILLET_NO_RESTRICT_APP 名单，自动回写 userTable.bgControl 为 noRestrict
+- 把 GMS 写入 MILLET\_NO\_RESTRICT\_APP 名单，自动回写 userTable.bgControl 为 noRestrict
+
 - 使 Greezer 冻结路径直接跳过 GMS，收到推送广播时主动解冻目标应用，理论上解决了「日志显示已投递、应用却毫无反应」的问题
+
 - 使 c2dm 投递不再被延后，广播也不会被塞进缓存等到下次解锁才回放
+
 - 将 GMS 加入睡眠模式白名单
+
 - 睡眠模式结束后主动让 GMS 重连，不等待下一次心跳
+
 - 扩展恢复流程，覆盖更多失败场景以解决广播投递失败
 
 ⚠️理论上做到了对 GMS 广播推送全方位的保护，现阶段可能就只剩高内存负载时清理内存导致 GMS 短时间内掉线，但会立即恢复
@@ -194,11 +255,17 @@
 ✨ 界面优化
 
 - 下拉刷新改用 Material 3 Expressive 加载指示器
+
 - 修复更多选项勾选框配色不跟随动态取色的问题
+
 - 新增隐私说明页
+
 - 更新开源许可页内容
+
 - 优化开源许可页，查看开源项目及组件的展示
+
 - 新增 Shortcut ，桌面长按图标可直达设置、FCM 诊断与帮助
+
 - 支持 Android 12+ 回弹效果
 
 🙏 致谢
@@ -206,91 +273,137 @@
 本次推送修复重点参考了以下三个项目，在此致谢：
 
 - [dingwen07/hyperos-fcm-fix](https://github.com/dingwen07/hyperos-fcm-fix)
+
 - [Kr328/HyperOSFCMFix](https://github.com/Kr328/HyperOSFCMFix)
+
 - [ReedGAOOO/FCMGuard-HyperOS](https://github.com/ReedGAOOO/FCMGuard-HyperOS)
 
 ## 2.6.0
 
 - 全新桌面图标，支持 Adaptive Icon 与 Themed Icon
+
 - 桌面名称改为 HyperGreeze
+
 - 列表支持拉伸回弹（Stretch overscroll）
+
 - 修复 Android 16 上关闭无障碍时可能崩溃的问题
+
 - 修复小窗/分屏下点「更多选项」菜单位置不正确的问题
+
 - 精简多个入口
+
 - 降低启动与主题切换时异常崩溃的概率
 
 ## 2.5.0
 
 - 将原项目绝大部分 Java 代码迁移至 Kotlin，部分界面使用 Jetpack Compose（体积大小变化是正常的）
+
 - 持续优化 Material Design 3 风格
+
 - 初次适配「无障碍」
+
 - 优化 Tooltip 的展示
+
 - 优化按压涟漪效果
+
 - 更新「开放源代码许可」页内容
+
 - 调整「模块状态」页显示
+
 - 关于页标题栏改为「设置」
+
 - 若干闪退与翻译问题修复
 
 ## 2.3.0
 
 - 精简「帮助页」文案
+
 - 新增「严格模式」，只要勾选了至少一个应用，模块就**只对勾选的应用生效**
+
 - 完善「模块状态」页下的英文界面翻译
+
 - 删除更多选项多余的振动反馈
+
 - 新增「排除 MiPush 应用」选项
+
 - 修正「显示系统应用」的判定
 
 ## 2.1.0
 
 - 修复连续下拉刷新时，较早发起但较慢完成的扫描会用旧结果覆盖新列表的问题
+
 - 新增「模块状态」页
-- 加载「电量和性能」代码时缺少 CONTEXT_INCLUDE_CODE
-- 补全 4 个此前遗漏的 hook 目标（GreezeManagerService#isAllowBroadcast、GreezeManagerService#getPackageNameFromUid、ActivityManagerService#broadcastInten&#x74;*、ActivityManagerService#getRecordForApp*）
+
+- 加载「电量和性能」代码时缺少 CONTEXT\_INCLUDE\_CODE
+
+- 补全 4 个此前遗漏的 hook 目标（GreezeManagerService#isAllowBroadcast、GreezeManagerService#getPackageNameFromUid、ActivityManagerService#broadcastIntent\*、ActivityManagerService#getRecordForApp\*）
+
 - 模块注入后新增一行汇总日志，便于判断模块是否生效
+
 - 回调并完善对FCM应用的判断
 
 ## 2.0.1 (versionCode 20)
 
 - 更新 Android Gradle Plugin 至 9.4.1
+
 - 更新 SwipeRefreshLayout 至 1.2.0
 
 ## 2.0.0 (versionCode 19)
 
 - 新增**应用内语言切换**（简体中文 / English）
+
 - 新增**主题**切换，包括主题模式、动态颜色、调色风格和颜色规格
+
 - 新增**备份与恢复**
+
 - 新增**帮助页**
+
 - 优化下拉菜单动效
+
 - 修复勾选应用后需手动刷新才生效的问题
+
 - 修复未授权时过早提示无FCM应用的问题
+
 - 加固稳定性与安全性：钩子异常隔离、清理器判定防崩溃、白名单广播改后台线程
 
 ## 1.8.0 (versionCode 18)
 
 - 修复 HyperOS 3 上误报的报错
+
 - 修复 HyperOS 3 上 `googleNetworkDisconnect` 从未生效的问题
 
 ## 1.7.0 (versionCode 17)
 
 - 新增关于页，完善开放源代码许可清单
+
 - 启动时自动检查更新（每 24 小时一次，亦可手动检查）
+
 - 尝试兼容 HyperOS 3「电量和性能」Hook 策略，参考 [zuohl/HyperOS\_FCM\_Live](https://github.com/zuohl/HyperOS_FCM_Live)
+
 - 完善应用列表权限获取，参考 [250king/HyperOS\_FCM\_Live#1](https://github.com/250king/HyperOS_FCM_Live/pull/1)
+
 - 优化更多选项菜单配色
+
 - 桌面图标更名为「FCM 唤醒名单」
+
 - 未找到支持 FCM 的应用时显示 Toast
+
 - 改进项目代码质量
 
 ## 1.6.0 (versionCode 16)
 
 - 长按应用卡片进入多选，顶栏批量加入/移出白名单，支持全选/取消全选
+
 - 更多选项新增「展示支持应用」（参考 FCMPushViewer 的 Receiver 检测）；首次启动默认开启，用户更改后持久化
+
 - 长按图标 Tooltip 自定义定位，避免遮挡控件
+
 - 修复多选点击时整屏涟漪异常
+
 - 接入 HyperOS `GET_INSTALLED_APPS` 运行时权限申请（思路参考 [250king/HyperOS\_FCM\_Live#1](https://github.com/250king/HyperOS_FCM_Live/pull/1)），避免应用列表被过滤得不全
 
 ## 1.5.1 (versionCode 15)
 
-###紧急修复，建议更新至本版本  
--修复'1.5.0.14'无法隐藏桌面图标的问题  
+\###紧急修复，建议更新至本版本\
+-修复'1.5.0.14'无法隐藏桌面图标的问题\
 -界面深浅取色跟随系统

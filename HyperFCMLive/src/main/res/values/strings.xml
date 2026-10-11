@@ -17,6 +17,8 @@
     <string name="launcher_name">HyperGreeze</string>
     <string name="back">返回</string>
     <string name="help">帮助</string>
+    <!-- 设置页「其他」区的行名：与顶栏入口/快捷方式的「帮助」区分开，行名说明点开看到的是使用说明 -->
+    <string name="help_guide">使用帮助</string>
     <string name="xposed_description">去除澎湃系统对谷歌推送连接相关广播的限制。启用模块后，系统耗电可能会增加</string>
     <string name="settings_title">FCM 唤醒白名单</string>
     <string name="select_all">全选</string>
@@ -25,12 +27,12 @@
     <string name="tooltip_search">搜索</string>
     <string name="exit_search">退出搜索</string>
     <string name="exit_multi_select">退出多选</string>
+    <string name="batch_ops">批量操作</string>
     <string name="selected_count">已选择 %1$d 项</string>
-    <string name="batch_add_allowlist">加入白名单</string>
-    <string name="batch_remove_allowlist">移出白名单</string>
     <string name="batch_added">白名单已更新</string>
-    <string name="batch_nothing_selected">未选择应用</string>
+    <string name="batch_save">保存</string>
     <string name="multi_select_tip">长按应用卡片可批量操作</string>
+    <string name="multi_select_tip_miuix">点击顶栏「批量操作」可一次处理多个应用</string>
     <string name="installed_apps_permission_denied">未授权时应用列表可能不完整</string>
     <string name="show_system_apps">显示系统应用</string>
     <string name="show_fcm_supported_apps">展示支持应用</string>
@@ -47,6 +49,8 @@
     <string name="about_sub_experiment">实验性开关入口，默认不启用</string>
     <string name="about_section_privacy">隐私与权限</string>
     <string name="about_section_project">关于</string>
+    <string name="about_section_other">其他</string>
+    <string name="about_sub_help">查看在线使用说明</string>
     <string name="privacy_perm_query_all">读取应用列表</string>
     <string name="privacy_perm_query_all_desc">android.permission.QUERY_ALL_PACKAGES：在本地读取已安装应用</string>
     <string name="privacy_perm_get_installed">获取已安装应用</string>
@@ -65,6 +69,8 @@
     <string name="privacy_section_perms">应用权限</string>
     <string name="privacy_section_commitment">隐私承诺</string>
     <string name="view_source_code">查看源代码</string>
+    <string name="app_details">应用详情</string>
+    <string name="app_details_unavailable">无法打开应用详情</string>
     <string name="dialog_close">关闭</string>
     <string name="check_for_updates">检查更新</string>
     <string name="update_checking">正在检查更新…</string>
@@ -78,6 +84,7 @@
     <string name="allowlist_import_done">已导入 %1$d 个应用</string>
     <string name="allowlist_export_done">已导出 %1$d 个应用</string>
     <string name="update_found">发现新版本 %1$s</string>
+    <string name="update_found_title">发现新版本</string>
     <string name="update_open">前往下载</string>
     <string name="open_source_licenses">开放源代码许可</string>
     <string name="licenses_title">开放源代码许可</string>
@@ -91,8 +98,14 @@
     <string name="hide_launcher_icon">隐藏桌面图标</string>
     <string name="theme_mode">主题模式</string>
     <string name="palette_style">调色风格</string>
+    <string name="ui_style">界面风格</string>
+    <string name="miuix_monet">莫奈颜色</string>
+    <string name="miuix_accent">强调色</string>
     <string name="color_spec">颜色规格</string>
     <string name="about_sub_theme_mode">调整应用的主题模式</string>
+    <string name="about_sub_ui_style">选择应用的界面风格</string>
+    <string name="about_sub_miuix_monet">跟随壁纸为界面取色</string>
+    <string name="about_sub_miuix_accent">挑选莫奈配色的主色调</string>
     <string name="about_sub_palette_style">选择动态取色风格</string>
     <string name="about_sub_color_spec">选择 Material 颜色规范</string>
     <string name="dynamic_color">动态颜色</string>
@@ -103,6 +116,11 @@
         <item>浅色模式</item>
         <item>深色模式</item>
         <item>AMOLED</item>
+    </string-array>
+    <!-- 与 ThemePrefs.UI_STYLE_* 的顺序一致。两个都是设计语言的名字，保留原文。 -->
+    <string-array name="ui_style_entries">
+        <item>Material 3</item>
+        <item>Miuix</item>
     </string-array>
     <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格），选项保留英文原文。 -->
     <string-array name="palette_style_entries">
@@ -119,6 +137,26 @@
     <string-array name="color_spec_entries">
         <item>Material You (2021)</item>
         <item>Expressive (2025)</item>
+    </string-array>
+    <!-- 强调色菜单：第 0 项是「未选择」（存储值 0，跟随壁纸），其余与
+         MIUIX_ACCENT_OPTIONS 的顺序一一对应（KernelSU 同款 Material 500 档 + 樱粉）。 -->
+    <string-array name="miuix_accent_entries">
+        <item>跟随壁纸</item>
+        <item>红</item>
+        <item>粉</item>
+        <item>紫</item>
+        <item>深紫</item>
+        <item>靛蓝</item>
+        <item>蓝</item>
+        <item>青</item>
+        <item>蓝绿</item>
+        <item>绿</item>
+        <item>黄</item>
+        <item>琥珀</item>
+        <item>橙</item>
+        <item>棕</item>
+        <item>蓝灰</item>
+        <item>樱粉</item>
     </string-array>
     <string name="hide_icon_toast">桌面图标已隐藏，需要设置时请从 LSPosed 打开模块</string>
     <string name="show_icon_toast">桌面图标已恢复</string>
@@ -149,15 +187,15 @@
 
     <string name="experiment_section_sleep">睡眠模式</string>
     <string name="experiment_sleep_keepalive">保护 WiFi 不断网</string>
-    <string name="experiment_sleep_keepalive_desc">在睡眠模式下，WiFi 保持开启，FCM 通道不会整夜中断；夜间耗电增加</string>
+    <string name="experiment_sleep_keepalive_desc">在睡眠模式下，WiFi 保持开启，防止 FCM 通道中断；夜间耗电增加</string>
     <string name="experiment_sleep_keepalive_data">保护移动数据不断网</string>
     <string name="experiment_sleep_keepalive_data_desc">在睡眠模式下，移动数据保持开启，FCM 通道仍可用；夜间耗电更多</string>
 
     <!-- 自启动单列一节：主开关在运行时放行，副档逐层扩大覆盖面，写入档落持久设置，默认全关 -->
     <string name="experiment_section_autostart">自启动</string>
-    <string name="experiment_autostart_gate_release">放宽已勾选应用唤醒条件</string>
+    <string name="experiment_autostart_gate_release">放宽应用唤醒条件</string>
     <string name="experiment_autostart_gate_release_desc">放行已勾选应用的服务启动与进程启动</string>
-    <string name="experiment_autostart_restart_release">不冻结已勾选应用</string>
+    <string name="experiment_autostart_restart_release">不冻结应用</string>
     <string name="experiment_autostart_restart_release_desc">已勾选应用进程结束后，按正常路径重启而非被系统冻结</string>
     <string name="experiment_autostart_root_release">答复自启动查询为允许</string>
     <string name="experiment_autostart_root_release_desc">对于已勾选应用，系统查询自启动状态的统一入口均按允许答复，覆盖上方各档与其余全部读取点；系统可能不再记录这些应用的自启动记录</string>
@@ -165,19 +203,23 @@
     <string name="experiment_wake_autostart_write_desc">把自启动行为写入系统设置，不改手机管家的自启动开关；系统应用不写入；不随本开关关闭还原</string>
     <string name="experiment_wake_autostart_switch">同时写入自启动开关状态</string>
     <string name="experiment_wake_autostart_switch_desc">写入自启动设置的同时一并写入开关状态，应用管理将显示已勾选应用的自启动开关为开；系统应用不写入；不随本开关关闭还原</string>
-    <string name="experiment_autostart_empty_list">当前白名单为空，开关只作用于白名单内的应用，请先配置白名单</string>
+    <string name="experiment_autostart_empty_list">当前白名单为空，开关只作用于已勾选应用，请先配置白名单</string>
     <string name="experiment_autostart_write_confirm_title">写入系统自启动设置</string>
-    <string name="experiment_autostart_write_confirm">写入只改变自启动行为，不改变手机管家的自启动开关，在应用管理里看不出变化\n为安全考虑，系统应用一律不写入\n写入后，关闭本开关不会还原；	撤销方式：在手机管家里把该应用的自启动先打开再关闭</string>
+    <string name="experiment_autostart_write_confirm">只改变自启动行为，不改动手机管家的开关，应用管理里看不出变化。\n出于安全考虑，系统应用一律不写入。\n写入后关闭本开关不会还原；撤销：在手机管家里把该应用的自启动先开再关。</string>
     <string name="experiment_autostart_write_confirm_ok">写入</string>
 
-    <!-- 后台网络单列一节：冻结期网络放宽，只作用于白名单内应用，默认关 -->
+    <!-- 后台网络单列一节：冻结期网络放宽，默认关 -->
     <string name="experiment_section_background_net">后台网络</string>
-    <string name="experiment_greeze_net_release">保持已勾选应用冻结期联网</string>
+    <string name="experiment_greeze_net_release">保持应用冻结期联网</string>
     <string name="experiment_greeze_net_release_desc">已勾选应用切至后台被冻时网络保持可用；本项并不优化 FCM 推送，而是保护这些应用的自有长连接</string>
 
     <!-- 模块状态页 -->
     <string name="status_yes">是</string>
     <string name="status_no">否</string>
+    <string name="refresh_pull_down">下拉刷新</string>
+    <string name="refresh_release">松开刷新</string>
+    <string name="refreshing">正在刷新…</string>
+    <string name="refresh_done">刷新成功</string>
     <string name="app_list_refreshed">应用列表已刷新</string>
     <string name="a11y_allowlist_on">已在白名单</string>
     <string name="a11y_allowlist_off">不在白名单</string>

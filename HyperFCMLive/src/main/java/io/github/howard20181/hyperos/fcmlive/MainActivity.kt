@@ -28,6 +28,8 @@ import android.window.OnBackInvokedDispatcher
 import io.github.howard20181.hyperos.fcmlive.theme.AppPalette
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
+import io.github.howard20181.hyperos.fcmlive.theme.ThemePrefs
+import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport
 import io.github.howard20181.hyperos.fcmlive.ui.AppListStore
 import io.github.howard20181.hyperos.fcmlive.ui.MainActions
@@ -59,6 +61,13 @@ class MainActivity : AppCompatActivity() {
      * rows are composed from it, so the mutations here are what recomposes them.
      */
     private val filteredApps = mutableStateListOf<AppListStore.AppEntry>()
+
+    /**
+     * Row icons keyed by package, filled asynchronously by [store]. A per-package
+     * snapshot map (not a field on the entry) so an icon landing during a scroll
+     * recomposes only its own row instead of rebuilding the whole visible list.
+     */
+    private val iconsByPkg = androidx.compose.runtime.mutableStateMapOf<String, android.graphics.drawable.Drawable?>()
     private var allowlist: Set<String> = HashSet()
 
     /** Row icons: the only piece of the old adapter that survived. */
@@ -181,10 +190,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         ThemeSupport.onCreate(this)
         appliedPalette = ThemeEngine.palette(this)
-        // Row icons are loaded off-thread by the store; when a batch lands it
-        // re-emits the visible list so the rows recompose with their icons.
-        store = AppListStore(this) {
-            runOnUiThreadSafe { refreshVisibleRows() }
+        // Row icons are loaded off-thread by the store; each coalesced batch
+        // lands in the per-package map, recomposing only the rows that got one.
+        store = AppListStore(this) { batch ->
+            batch.forEach { (pkg, drawable) -> iconsByPkg[pkg] = drawable }
         }
 
         // Seed UI order from the local cache so allowlisted apps sit on top
@@ -265,8 +274,10 @@ class MainActivity : AppCompatActivity() {
                     actions = MainActions(
                         onBack = { if (multiSelectMode) exitMultiSelect() else exitSearch() },
                         onSearch = { enterSearch() },
-                        onBatchAdd = { applyBatchAllowlist(true) },
-                        onBatchRemove = { applyBatchAllowlist(false) },
+                        onStartMultiSelect = { enterMultiSelect(null) },
+                        // Reconcile model: checkboxes show final membership, one
+                        // save applies the add/remove diff.
+                        onBatchSave = { saveBatchAllowlist() },
                         onSelectAll = { toggleSelectAllVisible() },
                         onAbout = { startActivityWithSnapshot(Intent(this, AboutActivity::class.java)) },
                         onToggleShowSystemApps = { toggleOverflowShowSystemApps() },
@@ -285,6 +296,7 @@ class MainActivity : AppCompatActivity() {
                     onRowClick = { handleRowTap(it) },
                     onRowLongClick = { handleRowLongPress(it) },
                     loadIcon = { store?.loadIcon(it) },
+                    icons = iconsByPkg,
                     refreshing = refreshing,
                     onRefresh = { refreshing = true; loadApps() },
                     onDiagnostics = { openFcmDiagnostics() },
@@ -334,9 +346,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Re-emit the visible rows so they recompose with the icons that just landed.
-     * `AppEntry.icon` is a plain field, so nothing else can tell the rows it
+     * Re-emit the visible rows so they recompose with a changed allowlist state.
+     * `AppEntry.checked` is a plain field, so nothing else can tell the rows it
      * changed — this replaces the `notifyDataSetChanged` the adapter used to send.
+     * Icons no longer route through here; they land in [iconsByPkg] per row.
      */
     private fun refreshVisibleRows() {
         if (filteredApps.isEmpty()) {
@@ -551,6 +564,9 @@ class MainActivity : AppCompatActivity() {
             ThemeSupport.reapplyWindow(this)
             appliedPalette = palette
         }
+        // A hot reload (scope toggle, module update) can have landed while the
+        // window was backgrounded; the Compose tree re-skins and re-reads its
+        // own state on return.
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -689,7 +705,15 @@ class MainActivity : AppCompatActivity() {
         rapidCheckCount++
         if (rapidCheckCount >= RAPID_CHECK_HINT_AT) {
             multiSelectKnown = true
-            showMessage(getString(R.string.multi_select_tip))
+            // Where batch mode is entered differs by look: long-press under
+            // Material, the top-bar 批量操作 icon under Miuix, so the hint names
+            // the door that actually exists.
+            val tipRes = if (UiStyle.of(ThemePrefs.uiStyle(this)) == UiStyle.Miuix) {
+                R.string.multi_select_tip_miuix
+            } else {
+                R.string.multi_select_tip
+            }
+            showMessage(getString(tipRes))
         }
     }
 
@@ -704,7 +728,17 @@ class MainActivity : AppCompatActivity() {
         multiSelectMode = true
         updateBackCallback()
         selectedPkgs.clear()
+        // Reconcile model: the staging set starts as a mirror of the current
+        // allowlist, so existing members are visible (checkboxes on) and the
+        // user edits membership directly — check to add, uncheck to remove —
+        // then taps save.
+        for (app in allApps) {
+            if (!app.exempt && app.checked) {
+                selectedPkgs.add(app.packageName)
+            }
+        }
         if (firstPackage != null) {
+            // Entered via a Material long-press: stage the pressed row too.
             selectedPkgs.add(firstPackage)
         }
         pushUiState()
@@ -758,36 +792,30 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Apply selected packages to the allowlist. Selection is a staging set;
-     * the whitelist only changes when the user taps a batch action.
+     * Save the batch edit in the reconcile ("what you see is what you get")
+     * model. The staging set is the *desired* membership: for every non-exempt
+     * app, a checked row that was off is added and an unchecked row that was on
+     * is removed. An empty set is a valid "remove all". The stored allowlist
+     * changes only here, on save.
      */
-    private fun applyBatchAllowlist(add: Boolean) {
+    private fun saveBatchAllowlist() {
         if (!multiSelectMode) {
             return
         }
-        val selected = HashSet(selectedPkgs)
-        if (selected.isEmpty()) {
-            showMessage(getString(R.string.batch_nothing_selected))
-            return
-        }
+        val desired = HashSet(selectedPkgs)
         var changed = false
         val newAllow = HashSet(allowlist)
         for (app in allApps) {
-            if (!selected.contains(app.packageName)) {
-                continue
-            }
-            // Belt and braces with [toggleSelectAllVisible]: a batch must not be
-            // able to flip an exempt row's stored state even if one were ever
-            // staged. Adding it would be a no-op the UI cannot show; removing it
-            // would look like it turned the module off for GMS, which it cannot.
+            // Exempt rows are neither members nor stageable; leave them.
             if (app.exempt) {
                 continue
             }
-            if (add && !app.checked) {
+            val shouldBe = desired.contains(app.packageName)
+            if (shouldBe && !app.checked) {
                 app.checked = true
                 newAllow.add(app.packageName)
                 changed = true
-            } else if (!add && app.checked) {
+            } else if (!shouldBe && app.checked) {
                 app.checked = false
                 newAllow.remove(app.packageName)
                 changed = true
@@ -798,7 +826,9 @@ class MainActivity : AppCompatActivity() {
             updateAllowlist()
         }
         refreshVisibleRows()
-        showMessage(getString(R.string.batch_added))
+        if (changed) {
+            showMessage(getString(R.string.batch_added))
+        }
         exitMultiSelect()
     }
 
@@ -1307,7 +1337,7 @@ class MainActivity : AppCompatActivity() {
         /**
          * The packages the module is unconditionally exempt for — the same two
          * [io.github.howard20181.hyperos.fcmlive.Hooker] special-cases in
-         * `moduleAppliesTo`. Duplicated here rather than shared because the hook
+         * `AllowlistGate.moduleAppliesTo`. Duplicated here rather than shared because the hook
          * side's copy is private to its own companion and is loaded in
          * `system_server`, a process this one cannot reach into.
          *
@@ -1407,7 +1437,7 @@ class MainActivity : AppCompatActivity() {
          * questions in system_server (`Hooker#declaresFcmComponent`) — asking it
          * the same way is the point. GMS is the one deliberate divergence there
          * too: the hook exempts it before asking any of this (see
-         * `moduleAppliesTo`), so it never depends on the answer.
+         * `AllowlistGate.moduleAppliesTo`), so it never depends on the answer.
          *
          * Markers 3/4 arrive as device-wide queries and 1/2 from a per-package
          * lookup, so both sources feed the *same* per-package score here rather
@@ -1441,7 +1471,7 @@ class MainActivity : AppCompatActivity() {
             val byReceive = HashSet<String>()
             try {
                 val services = pm.queryIntentServices(
-                    Intent(Hooker.ACTION_MESSAGING_EVENT),
+                    Intent(HookerSupport.ACTION_MESSAGING_EVENT),
                     PackageManager.ResolveInfoFlags.of(0)
                 )
                 for (ri in services) {
@@ -1454,7 +1484,7 @@ class MainActivity : AppCompatActivity() {
             }
             try {
                 val receivers = pm.queryBroadcastReceivers(
-                    Intent(Hooker.ACTION_REMOTE_INTENT),
+                    Intent(HookerSupport.ACTION_REMOTE_INTENT),
                     PackageManager.ResolveInfoFlags.of(0)
                 )
                 for (ri in receivers) {
@@ -1533,7 +1563,7 @@ class MainActivity : AppCompatActivity() {
          */
         private fun declaresFirebaseMessagingService(pm: PackageManager, pkg: String): Boolean {
             return try {
-                pm.getServiceInfo(ComponentName(pkg, Hooker.FCM_MESSAGING_SERVICE_CLASS), 0)
+                pm.getServiceInfo(ComponentName(pkg, HookerSupport.FCM_MESSAGING_SERVICE_CLASS), 0)
                 true
             } catch (ignored: Throwable) {
                 // Not declared (or not visible to us).
@@ -1552,7 +1582,7 @@ class MainActivity : AppCompatActivity() {
          */
         private fun declaresFirebaseInstanceIdReceiver(pm: PackageManager, pkg: String): Boolean {
             return try {
-                pm.getReceiverInfo(ComponentName(pkg, Hooker.FCM_IID_RECEIVER_CLASS), 0)
+                pm.getReceiverInfo(ComponentName(pkg, HookerSupport.FCM_IID_RECEIVER_CLASS), 0)
                 true
             } catch (ignored: Throwable) {
                 // Not declared.

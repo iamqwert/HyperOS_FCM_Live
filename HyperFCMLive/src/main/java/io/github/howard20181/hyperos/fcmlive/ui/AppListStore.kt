@@ -21,31 +21,27 @@ import java.util.concurrent.Executors
  * is the `getView` machinery: view holders, recycled rows, and the measure
  * pass that used to cap the app name against its tag.
  *
- * [onChanged] is how the composables learn that an icon arrived: the rows read
- * [AppEntry.icon] directly, so something has to tell them it changed.
+ * Icons are delivered through [onIconsReady] keyed by package rather than
+ * written back onto the [AppEntry]: the caller keeps them in a per-package
+ * snapshot map, so an icon arriving during a scroll recomposes only that one
+ * row instead of rebuilding the whole visible list the way the old
+ * `notifyDataSetChanged` did.
  */
-class AppListStore(context: Context, private val onChanged: () -> Unit) {
+class AppListStore(context: Context, private val onIconsReady: (Map<String, Drawable>) -> Unit) {
 
     /**
-     * One app. Deliberately a plain mutable class rather than a snapshot state:
-     * these are produced by a background package scan and matched back against
-     * the allowlist by identity, and every mutation is followed by a fresh list
-     * instance reaching the composables, which is what triggers recomposition.
+     * One app's *static* row data, produced by the background package scan.
+     *
+     * The mutable allowlist state (`checked`) and the async `icon` deliberately
+     * do not live here: `checked` is owned by the Activity's allowlist set and
+     * mirrored into a per-package snapshot map for the row to read, and the icon
+     * arrives later through [onIconsReady]. Keeping them out of [AppEntry] lets
+     * the row read exactly the one key it needs and recompose in isolation.
      */
     class AppEntry(
         @JvmField val packageName: String,
         @JvmField val label: String
     ) {
-        @JvmField
-        var icon: Drawable? = null
-
-        @Volatile
-        @JvmField
-        var iconLoading: Boolean = false
-
-        @JvmField
-        var checked: Boolean = false
-
         /**
          * This row is exempt from the allowlist: the module always acts for it,
          * so its checkbox carries no meaning. Drawn greyed out and made
@@ -72,6 +68,10 @@ class AppListStore(context: Context, private val onChanged: () -> Unit) {
          */
         @JvmField
         var supportMiPush: Boolean = false
+
+        /** Allowlist membership, owned by the Activity and read back at scan time. */
+        @JvmField
+        var checked: Boolean = false
     }
 
     private val appContext: Context = context.applicationContext
@@ -80,25 +80,30 @@ class AppListStore(context: Context, private val onChanged: () -> Unit) {
     private val iconLoader: ExecutorService = Executors.newFixedThreadPool(4)
     private val density: Float = appContext.resources.displayMetrics.density
 
-    /** True while a coalesced icon refresh is already posted to the main handler. */
-    private var refreshPosted = false
+    /** Packages with a load in flight, so a row re-composing does not re-queue it. */
+    private val loading = HashSet<String>()
+    /** Icons that landed since the last flush, coalesced to one delivery per frame. */
+    private val pending = HashMap<String, Drawable>()
+    private var flushPosted = false
 
     fun loadIcon(app: AppEntry) {
-        if (app.iconLoading) {
+        if (!loading.add(app.packageName)) {
             return
         }
-        app.iconLoading = true
+        val pkg = app.packageName
         iconLoader.execute {
             val d: Drawable? = try {
-                pm.getApplicationIcon(app.packageName)
+                pm.getApplicationIcon(pkg)
             } catch (e: PackageManager.NameNotFoundException) {
                 null
             }
             val loaded = d?.let { shrinkToRowSize(it) }
-            app.iconLoading = false
-            if (loaded != null) {
-                app.icon = loaded
-                scheduleIconRefresh()
+            mainHandler.post {
+                loading.remove(pkg)
+                if (loaded != null) {
+                    pending[pkg] = loaded
+                    scheduleFlush()
+                }
             }
         }
     }
@@ -137,22 +142,26 @@ class AppListStore(context: Context, private val onChanged: () -> Unit) {
         return BitmapDrawable(appContext.resources, scaled)
     }
 
-    /** Coalesce icon-load refreshes so one frame does not recompose the list N times. */
-    private fun scheduleIconRefresh() {
-        if (refreshPosted) {
+    /** Coalesce icon deliveries so one frame flushes every icon that landed. */
+    private fun scheduleFlush() {
+        if (flushPosted) {
             return
         }
-        refreshPosted = true
+        flushPosted = true
         mainHandler.postDelayed({
-            refreshPosted = false
-            onChanged()
+            flushPosted = false
+            if (pending.isNotEmpty()) {
+                val batch = HashMap(pending)
+                pending.clear()
+                onIconsReady(batch)
+            }
         }, 50L)
     }
 
     /** Release icon worker threads (call from Activity.onDestroy). */
     fun shutdown() {
         iconLoader.shutdown()
-        // Also drops the pending coalesced refresh post.
+        // Also drops the pending coalesced flush post.
         mainHandler.removeCallbacksAndMessages(null)
     }
 

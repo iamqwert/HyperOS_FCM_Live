@@ -13,12 +13,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -35,7 +33,6 @@ import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.Prefs
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
-import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
 
 /**
  * Experiment switches: everything here is off by default and reaches into
@@ -85,10 +82,10 @@ import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
  */
 @Composable
 fun ExperimentScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
-    Scaffold(
-        modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = { AppTopBar(titleRes = R.string.experiment, onBack = onBack) }
+    PageScaffold(
+        titleRes = R.string.experiment,
+        onBack = onBack,
+        modifier = modifier
     ) { innerPadding ->
         ExperimentBody(
             bottomPadding = innerPadding.calculateBottomPadding(),
@@ -157,10 +154,14 @@ private fun ExperimentBody(
     var writeConfirmVisible by remember { mutableStateOf(false) }
     var switchConfirmVisible by remember { mutableStateOf(false) }
 
+    val inset = pageHorizontalInset()
     LazyColumn(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp),
+            .padding(start = inset, end = inset),
+        // The signal-floor menu, and every menu added hereafter, must leave the
+        // reader where they were. See [rememberPageListState].
+        state = rememberPageListState(),
         // The gesture-hint strip is scroll-through, not a hard stop.
         contentPadding = PaddingValues(bottom = bottomPadding)
     ) {
@@ -203,7 +204,7 @@ private fun ExperimentBody(
                 exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
             ) {
                 Column {
-                    Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                    GroupRowGap()
                     SettingsMenuCard(
                         iconRes = R.drawable.ic_tune,
                         title = stringResource(R.string.experiment_wifi_weak_signal_floor),
@@ -249,7 +250,7 @@ private fun ExperimentBody(
                 first = true,
                 last = false
             )
-            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+            GroupRowGap()
             SettingsSwitchCard(
                 iconRes = R.drawable.ic_android_cell_4_bar,
                 title = stringResource(R.string.experiment_sleep_keepalive_data),
@@ -304,7 +305,7 @@ private fun ExperimentBody(
                 exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
             ) {
                 Column {
-                    Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                    GroupRowGap()
                     SettingsSwitchCard(
                         iconRes = R.drawable.ic_restart_release,
                         title = stringResource(R.string.experiment_autostart_restart_release),
@@ -325,7 +326,7 @@ private fun ExperimentBody(
                         // always on screen right below.
                         last = false
                     )
-                    Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                    GroupRowGap()
                     SettingsSwitchCard(
                         iconRes = R.drawable.ic_root_release,
                         title = stringResource(R.string.experiment_autostart_root_release),
@@ -350,7 +351,7 @@ private fun ExperimentBody(
                 exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
             ) {
                 Column {
-                    Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                    GroupRowGap()
                     SettingsSwitchCard(
                         iconRes = R.drawable.ic_autostart_write,
                         title = stringResource(R.string.experiment_wake_autostart_write),
@@ -383,7 +384,7 @@ private fun ExperimentBody(
                         exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
                     ) {
                         Column {
-                            Spacer(modifier = Modifier.height(GROUP_ROW_GAP))
+                            GroupRowGap()
                             SettingsSwitchCard(
                                 iconRes = R.drawable.ic_autostart_switch_write,
                                 title = stringResource(
@@ -448,51 +449,33 @@ private fun ExperimentBody(
     // The one experiment that leaves something behind asks first, and the dialog
     // is also where the undo path is written: the switch is deliberately a plain
     // toggle, so the explanation has to live somewhere the user cannot miss.
+    // The two writes that leave a setting behind share one dialog and one
+    // wrapper: AppDialog is the M3 dialog under the Material look and the
+    // system's own bottom-docked one under Miuix.
     if (writeConfirmVisible) {
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { writeConfirmVisible = false },
-            // Popup level, as in [AboutScreen]: the M3 dialog default is a tone
-            // below this ramp's page, so a dialog on it would sit behind the
-            // surface it is drawn over.
-            containerColor = LocalAppSurfaces.current.popup,
-            title = { Text(stringResource(R.string.experiment_autostart_write_confirm_title)) },
-            text = { Text(stringResource(R.string.experiment_autostart_write_confirm)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    writeConfirmVisible = false
-                    Prefs.writeWakeWriteAutostart(context, Prefs.remote(), true)
-                    wakeWriteAutostart = true
-                }) {
-                    Text(stringResource(R.string.experiment_autostart_write_confirm_ok))
-                }
+            title = stringResource(R.string.experiment_autostart_write_confirm_title),
+            text = stringResource(R.string.experiment_autostart_write_confirm),
+            confirmLabel = stringResource(R.string.experiment_autostart_write_confirm_ok),
+            onConfirm = {
+                Prefs.writeWakeWriteAutostart(context, Prefs.remote(), true)
+                wakeWriteAutostart = true
             },
-            dismissButton = {
-                TextButton(onClick = { writeConfirmVisible = false }) {
-                    Text(stringResource(android.R.string.cancel))
-                }
-            }
+            dismissLabel = stringResource(android.R.string.cancel)
         )
     }
     if (switchConfirmVisible) {
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { switchConfirmVisible = false },
-            containerColor = LocalAppSurfaces.current.popup,
-            title = { Text(stringResource(R.string.experiment_autostart_write_confirm_title)) },
-            text = { Text(stringResource(R.string.experiment_autostart_write_confirm)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    switchConfirmVisible = false
-                    Prefs.writeWakeWriteAutostartSwitch(context, Prefs.remote(), true)
-                    wakeWriteAutostartSwitch = true
-                }) {
-                    Text(stringResource(R.string.experiment_autostart_write_confirm_ok))
-                }
+            title = stringResource(R.string.experiment_autostart_write_confirm_title),
+            text = stringResource(R.string.experiment_autostart_write_confirm),
+            confirmLabel = stringResource(R.string.experiment_autostart_write_confirm_ok),
+            onConfirm = {
+                Prefs.writeWakeWriteAutostartSwitch(context, Prefs.remote(), true)
+                wakeWriteAutostartSwitch = true
             },
-            dismissButton = {
-                TextButton(onClick = { switchConfirmVisible = false }) {
-                    Text(stringResource(android.R.string.cancel))
-                }
-            }
+            dismissLabel = stringResource(android.R.string.cancel)
         )
     }
 }

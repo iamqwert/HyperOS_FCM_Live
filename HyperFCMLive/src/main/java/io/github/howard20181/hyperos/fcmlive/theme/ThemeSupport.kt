@@ -120,6 +120,9 @@ object ThemeSupport {
     /** Call before `setContentView`. Must never throw: UI setup is best-effort. */
     @JvmStatic
     fun onCreate(activity: Activity) {
+        // Sync the Compose-visible appearance state with disk before any
+        // composable reads it — see [AppearanceState].
+        AppearanceState.hydrate(activity)
         try {
             applyDynamicColors(activity)
         } catch (ignored: Throwable) {
@@ -130,7 +133,7 @@ object ThemeSupport {
             return
         }
         try {
-            applyWindow(activity, palette)
+            applyWindow(activity, palette.pageBg, palette.dark)
         } catch (ignored: Throwable) {
         }
     }
@@ -152,14 +155,31 @@ object ThemeSupport {
             return
         }
         try {
-            applyWindow(activity, palette)
+            applyWindow(activity, palette.pageBg, palette.dark)
         } catch (ignored: Throwable) {
         }
     }
 
-    private fun applyWindow(activity: Activity, palette: AppPalette) {
+    /**
+     * The same window chrome, painted from colours the caller already has.
+     *
+     * Under the Miuix look the page colour is Miuix's, not the engine's, and the
+     * window background is the only thing behind the status bar and the gesture
+     * strip once the app is edge-to-edge — so a look that moves the palette has to
+     * move this with it or the bars keep wearing the old one. The Compose theme
+     * calls this from a side effect; it cannot be recomposed into the window, which
+     * is View-side state nothing in the tree draws.
+     */
+    @JvmStatic
+    fun reapplyWindow(activity: Activity, surface: Int, dark: Boolean) {
+        try {
+            applyWindow(activity, surface, dark)
+        } catch (ignored: Throwable) {
+        }
+    }
+
+    private fun applyWindow(activity: Activity, surface: Int, dark: Boolean) {
         val window = activity.window ?: return
-        val surface = palette.pageBg
         // The window background is what shows through the system-bar areas, so
         // it has to be the page colour: Android 15 (API 35) forces edge-to-edge
         // and draws both bars transparent, which makes this drawable the only
@@ -200,7 +220,7 @@ object ThemeSupport {
         if (controller != null) {
             val appearance = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
                 WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            controller.setSystemBarsAppearance(if (palette.dark) 0 else appearance, appearance)
+            controller.setSystemBarsAppearance(if (dark) 0 else appearance, appearance)
         }
     }
 }

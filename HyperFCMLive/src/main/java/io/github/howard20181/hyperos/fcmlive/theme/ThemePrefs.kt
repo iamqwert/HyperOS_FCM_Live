@@ -25,6 +25,24 @@ object ThemePrefs {
     const val SPEC_2021 = 0
     const val SPEC_2025 = 1
 
+    /** Which look the app is dressed in. See [UiStyle]. */
+    const val UI_STYLE_MATERIAL = 0
+    /** Miuix: HyperOS row language — no leading icons, text to the margin. */
+    const val UI_STYLE_MIUIX = 1
+
+    private const val KEY_UI_STYLE = "ui_style"
+    /** Updating installs within this window of their first install read as fresh. */
+    private const val UPGRADE_TOLERANCE_MS = 5_000L
+    /** Monet inside the Miuix style only; the Material style has 动态颜色. */
+    private const val KEY_MIUIX_MONET = "miuix_monet"
+    /**
+     * Key colour for the Miuix Monet derivation (强调色). 0 — the default —
+     * means "follow the wallpaper"; any other value is an ARGB seed fed to
+     * Miuix's Monet engine in place of the platform accent. Only read while
+     * [KEY_MIUIX_MONET] is on.
+     */
+    private const val KEY_MIUIX_ACCENT = "miuix_accent"
+
     private const val KEY_THEME_MODE = "theme_mode"
     private const val KEY_PALETTE_STYLE = "palette_style"
     private const val KEY_SPEC = "color_spec"
@@ -55,6 +73,100 @@ object ThemePrefs {
     @JvmStatic
     fun setThemeMode(context: Context, mode: Int) {
         prefs(context).edit().putInt(KEY_THEME_MODE, mode).apply()
+    }
+
+    /**
+     * Which look the app wears. Held as an int rather than the enum so this file
+     * keeps the same shape as every other accessor here, and so a value written by
+     * a newer build falls back to [UI_STYLE_MATERIAL] instead of throwing.
+     *
+     * The KEY_UI_STYLE default is decided once, on the first read that finds the
+     * key missing, and then written down: an install that has been *updated* onto
+     * a MIUIX-capable build keeps [UI_STYLE_MATERIAL] — the look its user chose
+     * by never being offered another — while a fresh install starts on
+     * [UI_STYLE_MIUIX]. From then on the stored value alone decides, so either
+     * side's own change persists the ordinary way.
+     */
+    @JvmStatic
+    fun uiStyle(context: Context): Int {
+        val p = prefs(context)
+        if (!p.contains(KEY_UI_STYLE)) {
+            val decided =
+                if (isUpgradeFromPreMiuixBuild(context)) UI_STYLE_MATERIAL else UI_STYLE_MIUIX
+            p.edit().putInt(KEY_UI_STYLE, decided).apply()
+            return decided
+        }
+        val stored = p.getInt(KEY_UI_STYLE, UI_STYLE_MATERIAL)
+        return if (stored == UI_STYLE_MIUIX) UI_STYLE_MIUIX else UI_STYLE_MATERIAL
+    }
+
+    /**
+     * Whether this install ran a build from before the Miuix look existed.
+     * Two independent signals, either of which settles it:
+     *  - the app's own local pref cache — every earlier build wrote its
+     *    allowlist mirror and toggle state there as it ran;
+     *  - the package having been updated at least once (first install predates
+     *    the last update by more than the tolerance it takes to install twice
+     *    in a row by hand).
+     */
+    private fun isUpgradeFromPreMiuixBuild(context: Context): Boolean {
+        if (context
+                .getSharedPreferences(
+                    io.github.howard20181.hyperos.fcmlive.Prefs.LOCAL_PREFS,
+                    Context.MODE_PRIVATE
+                )
+                .all
+                .isNotEmpty()
+        ) {
+            return true
+        }
+        return try {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            info.firstInstallTime < info.lastUpdateTime - UPGRADE_TOLERANCE_MS
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    @JvmStatic
+    fun setUiStyle(context: Context, style: Int) {
+        prefs(context).edit().putInt(KEY_UI_STYLE, style).apply()
+    }
+
+    /**
+     * Monet inside the Miuix look. Only that look reads this: the Material one has
+     * its own 动态颜色 row, which drives the app's own colour engine, and the two
+     * must not be allowed to disagree about where colors come from.
+     *
+     * Off until the user says otherwise: switching into the Miuix look should land
+     * on Miuix's own HyperOS scheme, not silently repaint the app from the
+     * wallpaper. Once flipped, the choice persists like every other appearance
+     * setting.
+     */
+    @JvmStatic
+    fun miuixMonet(context: Context): Boolean {
+        return prefs(context).getBoolean(KEY_MIUIX_MONET, false)
+    }
+
+    @JvmStatic
+    fun setMiuixMonet(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_MIUIX_MONET, enabled).apply()
+    }
+
+    /**
+     * The 强调色 picked under the Miuix look, as ARGB; 0 means "no pick —
+     * follow the wallpaper". Kept next to [miuixMonet] because it only means
+     * something while that switch is on: with Monet off the palette is Miuix's
+     * own HyperOS scheme and no key colour can move it.
+     */
+    @JvmStatic
+    fun miuixAccent(context: Context): Int {
+        return prefs(context).getInt(KEY_MIUIX_ACCENT, 0)
+    }
+
+    @JvmStatic
+    fun setMiuixAccent(context: Context, color: Int) {
+        prefs(context).edit().putInt(KEY_MIUIX_ACCENT, color).apply()
     }
 
     /**

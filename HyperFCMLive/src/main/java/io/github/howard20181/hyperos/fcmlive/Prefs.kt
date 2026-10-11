@@ -1157,7 +1157,7 @@ object Prefs {
     /**
      * Ask system_server to re-read the shared config group. Sent three times
      * over ~1.5s because the receiver there is installed by a retry loop shortly
-     * after boot (`Hooker.installAllowlistReceiverAsync`): a change made
+     * after boot (`AllowlistGate.installAllowlistReceiverAsync`): a change made
      * in that window would otherwise be dropped and appear to need a refresh.
      *
      * Despite the name it is not allowlist-only: the receiver reloads
