@@ -138,7 +138,7 @@ internal object WakePathProbe {
                     val denied = ++wakePathDeniedCount
                     val caller = readCallerPkg(chain, callerPkgField)
                     if (denied <= HookerSupport.WAKE_PATH_DETAIL_LIMIT) {
-                        module.log(
+                        module.logGated(
                             Log.INFO, HookerSupport.TAG,
                             "wake-path probe: checkWakePath DENIED #$denied " +
                                 "(callerPkg=$caller)"
@@ -157,7 +157,7 @@ internal object WakePathProbe {
                     val now = SystemClock.elapsedRealtime()
                     if (now - wakePathDeniedSummaryAt >= HookerSupport.WAKE_PATH_HEARTBEAT_MIN_MS) {
                         wakePathDeniedSummaryAt = now
-                        module.log(
+                        module.logGated(
                             Log.INFO, HookerSupport.TAG,
                             "wake-path probe: denied summary denied=$wakePathDeniedCount " +
                                 "top=${wakePathTopCallers()}"
@@ -172,7 +172,7 @@ internal object WakePathProbe {
                     if (last == 0L || now - last >= HookerSupport.WAKE_PATH_HEARTBEAT_MIN_MS) {
                         wakePathHeartbeatAt = now
                         val gap = if (last == 0L) "first" else "+${(now - last) / 60_000}m"
-                        module.log(
+                        module.logGated(
                             Log.INFO, HookerSupport.TAG,
                             "wake-path probe: heartbeat reached=$reached " +
                                 "denied=$wakePathDeniedCount gap=$gap " +
@@ -182,12 +182,12 @@ internal object WakePathProbe {
                     }
                 }
             } catch (t: Throwable) {
-                module.log(Log.ERROR, HookerSupport.TAG, "Failed to evaluate wake-path probe", t)
+                module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to evaluate wake-path probe", t)
             }
             result
         }
         module.deoptimize(method)
-        module.log(Log.INFO, HookerSupport.TAG, "wake-path probe: checkWakePath hooked (read-only)")
+        module.logGated(Log.INFO, HookerSupport.TAG, "wake-path probe: checkWakePath hooked (read-only)")
     }
 
     /**
@@ -256,7 +256,7 @@ internal object WakePathProbe {
                     // below only exist for c2dm and denials. One line, ever — a silent
                     // log therefore keeps meaning "never reached", while a line here
                     // with a still-zero `denied` means "reached and always allowed".
-                    module.log(
+                    module.logGated(
                         Log.INFO, HookerSupport.TAG,
                         "wake-path probe: broadcast gate first reach " +
                             "(action=$action caller=$caller callee=$callee " +
@@ -266,7 +266,7 @@ internal object WakePathProbe {
                 if (HookerSupport.ACTION_REMOTE_INTENT == action) {
                     val c2dm = ++broadcastWakePathC2dmCount
                     if (c2dm <= HookerSupport.WAKE_PATH_DETAIL_LIMIT) {
-                        module.log(
+                        module.logGated(
                             Log.INFO, HookerSupport.TAG,
                             "wake-path probe: broadcast c2dm reached the gate #$c2dm " +
                                 "(caller=$caller callee=$callee " +
@@ -280,7 +280,7 @@ internal object WakePathProbe {
                 if (!allowed) {
                     val denied = ++broadcastWakePathDeniedCount
                     if (denied <= HookerSupport.WAKE_PATH_DETAIL_LIMIT) {
-                        module.log(
+                        module.logGated(
                             Log.INFO, HookerSupport.TAG,
                             "wake-path probe: broadcast DENIED #$denied " +
                                 "(action=$action caller=$caller callee=$callee)"
@@ -288,12 +288,12 @@ internal object WakePathProbe {
                     }
                 }
             } catch (t: Throwable) {
-                module.log(Log.ERROR, HookerSupport.TAG, "Failed to evaluate broadcast wake-path probe", t)
+                module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to evaluate broadcast wake-path probe", t)
             }
             result
         }
         module.deoptimize(method)
-        module.log(
+        module.logGated(
             Log.INFO, HookerSupport.TAG,
             "P2: wake-path probe: checkBroadcastWakePath hooked (read-only); " +
                 "counter rides the 30min broadcast-gate summary"

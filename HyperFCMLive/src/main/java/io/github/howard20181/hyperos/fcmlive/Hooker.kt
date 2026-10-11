@@ -71,10 +71,18 @@ class Hooker : XposedModule() {
     override fun onSystemServerStarting(param: XposedModuleInterface.SystemServerStartingParam) {
         val classLoader = param.classLoader
         this.param = Pair.create("system", classLoader)
+        // Load the debug-log snapshot before the install pass logs anything, so
+        // a troubleshooting session opened before this boot already sees the
+        // install lines; a failed read keeps the gate closed, which is the
+        // same value a fresh snapshot would carry.
+        try {
+            HookLog.refresh(getRemotePreferences(Prefs.GROUP_CONFIG))
+        } catch (ignored: Throwable) {
+        }
         try {
             hookSystemServer(classLoader)
         } catch (tr: Throwable) {
-            log(Log.ERROR, HookerSupport.TAG, "Failed to hook SystemServer", tr)
+            logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook SystemServer", tr)
         }
         logSummary("system_server")
     }
@@ -236,10 +244,17 @@ class Hooker : XposedModule() {
         val packageName = param.packageName
         val classLoader = param.classLoader
         this.param = Pair.create(packageName, classLoader)
+        // Same pre-install snapshot as the system_server entry: the PowerKeeper
+        // process has no allowlist reload to ride, so the entry is where the
+        // debug-log gate gets its first — and otherwise only — config read.
+        try {
+            HookLog.refresh(getRemotePreferences(Prefs.GROUP_CONFIG))
+        } catch (ignored: Throwable) {
+        }
         try {
             hookPackage(packageName, classLoader)
         } catch (tr: Throwable) {
-            log(Log.ERROR, HookerSupport.TAG, "Failed to hook package", tr)
+            logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook package", tr)
         }
         logSummary(packageName)
     }
@@ -300,7 +315,7 @@ class Hooker : XposedModule() {
         // stale handle and re-runs the whole install sequence, so nothing is left behind
         // that would need a reboot. Do not reintroduce any "reboot required" wording —
         // HELP.md / README state no reboot is needed and this method proves it.
-        log(Log.INFO, HookerSupport.TAG, "Hot reload requested — re-installing hooks without reboot")
+        logGated(Log.INFO, HookerSupport.TAG, "Hot reload requested — re-installing hooks without reboot")
         param.setSavedInstanceState(this.param)
         return true
     }
@@ -325,7 +340,7 @@ class Hooker : XposedModule() {
                         hookPackage(packageName, classLoader)
                     }
                 } catch (tr: Throwable) {
-                    log(Log.ERROR, HookerSupport.TAG, "Hot reload failed", tr)
+                    logGated(Log.ERROR, HookerSupport.TAG, "Hot reload failed", tr)
                 }
             }
         }
@@ -360,7 +375,7 @@ class Hooker : XposedModule() {
                 // inert. Once per boot is enough — this is retried on every call.
                 if (!systemContextFailureLogged) {
                     systemContextFailureLogged = true
-                    log(Log.WARN, HookerSupport.TAG, "System context unavailable", t)
+                    logGated(Log.WARN, HookerSupport.TAG, "System context unavailable", t)
                 }
             }
         }
@@ -561,8 +576,12 @@ class Hooker : XposedModule() {
      */
     private fun isGreezeNetReleaseEnabled(): Boolean {
         return try {
-            getRemotePreferences(Prefs.GROUP_CONFIG)
-                .getBoolean(Prefs.KEY_GREEZE_NET_RELEASE, false)
+            val prefs = getRemotePreferences(Prefs.GROUP_CONFIG)
+            // This read runs on every qualifying freeze, which makes it one of
+            // the config openings the debug-log gate refreshes from (see
+            // [HookLog]); the greeze path logs its verdicts through the gate.
+            HookLog.refresh(prefs)
+            prefs.getBoolean(Prefs.KEY_GREEZE_NET_RELEASE, false)
         } catch (ignored: Throwable) {
             false
         }
@@ -655,7 +674,7 @@ class Hooker : XposedModule() {
                     if (fromRestrictNet) {
                         if (!restrictNetMatchLogged) {
                             restrictNetMatchLogged = true
-                            log(
+                            logGated(
                                 Log.INFO, HookerSupport.TAG, "isPushApp: caller isRestrictNet matched;" +
                                     " answering false"
                             )
@@ -663,7 +682,7 @@ class Hooker : XposedModule() {
                         return@intercept false
                     }
                 } catch (t: Throwable) {
-                    log(Log.ERROR, HookerSupport.TAG, "Stack inspection failed", t)
+                    logGated(Log.ERROR, HookerSupport.TAG, "Stack inspection failed", t)
                 }
             }
             chain.proceed()

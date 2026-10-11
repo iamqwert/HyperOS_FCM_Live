@@ -58,7 +58,7 @@ internal object AmsHooks {
             )
         }
         if (getRecordMethod == null) {
-            module.log(
+            module.logGated(
                 Log.WARN, HookerSupport.TAG, "No ActivityManagerService#getRecordForApp*;" +
                     " the broadcast caller is identified by binder uid instead"
             )
@@ -120,7 +120,7 @@ internal object AmsHooks {
             }
         }
         if (broadcastMethod == null) {
-            module.log(
+            module.logGated(
                 Log.ERROR, HookerSupport.TAG, "No broadcastIntent* in ActivityManagerService;" +
                     " stopped-package delivery and the power exemption are not installed"
             )
@@ -154,7 +154,7 @@ internal object AmsHooks {
                                 intent.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
                             }
                         } catch (t: Throwable) {
-                            module.log(Log.ERROR, HookerSupport.TAG, "Failed to add FLAG_INCLUDE_STOPPED_PACKAGES", t)
+                            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to add FLAG_INCLUDE_STOPPED_PACKAGES", t)
                         }
                         try {
                             val mContext = mContextField.get(chain.thisObject) as? Context
@@ -170,11 +170,11 @@ internal object AmsHooks {
                                 )
                             }
                         } catch (t: Throwable) {
-                            module.log(Log.ERROR, HookerSupport.TAG, "Failed to add temporary power exemption", t)
+                            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to add temporary power exemption", t)
                         }
                     }
                 } catch (t: Throwable) {
-                    module.log(Log.ERROR, HookerSupport.TAG, "C2DM broadcast hook failed", t)
+                    module.logGated(Log.ERROR, HookerSupport.TAG, "C2DM broadcast hook failed", t)
                 }
             }
             // Experiment: the autostart switch's write. It used to be the
@@ -194,7 +194,7 @@ internal object AmsHooks {
                         AutostartGate.maybeWriteAutostart(module, systemContext, autostartPackage)
                     }
                 } catch (t: Throwable) {
-                    module.log(Log.ERROR, HookerSupport.TAG, "Wake autostart write hook failed", t)
+                    module.logGated(Log.ERROR, HookerSupport.TAG, "Wake autostart write hook failed", t)
                 }
             }
             chain.proceed()
@@ -218,7 +218,7 @@ internal object AmsHooks {
                     return HookerSupport.GMS_PACKAGE_NAME == info.packageName
                 }
             } catch (t: Throwable) {
-                module.log(Log.ERROR, HookerSupport.TAG, "Failed to resolve the broadcast caller", t)
+                module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to resolve the broadcast caller", t)
             }
         }
         return binderCallerIsGms(module, systemContext)
@@ -235,7 +235,7 @@ internal object AmsHooks {
                 }
             }
         } catch (t: Throwable) {
-            module.log(Log.ERROR, HookerSupport.TAG, "Failed to resolve the binder caller uid", t)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to resolve the binder caller uid", t)
         }
         return false
     }

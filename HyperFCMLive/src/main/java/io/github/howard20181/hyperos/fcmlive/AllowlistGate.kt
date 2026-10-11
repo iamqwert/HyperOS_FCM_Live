@@ -29,6 +29,10 @@ internal object AllowlistGate {
     internal fun loadAllowlistFromRemotePrefs(module: XposedInterface) {
         try {
             val prefs = module.getRemotePreferences(Prefs.GROUP_CONFIG)
+            // This reload is the one config read every settings write reaches
+            // (the reload broadcast), so it doubles as the debug-log gate's
+            // freshest snapshot in system_server — see [HookLog].
+            HookLog.refresh(prefs)
             val set = prefs.getStringSet(Prefs.KEY_ALLOWLIST, emptySet())
             val loaded = if (set != null) HashSet(set) else HashSet()
             if (loaded != sAllowlist) {
@@ -37,7 +41,7 @@ internal object AllowlistGate {
                 // The package count is deliberately not printed: without the names
                 // it only ever said "not empty", which the boolean says directly,
                 // and a 9-to-5 edit read as the same line either way.
-                module.log(
+                module.logGated(
                     Log.INFO, HookerSupport.TAG,
                     "allowlist loaded: selected=${loaded.isNotEmpty()}"
                 )
@@ -46,7 +50,7 @@ internal object AllowlistGate {
             sAllowlistFreshMs = SystemClock.uptimeMillis()
             sAllowlistFailureStreak = 0
         } catch (e: Exception) {
-            module.log(Log.ERROR, HookerSupport.TAG, "Failed to read remote allowlist", e)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to read remote allowlist", e)
             // A failed read must not push the next lazy retry a full
             // ALLOWLIST_STALE_MS into the future ("failure delays retry").
             // Backdate the freshness stamp so getFcmAllowlist() retries after an
@@ -155,7 +159,7 @@ internal object AllowlistGate {
                     return@Thread
                 }
             }
-            module.log(
+            module.logGated(
                 Log.WARN, HookerSupport.TAG, "Allowlist receiver not installed during boot;" +
                     " falling back to lazy registration"
             )
@@ -297,7 +301,7 @@ internal object AllowlistGate {
             val handler = allowlistBackgroundHandler()
             sys.registerReceiver(receiver, filter, null, handler, Context.RECEIVER_EXPORTED)
             allowlistReceiverRegistered = true
-            module.log(Log.INFO, HookerSupport.TAG, "Allowlist receiver installed")
+            module.logGated(Log.INFO, HookerSupport.TAG, "Allowlist receiver installed")
             return true
         } catch (e: Throwable) {
             // The boot retry loop reports only its final attempt, so it stays
@@ -357,7 +361,7 @@ internal object AllowlistGate {
             return
         }
         foreignAllowlistSenderLogged = true
-        module.log(
+        module.logGated(
             Log.WARN, HookerSupport.TAG,
             "Ignored allowlist broadcast from " +
                 (fromPackage ?: "uid $fromUid") +
@@ -379,6 +383,6 @@ internal object AllowlistGate {
             return
         }
         allowlistRegisterFailureLogged = true
-        module.log(Log.WARN, HookerSupport.TAG, "Allowlist receiver registration failed", t)
+        module.logGated(Log.WARN, HookerSupport.TAG, "Allowlist receiver registration failed", t)
     }
 }

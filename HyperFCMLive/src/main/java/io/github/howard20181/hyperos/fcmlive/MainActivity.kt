@@ -1093,6 +1093,13 @@ class MainActivity : AppCompatActivity() {
                 this, prefs, Prefs.readLocalGreezeNetRelease(this)
             )
         }
+        if (Prefs.hasPendingDebugLogPush(this)) {
+            // Same repair for the debug-log switch; without it a flip made
+            // before the service bound would never reach the gate in
+            // system_server, which would keep logging (or staying silent)
+            // against what the screen shows.
+            Prefs.writeDebugLog(this, prefs, Prefs.readLocalDebugLog(this))
+        }
         if (Prefs.hasPendingPush(this)) {
             // A check made before the service bound is newer than the remote set:
             // push it up (the write broadcasts, so system_server re-reads too)

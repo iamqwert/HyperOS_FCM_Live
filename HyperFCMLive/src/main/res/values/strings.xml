@@ -213,6 +213,10 @@
     <string name="experiment_greeze_net_release">保持应用冻结期联网</string>
     <string name="experiment_greeze_net_release_desc">已勾选应用切至后台被冻时网络保持可用；本项并不优化 FCM 推送，而是保护这些应用的自有长连接</string>
 
+    <string name="experiment_section_debug">调试</string>
+    <string name="experiment_debug_log">显示调试日志</string>
+    <string name="experiment_debug_log_desc">输出调试日志，排查问题时启用</string>
+
     <!-- 模块状态页 -->
     <string name="status_yes">是</string>
     <string name="status_no">否</string>

@@ -68,7 +68,7 @@ internal object ProcessCleanerHooks {
                     return@intercept false
                 }
             } catch (t: Throwable) {
-                module.log(Log.ERROR, HookerSupport.TAG, "isForceStopEnable hook failed", t)
+                module.logGated(Log.ERROR, HookerSupport.TAG, "isForceStopEnable hook failed", t)
             }
             chain.proceed()
         }
@@ -125,7 +125,7 @@ internal object ProcessCleanerHooks {
         val declares: Boolean = try {
             declaresFcmUncached(pm, packageName)
         } catch (t: Throwable) {
-            module.log(Log.ERROR, HookerSupport.TAG, "FCM lookup failed for $packageName", t)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "FCM lookup failed for $packageName", t)
             return false
         }
         synchronized(fcmCache) {

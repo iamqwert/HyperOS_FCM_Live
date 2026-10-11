@@ -182,7 +182,7 @@ internal object WifiWeakSignalSwitch {
                         try {
                             scoreField.setInt(self, reported)
                         } catch (ignored: Throwable) {
-                            module.log(Log.WARN, HookerSupport.TAG, "wifi-weak-signal: score restore failed")
+                            module.logGated(Log.WARN, HookerSupport.TAG, "wifi-weak-signal: score restore failed")
                         }
                     }
                 }
@@ -192,7 +192,7 @@ internal object WifiWeakSignalSwitch {
         wifiScorerResolved.set(true)
         // Sentinel wording, same discipline as doze-keepout: hooked is not
         // active, and active is not the same as "the ROM would have switched".
-        module.log(
+        module.logGated(
             Log.INFO, HookerSupport.TAG,
             "AmlMiuiThirdPartScorer#notifyScoreAndIsUsable hooked (wifi-weak-signal " +
                 "switch, default off): idle until the experiment switch is on, then " +
@@ -262,7 +262,7 @@ internal object WifiWeakSignalSwitch {
             return
         }
         lastWifiScoreClampLogMs.set(now)
-        module.log(
+        module.logGated(
             Log.INFO, HookerSupport.TAG,
             "wifi-weak-signal: reported $actual met the chosen floor $floor but would " +
                 "have failed the ROM's ${HookerSupport.WIFI_SCORE_USABLE_MIN}; reported as usable instead"
@@ -282,7 +282,7 @@ internal object WifiWeakSignalSwitch {
             return
         }
         lastWifiScoreSkipLogMs.set(now)
-        module.log(
+        module.logGated(
             Log.INFO, HookerSupport.TAG,
             "wifi-weak-signal: reported $actual is below the chosen floor $floor; " +
                 "left to the ROM's own policy"
@@ -298,6 +298,7 @@ internal object WifiWeakSignalSwitch {
     private fun isWifiWeakSignalSwitchRelaxed(module: XposedInterface): Boolean {
         return try {
             module.getRemotePreferences(Prefs.GROUP_CONFIG)
+                .also { HookLog.refresh(it) }
                 .getBoolean(Prefs.KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED, false)
         } catch (ignored: Throwable) {
             // Fail closed: an unreadable switch must not start deciding how the
@@ -320,6 +321,7 @@ internal object WifiWeakSignalSwitch {
         return try {
             Prefs.sanitizeWeakSignalFloor(
                 module.getRemotePreferences(Prefs.GROUP_CONFIG)
+                    .also { HookLog.refresh(it) }
                     .getInt(Prefs.KEY_WIFI_WEAK_SIGNAL_FLOOR, Prefs.WIFI_WEAK_SIGNAL_FLOOR_DEFAULT)
             )
         } catch (ignored: Throwable) {

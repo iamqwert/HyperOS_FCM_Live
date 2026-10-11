@@ -67,7 +67,7 @@ internal object TrafficProbe {
         probeBackgroundHandler().postDelayed(object : Runnable {
             override fun run() {
                 if (latestTrafficProbeGeneration() != generation) {
-                    module.log(
+                    module.logGated(
                         Log.INFO, HookerSupport.TAG,
                         "gms probe: chain generation $generation superseded, " +
                             "retire without rescheduling"
@@ -116,7 +116,7 @@ internal object TrafficProbe {
         } else {
             "uid=$uid ${trafficSinceLastProbe(uid)}"
         }
-        module.log(Log.INFO, HookerSupport.TAG, "gms probe [$reason]: $traffic; ${gateSummary()}")
+        module.logGated(Log.INFO, HookerSupport.TAG, "gms probe [$reason]: $traffic; ${gateSummary()}")
     }
 
     /**

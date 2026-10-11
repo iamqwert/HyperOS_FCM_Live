@@ -89,7 +89,7 @@ internal class InstallBookkeeping(private val module: XposedModule) {
     /** This generation is expected to carry it, and does not. Counted and logged. */
     internal fun logSkip(message: String) {
         hookTargetsAbsent++
-        module.log(Log.INFO, HookerSupport.TAG, message)
+        module.logGated(Log.INFO, HookerSupport.TAG, message)
     }
 
     /**
@@ -116,7 +116,7 @@ internal class InstallBookkeeping(private val module: XposedModule) {
     internal fun logSkipOtherGeneration(symbol: String) {
         hookTargetsAbsentOtherGeneration++
         if (!installPassCollecting) {
-            module.log(Log.DEBUG, HookerSupport.TAG, "cross-generation target(s) absent (1), skip: $symbol")
+            module.logGated(Log.DEBUG, HookerSupport.TAG, "cross-generation target(s) absent (1), skip: $symbol")
             return
         }
         otherGenerationAbsent.add(symbol)
@@ -131,7 +131,7 @@ internal class InstallBookkeeping(private val module: XposedModule) {
      */
     internal fun flushOtherGenerationAbsent() {
         if (otherGenerationAbsent.isEmpty()) return
-        module.log(
+        module.logGated(
             Log.DEBUG, HookerSupport.TAG,
             "cross-generation target(s) absent (${otherGenerationAbsent.size}), skip: " +
                 otherGenerationAbsent.joinToString(", ")
@@ -147,7 +147,7 @@ internal class InstallBookkeeping(private val module: XposedModule) {
     /** One line for every read-only probe answered during this install pass. */
     internal fun flushProbes() {
         if (probeFindings.isEmpty()) return
-        module.log(Log.INFO, HookerSupport.TAG, "probe: " + probeFindings.joinToString(" "))
+        module.logGated(Log.INFO, HookerSupport.TAG, "probe: " + probeFindings.joinToString(" "))
         probeFindings.clear()
     }
 
@@ -157,7 +157,7 @@ internal class InstallBookkeeping(private val module: XposedModule) {
         // `hookPackage`), which is the only place guaranteed to run — see the
         // note there about the hot-reload path skipping this function.
         val crossGeneration = hookTargetsAbsentOtherGeneration
-        module.log(
+        module.logGated(
             Log.INFO, HookerSupport.TAG, "HyperFCMLive active in $process: " +
                 "$hooksInstalled hook(s) installed, " +
                 "$hookTargetsAbsent target(s) absent on this ROM" +
@@ -174,7 +174,7 @@ internal class InstallBookkeeping(private val module: XposedModule) {
         try {
             group.install()
         } catch (t: Throwable) {
-            module.log(Log.ERROR, HookerSupport.TAG, "Failed to ${group.verb} ${group.name}", t)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to ${group.verb} ${group.name}", t)
         }
     }
 }

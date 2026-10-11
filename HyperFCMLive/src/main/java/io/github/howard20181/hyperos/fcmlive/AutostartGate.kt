@@ -271,7 +271,7 @@ internal object AutostartGate {
                         ++autostartRootReleaseCount
                         answered = true
                         if (claimAutostartGateDetail(HookerSupport.AUTOSTART_GATE_ROOT, pkg)) {
-                            module.log(
+                            module.logGated(
                                 Log.INFO, HookerSupport.TAG,
                                 "autostart root: answered op 10008 as allowed " +
                                     "(callee=$pkg)"
@@ -279,7 +279,7 @@ internal object AutostartGate {
                         }
                     }
                 } catch (t: Throwable) {
-                    module.log(Log.ERROR, HookerSupport.TAG, "autostart root choke failed", t)
+                    module.logGated(Log.ERROR, HookerSupport.TAG, "autostart root choke failed", t)
                 }
                 if (answered) AppOpsManager.MODE_ALLOWED else chain.proceed()
             }
@@ -287,7 +287,7 @@ internal object AutostartGate {
             installed++
         }
         if (installed > 0) {
-            module.log(
+            module.logGated(
                 Log.INFO, HookerSupport.TAG,
                 "autostart gate: $installed checkpoint(s) hooked (read-through); " +
                     "denials counted unconditionally, each releasable gate follows " +
@@ -367,7 +367,7 @@ internal object AutostartGate {
                 } catch (t: Throwable) {
                     -1
                 }
-                module.log(
+                module.logGated(
                     Log.INFO, HookerSupport.TAG,
                     "autostart gate: ${autostartGateLabel(gate)} DENIED #$denied -> " +
                         (if (!releaseable) "probe" else if (release) "released" else "kept") +
@@ -380,7 +380,7 @@ internal object AutostartGate {
                 return true
             }
         } catch (t: Throwable) {
-            module.log(Log.ERROR, HookerSupport.TAG, "Failed to evaluate autostart gate", t)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to evaluate autostart gate", t)
         }
         return result
     }
@@ -431,6 +431,7 @@ internal object AutostartGate {
     private fun isAutostartGateReleaseEnabled(module: XposedInterface): Boolean {
         return try {
             module.getRemotePreferences(Prefs.GROUP_CONFIG)
+                .also { HookLog.refresh(it) }
                 .getBoolean(Prefs.KEY_AUTOSTART_GATE_RELEASE, false)
         } catch (ignored: Throwable) {
             false
@@ -447,6 +448,7 @@ internal object AutostartGate {
     private fun isAutostartRestartReleaseEnabled(module: XposedInterface): Boolean {
         return try {
             module.getRemotePreferences(Prefs.GROUP_CONFIG)
+                .also { HookLog.refresh(it) }
                 .getBoolean(Prefs.KEY_AUTOSTART_RESTART_RELEASE, false)
         } catch (ignored: Throwable) {
             false
@@ -462,6 +464,7 @@ internal object AutostartGate {
     private fun isAutostartRootReleaseEnabled(module: XposedInterface): Boolean {
         return try {
             module.getRemotePreferences(Prefs.GROUP_CONFIG)
+                .also { HookLog.refresh(it) }
                 .getBoolean(Prefs.KEY_AUTOSTART_ROOT_RELEASE, false)
         } catch (ignored: Throwable) {
             false
@@ -479,6 +482,7 @@ internal object AutostartGate {
     private fun isWakeWriteAutostartSwitchEnabled(module: XposedInterface): Boolean {
         return try {
             module.getRemotePreferences(Prefs.GROUP_CONFIG)
+                .also { HookLog.refresh(it) }
                 .getBoolean(Prefs.KEY_WAKE_WRITE_AUTOSTART_SWITCH, false)
         } catch (ignored: Throwable) {
             false
@@ -501,6 +505,7 @@ internal object AutostartGate {
     internal fun isWakeWriteAutostartEnabled(module: XposedInterface): Boolean {
         return try {
             module.getRemotePreferences(Prefs.GROUP_CONFIG)
+                .also { HookLog.refresh(it) }
                 .getBoolean(Prefs.KEY_WAKE_WRITE_AUTOSTART, false)
         } catch (ignored: Throwable) {
             false
@@ -564,7 +569,7 @@ internal object AutostartGate {
     ) {
         if (writeAutostartIfNeeded(module, getSystemContext, packageName, throttle = true) == HookerSupport.AUTOSTART_WRITTEN) {
             val ops = if (isWakeWriteAutostartSwitchEnabled(module)) " (10008, 10053)" else " (10008)"
-            module.log(Log.INFO, HookerSupport.TAG, "wake: set the autostart op$ops of $packageName to allowed")
+            module.logGated(Log.INFO, HookerSupport.TAG, "wake: set the autostart op$ops of $packageName to allowed")
         }
     }
 
@@ -603,7 +608,7 @@ internal object AutostartGate {
             module, getSystemContext, { applyAutostartToAllowlist(module, getSystemContext) }
         )
         if (allowlist.isEmpty()) {
-            module.log(
+            module.logGated(
                 Log.INFO, HookerSupport.TAG,
                 "wake: autostart write requested with an empty allowlist, nothing to write"
             )
@@ -626,7 +631,7 @@ internal object AutostartGate {
                 else -> already++
             }
         }
-        module.log(
+        module.logGated(
             Log.INFO, HookerSupport.TAG,
             "wake: autostart on request over ${allowlist.size} allowlisted package(s): " +
                 "$written written, $already already allowed, $skipped system, " +
@@ -750,7 +755,7 @@ internal object AutostartGate {
             }
             return if (wrote) HookerSupport.AUTOSTART_WRITTEN else HookerSupport.AUTOSTART_ALREADY
         } catch (t: Throwable) {
-            module.log(Log.ERROR, HookerSupport.TAG, "wake: failed to write the autostart op of $packageName", t)
+            module.logGated(Log.ERROR, HookerSupport.TAG, "wake: failed to write the autostart op of $packageName", t)
             return HookerSupport.AUTOSTART_FAILED
         } finally {
             Binder.restoreCallingIdentity(token)
