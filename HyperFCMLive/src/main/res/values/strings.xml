@@ -29,11 +29,10 @@
     <string name="exit_multi_select">退出多选</string>
     <string name="batch_ops">批量操作</string>
     <string name="selected_count">已选择 %1$d 项</string>
-    <string name="batch_add_allowlist">加入白名单</string>
-    <string name="batch_remove_allowlist">移出白名单</string>
     <string name="batch_added">白名单已更新</string>
-    <string name="batch_nothing_selected">未选择应用</string>
+    <string name="batch_save">保存</string>
     <string name="multi_select_tip">长按应用卡片可批量操作</string>
+    <string name="multi_select_tip_miuix">点击顶栏「批量操作」可一次处理多个应用</string>
     <string name="installed_apps_permission_denied">未授权时应用列表可能不完整</string>
     <string name="show_system_apps">显示系统应用</string>
     <string name="show_fcm_supported_apps">展示支持应用</string>
@@ -70,6 +69,8 @@
     <string name="privacy_section_perms">应用权限</string>
     <string name="privacy_section_commitment">隐私承诺</string>
     <string name="view_source_code">查看源代码</string>
+    <string name="app_details">应用详情</string>
+    <string name="app_details_unavailable">无法打开应用详情</string>
     <string name="dialog_close">关闭</string>
     <string name="check_for_updates">检查更新</string>
     <string name="update_checking">正在检查更新…</string>

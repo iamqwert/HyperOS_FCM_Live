@@ -3,6 +3,7 @@ package io.github.howard20181.hyperos.fcmlive.ui
 import android.content.res.Configuration
 import android.graphics.drawable.Drawable
 import android.view.HapticFeedbackConstants
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
@@ -14,6 +15,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -58,6 +60,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.ripple
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
@@ -85,6 +88,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
@@ -102,10 +106,15 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.R
+import io.github.howard20181.hyperos.fcmlive.UiUtils
 import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+
 import top.yukonga.miuix.kmp.basic.PullToRefresh as MiuixPullToRefresh
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
@@ -171,8 +180,9 @@ data class MainActions(
     val onBack: () -> Unit,
     val onSearch: () -> Unit,
     val onStartMultiSelect: () -> Unit,
-    val onBatchAdd: () -> Unit,
-    val onBatchRemove: () -> Unit,
+    // One save in the reconcile model: checkbox = final membership, save applies
+    // the add/remove diff. Replaces the separate add/remove actions.
+    val onBatchSave: () -> Unit,
     val onSelectAll: () -> Unit,
     val onAbout: () -> Unit,
     val onToggleShowSystemApps: () -> Unit,
@@ -263,6 +273,13 @@ fun MainScreen(
         // the system's own pull-to-refresh, the circle with the refresh text,
         // not the M3 spinner.
         val scrollBehavior = MiuixScrollBehavior()
+        // Under this look a long-press does not start a batch selection (that is
+        // entered from the top-bar action); it opens a small sheet for the row.
+        // Track which row's sheet is up, null when dismissed.
+        var detailsApp by remember { mutableStateOf<AppListStore.AppEntry?>(null) }
+        val sheetContext = LocalContext.current
+        val detailsLabel = stringResource(R.string.app_details)
+        val detailsFailedLabel = stringResource(R.string.app_details_unavailable)
         MiuixScaffold(
             modifier = modifier,
             // The page colour, not Miuix's own default: under AMOLED the page is
@@ -311,7 +328,21 @@ fun MainScreen(
                         selected = selected,
                         lazyListState = lazyListState,
                         onRowClick = onRowClick,
-                        onRowLongClick = onRowLongClick,
+                        // Miuix: long-press opens the row's small popup rather
+                        // than starting a batch selection.
+                        onRowLongClick = { detailsApp = it },
+                        contextMenuPkg = detailsApp?.packageName,
+                        onContextMenuItemClick = {
+                            val pkg = detailsApp?.packageName
+                            detailsApp = null
+                            if (pkg != null &&
+                                !UiUtils.openAppDetails(sheetContext, pkg)) {
+                                Toast.makeText(
+                                    sheetContext, detailsFailedLabel, Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                        onContextMenuDismiss = { detailsApp = null },
                         loadIcon = loadIcon,
                         icons = icons,
                         bottomPadding = innerPadding.calculateBottomPadding() + FAB_CLEARANCE,
@@ -484,12 +515,10 @@ private fun DiagnosticsFab(onClick: () -> Unit) {
             Icon(
                 painter = painterResource(R.drawable.ic_fcm_diagnostics),
                 contentDescription = label,
-                // 28dp, not the 24dp an icon defaults to: `build` is a thin
-                // glyph that draws well inside its box, so at 24dp the wrench
-                // sat in a pool of empty plate and read small next to the
-                // top-bar icons. Larger glyph, same 56dp container — the plate
-                // is what the target size is measured on, not the ink.
-                modifier = Modifier.size(28.dp)
+                // 24dp, the M3 FAB icon size — the plate (56dp) is what the
+                // target size is measured on, not the ink. The earlier 28dp
+                // filled the plate visually but sat off the spec grid.
+                modifier = Modifier.size(24.dp)
             )
         }
     }
@@ -543,10 +572,8 @@ fun MainTopBar(
                 },
                 actions = {
                     if (state.multiSelect) {
-                        // Two controls, both from the library's own set: the
-                        // select-all flip, and the overflow that carries the two
-                        // staging actions. The three-icon row this replaces was
-                        // crowded, and it spoke Material Symbols on a Miuix bar.
+                        // The select-all flip, then 保存: checkboxes already show
+                        // the final membership, so save applies the diff.
                         TopBarIconButton(
                             painter = rememberVectorPainter(MiuixIcons.SelectAll),
                             description = stringResource(
@@ -555,7 +582,10 @@ fun MainTopBar(
                             ),
                             onClick = actions.onSelectAll
                         )
-                        SelectionMenu(actions)
+                        MiuixTopBarTextAction(
+                            text = stringResource(R.string.batch_save),
+                            onClick = actions.onBatchSave
+                        )
                     } else {
                         // Batch mode's entry, one slot to the left of the overflow
                         // — the same two-control bar the reference app rests in.
@@ -632,16 +662,11 @@ fun MainTopBar(
         }
 
         if (state.multiSelect) {
-            TopBarIconButton(
-                painter = painterResource(R.drawable.ic_batch_add),
-                description = stringResource(R.string.batch_add_allowlist),
-                onClick = actions.onBatchAdd
-            )
-            TopBarIconButton(
-                painter = painterResource(R.drawable.ic_batch_remove),
-                description = stringResource(R.string.batch_remove_allowlist),
-                onClick = actions.onBatchRemove
-            )
+            // Checkboxes show the final membership; 保存 applies the add/remove
+            // diff. Replaces the separate add/remove icon buttons.
+            TextButton(onClick = actions.onBatchSave) {
+                Text(stringResource(R.string.batch_save))
+            }
             TopBarIconButton(
                 painter = painterResource(
                     if (state.allVisibleSelected) R.drawable.ic_deselect_all else R.drawable.ic_select_all
@@ -969,69 +994,102 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
 }
 
 /**
- * Batch mode's action menu: the two staging actions behind the overflow glyph,
- * where the normal mode keeps its toggles.
- *
- * The bar follows the reference app's selection bar — close leading, then
- * select all and the overflow — instead of the three-icon row that crowded the
- * title. The entries are actions, not states, so none carries the check; an
- * empty staging set still opens the menu, and the tap answers with the
- * 「未选择应用」 line, the same answer the icon row used to give.
+ * A text action in the Miuix top bar's actions slot (保存): primary-coloured
+ * text, the platform's own press feedback, and a comfortable tap target. It is
+ * the Miuix look's equivalent of a "done" button; the Material bar keeps its
+ * own icon/button language.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SelectionMenu(actions: MainActions) {
-    var expanded by remember { mutableStateOf(false) }
-    val moreLabel = stringResource(R.string.more_menu)
-    Box {
-        // Miuix-only component: no long-press bubble under this look — see
-        // [LongPressTooltip].
-        MiuixIconButton(onClick = { expanded = true }) {
-            // Same NORMAL weight as the overflow glyph beside it — see there.
-            Icon(
-                imageVector = MiuixIcons.Normal.Sort,
-                contentDescription = moreLabel,
-                tint = MiuixTheme.colorScheme.onSurface,
-                modifier = Modifier.size(24.dp)
-            )
+private fun MiuixTopBarTextAction(text: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        MiuixText(
+            text = text,
+            color = MiuixTheme.colorScheme.primary,
+            style = MiuixTheme.textStyles.body1
+        )
+    }
+}
+
+/**
+ * Positions the long-press popup the way the reference layer sits: vertically below the row
+ * when there is room, above it when there is not, beside it in the middle otherwise.
+ *
+ * Horizontally the popup's center rides at 60% of the row's width, not the 50% a plain
+ * centering gives: anchored to the full-width row, a dead-centered panel reads as sitting
+ * left of the pressed content (the row's own ink — icon, label, switch — crowds the leading
+ * half), so the center is biased toward the trailing half. The clamp keeps it inside the
+ * window when 60% would push the panel's far edge out.
+ */
+private object RowContextMenuPositionProvider : PopupPositionProvider {
+    private const val VERTICAL_GAP_DP = 6
+    private const val HORIZONTAL_CENTER_FRACTION_NUMERATOR = 3
+    private const val HORIZONTAL_CENTER_FRACTION_DENOMINATOR = 5
+
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowBounds: IntRect,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+        popupMargin: IntRect,
+        alignment: PopupPositionProvider.Align
+    ): IntOffset {
+        val centerX = anchorBounds.left +
+            anchorBounds.width * HORIZONTAL_CENTER_FRACTION_NUMERATOR /
+            HORIZONTAL_CENTER_FRACTION_DENOMINATOR
+        val offsetX = centerX - popupContentSize.width / 2
+        val offsetY = when {
+            windowBounds.bottom - anchorBounds.bottom >=
+                popupContentSize.height + popupMargin.bottom ->
+                // Below the row.
+                anchorBounds.bottom + popupMargin.bottom
+            anchorBounds.top - windowBounds.top >=
+                popupContentSize.height + popupMargin.top ->
+                // Above the row.
+                anchorBounds.top - popupContentSize.height - popupMargin.top
+            else ->
+                // Not enough room on either side: cover the row, centered.
+                anchorBounds.top +
+                    (anchorBounds.height - popupContentSize.height) / 2
         }
-        OverlayListPopup(
-            show = expanded,
-            onDismissRequest = { expanded = false },
-            // End-aligned to the anchor, clamped inside the window — the same
-            // provider the normal overflow uses.
-            popupPositionProvider = OverflowMenuPositionProvider,
-            alignment = top.yukonga.miuix.kmp.basic.PopupPositionProvider.Align.TopEnd
-        ) {
-            val addLabel = stringResource(R.string.batch_add_allowlist)
-            val removeLabel = stringResource(R.string.batch_remove_allowlist)
-            ListPopupColumn {
-                DropdownImpl(
-                    item = DropdownItem(text = addLabel),
-                    optionSize = 2,
-                    isSelected = false,
-                    index = 0,
-                    isFirst = true,
-                    isLast = false,
-                    onSelectedIndexChange = {
-                        expanded = false
-                        actions.onBatchAdd()
-                    }
-                )
-                DropdownImpl(
-                    item = DropdownItem(text = removeLabel),
-                    optionSize = 2,
-                    isSelected = false,
-                    index = 1,
-                    isFirst = false,
-                    isLast = true,
-                    onSelectedIndexChange = {
-                        expanded = false
-                        actions.onBatchRemove()
-                    }
-                )
-            }
-        }
+        val maxX = (windowBounds.right - popupContentSize.width - popupMargin.right)
+            .coerceAtLeast(windowBounds.left + popupMargin.left)
+        val maxY = windowBounds.bottom - popupContentSize.height - popupMargin.bottom
+        val minY = windowBounds.top + popupMargin.top
+        return IntOffset(
+            x = offsetX.coerceIn(windowBounds.left + popupMargin.left, maxX),
+            y = offsetY.coerceIn(minY.coerceAtMost(maxY), maxY)
+        )
+    }
+
+    override fun getMargins(): PaddingValues =
+        PaddingValues(vertical = VERTICAL_GAP_DP.dp)
+}
+
+/**
+ * The single centered item inside the long-press popup (应用详情). The popup
+ * surface — rounded 16dp `surfaceContainer` — is painted by [OverlayListPopup],
+ * so this is only the tap target: centered text, min width enforced by the
+ * popup's `minWidth`, tap opens the manager's app-management page.
+ */
+@Composable
+private fun AppDetailsPopupItem(text: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(horizontal = 24.dp, vertical = 18.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        MiuixText(
+            text = text,
+            color = MiuixTheme.colorScheme.onSurface,
+            style = MiuixTheme.textStyles.body1
+        )
     }
 }
 
@@ -1076,6 +1134,11 @@ fun AppListPane(
     lazyListState: LazyListState,
     onRowClick: (AppListStore.AppEntry) -> Unit,
     onRowLongClick: (AppListStore.AppEntry) -> Unit,
+    // Miuix long-press context popup. Null package → no popup; item-click and
+    // dismiss callbacks are non-null whenever a popup could be shown.
+    contextMenuPkg: String? = null,
+    onContextMenuItemClick: (() -> Unit)? = null,
+    onContextMenuDismiss: (() -> Unit)? = null,
     loadIcon: (AppListStore.AppEntry) -> Unit,
     icons: Map<String, Drawable?> = emptyMap(),
     bottomPadding: Dp,
@@ -1108,6 +1171,9 @@ fun AppListPane(
                 exemptNote = app.exemptNote,
                 multiSelect = multiSelect,
                 rowSelected = selected.contains(app.packageName),
+                contextMenuVisible = contextMenuPkg == app.packageName,
+                onContextMenuItemClick = onContextMenuItemClick,
+                onContextMenuDismiss = onContextMenuDismiss,
                 onClick = { onRowClick(app) },
                 onLongClick = { onRowLongClick(app) },
                 onIconMissing = { loadIcon(app) }
@@ -1150,6 +1216,10 @@ private fun LazyItemScope.AppRow(
     rowSelected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    // Miuix long-press popup for this row (only one row at a time is visible).
+    contextMenuVisible: Boolean = false,
+    onContextMenuItemClick: (() -> Unit)? = null,
+    onContextMenuDismiss: (() -> Unit)? = null,
     onIconMissing: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1197,6 +1267,7 @@ private fun LazyItemScope.AppRow(
         if (checked) R.string.a11y_allowlist_on else R.string.a11y_allowlist_off
     )
     val mipushTag = stringResource(R.string.mipush_badge)
+    val detailsLabel = stringResource(R.string.app_details)
     // The reason this row is inert. Taken from the entry rather than fixed
     // here: an exempt row's sentence has to match the reason, and there is
     // more than one reason.
@@ -1229,6 +1300,10 @@ private fun LazyItemScope.AppRow(
         LaunchedEffect(packageName) { onIconMissing() }
     }
 
+    // The anchor Box wraps the card and hosts the long-press popup: the popup's
+    // internal zero-size spacer reads this Box's bounds as the anchor, so the
+    // layer positions itself over exactly this row.
+    Box(modifier = Modifier.fillMaxWidth()) {
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -1302,7 +1377,18 @@ private fun LazyItemScope.AppRow(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.titleMedium,
+                        // Miuix rows print their title at headline1's size with a
+                        // medium weight (what BasicComponent sets); keeping the
+                        // app list on the M3 titleMedium under this look is what
+                        // made its rows read as foreign next to the settings rows.
+                        style = if (LocalUiStyle.current == UiStyle.Miuix) {
+                            TextStyle(
+                                fontSize = MiuixTheme.textStyles.headline1.fontSize,
+                                fontWeight = FontWeight.Medium
+                            )
+                        } else {
+                            MaterialTheme.typography.titleMedium
+                        },
                         color = labelColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -1318,7 +1404,13 @@ private fun LazyItemScope.AppRow(
                     // user already knows about it, and the reason is the thing
                     // they do not.
                     text = if (exempt) exemptNoteText else packageName,
-                    style = MaterialTheme.typography.bodySmall,
+                    // Miuix rows print their summary at body2's size (again what
+                    // BasicComponent sets).
+                    style = if (LocalUiStyle.current == UiStyle.Miuix) {
+                        TextStyle(fontSize = MiuixTheme.textStyles.body2.fontSize)
+                    } else {
+                        MaterialTheme.typography.bodySmall
+                    },
                     color = supportingColor
                 )
             }
@@ -1353,6 +1445,18 @@ private fun LazyItemScope.AppRow(
                         modifier = Modifier.clearAndSetSemantics {}
                     )
                 }
+            } else if (multiSelect && !exempt) {
+                // The Material look's batch rows answer with their own checkbox, the
+                // M3 multi-select language, mirroring the Miuix branch above: the
+                // staged state lives at the trailing edge instead of the saved
+                // allowlist glyph, which under batch semantics would be a readout
+                // that never moves while the tap rewrites something else. Silent in
+                // the a11y tree for the same reason — the row carries the state.
+                Checkbox(
+                    checked = rowSelected,
+                    onCheckedChange = null,
+                    modifier = Modifier.clearAndSetSemantics {}
+                )
             } else if (exempt) {
                 // A lock rather than the on/off glyph: the checkbox states do
                 // not apply, and drawing an "off" tick would suggest the user
@@ -1372,6 +1476,20 @@ private fun LazyItemScope.AppRow(
                     tint = statusTint,
                     modifier = Modifier.size(28.dp)
                 )
+            }
+        }
+    }
+        // Miuix long-press layer: a small rounded popup anchored to this row.
+        if (contextMenuVisible && LocalUiStyle.current == UiStyle.Miuix) {
+            OverlayListPopup(
+                show = true,
+                popupPositionProvider = RowContextMenuPositionProvider,
+                onDismissRequest = { onContextMenuDismiss?.invoke() },
+                onDismissFinished = { onContextMenuDismiss?.invoke() }
+            ) {
+                AppDetailsPopupItem(text = detailsLabel) {
+                    onContextMenuItemClick?.invoke()
+                }
             }
         }
     }
@@ -1456,8 +1574,7 @@ private fun MainScreenPreview() {
                 onBack = {},
                 onSearch = {},
                 onStartMultiSelect = {},
-                onBatchAdd = {},
-                onBatchRemove = {},
+                onBatchSave = {},
                 onSelectAll = {},
                 onAbout = {},
                 onToggleShowSystemApps = {},
