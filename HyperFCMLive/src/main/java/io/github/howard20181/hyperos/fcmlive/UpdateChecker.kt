@@ -5,6 +5,10 @@ import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStream
@@ -51,6 +55,15 @@ object UpdateChecker {
     private const val KEY_LAST_AUTO_CHECK = "update_last_auto_check"
     private const val AUTO_CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L
 
+    /**
+     * Network checks run here. Each check used to be a raw `Thread`; the scope
+     * changes nothing about the semantics (fire-and-forget, unbounded, one
+     * network call at a time in practice) but keeps them off the caller's
+     * thread and cancellable by process death exactly as before. Callbacks are
+     * still delivered on the main thread via [Handler], as the UI expects.
+     */
+    private val checkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     /** Manual check: always hits the network (user-initiated). */
     @JvmStatic
     fun checkAsync(context: Context, callback: Callback?) {
@@ -76,7 +89,7 @@ object UpdateChecker {
                 return
             }
         }
-        Thread {
+        checkScope.launch {
             var latest: String? = null
             var htmlUrl = RELEASES_PAGE
             var ok = false
@@ -134,7 +147,7 @@ object UpdateChecker {
                 // A failed check is not proof that there is no update: keep the
                 // cached badge and report the failure instead of "up to date".
                 callback?.let { Handler(Looper.getMainLooper()).post(it::onError) }
-                return@Thread
+                return@launch
             }
             // CI tags releases as v{versionName}.{versionCode}, so compare
             // against the same shape to avoid a permanent false positive.
@@ -146,11 +159,11 @@ object UpdateChecker {
             val url = htmlUrl
             saveState(app, available, version, url)
             callback?.let { cb ->
-                val result = available
-                Handler(Looper.getMainLooper())
-                    .post { cb.onResult(result, version, url) }
-            }
-        }.start()
+                    val result = available
+                    Handler(Looper.getMainLooper())
+                        .post { cb.onResult(result, version, url) }
+                }
+        }
     }
 
     @JvmStatic
@@ -278,32 +291,45 @@ object UpdateChecker {
             if (conn.responseCode != 200) {
                 return null
             }
-            val feed = readStream(conn.inputStream)
-            val entry = feed.indexOf("<entry>")
-            if (entry < 0) {
-                return null
-            }
-            val first = feed.substring(entry)
-            val id = between(first, "<id>", "</id>")
-            if (id == null || id.indexOf('/') < 0) {
-                return null
-            }
-            // tag:github.com,2008:Repository/<id>/v1.8.0.18
-            val tag = id.substring(id.lastIndexOf('/') + 1).removePrefix("v")
-            if (tag.isEmpty()) {
-                return null
-            }
-            var page = between(first, "href=\"", "\"")
-            if (!isTrustedReleasePage(page)) {
-                page = RELEASES_PAGE
-            }
-            arrayOf(tag, page)
+            parseAtomFeed(readStream(conn.inputStream))
         } catch (t: Throwable) {
             Log.w(TAG, "atom fallback failed", t)
             null
         } finally {
             conn?.disconnect()
         }
+    }
+
+    /**
+     * Pure parse of the fetched release Atom feed. Returns `{version, pageUrl}`
+     * or null when the feed has no entry. String parsing keeps this
+     * dependency-free; the feed layout is stable (`<id>` ends with the tag,
+     * first href is the release page).
+     *
+     * Pulled out of the network path so the unit tests can pin the parsing —
+     * this is hand-rolled string handling against an external feed, exactly
+     * the kind of code that breaks silently.
+     */
+    internal fun parseAtomFeed(feed: String): Array<String?>? {
+        val entry = feed.indexOf("<entry>")
+        if (entry < 0) {
+            return null
+        }
+        val first = feed.substring(entry)
+        val id = between(first, "<id>", "</id>")
+        if (id == null || id.indexOf('/') < 0) {
+            return null
+        }
+        // tag:github.com,2008:Repository/<id>/v1.8.0.18
+        val tag = id.substring(id.lastIndexOf('/') + 1).removePrefix("v")
+        if (tag.isEmpty()) {
+            return null
+        }
+        var page = between(first, "href=\"", "\"")
+        if (!isTrustedReleasePage(page)) {
+            page = RELEASES_PAGE
+        }
+        return arrayOf(tag, page)
     }
 
     /**
@@ -314,8 +340,11 @@ object UpdateChecker {
      * "a new version is available" into a phishing redirect. Only https pages on
      * github.com under /releases/ are accepted; anything else falls back to the
      * fixed releases page.
+     *
+     * `internal` so the unit tests can pin the whitelist behaviour down; this is
+     * the last gate before an implicit ACTION_VIEW.
      */
-    private fun isTrustedReleasePage(url: String?): Boolean {
+    internal fun isTrustedReleasePage(url: String?): Boolean {
         if (url.isNullOrEmpty()) {
             return false
         }
@@ -329,7 +358,11 @@ object UpdateChecker {
                 return false
             }
             val path = uri.path
-            path != null && path.contains("/releases/")
+            // "/releases" itself is a release page too — the repo's releases
+            // index has no trailing slash, and the earlier contains-only check
+            // rejected exactly the fixed page the fallback hands out.
+            return path != null &&
+                (path.contains("/releases/") || path.endsWith("/releases"))
         } catch (t: Throwable) {
             false
         }
