@@ -7,12 +7,15 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Process
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.platform.ComposeView
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
+import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport
+import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import io.github.howard20181.hyperos.fcmlive.ui.AboutActions
 import io.github.howard20181.hyperos.fcmlive.ui.AboutScreen
 import io.github.howard20181.hyperos.fcmlive.ui.PredictiveBackContainer
@@ -51,6 +54,17 @@ class AboutActivity : AppCompatActivity() {
 
     /** The M3 feedback line. Owned here, drawn by [AboutScreen]'s Scaffold. */
     private val snackbarHostState = SnackbarHostState()
+
+    /**
+     * True while the Compose tree is wearing the Miuix shell.
+     *
+     * Read in composition (see [onCreate]'s setContent) and refreshed on every
+     * style change; [showMessage] is a plain function, so this field is its one
+     * bridge to the current look. Without it the Miuix look would swallow every
+     * message: that shell hosts no snackbar, so the M3 bar silently never
+     * appears.
+     */
+    private var miuixFeedbackNow = false
 
     /** Scope for showing a message; cancelled with the Activity. */
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -94,6 +108,12 @@ class AboutActivity : AppCompatActivity() {
         val composeView = ComposeView(this).apply {
             setContent {
                 HyperFCMLiveTheme {
+                    // The feedback style follows the shell: Miuix acknowledges
+                    // with the system toast (its Scaffold hosts no snackbar),
+                    // Material with the page's own bar. Read here, in
+                    // composition — [showMessage] is a plain function and
+                    // cannot read this itself.
+                    miuixFeedbackNow = LocalUiStyle.current == UiStyle.Miuix
                     PredictiveBackContainer(
                         // A committed back has already slid the page out, so the
                         // exit transition is suppressed for that path only; a back
@@ -372,14 +392,19 @@ class AboutActivity : AppCompatActivity() {
     }
 
     /**
-     * One line of feedback, in the M3 way: drawn by the page it belongs to, in
-     * that page's colours, rather than floating over it in the system's.
+     * One line of feedback, in whichever shell the app is wearing: a snackbar
+     * drawn by the page it belongs to, in that page's colours, under Material —
+     * and the system toast under Miuix, whose Scaffold hosts no snackbar.
      */
     private fun showMessage(resId: Int) {
         showMessage(getString(resId))
     }
 
     private fun showMessage(text: String) {
+        if (miuixFeedbackNow) {
+            Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+            return
+        }
         uiScope.launch {
             // A second message replaces the first instead of queueing behind it.
             snackbarHostState.currentSnackbarData?.dismiss()

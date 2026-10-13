@@ -29,7 +29,7 @@ import java.lang.reflect.Method
  * shared boolean-arg rewriter (it routes its own misses through
  * `logSkip` / `logSkipOtherGeneration`), `netReleaseEnabled` /
  * `allowlistPackageForUid` read the `greeze_net_release` experiment off
- * `Hooker`'s allowlist state, and `systemContext` / `onApplyAutostart` feed
+ * `Hooker`'s allowlist state, and `systemContext` feeds
  * [AllowlistGate.moduleAppliesTo].
  *
  * The broadcast-gate counters ([broadcastGateAllowedCount] and friends) are
@@ -62,6 +62,25 @@ internal object GreezeHooks {
     @Volatile
     internal var broadcastGateCnActionCount = 0
 
+    /**
+     * `BroadcastQueueModernStubImpl#checkApplicationAutoStart` answered allow at
+     * method entry (caller=GMS + c2dm + allowlisted callee).
+     *
+     * Blind-spot closure (2026-10-13): this hook used to be the module's only
+     * checkpoint that answered without leaving a trace — the greeze freeze gate
+     * (`isAllowBroadcast`) is never asked for a non-frozen callee, and this very
+     * early return short-circuits the downstream wake-path probe, so a night of
+     * live c2dm traffic read as `c2dm allowed=0, wake-path c2dm=0`. The
+     * GcmService dump proved the hop carries FCM traffic; these counters are
+     * what make that visible going forward.
+     */
+    @Volatile
+    internal var broadcastGateAutostartAllowedCount = 0
+
+    /** c2dm from GMS reaching this checkpoint with the callee off the allowlist: handed back to the ROM. */
+    @Volatile
+    internal var broadcastGateAutostartSkippedCount = 0
+
     /** c2dm that reached `DomesticPolicyManager#deferBroadcast` unsuppressed. */
     @Volatile
     internal var deferC2dmPassthroughCount = 0
@@ -69,6 +88,10 @@ internal object GreezeHooks {
     /** One-shot: first c2dm allow decided by the isAllowBroadcast gate. */
     @Volatile
     private var broadcastGateAllowedLogged = false
+
+    /** One-shot: first allow answered by the checkApplicationAutoStart hook itself. */
+    @Volatile
+    private var broadcastGateAutostartAllowedLogged = false
 
     /** One-shot: first c2dm deliberately left to the ROM policy (P0 behaviour). */
     @Volatile
@@ -148,7 +171,6 @@ internal object GreezeHooks {
         isGmsUid: (Int) -> Boolean,
         forceBooleanArg: (Class<*>, String, Boolean, String, Int) -> Unit,
         systemContext: () -> android.content.Context?,
-        onApplyAutostart: () -> Unit,
         findMethod: (Class<*>, String, Array<Class<*>?>) -> Method?
     ) {
         val GreezeManagerServiceClass =
@@ -216,7 +238,7 @@ internal object GreezeHooks {
                             HookerSupport.GMS_PERSISTENT_PROCESS_NAME == calleePkgName
                         if (HookerSupport.ACTION_REMOTE_INTENT == action &&
                             (callerPkgIsGms || callerUidIsGms) &&
-                            AllowlistGate.moduleAppliesTo(module, systemContext, onApplyAutostart, calleePkgName)
+                            AllowlistGate.moduleAppliesTo(module, systemContext, calleePkgName)
                         ) {
                             broadcastGateAllowedCount++
                             if (!callerPkgIsGms) {
@@ -684,8 +706,7 @@ internal object GreezeHooks {
         classLoader: ClassLoader,
         hookE: (Executable) -> XposedInterface.HookBuilder,
         logSkip: (String) -> Unit,
-        systemContext: () -> android.content.Context?,
-        onApplyAutostart: () -> Unit
+        systemContext: () -> android.content.Context?
     ) {
         val BroadcastQueueModernStubImplClass =
             classLoader.loadClass("com.android.server.am.BroadcastQueueModernStubImpl")
@@ -712,9 +733,29 @@ internal object GreezeHooks {
                     intent != null &&
                     HookerSupport.ACTION_REMOTE_INTENT == intent.action &&
                     targetPackage != null &&
-                    AllowlistGate.moduleAppliesTo(module, systemContext, onApplyAutostart, targetPackage)
+                    AllowlistGate.moduleAppliesTo(module, systemContext, targetPackage)
                 ) {
+                    ++broadcastGateAutostartAllowedCount
+                    if (!broadcastGateAutostartAllowedLogged) {
+                        broadcastGateAutostartAllowedLogged = true
+                        module.logGated(
+                            Log.INFO, HookerSupport.TAG,
+                            "checkApplicationAutoStart: c2dm allowed for callee=$targetPackage " +
+                                "(answered at method entry, before MIUIOP 10008 is read)"
+                        )
+                    }
                     return@intercept true
+                }
+                if (callerPackage != null &&
+                    HookerSupport.GMS_PACKAGE_NAME == callerPackage &&
+                    intent != null &&
+                    HookerSupport.ACTION_REMOTE_INTENT == intent.action
+                ) {
+                    // Reachable with the callee off the user's list (or a target the
+                    // intent alone cannot name). Counted for the same reason as the
+                    // isAllowBroadcast skip path: an unselected app must stay an
+                    // observation, not an assumption.
+                    ++broadcastGateAutostartSkippedCount
                 }
                 // The branch above is the only autostart gate this module
                 // answers. A second branch used to drop its caller restriction
@@ -776,7 +817,7 @@ internal object GreezeHooks {
                     if (HookerSupport.GMS_PACKAGE_NAME == callerPackage &&
                         intent != null &&
                         HookerSupport.ACTION_REMOTE_INTENT == intent.action &&
-                        AllowlistGate.moduleAppliesTo(module, systemContext, onApplyAutostart, calleePackage)
+                        AllowlistGate.moduleAppliesTo(module, systemContext, calleePackage)
                     ) {
                         // Same reason string and caller uid the native pass-through
                         // path uses, so greeze bookkeeping stays consistent.
@@ -816,8 +857,7 @@ internal object GreezeHooks {
         classLoader: ClassLoader,
         hookE: (Executable) -> XposedInterface.HookBuilder,
         logSkip: (String) -> Unit,
-        systemContext: () -> android.content.Context?,
-        onApplyAutostart: () -> Unit
+        systemContext: () -> android.content.Context?
     ) {
         try {
             val GreezeManagerServiceClass =
@@ -834,7 +874,7 @@ internal object GreezeHooks {
                     val packageName = chain.getArg(2) as? String
                     if (intent != null &&
                         HookerSupport.ACTION_REMOTE_INTENT == intent.action &&
-                        AllowlistGate.moduleAppliesTo(module, systemContext, onApplyAutostart, packageName)
+                        AllowlistGate.moduleAppliesTo(module, systemContext, packageName)
                     ) {
                         return@intercept false
                     }

@@ -1213,6 +1213,11 @@ fun AppDialog(
     onConfirm: () -> Unit = {},
     dismissLabel: String? = null,
     onDismiss: () -> Unit = {},
+    // An optional third action for the Material branch's bottom row (the
+    // licence sheet's 查看源代码): it renders where a dismiss button would,
+    // leading of the confirm. The Miuix branch ignores it — Miuix dialogs
+    // that need an extra action lay their own foot row (MiuixLicenseDialog).
+    neutralButton: (@Composable () -> Unit)? = null,
     content: (@Composable () -> Unit)? = null
 ) {
     if (LocalUiStyle.current == UiStyle.Miuix) {
@@ -1289,14 +1294,27 @@ fun AppDialog(
                 Text(text)
             }
         },
+        // Contract parity with the Miuix branch above: callers hand the action
+        // itself and the dialog always ends with onDismissRequest — a bare
+        // onConfirm/onDismiss leaves the dialog on screen (only the system
+        // back gesture could close it).
         confirmButton = {
             if (confirmLabel != null) {
-                TextButton(onClick = onConfirm) { Text(confirmLabel) }
+                TextButton(onClick = {
+                    onConfirm()
+                    onDismissRequest()
+                }) { Text(confirmLabel) }
             }
         },
         dismissButton = {
-            if (dismissLabel != null) {
-                TextButton(onClick = onDismiss) { Text(dismissLabel) }
+            when {
+                dismissLabel != null -> TextButton(onClick = {
+                    onDismiss()
+                    onDismissRequest()
+                }) { Text(dismissLabel) }
+                // No dismiss, but a neutral action was handed in: the slot is
+                // just layout, so the neutral button leads the row instead.
+                neutralButton != null -> neutralButton()
             }
         }
     )

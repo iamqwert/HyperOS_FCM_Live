@@ -15,11 +15,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * The FCM allowlist subsystem, extracted verbatim from `Hooker` (zero-behaviour
  * refactor). `Hooker`'s instance capabilities are injected at the call sites:
- * `module` is the [XposedInterface] the module entry object is, `systemContext`
- * is `Hooker#getSystemContext` as a supplier (its lazy resolution and
- * retry-on-null semantics stay with the caller), and `onApplyAutostart` is
- * `Hooker#applyAutostartToAllowlist`, invoked where the receiver used to call
- * it — on the allowlist handler thread.
+ * `module` is the [XposedInterface] the module entry object is, and
+ * `systemContext` is `Hooker#getSystemContext` as a supplier (its lazy
+ * resolution and retry-on-null semantics stay with the caller).
  */
 internal object AllowlistGate {
 
@@ -70,11 +68,10 @@ internal object AllowlistGate {
 
     internal fun hookAllowlist(
         module: XposedInterface,
-        systemContext: () -> Context?,
-        onApplyAutostart: () -> Unit
+        systemContext: () -> Context?
     ) {
         loadAllowlistFromRemotePrefs(module)
-        installAllowlistReceiverAsync(module, systemContext, onApplyAutostart)
+        installAllowlistReceiverAsync(module, systemContext)
     }
 
     @Volatile
@@ -111,6 +108,27 @@ internal object AllowlistGate {
         }
     }
 
+    /**
+     * Run [task] on the allowlist handler thread after [delayMs].
+     *
+     * Exists so other subsystems can borrow the thread's serialization without
+     * reaching into the receiver plumbing: the autostart backfill uses it to
+     * park its boot-time whole-allowlist walk somewhere that cannot race the
+     * allowlist reads. Fails silently when the handler thread cannot start —
+     * the callers of this helper are maintenance passes, not hot paths.
+     */
+    internal fun postDelayedToAllowlistHandler(
+        module: XposedInterface,
+        delayMs: Long,
+        task: () -> Unit
+    ) {
+        try {
+            allowlistBackgroundHandler().postDelayed(task, delayMs)
+        } catch (t: Throwable) {
+            module.logGated(Log.WARN, HookerSupport.TAG, "Failed to schedule a task on the allowlist handler", t)
+        }
+    }
+
     private fun requestAllowlistReload(module: XposedInterface) {
         val sinceLastRead = SystemClock.uptimeMillis() - sAllowlistReadMs
         if (sinceLastRead >= HookerSupport.ALLOWLIST_RELOAD_MIN_MS) {
@@ -128,8 +146,7 @@ internal object AllowlistGate {
 
     private fun installAllowlistReceiverAsync(
         module: XposedInterface,
-        systemContext: () -> Context?,
-        onApplyAutostart: () -> Unit
+        systemContext: () -> Context?
     ) {
         if (allowlistReceiverRegistered) {
             return
@@ -147,7 +164,7 @@ internal object AllowlistGate {
             // swallow a genuine failure on the lazy path.
             for (attempt in 0 until HookerSupport.ALLOWLIST_REGISTER_MAX_ATTEMPTS) {
                 val lastAttempt = attempt == HookerSupport.ALLOWLIST_REGISTER_MAX_ATTEMPTS - 1
-                if (registerAllowlistReceiver(module, systemContext, onApplyAutostart, reportFailure = lastAttempt)) {
+                if (registerAllowlistReceiver(module, systemContext, reportFailure = lastAttempt)) {
                     return@Thread
                 }
                 if (lastAttempt) {
@@ -178,10 +195,9 @@ internal object AllowlistGate {
      */
     private fun touchAllowlistFreshness(
         module: XposedInterface,
-        systemContext: () -> Context?,
-        onApplyAutostart: () -> Unit
+        systemContext: () -> Context?
     ) {
-        registerAllowlistReceiver(module, systemContext, onApplyAutostart)
+        registerAllowlistReceiver(module, systemContext)
         if (!allowlistReceiverRegistered &&
             SystemClock.uptimeMillis() - sAllowlistFreshMs >= HookerSupport.ALLOWLIST_STALE_MS
         ) {
@@ -191,11 +207,10 @@ internal object AllowlistGate {
 
     internal fun getFcmAllowlist(
         module: XposedInterface,
-        systemContext: () -> Context?,
-        onApplyAutostart: () -> Unit
+        systemContext: () -> Context?
     ): Set<String> {
-        touchAllowlistFreshness(module, systemContext, onApplyAutostart)
-        // A copy: callers that walk this (the autostart write, the apply pass) must
+        touchAllowlistFreshness(module, systemContext)
+        // A copy: callers that walk this (the autostart migration, the apply pass) must
         // not see sAllowlist swapped out from under them mid-iteration by a reload.
         return HashSet(sAllowlist)
     }
@@ -204,10 +219,9 @@ internal object AllowlistGate {
     internal fun allowlistContains(
         module: XposedInterface,
         systemContext: () -> Context?,
-        onApplyAutostart: () -> Unit,
         packageName: String?
     ): Boolean {
-        touchAllowlistFreshness(module, systemContext, onApplyAutostart)
+        touchAllowlistFreshness(module, systemContext)
         // sAllowlist is only ever replaced wholesale (never mutated in place), so a
         // volatile read is a stable snapshot; no copy needed for a single contains().
         return sAllowlist.contains(packageName)
@@ -237,13 +251,12 @@ internal object AllowlistGate {
     internal fun moduleAppliesTo(
         module: XposedInterface,
         systemContext: () -> Context?,
-        onApplyAutostart: () -> Unit,
         packageName: String?
     ): Boolean {
         if (HookerSupport.GMS_PACKAGE_NAME == packageName || HookerSupport.GMS_PERSISTENT_PROCESS_NAME == packageName) {
             return true
         }
-        return allowlistContains(module, systemContext, onApplyAutostart, packageName)
+        return allowlistContains(module, systemContext, packageName)
     }
 
     /**
@@ -256,7 +269,6 @@ internal object AllowlistGate {
     private fun registerAllowlistReceiver(
         module: XposedInterface,
         systemContext: () -> Context?,
-        onApplyAutostart: () -> Unit,
         reportFailure: Boolean = true
     ): Boolean {
         if (allowlistReceiverRegistered) {
@@ -292,12 +304,10 @@ internal object AllowlistGate {
                     }
                     when (intent.action) {
                         Prefs.ACTION_ALLOWLIST_CHANGED -> requestAllowlistReload(module)
-                        Prefs.ACTION_APPLY_AUTOSTART -> onApplyAutostart()
                     }
                 }
             }
             val filter = IntentFilter(Prefs.ACTION_ALLOWLIST_CHANGED)
-            filter.addAction(Prefs.ACTION_APPLY_AUTOSTART)
             val handler = allowlistBackgroundHandler()
             sys.registerReceiver(receiver, filter, null, handler, Context.RECEIVER_EXPORTED)
             allowlistReceiverRegistered = true

@@ -2,8 +2,10 @@
 <!-- Material Symbols "app_registration" (fill1, outlined family). Path data
      verbatim from fonts.gstatic.com (Apache-2.0); the source canvas is 960x960
      with a -960 y origin, shifted down via the group.
-     Local name is by use, not by symbol: this is the row that writes the
-     autostart behavior op (MIUIOP 10008) into system settings.
+     Local name is by use, not by symbol: this is the row that opens 手机管家's
+     own autostart management (com.miui.permcenter.autostart
+     .AutoStartManagementActivity), where the switch ops are shown and edited.
+     Formerly ic_autostart_write, when the row was the op-writing switch.
      -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"

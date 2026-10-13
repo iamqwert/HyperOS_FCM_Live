@@ -132,12 +132,12 @@ class Hooker : XposedModule() {
      */
     private fun systemServerGroups(classLoader: ClassLoader): List<Group> = listOf(
         Group("hook", "allowlist receiver") {
-            AllowlistGate.hookAllowlist(this, ::getSystemContext, ::applyAutostartToAllowlist)
+            AllowlistGate.hookAllowlist(this, ::getSystemContext)
         },
         Group("hook", "GreezeManagerService") {
             GreezeHooks.hookGreezeManagerService(
                 this, classLoader, ::hookE, ::logSkip, ::isGmsUid,
-                ::forceBooleanArg, ::getSystemContext, ::applyAutostartToAllowlist,
+                ::forceBooleanArg, ::getSystemContext,
                 { cls, name, types -> findMethod(cls, name, *types) }
             )
         },
@@ -158,13 +158,19 @@ class Hooker : XposedModule() {
         Group("hook", "BroadcastQueueModernStubImpl") {
             GreezeHooks.hookBroadcastQueueModernStubImpl(
                 this, classLoader, ::hookE, ::logSkip,
-                ::getSystemContext, ::applyAutostartToAllowlist
+                ::getSystemContext
             )
         },
         Group("hook", "greeze broadcast cache") {
             GreezeHooks.hookGreezeBroadcastCache(
                 this, classLoader, ::hookE, ::logSkip,
-                ::getSystemContext, ::applyAutostartToAllowlist
+                ::getSystemContext
+            )
+        },
+        Group("hook", "SmartPower intercept") {
+            SmartPowerHooks.hookSmartPowerIntercept(
+                this, classLoader, ::hookE, ::logSkip, ::logSkipOtherGeneration,
+                ::isSmartPowerReleaseEnabled, ::getSystemContext
             )
         },
         Group("hook", "ProcessPolicy") {
@@ -184,7 +190,7 @@ class Hooker : XposedModule() {
             AmsHooks.hookActivityManagerService(
                 this, classLoader, ::hookE,
                 { cls, name, types -> findMethod(cls, name, *types) },
-                ::getSystemContext, ::applyAutostartToAllowlist
+                ::getSystemContext
             )
         },
         Group("hook", "InternationalPolicyManager") {
@@ -195,13 +201,13 @@ class Hooker : XposedModule() {
         },
         Group("hook", "ProcessCleanerBase") {
             ProcessCleanerHooks.hookProcessCleanerBase(
-                this, classLoader, ::hookE, ::getSystemContext, ::applyAutostartToAllowlist
+                this, classLoader, ::hookE, ::getSystemContext
             )
         },
         Group("hook", "autostart gate") {
             AutostartGate.hookAutostartGate(
                 this, classLoader, ::hookE, ::logSkipOtherGeneration,
-                ::getSystemContext, ::applyAutostartToAllowlist
+                ::getSystemContext
             )
         },
         Group("hook", "alarm gate") {
@@ -237,6 +243,9 @@ class Hooker : XposedModule() {
         Group("start", "GMS traffic probe") {
             TrafficProbe.startGmsTrafficProbe(this, ::gmsUid, ::broadcastGateSummary)
         },
+        Group("start", "autostart switch-op migration") {
+            AutostartGate.backfillAutostartOpsAtStartup(this, ::getSystemContext)
+        },
     )
 
     override fun onPackageReady(param: XposedModuleInterface.PackageReadyParam) {
@@ -261,12 +270,17 @@ class Hooker : XposedModule() {
 
     private fun hookPackage(packageName: String, classLoader: ClassLoader) {
         // Same reasoning as [hookSystemServer]: this is also the hot-reload entry
-        // point. Only the PowerKeeper domain installs anything, so for any other
-        // package both buffers are empty and the flush is a no-op.
+        // point. Only the PowerKeeper and GMS domains install anything, so for
+        // any other package both buffers are empty and the flush is a no-op.
         installBook.installPassCollecting = true
         try {
             if ("com.miui.powerkeeper" == packageName) {
                 for (group in powerKeeperGroups(packageName, classLoader)) {
+                    installBook.installGroup(group)
+                }
+            }
+            if ("com.google.android.gms" == packageName) {
+                for (group in gmsGroups(classLoader)) {
                     installBook.installGroup(group)
                 }
             }
@@ -276,6 +290,14 @@ class Hooker : XposedModule() {
             flushProbes()
         }
     }
+
+    /** The GMS install surface: reconnect repair only, auto-discovered in process. */
+    private fun gmsGroups(classLoader: ClassLoader): List<Group> =
+        listOf(
+            Group("hook", "GCM reconnect repair") {
+                GcmReconnectHooks.hookGcmReconnect(this, classLoader, ::hookE, ::logSkip)
+            },
+        )
 
     /** The PowerKeeper install surface: same shape and same rules as [systemServerGroups]. */
     private fun powerKeeperGroups(packageName: String, classLoader: ClassLoader): List<Group> =
@@ -473,19 +495,6 @@ class Hooker : XposedModule() {
     }
 
     /**
-     * The AllowlistGate callback handle. `AllowlistGate` stores whatever this
-     * file hands it as `onApplyAutostart` and invokes it for
-     * [Prefs.ACTION_APPLY_AUTOSTART] on the allowlist handler thread; the walk
-     * itself lives in [AutostartGate.applyAutostartToAllowlist]. This one-line
-     * forwarder keeps every `::applyAutostartToAllowlist` reference — and the
-     * callback path documented in `AllowlistGate` — pointing at the same
-     * callable as before the extraction.
-     */
-    private fun applyAutostartToAllowlist() {
-        AutostartGate.applyAutostartToAllowlist(this, ::getSystemContext)
-    }
-
-    /**
      * P0/P1/P2 evidence, appended to every traffic-probe tick.
      *
      * Reading it:
@@ -529,6 +538,8 @@ class Hooker : XposedModule() {
             GreezeHooks.broadcastGateSkippedCount == 0 &&
             GreezeHooks.deferC2dmPassthroughCount == 0 &&
             GreezeHooks.broadcastGateCnActionCount == 0 &&
+            GreezeHooks.broadcastGateAutostartAllowedCount == 0 &&
+            GreezeHooks.broadcastGateAutostartSkippedCount == 0 &&
             WakePathProbe.broadcastWakePathReachedCount == 0 &&
             WakePathProbe.broadcastWakePathC2dmCount == 0 &&
             WakePathProbe.broadcastWakePathDeniedCount == 0 &&
@@ -540,19 +551,23 @@ class Hooker : XposedModule() {
             AutostartGate.autostartGateReleaseCount == 0 &&
             AutostartGate.autostartGateRestartReleaseCount == 0 &&
             AutostartGate.autostartRootReleaseCount == 0 &&
-            GreezeHooks.greezeNetReleaseCount == 0
+            GreezeHooks.greezeNetReleaseCount == 0 &&
+            SmartPowerHooks.smartPowerReleaseCount == 0
         if (idle) {
             return "broadcast gate idle — c2dm " +
-                "allowed/skipped/reached-defer/cn-actions = 0, " +
+                "allowed/skipped/reached-defer/cn-actions/autostart-allow/autostart-skipped = 0, " +
                 "wake-path reached/c2dm/denied/c2dm-denied = 0, " +
                 "autostart gate service/process/restart/pre-start-denied, " +
-                "released, restart-released, root-released, net-released = 0"
+                "released, restart-released, root-released, net-released, " +
+                "smart-power-released = 0"
         }
         return "broadcast gate c2dm allowed=${GreezeHooks.broadcastGateAllowedCount} " +
             "(uid-fallback=${GreezeHooks.broadcastGateAllowedByUidCount}), " +
             "skipped=${GreezeHooks.broadcastGateSkippedCount}, " +
             "reached-defer=${GreezeHooks.deferC2dmPassthroughCount}, " +
-            "cn-actions=${GreezeHooks.broadcastGateCnActionCount}; " +
+            "cn-actions=${GreezeHooks.broadcastGateCnActionCount}, " +
+            "autostart-allow=${GreezeHooks.broadcastGateAutostartAllowedCount}, " +
+            "autostart-skipped=${GreezeHooks.broadcastGateAutostartSkippedCount}; " +
             "wake-path reached=${WakePathProbe.broadcastWakePathReachedCount}, " +
             "c2dm=${WakePathProbe.broadcastWakePathC2dmCount}, " +
             "denied=${WakePathProbe.broadcastWakePathDeniedCount}, " +
@@ -564,7 +579,25 @@ class Hooker : XposedModule() {
                 "released=${AutostartGate.autostartGateReleaseCount}, " +
                 "restart-released=${AutostartGate.autostartGateRestartReleaseCount}, " +
                 "root-released=${AutostartGate.autostartRootReleaseCount}, " +
-                "net-released=${GreezeHooks.greezeNetReleaseCount}"
+                "net-released=${GreezeHooks.greezeNetReleaseCount}, " +
+                "smart-power-released=${SmartPowerHooks.smartPowerReleaseCount}"
+    }
+
+    /**
+     * Experiment switch: release OS3 SmartPower intercepts for checked apps.
+     * Reads its **own** key — it answers the OS3-generation broadcast/service
+     * interception, not the greeze gates, and must stay measurable on its own.
+     *
+     * Fails to *disabled*: this answers a verdict the ROM owns. On OS4 the
+     * hooks never install (targets absent), so this read never happens there.
+     */
+    private fun isSmartPowerReleaseEnabled(): Boolean {
+        return try {
+            val prefs = getRemotePreferences(Prefs.GROUP_CONFIG)
+            prefs.getBoolean(Prefs.KEY_SMARTPOWER_RELEASE, false)
+        } catch (ignored: Throwable) {
+            false
+        }
     }
 
     /**
@@ -604,7 +637,7 @@ class Hooker : XposedModule() {
         } catch (ignored: Throwable) {
             null
         } ?: return null
-        val allowlist = AllowlistGate.getFcmAllowlist(this, ::getSystemContext, ::applyAutostartToAllowlist)
+        val allowlist = AllowlistGate.getFcmAllowlist(this, ::getSystemContext)
         if (allowlist.isEmpty()) {
             return null
         }
@@ -661,7 +694,7 @@ class Hooker : XposedModule() {
         val systemServerCl = InternationalPolicyManagerClass.classLoader
         hookE(isPushAppMethod).intercept { chain: XposedInterface.Chain ->
             val pkg = chain.getArg(0) as? String
-            if (AllowlistGate.moduleAppliesTo(this, ::getSystemContext, ::applyAutostartToAllowlist, pkg)) {
+            if (AllowlistGate.moduleAppliesTo(this, ::getSystemContext, pkg)) {
                 try {
                     val fromRestrictNet = HookerSupport.STACK_WALKER.walk { frames ->
                         frames.anyMatch { frame ->
