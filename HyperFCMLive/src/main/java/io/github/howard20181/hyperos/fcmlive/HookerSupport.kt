@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.PowerExemptionManager
 import java.lang.reflect.Method
-import java.util.concurrent.ConcurrentHashMap
 
 internal object HookerSupport {
     internal const val TAG = "HyperGreeze"
@@ -22,6 +21,24 @@ internal object HookerSupport {
         "com.google.firebase.messaging.FirebaseMessagingService"
     const val FCM_IID_RECEIVER_CLASS =
         "com.google.firebase.iid.FirebaseInstanceIdReceiver"
+
+    /** Marker ⑤ namespace: Google's in-house push infrastructure, GnpCore. */
+    const val GOOGLE_PUSH_RECEIVER_PREFIX = "com.google.android.libraries.notifications."
+
+    /**
+     * Marker ⑤ shape: Google's own apps (Wallet, Photos, Maps…) do not ship any
+     * Firebase SDK push component. Their c2dm `RECEIVE` entrypoint resolves to
+     * the notifications-platform PushReceiver instead — a class name under the
+     * `com.google.android.libraries.notifications.` namespace ending in
+     * `PushReceiver`. Verified against Google Wallet 26.39; the namespace is a
+     * merged Google library, not per-app code, so random third-party apps do
+     * not carry it.
+     */
+    fun isGooglePushReceiverClass(className: String?): Boolean =
+        className != null &&
+            className.startsWith(GOOGLE_PUSH_RECEIVER_PREFIX) &&
+            className.endsWith("PushReceiver")
+
     internal const val GMS_PACKAGE_NAME = "com.google.android.gms"
     internal const val GMS_PERSISTENT_PROCESS_NAME = "com.google.android.gms.persistent"
     internal const val WECHAT_PACKAGE_NAME = "com.tencent.mm"
@@ -60,11 +77,11 @@ internal object HookerSupport {
      * Centre UI shows.** Confirmed on V816 by opening autostart for a
      * package and watching both ops: the ROM writes and reverts the pair
      * together, but writing `10008` alone is already enough to change what
-     * the ROM does. So the ~25 packages sitting at `10008=allow /
-     * 10053=ignore` are not in an inconsistent *functional* state — only
-     * the Settings row is lying. (Corollary: the user's own revert path is
-     * the two-step one — a row showing "off" has to be turned "on" before
-     * "off" writes `10008` back.)
+     * the ROM does. The module's write switch used to write `10008` alone,
+     * which left packages at `10008=allow / 10053=ignore` — functionally
+     * allowed, only the manager row lying. The pair is written together now
+     * (and backfilled once per boot), so the two-step revert corollary no
+     * longer applies to anything the current build writes.
      *
      * **Why this op decides delivery although the module already answers
      * the broadcast gate.** The hook on
@@ -88,17 +105,19 @@ internal object HookerSupport {
     /**
      * `10053 = OP_AUTO_START_SWITCH` — the manager toggle's own op, which
      * 手机管家's autostart switch writes alongside `10008`
-     * (framework.jar → `miui/MiuiAppOpsNames.java`). Writing it is the
-     * display-symmetry rung; whether the manager's row *reads* it for
-     * display is not yet bytecode-confirmed, so nothing on screen
-     * promises a visible change.
+     * (framework.jar → `miui/MiuiAppOpsNames.java`). The module only ever
+     * **writes** this op, and only from the boot-time migration
+     * (`AutostartGate.backfillAutostartOpsAtStartup`), which backfills it for
+     * packages older builds left at `10008=allow / 10053=ignore`; the behavior
+     * op itself is read-only everywhere in this module.
      */
     internal const val MIUIOP_AUTO_START_SWITCH = 10053
 
     /**
-     * Outcomes of [writeAutostartIfNeeded]. Ints rather than an enum so the
-     * broadcast paths stay allocation-free; the two callers only compare
-     * them, they never hold them.
+     * Outcomes of the boot-time autostart switch-op migration
+     * (`AutostartGate.syncAutostartSwitchOpIfNeeded`). Ints rather than an enum
+     * so the walk stays allocation-free; the caller only compares them, it
+     * never holds them.
      */
     internal const val AUTOSTART_ALREADY = 0
     internal const val AUTOSTART_WRITTEN = 1
@@ -132,27 +151,13 @@ internal object HookerSupport {
     internal const val AUTOSTART_SKIPPED_MISSING = 3
 
     /**
-     * Shortest interval between two autostart writes for the same package on
-     * the *lazy* path — see [maybeWriteAutostart]. The setting is persistent,
-     * so a burst of pushes does not need a burst of writes, and the
-     * read-before-write makes an already-allowed package cost nothing but a
-     * read.
-     *
-     * [applyAutostartToAllowlist] ignores it, because that path is one
-     * deliberate user action rather than a stream of system events.
-     */
-    internal const val WAKE_AUTOSTART_COOLDOWN_MS = 60_000L
-    /** Package → last autostart write attempt, best-effort under concurrency. */
-    internal val wakeAutostartLastMs = ConcurrentHashMap<String, Long>()
-
-    /**
-     * Set while the module itself is reading the autostart op for its
-     * read-before-write. The root choke hooks the very method this read
-     * goes through, and without the flag the choke's answer ("allowed")
-     * would make every write see an already-allowed op and silently stop
-     * the persistent half from ever writing while the root rung is on.
-     * Thread-local because the write runs on the allowlist handler thread;
-     * always cleared in a finally.
+     * Set while the module itself is reading the autostart ops for the
+     * boot-time migration's read-before-write. The root choke hooks the very
+     * method these reads go through, and without the flag the choke's answer
+     * ("allowed") would make every read see an already-allowed op and silently
+     * stop the manager-switch backfill from ever writing while the root rung
+     * is on. Thread-local because the walk runs on the allowlist handler
+     * thread; always cleared in a finally.
      */
     internal val autostartWriteReadInFlight = ThreadLocal<Boolean>()
 
@@ -163,8 +168,8 @@ internal object HookerSupport {
      * Neither overload is in the public SDK — it only exposes the name-based
      * forms, because the op *code* is the hidden half. Resolved by
      * reflection and invoked through [XposedInterface.getInvoker], the route
-     * the module already uses for hidden framework methods; a miss makes
-     * [writeAutostartIfNeeded] report [AUTOSTART_FAILED] rather than crash.
+     * the module already uses for hidden framework methods; a miss makes the
+     * migration report [AUTOSTART_FAILED] rather than crash.
      */
     internal val APP_OPS_SET_MODE: Method? by lazy {
         try {

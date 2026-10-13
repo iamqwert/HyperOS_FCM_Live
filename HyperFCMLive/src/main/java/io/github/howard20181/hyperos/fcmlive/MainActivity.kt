@@ -14,6 +14,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.widget.Toast
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -29,6 +30,7 @@ import io.github.howard20181.hyperos.fcmlive.theme.AppPalette
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
 import io.github.howard20181.hyperos.fcmlive.theme.ThemePrefs
+import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport
 import io.github.howard20181.hyperos.fcmlive.ui.AppListStore
@@ -86,6 +88,17 @@ class MainActivity : AppCompatActivity() {
      * originates here; handed to the tree, which is what actually draws it.
      */
     private val snackbarHostState = SnackbarHostState()
+
+    /**
+     * True while the Compose tree is wearing the Miuix shell.
+     *
+     * Read in composition ([installContent]) and refreshed on every style
+     * change; [showMessage] is a plain function, so this field is its one
+     * bridge to the current look. Without it the Miuix look would swallow
+     * every message: that shell hosts no snackbar, so the M3 bar silently
+     * never appears.
+     */
+    private var miuixFeedbackNow = false
 
     /**
      * Scope for the one asynchronous thing this screen owns outside the tree:
@@ -269,6 +282,11 @@ class MainActivity : AppCompatActivity() {
         setContentView(host)
         host.setContent {
             HyperFCMLiveTheme {
+                // The feedback style follows the shell: Miuix acknowledges with
+                // the system toast (its Scaffold hosts no snackbar), Material
+                // with the page's own bar. Read here, in composition —
+                // [showMessage] is a plain function and cannot read this itself.
+                miuixFeedbackNow = LocalUiStyle.current == UiStyle.Miuix
                 MainScreen(
                     topBarState = topBarState,
                     actions = MainActions(
@@ -307,14 +325,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * One transient line of feedback, in the M3 way.
+     * One transient line of feedback, in whichever shell the app is wearing.
      *
      * Every message this screen produced used to be a `Toast`: a second
      * feedback stack that no theme could reach, raised outside this window and
      * invisible to the tree around it. A snackbar is drawn by the page it
-     * belongs to and follows that page's palette, which is the whole point.
+     * belongs to and follows that page's palette, which is the whole point —
+     * but only the Material shell hosts one, so the Miuix shell acknowledges
+     * with the system toast, the way the About and Licences pages already do.
      */
     private fun showMessage(text: String) {
+        if (miuixFeedbackNow) {
+            Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+            return
+        }
         uiScope.launch {
             // A burst of taps replaces the line rather than queueing behind it.
             snackbarHostState.currentSnackbarData?.dismiss()
@@ -1052,14 +1076,6 @@ class MainActivity : AppCompatActivity() {
                 this, prefs, Prefs.readLocalSleepKeepaliveData(this)
             )
         }
-        if (Prefs.hasPendingWakeWriteAutostartPush(this)) {
-            // Same repair for the autostart-write switch, which the experiment
-            // screen owns; without this a flip made before the service bound
-            // would be reverted here rather than pushed up.
-            Prefs.writeWakeWriteAutostart(
-                this, prefs, Prefs.readLocalWakeWriteAutostart(this)
-            )
-        }
         if (Prefs.hasPendingAutostartGateReleasePush(this)) {
             // Same repair for the autostart-gate switch, which the experiment
             // screen owns; without this a flip made before the service bound
@@ -1080,13 +1096,6 @@ class MainActivity : AppCompatActivity() {
                 this, prefs, Prefs.readLocalAutostartRootRelease(this)
             )
         }
-        if (Prefs.hasPendingWakeWriteAutostartSwitchPush(this)) {
-            // Same repair for the switch-write rung, which rides the
-            // autostart-write walk.
-            Prefs.writeWakeWriteAutostartSwitch(
-                this, prefs, Prefs.readLocalWakeWriteAutostartSwitch(this)
-            )
-        }
         if (Prefs.hasPendingGreezeNetReleasePush(this)) {
             // Same repair for the greeze net-release switch.
             Prefs.writeGreezeNetRelease(
@@ -1099,6 +1108,20 @@ class MainActivity : AppCompatActivity() {
             // system_server, which would keep logging (or staying silent)
             // against what the screen shows.
             Prefs.writeDebugLog(this, prefs, Prefs.readLocalDebugLog(this))
+        }
+        if (Prefs.hasPendingGcmReconnectFixPush(this)) {
+            // Same repair for the GCM reconnect switch; the GMS-side hook reads
+            // the remote group per timer write, so a flip made before the
+            // service bound would leave GMS acting against what the screen
+            // shows until the next app-side write.
+            Prefs.writeGcmReconnectFix(this, prefs, Prefs.readLocalGcmReconnectFix(this))
+        }
+        if (Prefs.hasPendingSmartPowerReleasePush(this)) {
+            // Same repair for the Smart Power switch; the system_server-side
+            // hook reads the remote group per decision, so a flip made before
+            // the service bound would leave the ROM intercepting against what
+            // the screen shows until the next app-side write.
+            Prefs.writeSmartPowerRelease(this, prefs, Prefs.readLocalSmartPowerRelease(this))
         }
         if (Prefs.hasPendingPush(this)) {
             // A check made before the service bound is newer than the remote set:
@@ -1472,10 +1495,14 @@ class MainActivity : AppCompatActivity() {
             if (candidates == null) {
                 return support
             }
-            // Markers 3 and 4, device-wide. Kept as two sets, not one: the rule
-            // counts them separately.
+            // Markers 3, 4 and 5, device-wide. Kept as three sets, not one: the
+            // rule counts them separately. Marker 5 tracks which packages'
+            // RECEIVE receiver is Google's notifications-platform PushReceiver —
+            // the entrypoint shape of Google's own apps, which ship no Firebase
+            // SDK push component.
             val byMessagingEvent = HashSet<String>()
             val byReceive = HashSet<String>()
+            val byGooglePushReceiver = HashSet<String>()
             try {
                 val services = pm.queryIntentServices(
                     Intent(HookerSupport.ACTION_MESSAGING_EVENT),
@@ -1495,7 +1522,11 @@ class MainActivity : AppCompatActivity() {
                     PackageManager.ResolveInfoFlags.of(0)
                 )
                 for (ri in receivers) {
-                    byReceive.add(ri.activityInfo.packageName)
+                    val info = ri.activityInfo ?: continue
+                    byReceive.add(info.packageName)
+                    if (HookerSupport.isGooglePushReceiverClass(info.name)) {
+                        byGooglePushReceiver.add(info.packageName)
+                    }
                 }
             } catch (t: Throwable) {
                 Log.w(TAG_UI, "Failed to query C2DM receivers", t)
@@ -1507,9 +1538,11 @@ class MainActivity : AppCompatActivity() {
                     declaresFirebaseInstanceIdReceiver(pm, pkg)         // ②
                 val hasMessagingEvent = byMessagingEvent.contains(pkg)  // ③
                 val hasReceive = byReceive.contains(pkg)                // ④
+                val hasGooglePushReceiver =
+                    byGooglePushReceiver.contains(pkg)                  // ⑤
                 if (isFcmClient(
                         hasMessagingService, hasIidReceiver,
-                        hasMessagingEvent, hasReceive
+                        hasMessagingEvent, hasReceive, hasGooglePushReceiver
                     )
                 ) {
                     support.fcm.add(pkg)
@@ -1522,22 +1555,27 @@ class MainActivity : AppCompatActivity() {
         }
 
         /**
-         * The one rule, in one place: **any two of ②③④, or ② alone, or ③ alone.**
+         * The one rule, in one place: **any two of ②③④, or ② alone, ③ alone, or ⑤ alone.**
          *
          * Written out as an explicit table rather than as arithmetic on a count,
-         * because the three accepted shapes are not a count — "② alone" and
-         * "③ alone" are each one marker while ②+③ is two, and `④ alone` has to
-         * be rejected even though it is also one marker. A boolean table says
-         * that; `sum >= 2 || has2 || has3` hides it.
+         * because the accepted shapes are not a count — "② alone" and "③ alone"
+         * are each one marker while ②+③ is two, and `④ alone` has to be rejected
+         * even though it is also one marker. A boolean table says that;
+         * `sum >= 2 || has2 || has3` hides it.
          *
          * ① is accepted as a *contributor* (it counts toward the two-of-three)
-         * but never on its own; see the caller for why.
+         * but never on its own; see the caller for why. ⑤ — the RECEIVE
+         * receiver resolves to Google's notifications-platform PushReceiver —
+         * is accepted alone: Google's own apps carry that entrypoint and none
+         * of the Firebase SDK markers, and the class namespace is a merged
+         * Google library that third-party apps do not reproduce.
          */
         private fun isFcmClient(
             hasMessagingService: Boolean,
             hasIidReceiver: Boolean,
             hasMessagingEvent: Boolean,
-            hasReceive: Boolean
+            hasReceive: Boolean,
+            hasGooglePushReceiver: Boolean
         ): Boolean {
             // ②③④: any two.
             val amongActions =
@@ -1549,6 +1587,10 @@ class MainActivity : AppCompatActivity() {
             }
             // ② alone or ③ alone.
             if (hasIidReceiver || hasMessagingEvent) {
+                return true
+            }
+            // ⑤ alone: Google's own push entrypoint.
+            if (hasGooglePushReceiver) {
                 return true
             }
             // Everything else: ① alone, ④ alone, or nothing.

@@ -23,10 +23,7 @@ import java.lang.reflect.Executable
  * [XposedInterface] the module entry object is (`log` / `getInvoker`),
  * `hookE` is `Hooker#hookE` (the counted, `setId`-deduplicated hook builder —
  * its `hooksInstalled` counter feeds the end-of-install summary that stays
- * with `Hooker`), `systemContext` is `Hooker#getSystemContext`, and
- * `onApplyAutostart` is the allowlist callback handle that keeps
- * [AllowlistGate.moduleAppliesTo] pointed at the same callable as before the
- * extraction.
+ * with `Hooker`), and `systemContext` is `Hooker#getSystemContext`.
  */
 internal object ProcessCleanerHooks {
 
@@ -34,8 +31,7 @@ internal object ProcessCleanerHooks {
         module: XposedInterface,
         classLoader: ClassLoader,
         hookE: (Executable) -> XposedInterface.HookBuilder,
-        systemContext: () -> Context?,
-        onApplyAutostart: () -> Unit
+        systemContext: () -> Context?
     ) {
         val ProcessCleanerBaseClass =
             classLoader.loadClass("com.android.server.am.ProcessCleanerBase")
@@ -62,7 +58,7 @@ internal object ProcessCleanerHooks {
                 if (policy is Int && policy != 13 &&
                     pm != null &&
                     pkgName != null &&
-                    AllowlistGate.moduleAppliesTo(module, systemContext, onApplyAutostart, pkgName) &&
+                    AllowlistGate.moduleAppliesTo(module, systemContext, pkgName) &&
                     declaresFcmComponent(module, pm, pkgName)
                 ) {
                     return@intercept false
@@ -157,30 +153,49 @@ internal object ProcessCleanerHooks {
         val serviceIntent = Intent(HookerSupport.ACTION_MESSAGING_EVENT)
         serviceIntent.setPackage(packageName)
         val hasMessagingEvent = pm.queryIntentServices(serviceIntent, 0).isNotEmpty()
-        // Marker 4: the c2dm RECEIVE action.
+        // Markers 4 and 5: the c2dm RECEIVE action, and what class answers it.
+        // Asked with setPackage so this stays a per-package question. Google's
+        // own apps resolve to the notifications-platform PushReceiver (⑤),
+        // which is accepted alone; any other RECEIVE receiver is only the weak
+        // marker ④ and is never sufficient on its own.
+        var hasReceive = false
+        var hasGooglePushReceiver = false
         val receiverIntent = Intent(HookerSupport.ACTION_REMOTE_INTENT)
         receiverIntent.setPackage(packageName)
-        val hasReceive = pm.queryBroadcastReceivers(receiverIntent, 0).isNotEmpty()
-        return isFcmClient(hasMessagingService, hasIidReceiver, hasMessagingEvent, hasReceive)
+        for (ri in pm.queryBroadcastReceivers(receiverIntent, 0)) {
+            hasReceive = true
+            if (HookerSupport.isGooglePushReceiverClass(ri.activityInfo?.name)) {
+                hasGooglePushReceiver = true
+                break
+            }
+        }
+        return isFcmClient(
+            hasMessagingService, hasIidReceiver,
+            hasMessagingEvent, hasReceive, hasGooglePushReceiver
+        )
     }
 
     /**
-     * The one rule, in one place: **any two of ②③④, or ② alone, or ③ alone.**
+     * The one rule, in one place: **any two of ②③④, or ② alone, ③ alone, or ⑤ alone.**
      *
      * Spelled out as a boolean table rather than arithmetic on a count: the
      * accepted shapes are not a count — "② alone" and "③ alone" are each one
      * marker while ②+③ is two, and `④ alone` has to be rejected even though it
      * is also one marker. `sum >= 2 || has2 || has3` would say it in fewer lines
-     * and hide the three shapes.
+     * and hide the shapes.
      *
      * ① contributes to the two-of-three but is never sufficient on its own.
+     * ⑤ (the RECEIVE receiver is Google's notifications-platform PushReceiver)
+     * is accepted alone: it is the entrypoint shape of Google's own apps, whose
+     * push infrastructure ships none of the Firebase SDK markers.
      * Mirrors `MainActivity.isFcmClient`; keep the two in step.
      */
     private fun isFcmClient(
         hasMessagingService: Boolean,
         hasIidReceiver: Boolean,
         hasMessagingEvent: Boolean,
-        hasReceive: Boolean
+        hasReceive: Boolean,
+        hasGooglePushReceiver: Boolean
     ): Boolean {
         // ②③④: any two.
         val amongActions =
@@ -192,6 +207,10 @@ internal object ProcessCleanerHooks {
         }
         // ② alone or ③ alone.
         if (hasIidReceiver || hasMessagingEvent) {
+            return true
+        }
+        // ⑤ alone: Google's own push entrypoint.
+        if (hasGooglePushReceiver) {
             return true
         }
         // Everything else: ① alone, ④ alone, or nothing.

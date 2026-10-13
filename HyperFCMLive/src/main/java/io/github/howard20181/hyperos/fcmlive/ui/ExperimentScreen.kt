@@ -1,6 +1,9 @@
 package io.github.howard20181.hyperos.fcmlive.ui
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.content.res.Configuration
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -32,9 +35,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.Prefs
 import io.github.howard20181.hyperos.fcmlive.R
-import io.github.howard20181.hyperos.fcmlive.theme.AppearanceState
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
-import io.github.howard20181.hyperos.fcmlive.theme.ThemePrefs
 
 /**
  * Experiment switches: everything here is off by default and reaches into
@@ -52,13 +53,12 @@ import io.github.howard20181.hyperos.fcmlive.theme.ThemePrefs
  * on the flip. The hidden state and the hook agree, because the sub-switch's
  * hook reads the master flag as well.
  *
- * The autostart pair is the exception to that hiding rule, and it is worth
- * reading before copying the shape: its sub-switch writes a ROM setting that
- * stays written after the master goes off, and its hook reads only its own flag
- * — not the master's. Hiding it with the master would take the only control for
- * a live setting off the screen and leave the row's own value unreadable, so
- * this sub-row stays visible while *its own* value is on. On screen exactly
- * while the setting it controls is.
+ * The autostart section is the counter-example worth reading before copying the
+ * shape: its runtime rows answer different ROM checkpoints, and each hook reads
+ * only its own flag — not the master's — so each rung can be measured alone.
+ * They are still hidden under the master, because unlike the retired write
+ * switch they answer gates in memory only: nothing they control outlives the
+ * master being off, so hiding them hides nothing that is still in force.
  *
  * A pair is not the only shape a section can take, and the sleep section is the
  * counter-example worth reading before adding one: its two switches answer the
@@ -104,7 +104,6 @@ private fun ExperimentBody(
     val context = LocalContext.current
     // Read once per screen: the hook side owns the live value, and the mirror
     // is only the answer the UI last left behind.
-    var wechatDozeKeepout by remember { mutableStateOf(Prefs.readLocalWechatDozeKeepout(context)) }
     var wifiWeakSignalRelaxed by remember {
         mutableStateOf(Prefs.readLocalWifiWeakSignalSwitchRelaxed(context))
     }
@@ -113,13 +112,6 @@ private fun ExperimentBody(
     }
     val floorLabels = Prefs.WIFI_WEAK_SIGNAL_FLOORS.map {
         stringResource(R.string.experiment_wifi_weak_signal_floor_item, it)
-    }
-    var sleepKeepalive by remember { mutableStateOf(Prefs.readLocalSleepKeepalive(context)) }
-    var sleepKeepaliveData by remember {
-        mutableStateOf(Prefs.readLocalSleepKeepaliveData(context))
-    }
-    var wakeWriteAutostart by remember {
-        mutableStateOf(Prefs.readLocalWakeWriteAutostart(context))
     }
     var autostartGateRelease by remember {
         mutableStateOf(Prefs.readLocalAutostartGateRelease(context))
@@ -130,21 +122,23 @@ private fun ExperimentBody(
     var autostartRootRelease by remember {
         mutableStateOf(Prefs.readLocalAutostartRootRelease(context))
     }
-    var wakeWriteAutostartSwitch by remember {
-        mutableStateOf(Prefs.readLocalWakeWriteAutostartSwitch(context))
-    }
     var greezeNetRelease by remember {
         mutableStateOf(Prefs.readLocalGreezeNetRelease(context))
     }
-    var debugLog by remember {
-        mutableStateOf(Prefs.readLocalDebugLog(context))
+    var gcmReconnectFix by remember {
+        mutableStateOf(Prefs.readLocalGcmReconnectFix(context))
     }
-    // The write rows are on screen while either persistent switch says so: the
-    // settings they write outlive every runtime switch, and each hook reads its
-    // own flag alone, so hiding them with the master would remove the only
-    // control for settings that are still in force. The two runtime rungs are
-    // the opposite: pure memory, nothing persists, so they follow the master.
-    val writeRevealed = autostartGateRelease || wakeWriteAutostart
+    var smartPowerRelease by remember {
+        mutableStateOf(Prefs.readLocalSmartPowerRelease(context))
+    }
+    // Smart Power 只在 OS3 上存在（OS4 已移除拦截决策，hook 侧连目标方法都
+    // 找不到），所以整节按世代隐藏，而不是显示一个永远无效的开关。读一次即
+    // 可：系统属性在进程生命周期内不变。
+    val os3Generation = remember { isOs3Generation() }
+    // The runtime rungs hide under the master: they answer ROM gates in memory
+    // only, so with the master off nothing they control is in force. Nothing
+    // here writes any more — the write switch is retired, and its row is now a
+    // plain entry into 手机管家's autostart management, always on screen.
     // Both autostart rows do nothing on an empty FCM wake allowlist, and an
     // empty list means "no app" — the same as everywhere else now that the
     // allowlist is the sole control. Read once, like the switch values above,
@@ -156,8 +150,6 @@ private fun ExperimentBody(
     } else {
         null
     }
-    var writeConfirmVisible by remember { mutableStateOf(false) }
-    var switchConfirmVisible by remember { mutableStateOf(false) }
 
     val inset = pageHorizontalInset()
     LazyColumn(
@@ -171,22 +163,9 @@ private fun ExperimentBody(
         contentPadding = PaddingValues(bottom = bottomPadding)
     ) {
         item {
-            SectionTitle(R.string.experiment_section_battery, first = true)
+            SectionTitle(R.string.experiment_section_network, first = true)
             SettingsSwitchCard(
-                iconRes = R.drawable.ic_battery_saver,
-                title = stringResource(R.string.experiment_wechat_doze_keepout),
-                description = stringResource(R.string.experiment_wechat_doze_keepout_desc),
-                checked = wechatDozeKeepout,
-                onCheckedChange = { checked ->
-                    Prefs.writeWechatDozeKeepout(context, Prefs.remote(), checked)
-                    wechatDozeKeepout = checked
-                }
-            )
-        }
-        item {
-            SectionTitle(R.string.experiment_section_network)
-            SettingsSwitchCard(
-                iconRes = R.drawable.ic_wifi_weak_relaxed,
+                iconRes = R.drawable.ic_network_manage,
                 title = stringResource(R.string.experiment_wifi_weak_signal_relaxed),
                 description = stringResource(R.string.experiment_wifi_weak_signal_relaxed_desc),
                 checked = wifiWeakSignalRelaxed,
@@ -236,40 +215,6 @@ private fun ExperimentBody(
             }
         }
         item {
-            SectionTitle(R.string.experiment_section_sleep)
-            // Two radios, two switches, no master. Whichever switch is on is the
-            // half of the network that survives the night, and the other half is
-            // left to the ROM either way — so both rows are always on screen and
-            // neither hides behind the other. They still share one heading and
-            // one connected group, because they are one feature: sleep mode's
-            // network cutoff.
-            SettingsSwitchCard(
-                iconRes = R.drawable.ic_wifi,
-                title = stringResource(R.string.experiment_sleep_keepalive),
-                description = stringResource(R.string.experiment_sleep_keepalive_desc),
-                checked = sleepKeepalive,
-                onCheckedChange = { checked ->
-                    Prefs.writeSleepKeepalive(context, Prefs.remote(), checked)
-                    sleepKeepalive = checked
-                },
-                first = true,
-                last = false
-            )
-            GroupRowGap()
-            SettingsSwitchCard(
-                iconRes = R.drawable.ic_android_cell_4_bar,
-                title = stringResource(R.string.experiment_sleep_keepalive_data),
-                description = stringResource(R.string.experiment_sleep_keepalive_data_desc),
-                checked = sleepKeepaliveData,
-                onCheckedChange = { checked ->
-                    Prefs.writeSleepKeepaliveData(context, Prefs.remote(), checked)
-                    sleepKeepaliveData = checked
-                },
-                first = false,
-                last = true
-            )
-        }
-        item {
             // A section of its own: every row here works on the MIUI autostart
             // verdict, which is a different ROM mechanism from the AOSP stopped
             // state the shipped GMS→c2dm hop opens in memory. The runtime
@@ -280,12 +225,13 @@ private fun ExperimentBody(
             //
             // The rows form a ladder of independently testable rungs, widest
             // first: answer the service/process checkpoints in memory, then the
-            // freeze gate, then the op query itself, and — persisting — write
-            // the behavior op and, optionally, the switch op the manager's own
-            // toggle writes alongside it. Each runtime rung reads only its own
-            // flag, so any single rung can be measured alone; the two write
-            // rows outlive every runtime switch, which is why they do not hide
-            // with the master (see writeRevealed).
+            // freeze gate, then the op query itself. Each runtime rung reads
+            // only its own flag, so any single rung can be measured alone; all
+            // of them hide under the master because nothing they answer
+            // outlives it. The write switch that used to close the ladder is
+            // retired — the section now ends with a plain entry into 手机管家's
+            // own autostart management, where the state the ops are in is both
+            // visible and user-controlled.
             SectionTitle(R.string.experiment_section_autostart)
             SettingsSwitchCard(
                 iconRes = R.drawable.ic_autostart_release,
@@ -299,10 +245,9 @@ private fun ExperimentBody(
                 stateLine = emptyAllowlistHint,
                 stateLineOff = emptyAllowlistHint,
                 first = true,
-                // Every rung below reveals with one of these two switches, so
-                // the master keeps its bottom corners only when the whole
-                // ladder under it is gone.
-                last = !writeRevealed
+                // The manager entry below is always on screen, so the master is
+                // never the visible group's last row.
+                last = false
             )
             AnimatedVisibility(
                 visible = autostartGateRelease,
@@ -346,82 +291,36 @@ private fun ExperimentBody(
                         stateLine = emptyAllowlistHint,
                         stateLineOff = emptyAllowlistHint,
                         first = false,
-                        last = !writeRevealed
+                        // The manager entry below is always on screen, so this
+                        // row is never the visible group's last either.
+                        last = false
                     )
                 }
             }
-            AnimatedVisibility(
-                visible = writeRevealed,
-                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
-            ) {
-                Column {
-                    GroupRowGap()
-                    SettingsSwitchCard(
-                        iconRes = R.drawable.ic_autostart_write,
-                        title = stringResource(R.string.experiment_wake_autostart_write),
-                        description = stringResource(
-                            R.string.experiment_wake_autostart_write_desc
-                        ),
-                        checked = wakeWriteAutostart,
-                        onCheckedChange = { checked ->
-                            // Only the on direction needs the dialog: it is the
-                            // one that leaves a setting behind. Turning it off
-                            // writes nothing, which is exactly what the dialog
-                            // explains.
-                            if (checked) {
-                                writeConfirmVisible = true
-                            } else {
-                                Prefs.writeWakeWriteAutostart(context, Prefs.remote(), false)
-                                wakeWriteAutostart = false
-                            }
-                        },
-                        stateLine = emptyAllowlistHint,
-                        stateLineOff = emptyAllowlistHint,
-                        // The master is always on screen above this row, so
-                        // this row is never the visible group's first.
-                        first = false,
-                        last = !wakeWriteAutostart
-                    )
-                    AnimatedVisibility(
-                        visible = wakeWriteAutostart,
-                        enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                        exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
-                    ) {
-                        Column {
-                            GroupRowGap()
-                            SettingsSwitchCard(
-                                iconRes = R.drawable.ic_autostart_switch_write,
-                                title = stringResource(
-                                    R.string.experiment_wake_autostart_switch
-                                ),
-                                description = stringResource(
-                                    R.string.experiment_wake_autostart_switch_desc
-                                ),
-                                checked = wakeWriteAutostartSwitch,
-                                onCheckedChange = { checked ->
-                                    // Same dialog rule as its behavior-op
-                                    // partner: the on direction leaves a
-                                    // setting behind, the off direction
-                                    // writes nothing.
-                                    if (checked) {
-                                        switchConfirmVisible = true
-                                    } else {
-                                        Prefs.writeWakeWriteAutostartSwitch(
-                                            context, Prefs.remote(), false
-                                        )
-                                        wakeWriteAutostartSwitch = false
-                                    }
-                                },
-                                stateLine = emptyAllowlistHint,
-                                stateLineOff = emptyAllowlistHint,
-                                first = false,
-                                last = true
+            GroupRowGap()
+            NavCard(
+                iconRes = R.drawable.ic_autostart_manage,
+                title = stringResource(R.string.experiment_wake_autostart_write),
+                subtitle = stringResource(R.string.experiment_wake_autostart_write_desc),
+                onClick = {
+                    try {
+                        context.startActivity(
+                            Intent().setClassName(
+                                "com.miui.securitycenter",
+                                "com.miui.permcenter.autostart.AutoStartManagementActivity"
                             )
-                        }
+                        )
+                    } catch (ignored: ActivityNotFoundException) {
+                        Toast.makeText(
+                            context,
+                            R.string.experiment_autostart_entry_missing,
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
-                }
-            }
+                },
+                first = false,
+                last = true
+            )
         }
         item {
             // A section of its own: this row answers the freeze-time network
@@ -446,67 +345,48 @@ private fun ExperimentBody(
                 stateLineOff = emptyAllowlistHint
             )
         }
+        if (os3Generation) {
+            item {
+                // Smart Power 节：OS3 世代的系统侧实验。hook 装不装由目标方法
+                // 在不在决定（OS4 上天然不装），这一节只负责把开关亮给 OS3 的
+                // 用户；开关实时生效，无需重启。
+                SectionTitle(R.string.experiment_section_smart_power)
+                SettingsSwitchCard(
+                    iconRes = R.drawable.ic_science,
+                    title = stringResource(R.string.experiment_smart_power_release),
+                    description = stringResource(R.string.experiment_smart_power_release_desc),
+                    checked = smartPowerRelease,
+                    onCheckedChange = { checked ->
+                        Prefs.writeSmartPowerRelease(context, Prefs.remote(), checked)
+                        smartPowerRelease = checked
+                    },
+                    // 同样的空白名单提示：开关只作用于已勾选应用。
+                    stateLine = emptyAllowlistHint,
+                    stateLineOff = emptyAllowlistHint
+                )
+            }
+        }
         item {
-            // The debug section: a pure emission switch. Nothing here changes
-            // what a hook decides — only whether the log line describing it is
-            // written out — so it is a section of one row with no confirm
-            // dialog and no allowlist dependency.
-            SectionTitle(R.string.experiment_section_debug)
+            // The GMS section: a keepalive experiment inside the GMS process
+            // itself. The hook is installed whenever GMS loads the module, but
+            // it only ever sends a broadcast when this switch is on — the flag
+            // is read live on every heartbeat-timer write, so flipping it lands
+            // on the next heartbeat with no reboot and no GMS restart.
+            SectionTitle(R.string.experiment_section_gms)
             SettingsSwitchCard(
-                // Style-dependent icon: under Material 3 the row carries the
-                // filled bug_report glyph — the "log a defect report" reading —
-                // while the MIUIX style keeps the diagnostics glyph it shares
-                // with the module-status page.
-                iconRes = if (AppearanceState.uiStyle.intValue == ThemePrefs.UI_STYLE_MATERIAL) {
-                    R.drawable.ic_bug_report
-                } else {
-                    R.drawable.ic_fcm_diagnostics
-                },
-                title = stringResource(R.string.experiment_debug_log),
-                description = stringResource(R.string.experiment_debug_log_desc),
-                checked = debugLog,
+                iconRes = R.drawable.ic_cloud_sync,
+                title = stringResource(R.string.experiment_gcm_reconnect),
+                description = stringResource(R.string.experiment_gcm_reconnect_desc),
+                checked = gcmReconnectFix,
                 onCheckedChange = { checked ->
-                    Prefs.writeDebugLog(context, Prefs.remote(), checked)
-                    debugLog = checked
+                    Prefs.writeGcmReconnectFix(context, Prefs.remote(), checked)
+                    gcmReconnectFix = checked
                 }
             )
         }
         // The same 16dp tail the settings page ends on, so the last card does
         // not sit flush against the gesture strip on a fully scrolled page.
         item { Spacer(modifier = Modifier.height(16.dp)) }
-    }
-
-    // The one experiment that leaves something behind asks first, and the dialog
-    // is also where the undo path is written: the switch is deliberately a plain
-    // toggle, so the explanation has to live somewhere the user cannot miss.
-    // The two writes that leave a setting behind share one dialog and one
-    // wrapper: AppDialog is the M3 dialog under the Material look and the
-    // system's own bottom-docked one under Miuix.
-    if (writeConfirmVisible) {
-        AppDialog(
-            onDismissRequest = { writeConfirmVisible = false },
-            title = stringResource(R.string.experiment_autostart_write_confirm_title),
-            text = stringResource(R.string.experiment_autostart_write_confirm),
-            confirmLabel = stringResource(R.string.experiment_autostart_write_confirm_ok),
-            onConfirm = {
-                Prefs.writeWakeWriteAutostart(context, Prefs.remote(), true)
-                wakeWriteAutostart = true
-            },
-            dismissLabel = stringResource(android.R.string.cancel)
-        )
-    }
-    if (switchConfirmVisible) {
-        AppDialog(
-            onDismissRequest = { switchConfirmVisible = false },
-            title = stringResource(R.string.experiment_autostart_write_confirm_title),
-            text = stringResource(R.string.experiment_autostart_write_confirm),
-            confirmLabel = stringResource(R.string.experiment_autostart_write_confirm_ok),
-            onConfirm = {
-                Prefs.writeWakeWriteAutostartSwitch(context, Prefs.remote(), true)
-                wakeWriteAutostartSwitch = true
-            },
-            dismissLabel = stringResource(android.R.string.cancel)
-        )
     }
 }
 
@@ -523,4 +403,22 @@ private fun ExperimentScreenPreview() {
             ExperimentScreen(onBack = {})
         }
     }
+}
+
+/**
+ * 本机是否为 OS3 世代。
+ *
+ * 读 `ro.mi.os.version.name`（真机 OS4 实测返回 `OS4.0.0.33.XPMCNXM`），
+ * `OS3` 前缀才算命中；MIUI 时代该属性不存在，同样视为非 OS3。反射读
+ * SystemProperties：该类在 SDK 里不可见，但 `get(String)` 对所有进程开放。
+ *
+ * 这个判断只管 UI 显隐。hook 侧从不做世代假设——目标方法在不在决定装不装，
+ * 两边各用最省的机制（见 SmartPowerHooks 的文档）。
+ */
+private fun isOs3Generation(): Boolean = try {
+    val get = Class.forName("android.os.SystemProperties")
+        .getDeclaredMethod("get", String::class.java)
+    (get.invoke(null, "ro.mi.os.version.name") as? String)?.startsWith("OS3") == true
+} catch (ignored: Throwable) {
+    false
 }

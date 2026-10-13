@@ -23,10 +23,7 @@ import java.lang.reflect.Method
  * hook builder — its `hooksInstalled` counter feeds the end-of-install summary
  * that stays with `Hooker`), `findMethod` is the null-returning lookup helper
  * (passed as `(Class, String, Array)` because Kotlin forbids `vararg` on
- * function-type parameters), `systemContext` is `Hooker#getSystemContext`, and
- * `onApplyAutostart` is the allowlist callback handle that keeps
- * `AllowlistGate` / `AutostartGate` writes pointed at the same callable as
- * before the extraction.
+ * function-type parameters), and `systemContext` is `Hooker#getSystemContext`.
  */
 internal object AmsHooks {
 
@@ -35,8 +32,7 @@ internal object AmsHooks {
         classLoader: ClassLoader,
         hookE: (Executable) -> XposedInterface.HookBuilder,
         findMethod: (Class<*>, String, Array<Class<*>?>) -> Method?,
-        systemContext: () -> Context?,
-        onApplyAutostart: () -> Unit
+        systemContext: () -> Context?
     ) {
         val ActivityManagerServiceClass =
             classLoader.loadClass("com.android.server.am.ActivityManagerService")
@@ -139,7 +135,7 @@ internal object AmsHooks {
                             chain.thisObject, chain.getArg(0)
                         ) &&
                         targetPackage != null &&
-                        AllowlistGate.moduleAppliesTo(module, systemContext, onApplyAutostart, targetPackage)
+                        AllowlistGate.moduleAppliesTo(module, systemContext, targetPackage)
                     ) {
                         // ponytail: only the flag is added — appOp is passed
                         //   through untouched. External modules raise OP_NONE to
@@ -175,26 +171,6 @@ internal object AmsHooks {
                     }
                 } catch (t: Throwable) {
                     module.logGated(Log.ERROR, HookerSupport.TAG, "C2DM broadcast hook failed", t)
-                }
-            }
-            // Experiment: the autostart switch's write. It used to be the
-            // persistent half of a pair whose runtime half answered the same
-            // gate in memory for broadcasts the module intercepted; that half is
-            // gone — see the [checkApplicationAutoStart] hook — so what is left
-            // writes the ROM's own autostart AppOp for the package, see
-            // maybeWriteAutostart. The action test is the cheap local one, so
-            // the remote-prefs read only happens for a push broadcast.
-            if (intent != null && AutostartGate.isPushAction(intent.action)) {
-                try {
-                    val autostartPackage = HookerSupport.targetPackageOf(intent)
-                    if (autostartPackage != null &&
-                        AutostartGate.isWakeWriteAutostartEnabled(module) &&
-                        AutostartGate.wakeExplicitlyAllows(module, systemContext, onApplyAutostart, autostartPackage)
-                    ) {
-                        AutostartGate.maybeWriteAutostart(module, systemContext, autostartPackage)
-                    }
-                } catch (t: Throwable) {
-                    module.logGated(Log.ERROR, HookerSupport.TAG, "Wake autostart write hook failed", t)
                 }
             }
             chain.proceed()

@@ -476,8 +476,10 @@ internal object GmsSupport {
      * Write-surface audit (2026-10-03, extended 2026-10-08): these are the only
      * **five** places in the module that persist anything outside its own prefs —
      * this one, [ensureGmsUserTableBgControl], the WeChat doze keepout (default
-     * off), and the autostart op writes ([writeAutostartIfNeeded]: `setMode(10008)`,
-     * plus `setMode(10053)` behind its own sub-rung — both default off). All of
+     * off), and the autostart switch-op backfill (`AutostartGate`'s boot-time
+     * migration: `setMode(10053)` only, one-directional, for allowlisted
+     * packages already allowed at the behavior op — it never grants `10008`).
+     * All of
      * them widen a restriction; none can blacklist an app, and there is no path
      * that leaves an app worse off after uninstalling the module than it was
      * before installing it. Runtime-only effects a reboot erases — sleep-mode

@@ -322,6 +322,16 @@ private fun LicenseDialog(
         title = sheet.title,
         confirmLabel = closeLabel,
         onConfirm = onDismiss,
+        // 查看源代码 lives on the dialog's bottom action row, leading of
+        // 关闭 — it used to ride at the top of the body slot, which read as
+        // a stray button above the prose. null when there is no repository.
+        neutralButton = sheet.url?.let { url ->
+            {
+                TextButton(onClick = { onOpenSource(url) }) {
+                    Text(sourceLabel)
+                }
+            }
+        },
         content = {
             // Without a ceiling the body grows to the dialog's full height and
             // the dialog itself takes over the screen — these files run to
@@ -339,18 +349,6 @@ private fun LicenseDialog(
             val bodyHeight = with(density) {
                 val px = LocalWindowInfo.current.containerSize.height
                 if (px <= 0) Dp.Infinity else (px * 0.55f).toDp()
-            }
-            if (sheet.url != null) {
-                if (LocalUiStyle.current == UiStyle.Miuix) {
-                    MiuixTextButton(
-                        text = sourceLabel,
-                        onClick = { onOpenSource(sheet.url) }
-                    )
-                } else {
-                    TextButton(onClick = { onOpenSource(sheet.url) }) {
-                        Text(sourceLabel)
-                    }
-                }
             }
             SelectionContainer {
                 Text(
@@ -588,6 +586,11 @@ private val REFERENCES = arrayOf(
     arrayOf("Howard20181/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/Howard20181/HyperOS_FCM_Live"),
     arrayOf("Kr328/HyperOSFCMFix", "MIT License", "https://github.com/Kr328/HyperOSFCMFix"),
     arrayOf("Kwensiu/DPIS", "GPL-3.0", "https://github.com/Kwensiu/DPIS"),
+    // The GCM reconnect repair (实验功能) follows this module's catch-up shape:
+    // a stale-connection check after the heartbeat timer's countdown expires,
+    // then a GCM_RECONNECT broadcast. No LICENSE file in the repository — shown
+    // as 「—」, the row links to the project like the other unlicensed ones.
+    arrayOf("kooritea/fcmfix", "—", "https://github.com/kooritea/fcmfix"),
     arrayOf("tiann/KernelSU", "GPL-3.0", "https://github.com/tiann/KernelSU"),
     // No LICENSE file in the repository — shown as 「—」. There is no text to
     // open a sheet for, but the row links to the project, so a tap opens that

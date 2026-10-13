@@ -45,7 +45,11 @@
     <string name="about_section_display">显示</string>
     <string name="about_section_theme">主题</string>
     <string name="about_section_backup">数据</string>
-    <string name="about_section_experiment">实验</string>
+    <string name="about_section_battery">电池优化</string>
+    <string name="about_battery_aosp_usage">AOSP 应用电池使用情况</string>
+    <string name="about_battery_aosp_usage_desc">打开系统设置的应用电池用量页，查看各应用的电池优化状态与耗电排行</string>
+    <string name="about_battery_aosp_usage_missing">未找到应用电池使用情况页面，当前系统可能不适用</string>
+    <string name="about_section_experiment_debug">实验与调试</string>
     <string name="about_sub_experiment">实验性开关入口，默认不启用</string>
     <string name="about_section_privacy">隐私与权限</string>
     <string name="about_section_project">关于</string>
@@ -174,9 +178,8 @@
 
     <!-- 实验功能页：危险开关集中在此，主界面只留入口 -->
     <string name="experiment">实验功能</string>
-    <string name="experiment_section_battery">电池</string>
-    <string name="experiment_wechat_doze_keepout">禁止系统将微信写回电池未优化名单</string>
-    <string name="experiment_wechat_doze_keepout_desc">阻止微信进入 AOSP 电池优化中的「未优化」名单，需自行调整为优化</string>
+    <string name="experiment_wechat_doze_keepout">禁止恢复微信电池未优化状态</string>
+    <string name="experiment_wechat_doze_keepout_desc">需自行调整微信为电池优化</string>
 
     <string name="experiment_section_network">网络</string>
     <string name="experiment_wifi_weak_signal_relaxed">放宽 WiFi 弱信号切换</string>
@@ -187,11 +190,11 @@
 
     <string name="experiment_section_sleep">睡眠模式</string>
     <string name="experiment_sleep_keepalive">保护 WiFi 不断网</string>
-    <string name="experiment_sleep_keepalive_desc">在睡眠模式下，WiFi 保持开启，防止 FCM 通道中断；夜间耗电增加</string>
+    <string name="experiment_sleep_keepalive_desc">不断开 WiFi 以保持推送通畅</string>
     <string name="experiment_sleep_keepalive_data">保护移动数据不断网</string>
-    <string name="experiment_sleep_keepalive_data_desc">在睡眠模式下，移动数据保持开启，FCM 通道仍可用；夜间耗电更多</string>
+    <string name="experiment_sleep_keepalive_data_desc">不断开移动数据以确保推送通畅</string>
 
-    <!-- 自启动单列一节：主开关在运行时放行，副档逐层扩大覆盖面，写入档落持久设置，默认全关 -->
+    <!-- 自启动单列一节：主开关在运行时放行，副档逐层扩大覆盖面，末行为管家自启动管理入口，默认全关 -->
     <string name="experiment_section_autostart">自启动</string>
     <string name="experiment_autostart_gate_release">放宽应用唤醒条件</string>
     <string name="experiment_autostart_gate_release_desc">放行已勾选应用的服务启动与进程启动</string>
@@ -199,23 +202,29 @@
     <string name="experiment_autostart_restart_release_desc">已勾选应用进程结束后，按正常路径重启而非被系统冻结</string>
     <string name="experiment_autostart_root_release">答复自启动查询为允许</string>
     <string name="experiment_autostart_root_release_desc">对于已勾选应用，系统查询自启动状态的统一入口均按允许答复，覆盖上方各档与其余全部读取点；系统可能不再记录这些应用的自启动记录</string>
-    <string name="experiment_wake_autostart_write">同时写入系统自启动设置</string>
-    <string name="experiment_wake_autostart_write_desc">把自启动行为写入系统设置，不改手机管家的自启动开关；系统应用不写入；不随本开关关闭还原</string>
-    <string name="experiment_wake_autostart_switch">同时写入自启动开关状态</string>
-    <string name="experiment_wake_autostart_switch_desc">写入自启动设置的同时一并写入开关状态，应用管理将显示已勾选应用的自启动开关为开；系统应用不写入；不随本开关关闭还原</string>
+    <string name="experiment_wake_autostart_write">自启动管理</string>
+    <string name="experiment_wake_autostart_write_desc">打开手机管家的自启动管理，可直接查看与调整各应用的自启动开关；旧版本写入的开关状态也会在每次开机自动补齐对账</string>
     <string name="experiment_autostart_empty_list">当前白名单为空，开关只作用于已勾选应用，请先配置白名单</string>
-    <string name="experiment_autostart_write_confirm_title">写入系统自启动设置</string>
-    <string name="experiment_autostart_write_confirm">只改变自启动行为，不改动手机管家的开关，应用管理里看不出变化。\n出于安全考虑，系统应用一律不写入。\n写入后关闭本开关不会还原；撤销：在手机管家里把该应用的自启动先开再关。</string>
-    <string name="experiment_autostart_write_confirm_ok">写入</string>
+    <string name="experiment_autostart_entry_missing">未找到自启动管理页面，当前系统可能不适用</string>
 
     <!-- 后台网络单列一节：冻结期网络放宽，默认关 -->
     <string name="experiment_section_background_net">后台网络</string>
     <string name="experiment_greeze_net_release">保持应用冻结期联网</string>
     <string name="experiment_greeze_net_release_desc">已勾选应用切至后台被冻时网络保持可用；本项并不优化 FCM 推送，而是保护这些应用的自有长连接</string>
 
-    <string name="experiment_section_debug">调试</string>
+    <!-- Smart Power 单列一节：OS3 世代实验功能。OS4 已移除 SmartPower 的拦截
+         决策（真机 services.jar/miui-services.jar 验证），整节只在 OS3 上渲染 -->
+    <string name="experiment_section_smart_power">Smart Power</string>
+    <string name="experiment_smart_power_release">Smart Power 拦截放行</string>
+    <string name="experiment_smart_power_release_desc">对已勾选应用的 FCM 广播与消息服务启动按放行答复；仅 OS3 生效</string>
+
+    <!-- 「显示调试日志」在设置页的「实验与调试」区（about_section_experiment_debug） -->
     <string name="experiment_debug_log">显示调试日志</string>
     <string name="experiment_debug_log_desc">输出调试日志，排查问题时启用</string>
+
+    <string name="experiment_section_gms">GMS</string>
+    <string name="experiment_gcm_reconnect">GCM 重连修复</string>
+    <string name="experiment_gcm_reconnect_desc">GMS 长连接断开且下次重连闹钟已过期时，主动触发重连而不等系统排队，缩短推送恢复时间</string>
 
     <!-- 模块状态页 -->
     <string name="status_yes">是</string>

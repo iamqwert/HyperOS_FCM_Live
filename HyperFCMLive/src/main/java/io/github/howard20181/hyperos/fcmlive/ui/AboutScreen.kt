@@ -1,5 +1,7 @@
 package io.github.howard20181.hyperos.fcmlive.ui
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.content.res.Configuration
 import android.view.HapticFeedbackConstants
 import android.widget.Toast
@@ -69,6 +71,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.LauncherIcon
+import io.github.howard20181.hyperos.fcmlive.Prefs
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.UpdateChecker
 import io.github.howard20181.hyperos.fcmlive.mcu.Hct
@@ -206,6 +209,17 @@ private fun AboutBody(
     // is a system-side setting with no palette behind it, and the update badge
     // is screen state by definition.
     var hideIcon by remember { mutableStateOf(LauncherIcon.isHidden(context)) }
+    // Read once per screen: the hook side owns the live value, and the mirror
+    // is only the answer the UI last left behind (same rule as the experiment
+    // page's mirrors).
+    var wechatDozeKeepout by remember { mutableStateOf(Prefs.readLocalWechatDozeKeepout(context)) }
+    var sleepKeepalive by remember { mutableStateOf(Prefs.readLocalSleepKeepalive(context)) }
+    var sleepKeepaliveData by remember {
+        mutableStateOf(Prefs.readLocalSleepKeepaliveData(context))
+    }
+    var debugLog by remember {
+        mutableStateOf(Prefs.readLocalDebugLog(context))
+    }
     var updateBadge by remember { mutableStateOf(UpdateChecker.isUpdateAvailable(context)) }
     val themeMode by AppearanceState.themeMode
     val uiStyle by AppearanceState.uiStyle
@@ -480,6 +494,149 @@ private fun AboutBody(
         }
 
         item {
+            // The battery switch is a plain runtime switch like any appearance
+            // toggle — it never qualified as an experiment (no probe, no gate,
+            // one hook reading one flag), so it lives on this page instead of
+            // behind the experiment gateway. Beside it sits a plain entry into
+            // the AOSP battery-usage page: the switch above moves WeChat out of
+            // the optimization whitelist, and this is where the user checks the
+            // state that page shows.
+            SectionTitle(R.string.about_section_battery)
+            SettingsSwitchCard(
+                iconRes = R.drawable.ic_energy_program_time_used,
+                title = stringResource(R.string.experiment_wechat_doze_keepout),
+                description = stringResource(R.string.experiment_wechat_doze_keepout_desc),
+                checked = wechatDozeKeepout,
+                onCheckedChange = { checked ->
+                    Prefs.writeWechatDozeKeepout(context, Prefs.remote(), checked)
+                    wechatDozeKeepout = checked
+                },
+                first = true,
+                last = false
+            )
+            GroupRowGap()
+            NavCard(
+                iconRes = R.drawable.ic_battery_profile,
+                title = stringResource(R.string.about_battery_aosp_usage),
+                subtitle = stringResource(R.string.about_battery_aosp_usage_desc),
+                onClick = {
+                    try {
+                        context.startActivity(
+                            Intent().setClassName(
+                                "com.android.settings",
+                                "com.android.settings.Settings\$AppBatteryUsageActivity"
+                            )
+                        )
+                    } catch (ignored: ActivityNotFoundException) {
+                        Toast.makeText(
+                            context,
+                            R.string.about_battery_aosp_usage_missing,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                },
+                first = false,
+                last = true
+            )
+        }
+
+        item {
+            // Same rationale as the battery row: two runtime switches, one
+            // hook flag each, no probe and no gate — sleep mode's network
+            // cutoff is a user-facing behaviour, not an experiment. Two
+            // radios, two switches, no master: whichever is on is the half of
+            // the network that survives the night, and the other half is left
+            // to the ROM either way, so both rows are always on screen.
+            SectionTitle(R.string.experiment_section_sleep)
+            SettingsSwitchCard(
+                iconRes = R.drawable.ic_signal_wifi_3_bar_lock,
+                title = stringResource(R.string.experiment_sleep_keepalive),
+                description = stringResource(R.string.experiment_sleep_keepalive_desc),
+                checked = sleepKeepalive,
+                onCheckedChange = { checked ->
+                    Prefs.writeSleepKeepalive(context, Prefs.remote(), checked)
+                    sleepKeepalive = checked
+                },
+                first = true,
+                last = false
+            )
+            GroupRowGap()
+            SettingsSwitchCard(
+                iconRes = R.drawable.ic_network_locked,
+                title = stringResource(R.string.experiment_sleep_keepalive_data),
+                description = stringResource(R.string.experiment_sleep_keepalive_data_desc),
+                checked = sleepKeepaliveData,
+                onCheckedChange = { checked ->
+                    Prefs.writeSleepKeepaliveData(context, Prefs.remote(), checked)
+                    sleepKeepaliveData = checked
+                },
+                first = false,
+                last = true
+            )
+        }
+
+        item {
+            // One merged section: the debug switch on top (a pure emission
+            // toggle — nothing here changes what a hook decides, only whether
+            // the log line describing it is written out), the experiment
+            // gateway below. No confirm dialog, no allowlist dependency in
+            // either row.
+            SectionTitle(R.string.about_section_experiment_debug)
+            SettingsSwitchCard(
+                // Style-dependent icon: under Material 3 the row carries the
+                // filled bug_report glyph — the "log a defect report" reading —
+                // while the MIUIX style keeps the diagnostics glyph it shares
+                // with the module-status page.
+                iconRes = if (AppearanceState.uiStyle.intValue == ThemePrefs.UI_STYLE_MATERIAL) {
+                    R.drawable.ic_bug_report
+                } else {
+                    R.drawable.ic_fcm_diagnostics
+                },
+                title = stringResource(R.string.experiment_debug_log),
+                description = stringResource(R.string.experiment_debug_log_desc),
+                checked = debugLog,
+                onCheckedChange = { checked ->
+                    Prefs.writeDebugLog(context, Prefs.remote(), checked)
+                    debugLog = checked
+                },
+                first = true,
+                last = false
+            )
+            GroupRowGap()
+            NavCard(
+                iconRes = R.drawable.ic_science,
+                title = stringResource(R.string.experiment),
+                subtitle = stringResource(R.string.about_sub_experiment),
+                onClick = actions.onExperiment,
+                first = false,
+                last = true
+            )
+        }
+
+        // Under Miuix the help entry lives in its own one-card "其他" section,
+        // right after 实验与调试 — the material the help covers is the toggles
+        // behind that gateway, so the two read together — and before
+        // 数据/关于, the closing groups the way the system's own settings park
+        // their project rows at the foot. Under Material the top-bar icon is
+        // the entry and this section is not composed at all.
+        if (miuixStyle) {
+            item {
+                SectionTitle(R.string.about_section_other)
+                NavCard(
+                    iconRes = R.drawable.ic_help,
+                    title = stringResource(R.string.help_guide),
+                    subtitle = stringResource(R.string.about_sub_help),
+                    onClick = actions.onHelp,
+                    first = true,
+                    last = true
+                )
+            }
+        }
+
+        item {
+            // The data section sits directly above 关于, keeping the project
+            // rows as the closing group the way the system's own settings park
+            // theirs at the foot.
             SectionTitle(R.string.about_section_backup)
             NavCard(
                 iconRes = R.drawable.ic_export,
@@ -498,38 +655,6 @@ private fun AboutBody(
                 first = false,
                 last = true
             )
-        }
-
-        item {
-            SectionTitle(R.string.about_section_experiment)
-            NavCard(
-                iconRes = R.drawable.ic_science,
-                title = stringResource(R.string.experiment),
-                subtitle = stringResource(R.string.about_sub_experiment),
-                onClick = actions.onExperiment,
-                first = true,
-                last = true
-            )
-        }
-
-        // Under Miuix the help entry lives in its own one-card "其他" section,
-        // right after 实验 — the material the help covers is the toggles on
-        // that page, so the two read together — and before 关于, which stays
-        // the closing group the way the system's own settings park their
-        // project rows at the foot. Under Material the top-bar icon is the
-        // entry and this section is not composed at all.
-        if (miuixStyle) {
-            item {
-                SectionTitle(R.string.about_section_other)
-                NavCard(
-                    iconRes = R.drawable.ic_help,
-                    title = stringResource(R.string.help_guide),
-                    subtitle = stringResource(R.string.about_sub_help),
-                    onClick = actions.onHelp,
-                    first = true,
-                    last = true
-                )
-            }
         }
 
         item {
