@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  文案红线：改文案前先整段读一遍，不要回写旧版本。本文件是简体中文文案（设备语言为任意
+  中文变体——简体、繁体、粤语——时自动使用本文件）；英文默认在 values/strings.xml。
+  两边键名必须同步增删；帮助页正文在 HELP.md。
+  1. 「白名单」必须分清三种：本应用的「FCM 唤醒白名单」/ 手机管家「省电策略」/
+     AOSP「电池优化」，它们不是一回事。
+  2. 钩子返回值是 ROM 的读取值，不是「请求」；值 = 1 表示 ROM 内建的「需保持可达」，
+     不要写成「不限网」。
+  3. 睡眠相关一律写「进入或退出」睡眠模式，不要只写「进入」。
+  4. powerkeeper 的中文正式名是「电量和性能」。
+  5. 实验性开关默认全部关闭，且只描述功能，不附加「已开启／已关闭」这类状态描述。
+  6. 危险开关只放在 ExperimentActivity。
+-->
+<resources>
+    <string name="app_name">修复澎湃系统谷歌推送重连</string>
+    <string name="launcher_name">HyperGreeze</string>
+    <string name="back">返回</string>
+    <string name="help">帮助</string>
+    <!-- 设置页「其他」区的行名：与顶栏入口/快捷方式的「帮助」区分开，行名说明点开看到的是使用说明 -->
+    <string name="help_guide">使用帮助</string>
+    <string name="xposed_description">去除澎湃系统对谷歌推送连接相关广播的限制。启用模块后，系统耗电可能会增加</string>
+    <string name="settings_title">FCM 唤醒白名单</string>
+    <string name="select_all">全选</string>
+    <string name="deselect_all">取消全选</string>
+    <string name="search_hint">搜索…</string>
+    <string name="tooltip_search">搜索</string>
+    <string name="exit_search">退出搜索</string>
+    <string name="exit_multi_select">退出多选</string>
+    <string name="batch_ops">批量操作</string>
+    <string name="selected_count">已选择 %1$d 项</string>
+    <string name="batch_added">白名单已更新</string>
+    <string name="batch_save">保存</string>
+    <string name="multi_select_tip">长按应用卡片可批量操作</string>
+    <string name="multi_select_tip_miuix">点击顶栏「批量操作」可一次处理多个应用</string>
+    <string name="installed_apps_permission_denied">未授权时应用列表可能不完整</string>
+    <string name="show_system_apps">显示系统应用</string>
+    <string name="show_fcm_supported_apps">展示支持应用</string>
+    <string name="exclude_mipush_apps">排除MiPush应用</string>
+    <string name="mipush_badge">MiPush</string>
+    <string name="no_fcm_apps_found">未发现支持FCM的应用</string>
+    <!-- 列表为空且原因是筛选（而非扫描失败）时的提示。 -->
+    <string name="no_apps_found">当前筛选条件下没有可显示的应用</string>
+    <string name="settings">设置</string>
+    <string name="about_section_display">显示</string>
+    <string name="about_section_theme">主题</string>
+    <string name="about_section_backup">数据</string>
+    <string name="about_section_battery">电池优化</string>
+    <string name="about_battery_aosp_usage">AOSP 应用电池使用情况</string>
+    <string name="about_battery_aosp_usage_desc">管理应用后台的电池使用情况</string>
+    <string name="about_battery_aosp_usage_missing">未找到应用电池使用情况页面，当前系统可能不适用</string>
+    <string name="about_section_experiment_debug">实验与调试</string>
+    <string name="about_sub_experiment">实验性开关入口，默认不启用</string>
+    <string name="about_section_privacy">隐私与权限</string>
+    <string name="about_section_project">关于</string>
+    <string name="about_section_other">其他</string>
+    <string name="about_sub_help">查看在线使用说明</string>
+    <string name="privacy_perm_query_all">读取应用列表</string>
+    <string name="privacy_perm_query_all_desc">android.permission.QUERY_ALL_PACKAGES：在本地读取已安装应用</string>
+    <string name="privacy_perm_get_installed">获取已安装应用</string>
+    <string name="privacy_perm_get_installed_desc">com.android.permission.GET_INSTALLED_APPS：HyperOS 上获取完整应用列表；未授权时列表可能不完整</string>
+    <string name="privacy_perm_internet">网络访问</string>
+    <string name="privacy_perm_internet_desc">android.permission.INTERNET：仅用于从 GitHub 检查更新</string>
+    <string name="privacy_commitment_desc">不收集、不上传个人数据；白名单与设置仅保存在本机；无统计分析、无广告、无追踪 SDK；代码开源可审计</string>
+    <string name="about_sub_hide_icon_on">已隐藏，可从 LSPosed 打开</string>
+    <string name="about_sub_hide_icon_off">已显示，点击后隐藏</string>
+    <string name="about_sub_check_update">当前版本 %1$s (%2$d)</string>
+    <string name="about_sub_export">将白名单备份为文本文件</string>
+    <string name="about_sub_import">从文本文件恢复白名单</string>
+    <string name="about_sub_source">本项目采用 GNU GPL-3.0 协议</string>
+    <string name="about_sub_privacy">权限用途与隐私承诺</string>
+    <string name="about_sub_licenses">本应用使用的开源组件</string>
+    <string name="privacy_section_perms">应用权限</string>
+    <string name="privacy_section_commitment">隐私承诺</string>
+    <string name="view_source_code">查看源代码</string>
+    <string name="dialog_close">关闭</string>
+    <string name="check_for_updates">检查更新</string>
+    <string name="update_checking">正在检查更新…</string>
+    <string name="update_none">已是最新版本</string>
+    <string name="update_error">检查更新失败，请检查网络后重试</string>
+    <string name="export_allowlist">备份配置</string>
+    <string name="import_allowlist">恢复配置</string>
+    <string name="allowlist_export_failed">备份失败</string>
+    <string name="allowlist_import_failed">恢复失败</string>
+    <string name="allowlist_import_empty">文件中没有有效的包名</string>
+    <string name="allowlist_import_done">已导入 %1$d 个应用</string>
+    <string name="allowlist_export_done">已导出 %1$d 个应用</string>
+    <string name="update_found">发现新版本 %1$s</string>
+    <string name="update_found_title">发现新版本</string>
+    <string name="update_open">前往下载</string>
+    <string name="open_source_licenses">开放源代码许可</string>
+    <string name="licenses_title">开放源代码许可</string>
+    <string name="licenses_section_deps">依赖</string>
+    <string name="licenses_section_refs">参考项目</string>
+    <string name="licenses_section_licenses">许可证</string>
+    <string name="license_view_full_text">点击查看全文</string>
+    <string name="license_apache_2">Apache License 2.0</string>
+    <string name="license_gpl_3">GPL-3.0</string>
+    <string name="license_mit">MIT License</string>
+    <string name="hide_launcher_icon">隐藏桌面图标</string>
+    <string name="theme_mode">主题模式</string>
+    <string name="palette_style">调色风格</string>
+    <string name="ui_style">界面风格</string>
+    <string name="miuix_monet">莫奈颜色</string>
+    <string name="miuix_accent">强调色</string>
+    <string name="color_spec">颜色规格</string>
+    <string name="about_sub_theme_mode">调整应用的主题模式</string>
+    <string name="about_sub_ui_style">选择应用的界面风格</string>
+    <string name="about_sub_miuix_monet">跟随壁纸为界面取色</string>
+    <string name="about_sub_miuix_accent">挑选莫奈配色的主色调</string>
+    <string name="about_sub_palette_style">选择动态取色风格</string>
+    <string name="about_sub_color_spec">选择 Material 颜色规范</string>
+    <string name="language">语言</string>
+    <string name="about_sub_language">选择应用界面语言</string>
+    <string name="dynamic_color">动态颜色</string>
+    <string name="about_sub_dynamic_color_on">正在跟随壁纸动态取色</string>
+    <string name="about_sub_dynamic_color_off">已停用，使用自选主题颜色</string>
+    <string-array name="theme_mode_entries">
+        <item>跟随系统</item>
+        <item>浅色模式</item>
+        <item>深色模式</item>
+        <item>AMOLED</item>
+    </string-array>
+    <!-- 与 ThemePrefs.UI_STYLE_* 的顺序一致。两个都是设计语言的名字，保留原文。 -->
+    <string-array name="ui_style_entries">
+        <item>Material 3</item>
+        <item>Miuix</item>
+    </string-array>
+    <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格），选项保留英文原文。 -->
+    <string-array name="palette_style_entries">
+        <item>Monochrome</item>
+        <item>Neutral</item>
+        <item>Tonal spot</item>
+        <item>Vibrant</item>
+        <item>Expressive</item>
+        <item>Fidelity</item>
+        <item>Content</item>
+        <item>Rainbow</item>
+        <item>Fruit salad</item>
+    </string-array>
+    <string-array name="color_spec_entries">
+        <item>Material You (2021)</item>
+        <item>Expressive (2025)</item>
+    </string-array>
+    <!-- 强调色菜单：第 0 项是「未选择」（存储值 0，跟随壁纸），其余与
+         MIUIX_ACCENT_OPTIONS 的顺序一一对应（KernelSU 同款 Material 500 档 + 樱粉）。 -->
+    <string-array name="miuix_accent_entries">
+        <item>跟随壁纸</item>
+        <item>红</item>
+        <item>粉</item>
+        <item>紫</item>
+        <item>深紫</item>
+        <item>靛蓝</item>
+        <item>蓝</item>
+        <item>青</item>
+        <item>蓝绿</item>
+        <item>绿</item>
+        <item>黄</item>
+        <item>琥珀</item>
+        <item>橙</item>
+        <item>棕</item>
+        <item>蓝灰</item>
+        <item>樱粉</item>
+    </string-array>
+    <string name="hide_icon_toast">桌面图标已隐藏，需要设置时请从 LSPosed 打开模块</string>
+    <string name="show_icon_toast">桌面图标已恢复</string>
+    <string name="more_menu">更多选项</string>
+    <string name="fcm_diagnostics">FCM 诊断</string>
+    <string name="fcm_diagnostics_not_found">当前设备无法打开 FCM 诊断界面</string>
+    <string name="shortcut_settings">设置</string>
+    <string name="shortcut_settings_long">打开模块设置</string>
+    <string name="shortcut_help_long">在浏览器中查看帮助</string>
+    <string name="shortcut_fcm_diagnostics_long">查看 FCM 诊断</string>
+
+    <!-- 帮助内容已迁出应用：唯一来源是仓库根目录的 HELP.md（在线文档）。
+         帮助图标与「帮助」快捷方式都用浏览器打开 AboutActivity.HELP_URL。
+         动了 Hooker 的行为时同步改 HELP.md，不要在这里补回帮助文案。 -->
+
+    <!-- 实验功能页：危险开关集中在此，主界面只留入口 -->
+    <string name="experiment">实验功能</string>
+    <string name="experiment_wechat_doze_keepout">禁止恢复微信电池未优化状态</string>
+    <string name="experiment_wechat_doze_keepout_desc">需自行调整微信为电池优化</string>
+
+    <string name="experiment_section_network">网络</string>
+    <string name="experiment_wifi_weak_signal_relaxed">弱 WiFi 信号下保持连接</string>
+    <string name="experiment_wifi_weak_signal_relaxed_desc">减少 WiFi 与移动数据之间的频繁切换；此功能不改善 WiFi 质量</string>
+    <string name="experiment_wifi_weak_signal_floor">调整 WiFi 弱信号标准</string>
+    <string name="experiment_wifi_weak_signal_floor_desc">当 WiFi 质量评分低于所选数值时，仍按系统默认策略切换网络</string>
+    <string name="experiment_wifi_weak_signal_floor_item">%1$d</string>
+
+    <string name="experiment_section_sleep">睡眠模式</string>
+    <string name="experiment_sleep_keepalive">保护 WiFi 不断网</string>
+    <string name="experiment_sleep_keepalive_desc">不断开 WiFi 以保持推送通畅</string>
+    <string name="experiment_sleep_keepalive_data">保护移动数据不断网</string>
+    <string name="experiment_sleep_keepalive_data_desc">不断开移动数据以确保推送通畅</string>
+
+    <!-- 自启动单列一节：主开关在运行时放行，副档逐层扩大覆盖面，末行为管家自启动管理入口，默认全关 -->
+    <string name="experiment_section_autostart">自启动</string>
+    <string name="experiment_autostart_gate_release">放行应用拉起</string>
+    <string name="experiment_autostart_gate_release_desc">放行应用的服务与进程启动</string>
+    <string name="experiment_autostart_restart_release">停用应用冻结</string>
+    <string name="experiment_autostart_restart_release_desc">应用进程结束后按正常路径重启</string>
+    <string name="experiment_autostart_root_release">放行自启动统一查询入口</string>
+    <string name="experiment_autostart_root_release_desc">系统所有自启动检查一律按允许答复</string>
+    <string name="experiment_wake_autostart_write">自启动管理</string>
+    <string name="experiment_wake_autostart_write_desc">查看与调整各应用的自启动开关</string>
+    <string name="experiment_autostart_empty_list">当前白名单为空，开关只作用于已勾选应用，请先配置白名单</string>
+    <string name="experiment_autostart_entry_missing">未找到自启动管理页面，当前系统可能不适用</string>
+
+    <!-- 后台网络单列一节：冻结期网络放宽，默认关 -->
+    <string name="experiment_section_background_net">后台网络</string>
+    <string name="experiment_greeze_net_release">保持应用冻结期联网</string>
+    <string name="experiment_greeze_net_release_desc">应用切至后台被冻时网络保持可用；本项并不优化 FCM 推送，而是保护这些应用的自有长连接</string>
+
+    <!-- Smart Power 单列一节：OS3 世代实验功能。OS4 已移除 SmartPower 的拦截
+         决策（真机 services.jar/miui-services.jar 验证），整节只在 OS3 上渲染 -->
+    <string name="experiment_section_smart_power">Smart Power</string>
+    <string name="experiment_smart_power_release">Smart Power 拦截放行</string>
+    <string name="experiment_smart_power_release_desc">放行应用 FCM 广播与消息服务启动</string>
+
+    <!-- 「显示调试日志」在设置页的「实验与调试」区（about_section_experiment_debug） -->
+    <string name="experiment_debug_log">显示调试日志</string>
+    <string name="experiment_debug_log_desc">输出调试日志，排查问题时启用</string>
+
+    <string name="experiment_section_gms">GMS</string>
+    <string name="experiment_gcm_reconnect">GCM 重连修复</string>
+    <string name="experiment_gcm_reconnect_desc">GMS 长连接断开且下次重连闹钟已过期时，主动触发重连</string>
+
+    <!-- 模块状态页 -->
+    <string name="status_yes">是</string>
+    <string name="status_no">否</string>
+    <string name="refresh_pull_down">下拉刷新</string>
+    <string name="refresh_release">松开刷新</string>
+    <string name="refreshing">正在刷新…</string>
+    <string name="refresh_done">刷新成功</string>
+    <string name="app_list_refreshed">应用列表已刷新</string>
+    <string name="a11y_allowlist_on">已在白名单</string>
+    <string name="a11y_allowlist_off">不在白名单</string>
+    <!-- 多选行状态，拼进整行的无障碍描述里 -->
+    <string name="row_selected">已选中</string>
+    <string name="row_unselected">未选中</string>
+    <!-- 不可勾选的行：GMS 恒生效。小字即其无障碍描述，故不再单列 a11y_* 副本 -->
+    <string name="gms_row_note">始终生效，无需勾选</string>
+</resources>

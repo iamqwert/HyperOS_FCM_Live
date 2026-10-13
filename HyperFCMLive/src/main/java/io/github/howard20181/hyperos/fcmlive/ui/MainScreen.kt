@@ -3,7 +3,6 @@ package io.github.howard20181.hyperos.fcmlive.ui
 import android.content.res.Configuration
 import android.graphics.drawable.Drawable
 import android.view.HapticFeedbackConstants
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
@@ -88,7 +87,6 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
@@ -106,7 +104,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.R
-import io.github.howard20181.hyperos.fcmlive.UiUtils
 import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import androidx.compose.ui.text.TextStyle
@@ -273,13 +270,6 @@ fun MainScreen(
         // the system's own pull-to-refresh, the circle with the refresh text,
         // not the M3 spinner.
         val scrollBehavior = MiuixScrollBehavior()
-        // Under this look a long-press does not start a batch selection (that is
-        // entered from the top-bar action); it opens a small sheet for the row.
-        // Track which row's sheet is up, null when dismissed.
-        var detailsApp by remember { mutableStateOf<AppListStore.AppEntry?>(null) }
-        val sheetContext = LocalContext.current
-        val detailsLabel = stringResource(R.string.app_details)
-        val detailsFailedLabel = stringResource(R.string.app_details_unavailable)
         MiuixScaffold(
             modifier = modifier,
             // The page colour, not Miuix's own default: under AMOLED the page is
@@ -328,21 +318,7 @@ fun MainScreen(
                         selected = selected,
                         lazyListState = lazyListState,
                         onRowClick = onRowClick,
-                        // Miuix: long-press opens the row's small popup rather
-                        // than starting a batch selection.
-                        onRowLongClick = { detailsApp = it },
-                        contextMenuPkg = detailsApp?.packageName,
-                        onContextMenuItemClick = {
-                            val pkg = detailsApp?.packageName
-                            detailsApp = null
-                            if (pkg != null &&
-                                !UiUtils.openAppDetails(sheetContext, pkg)) {
-                                Toast.makeText(
-                                    sheetContext, detailsFailedLabel, Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        },
-                        onContextMenuDismiss = { detailsApp = null },
+                        onRowLongClick = onRowLongClick,
                         loadIcon = loadIcon,
                         icons = icons,
                         bottomPadding = innerPadding.calculateBottomPadding() + FAB_CLEARANCE,
@@ -1017,83 +993,6 @@ private fun MiuixTopBarTextAction(text: String, onClick: () -> Unit) {
 }
 
 /**
- * Positions the long-press popup the way the reference layer sits: vertically below the row
- * when there is room, above it when there is not, beside it in the middle otherwise.
- *
- * Horizontally the popup's center rides at 60% of the row's width, not the 50% a plain
- * centering gives: anchored to the full-width row, a dead-centered panel reads as sitting
- * left of the pressed content (the row's own ink — icon, label, switch — crowds the leading
- * half), so the center is biased toward the trailing half. The clamp keeps it inside the
- * window when 60% would push the panel's far edge out.
- */
-private object RowContextMenuPositionProvider : PopupPositionProvider {
-    private const val VERTICAL_GAP_DP = 6
-    private const val HORIZONTAL_CENTER_FRACTION_NUMERATOR = 3
-    private const val HORIZONTAL_CENTER_FRACTION_DENOMINATOR = 5
-
-    override fun calculatePosition(
-        anchorBounds: IntRect,
-        windowBounds: IntRect,
-        layoutDirection: LayoutDirection,
-        popupContentSize: IntSize,
-        popupMargin: IntRect,
-        alignment: PopupPositionProvider.Align
-    ): IntOffset {
-        val centerX = anchorBounds.left +
-            anchorBounds.width * HORIZONTAL_CENTER_FRACTION_NUMERATOR /
-            HORIZONTAL_CENTER_FRACTION_DENOMINATOR
-        val offsetX = centerX - popupContentSize.width / 2
-        val offsetY = when {
-            windowBounds.bottom - anchorBounds.bottom >=
-                popupContentSize.height + popupMargin.bottom ->
-                // Below the row.
-                anchorBounds.bottom + popupMargin.bottom
-            anchorBounds.top - windowBounds.top >=
-                popupContentSize.height + popupMargin.top ->
-                // Above the row.
-                anchorBounds.top - popupContentSize.height - popupMargin.top
-            else ->
-                // Not enough room on either side: cover the row, centered.
-                anchorBounds.top +
-                    (anchorBounds.height - popupContentSize.height) / 2
-        }
-        val maxX = (windowBounds.right - popupContentSize.width - popupMargin.right)
-            .coerceAtLeast(windowBounds.left + popupMargin.left)
-        val maxY = windowBounds.bottom - popupContentSize.height - popupMargin.bottom
-        val minY = windowBounds.top + popupMargin.top
-        return IntOffset(
-            x = offsetX.coerceIn(windowBounds.left + popupMargin.left, maxX),
-            y = offsetY.coerceIn(minY.coerceAtMost(maxY), maxY)
-        )
-    }
-
-    override fun getMargins(): PaddingValues =
-        PaddingValues(vertical = VERTICAL_GAP_DP.dp)
-}
-
-/**
- * The single centered item inside the long-press popup (应用详情). The popup
- * surface — rounded 16dp `surfaceContainer` — is painted by [OverlayListPopup],
- * so this is only the tap target: centered text, min width enforced by the
- * popup's `minWidth`, tap opens the manager's app-management page.
- */
-@Composable
-private fun AppDetailsPopupItem(text: String, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .padding(horizontal = 24.dp, vertical = 18.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        MiuixText(
-            text = text,
-            color = MiuixTheme.colorScheme.onSurface,
-            style = MiuixTheme.textStyles.body1
-        )
-    }
-}
-
-/**
  * The overflow row's box: the shape of a checkbox, none of its semantics.
  *
  * The row itself is the toggle ([MenuItemRow] `checkable`), so it already
@@ -1134,11 +1033,6 @@ fun AppListPane(
     lazyListState: LazyListState,
     onRowClick: (AppListStore.AppEntry) -> Unit,
     onRowLongClick: (AppListStore.AppEntry) -> Unit,
-    // Miuix long-press context popup. Null package → no popup; item-click and
-    // dismiss callbacks are non-null whenever a popup could be shown.
-    contextMenuPkg: String? = null,
-    onContextMenuItemClick: (() -> Unit)? = null,
-    onContextMenuDismiss: (() -> Unit)? = null,
     loadIcon: (AppListStore.AppEntry) -> Unit,
     icons: Map<String, Drawable?> = emptyMap(),
     bottomPadding: Dp,
@@ -1171,9 +1065,6 @@ fun AppListPane(
                 exemptNote = app.exemptNote,
                 multiSelect = multiSelect,
                 rowSelected = selected.contains(app.packageName),
-                contextMenuVisible = contextMenuPkg == app.packageName,
-                onContextMenuItemClick = onContextMenuItemClick,
-                onContextMenuDismiss = onContextMenuDismiss,
                 onClick = { onRowClick(app) },
                 onLongClick = { onRowLongClick(app) },
                 onIconMissing = { loadIcon(app) }
@@ -1216,10 +1107,6 @@ private fun LazyItemScope.AppRow(
     rowSelected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
-    // Miuix long-press popup for this row (only one row at a time is visible).
-    contextMenuVisible: Boolean = false,
-    onContextMenuItemClick: (() -> Unit)? = null,
-    onContextMenuDismiss: (() -> Unit)? = null,
     onIconMissing: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1267,7 +1154,6 @@ private fun LazyItemScope.AppRow(
         if (checked) R.string.a11y_allowlist_on else R.string.a11y_allowlist_off
     )
     val mipushTag = stringResource(R.string.mipush_badge)
-    val detailsLabel = stringResource(R.string.app_details)
     // The reason this row is inert. Taken from the entry rather than fixed
     // here: an exempt row's sentence has to match the reason, and there is
     // more than one reason.
@@ -1300,9 +1186,9 @@ private fun LazyItemScope.AppRow(
         LaunchedEffect(packageName) { onIconMissing() }
     }
 
-    // The anchor Box wraps the card and hosts the long-press popup: the popup's
-    // internal zero-size spacer reads this Box's bounds as the anchor, so the
-    // layer positions itself over exactly this row.
+    // Sizing wrapper around the card. It used to anchor the Miuix long-press
+    // popup; the popup is gone (long-press now starts a batch selection), and
+    // the wrapper stays as the row's fillMaxWidth host.
     Box(modifier = Modifier.fillMaxWidth()) {
     Surface(
         modifier = modifier
@@ -1479,19 +1365,6 @@ private fun LazyItemScope.AppRow(
             }
         }
     }
-        // Miuix long-press layer: a small rounded popup anchored to this row.
-        if (contextMenuVisible && LocalUiStyle.current == UiStyle.Miuix) {
-            OverlayListPopup(
-                show = true,
-                popupPositionProvider = RowContextMenuPositionProvider,
-                onDismissRequest = { onContextMenuDismiss?.invoke() },
-                onDismissFinished = { onContextMenuDismiss?.invoke() }
-            ) {
-                AppDetailsPopupItem(text = detailsLabel) {
-                    onContextMenuItemClick?.invoke()
-                }
-            }
-        }
     }
 }
 

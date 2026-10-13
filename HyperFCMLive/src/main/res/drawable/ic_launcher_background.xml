@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- No rounded corners: the launcher Adaptive Icon mask owns the silhouette. -->
+<!-- No rounded corners: the launcher Adaptive Icon mask owns the silhouette.
+     Firebase-flame brand: deep red (top-left) melting to amber (bottom-right). -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <gradient
         android:angle="315"
-        android:startColor="#42A5F5"
-        android:centerColor="#2196F3"
-        android:endColor="#304FFE"
+        android:startColor="#F5391B"
+        android:centerColor="#FB8A00"
+        android:endColor="#FBB016"
         android:type="linear" />
 </shape>

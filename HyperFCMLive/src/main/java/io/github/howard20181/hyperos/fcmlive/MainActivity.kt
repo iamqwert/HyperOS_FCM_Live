@@ -762,7 +762,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         if (firstPackage != null) {
-            // Entered via a Material long-press: stage the pressed row too.
+            // Entered via a long-press: stage the pressed row too.
             selectedPkgs.add(firstPackage)
         }
         pushUiState()

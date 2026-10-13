@@ -43,8 +43,10 @@ object ShortcutPublisher {
                 .setLongLabel(context.getString(R.string.shortcut_help_long))
                 .setIcon(Icon.createWithResource(context, R.drawable.ic_shortcut_help))
                 // Opens the online help in a browser; there is no in-app help
-                // page any more (the text lives in HELP.md in the repository).
-                .setIntent(Intent(Intent.ACTION_VIEW, Uri.parse(AboutActivity.HELP_URL)))
+                // page any more (the text lives in HELP.md / HELP_EN.md in the
+                // repository). The doc language follows the app's display
+                // language at publish time.
+                .setIntent(Intent(Intent.ACTION_VIEW, Uri.parse(AboutActivity.helpUrl(context))))
                 .build()
             val fcm = ShortcutInfo.Builder(context, ID_FCM)
                 .setShortLabel(context.getString(R.string.fcm_diagnostics))
