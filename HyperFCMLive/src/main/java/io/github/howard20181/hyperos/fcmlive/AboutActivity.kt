@@ -16,6 +16,7 @@ import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport
 import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
+import io.github.howard20181.hyperos.fcmlive.AppLocale
 import io.github.howard20181.hyperos.fcmlive.ui.AboutActions
 import io.github.howard20181.hyperos.fcmlive.ui.AboutScreen
 import io.github.howard20181.hyperos.fcmlive.ui.PredictiveBackContainer
@@ -146,7 +147,7 @@ class AboutActivity : AppCompatActivity() {
                                 },
                                 onExport = ::exportAllowlist,
                                 onImport = ::importAllowlist,
-                                onHelp = { openLink(HELP_URL) },
+                                onHelp = { openLink(helpUrl(this@AboutActivity)) },
                                 onCheckUpdate = ::checkForUpdates,
                                 onUpdateOpen = ::openPendingUpdate,
                                 versionLine = versionLine,
@@ -433,6 +434,15 @@ class AboutActivity : AppCompatActivity() {
          * a single copy in the repository means a wording fix ships without an
          * APK release. Point this at a URL that renders Markdown.
          */
-        const val HELP_URL = "https://github.com/iamqwert/HyperOS_FCM_Live/blob/main/HELP.md"
+        private const val HELP_URL_ZH = "https://github.com/iamqwert/HyperOS_FCM_Live/blob/main/HELP.md"
+        private const val HELP_URL_EN = "https://github.com/iamqwert/HyperOS_FCM_Live/blob/main/HELP_EN.md"
+
+        /**
+         * The help doc in the app's current display language — the guide is
+         * bilingual, and the entry point must match what the reader is reading
+         * the rest of the UI in.
+         */
+        fun helpUrl(context: Context): String =
+            if (AppLocale.current(context) == AppLocale.INDEX_ENGLISH) HELP_URL_EN else HELP_URL_ZH
     }
 }

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Themed icon layer. System Monet tints this to the wallpaper accent.
-  Bubble + wrapping arcs; content bars are even-odd cutouts.
-  Group scale keeps all strokes inside the Adaptive Icon 66dp safe zone.
+  Cloud + Firebase flame silhouette: same geometry as the foreground,
+  flattened to a single fill so the tint reads cleanly.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -10,72 +10,34 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
+    <!-- 白色云朵 -->
     <group
-        android:pivotX="54"
-        android:pivotY="54"
-        android:scaleX="0.76"
-        android:scaleY="0.76">
-
-        <!-- 左侧广播波纹（圆弧包裹气泡） -->
-        <path
-            android:fillColor="#00000000"
-            android:pathData="M23,36 A36,36 0 0,0 23,72"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="6"
-            android:strokeLineCap="round" />
-        <path
-            android:fillColor="#00000000"
-            android:pathData="M32,40 A28,28 0 0,0 32,68"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="6"
-            android:strokeLineCap="round" />
-
-        <!-- 右侧广播波纹（圆弧包裹气泡） -->
-        <path
-            android:fillColor="#00000000"
-            android:pathData="M85,36 A36,36 0 0,1 85,72"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="6"
-            android:strokeLineCap="round" />
-        <path
-            android:fillColor="#00000000"
-            android:pathData="M76,40 A28,28 0 0,1 76,68"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="6"
-            android:strokeLineCap="round" />
-
-        <!-- 气泡 + 内容条镂空（evenOdd） -->
+        android:scaleX="2.4"
+        android:scaleY="2.4"
+        android:translateX="25.2"
+        android:translateY="24">
         <path
             android:fillColor="#FFFFFFFF"
-            android:fillType="evenOdd"
-            android:pathData="
-                M38,49
-                C38,45.7 40.7,43 44,43
-                L64,43
-                C67.3,43 70,45.7 70,49
-                L70,59
-                C70,62.3 67.3,65 64,65
-                L52,65
-                L42,73
-                L44,65
-                L44,65
-                C40.7,65 38,62.3 38,59
-                Z
-                M44,48
-                L64,48
-                C65.1,48 66,48.9 66,50
-                C66,51.1 65.1,52 64,52
-                L44,52
-                C42.9,52 42,51.1 42,50
-                C42,48.9 42.9,48 44,48
-                Z
-                M44,55
-                L64,55
-                C65.1,55 66,55.9 66,57
-                C66,58.1 65.1,59 64,59
-                L44,59
-                C42.9,59 42,58.1 42,57
-                C42,55.9 42.9,55 44,55
-                Z" />
+            android:pathData="M19.35,10.04C18.67,6.59 15.64,4 12,4 9.11,4 6.6,5.64 5.35,8.04 2.34,8.36 0,10.91 0,14c0,3.31 2.69,6 6,6h13c2.76,0 5,-2.24 5,-5 C24,12.36 22.95,10.22 19.35,10.04z" />
+    </group>
+
+    <!-- Firebase 经典火焰（单色剪影） -->
+    <group
+        android:scaleX="0.85"
+        android:scaleY="0.85"
+        android:translateX="40.4"
+        android:translateY="38.9">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M19.62,11.558l-3.203,2.98 -2.972,-5.995 1.538,-3.448c0.4,-0.7 1.024,-0.692 1.414,0z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M13.445,8.543l2.972,5.995 -11.97,11.135z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M23.123,7.003c0.572,-0.55 1.164,-0.362 1.315,0.417l3.116,18.105 -10.328,6.2c-0.36,0.2 -1.32,0.286 -1.32,0.286s-0.874,-0.104 -1.207,-0.3L4.447,25.673z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M13.445,8.543l-8.997,17.13L8.455,0.638c0.148,-0.78 0.592,-0.855 0.988,-0.167z" />
     </group>
 </vector>

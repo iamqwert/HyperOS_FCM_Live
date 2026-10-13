@@ -223,13 +223,14 @@ private fun ExperimentBody(
             // module intercepted — are gone: every real FCM broadcast is the
             // shipped hop, so neither could change an FCM outcome.
             //
-            // The rows form a ladder of independently testable rungs, widest
-            // first: answer the service/process checkpoints in memory, then the
-            // freeze gate, then the op query itself. Each runtime rung reads
-            // only its own flag, so any single rung can be measured alone; all
-            // of them hide under the master because nothing they answer
-            // outlives it. The write switch that used to close the ladder is
-            // retired — the section now ends with a plain entry into 手机管家's
+            // The rows form a chain, widest first: answer the service/process
+            // checkpoints in memory, then the freeze gate, then the op query
+            // itself. Each rung only shows once the rung above it is on, and
+            // the hooks honour the same chain (the rung's read is its own key
+            // ANDed with its ancestors), so what is hidden is also inert. With
+            // everything off the section shows just the master and the manager
+            // entry. The write switch that used to close the ladder is
+            // retired — the section ends with a plain entry into 手机管家's
             // own autostart management, where the state the ops are in is both
             // visible and user-controlled.
             SectionTitle(R.string.experiment_section_autostart)
@@ -272,29 +273,40 @@ private fun ExperimentBody(
                         stateLine = emptyAllowlistHint,
                         stateLineOff = emptyAllowlistHint,
                         first = false,
-                        // The root row shares this rung's visibility, so it is
-                        // always on screen right below.
+                        // The root rung chains behind this one, so it is on
+                        // screen right below when it shows at all.
                         last = false
                     )
-                    GroupRowGap()
-                    SettingsSwitchCard(
-                        iconRes = R.drawable.ic_root_release,
-                        title = stringResource(R.string.experiment_autostart_root_release),
-                        description = stringResource(
-                            R.string.experiment_autostart_root_release_desc
-                        ),
-                        checked = autostartRootRelease,
-                        onCheckedChange = { checked ->
-                            Prefs.writeAutostartRootRelease(context, Prefs.remote(), checked)
-                            autostartRootRelease = checked
-                        },
-                        stateLine = emptyAllowlistHint,
-                        stateLineOff = emptyAllowlistHint,
-                        first = false,
-                        // The manager entry below is always on screen, so this
-                        // row is never the visible group's last either.
-                        last = false
-                    )
+                    AnimatedVisibility(
+                        visible = autostartRestartRelease,
+                        enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                        exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
+                    ) {
+                        Column {
+                            GroupRowGap()
+                            SettingsSwitchCard(
+                                iconRes = R.drawable.ic_root_release,
+                                title = stringResource(R.string.experiment_autostart_root_release),
+                                description = stringResource(
+                                    R.string.experiment_autostart_root_release_desc
+                                ),
+                                checked = autostartRootRelease,
+                                onCheckedChange = { checked ->
+                                    Prefs.writeAutostartRootRelease(
+                                        context, Prefs.remote(), checked
+                                    )
+                                    autostartRootRelease = checked
+                                },
+                                stateLine = emptyAllowlistHint,
+                                stateLineOff = emptyAllowlistHint,
+                                first = false,
+                                // The manager entry below is always on screen,
+                                // so this row is never the visible group's
+                                // last either.
+                                last = false
+                            )
+                        }
+                    }
                 }
             }
             GroupRowGap()

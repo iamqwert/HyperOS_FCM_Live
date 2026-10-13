@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Per-app language list for the system settings page. zh-CN covers
+     Simplified Chinese; Traditional Chinese systems resolve resources to
+     values-zh anyway, so no zh-TW entry here (it would only duplicate the
+     same strings in the picker). -->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="zh-CN" />
+    <locale android:name="en" />
+</locale-config>

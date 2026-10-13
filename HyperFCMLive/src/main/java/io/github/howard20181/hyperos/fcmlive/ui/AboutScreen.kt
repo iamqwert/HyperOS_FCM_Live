@@ -70,6 +70,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import io.github.howard20181.hyperos.fcmlive.AppLocale
 import io.github.howard20181.hyperos.fcmlive.LauncherIcon
 import io.github.howard20181.hyperos.fcmlive.Prefs
 import io.github.howard20181.hyperos.fcmlive.R
@@ -249,6 +250,9 @@ private fun AboutBody(
     // same index over both — the mapping the pick writes through.
     val accentEntries = stringArrayResource(R.array.miuix_accent_entries)
     val accentValues = remember { listOf(0) + MIUIX_ACCENT_OPTIONS.toList() }
+    // 语言下拉：选项是各自的原生名（简体中文 / English），不翻译，所以这份
+    // 数组只有 values/ 一份定义。
+    val languageEntries = stringArrayResource(R.array.language_entries)
 
     // The two appearance menus are scoped by each other, because the settings
     // are not independent: the 2025 spec covers four palette styles and nothing
@@ -333,6 +337,8 @@ private fun AboutBody(
     ) {
         item {
             SectionTitle(R.string.about_section_display, first = true)
+            // 隐藏图标行与语言行同属一组连通卡：图标行只留首端圆角，语言行
+            // 只留尾端圆角，中间以 GroupRowGap 相连（与主题区的行组一致）。
             SettingsSwitchCard(
                 iconRes = R.drawable.ic_hide_icon,
                 title = stringResource(R.string.hide_launcher_icon),
@@ -344,7 +350,24 @@ private fun AboutBody(
                     LauncherIcon.setHidden(context, checked)
                     show(if (checked) hideText else showText)
                     hideIcon = checked
-                }
+                },
+                first = true,
+                last = false
+            )
+            GroupRowGap()
+            // 语言选择交给平台的 LocaleManager：写下去系统自己持久化并重建
+            // 界面，本应用不落偏好。未选择时的默认（ currentIndex 的取值）
+            // 走资源回退——values/ 英文、values-zh/ 简体中文，任意中文变体
+            // 的系统都读到简体。
+            PopupCard(
+                iconRes = R.drawable.ic_language,
+                title = stringResource(R.string.language),
+                subtitle = stringResource(R.string.about_sub_language),
+                entries = languageEntries.toList(),
+                currentIndex = AppLocale.current(context),
+                first = false,
+                last = true,
+                onPick = { index -> AppLocale.apply(context, index) }
             )
         }
 

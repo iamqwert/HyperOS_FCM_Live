@@ -308,9 +308,10 @@ internal object AutostartGate {
             module.logGated(
                 Log.INFO, HookerSupport.TAG,
                 "autostart gate: $installed checkpoint(s) hooked (read-through); " +
-                    "denials counted unconditionally, each releasable gate follows " +
-                    "its own experiment switch, pre-start probed read-only, " +
-                    "AppOps root choke answers op 10008 before the ROM judges"
+                    "denials counted unconditionally, each rung reads its own " +
+                    "switch ANDed with the rungs above it, pre-start probed " +
+                    "read-only, AppOps root choke answers op 10008 before the " +
+                    "ROM judges"
             )
         }
     }
@@ -360,8 +361,9 @@ internal object AutostartGate {
             // impossible to tell apart.
             //
             // The two releasable gate families each read their own experiment
-            // key — deliberately not an AND chain under the master, so that
-            // one rung can be isolated and measured on its own.
+            // key ANDed with the rungs above it: the screen chains the rows'
+            // visibility, and the hook honours the same chain, so a hidden
+            // rung is inert too (Prefs master/sub rule, rule 1).
             val release = releaseable && when (gate) {
                 HookerSupport.AUTOSTART_GATE_RESTART -> isAutostartRestartReleaseEnabled(module)
                 else -> isAutostartGateReleaseEnabled(module)
@@ -457,13 +459,15 @@ internal object AutostartGate {
 
     /**
      * Experiment switch: release the restart gate (freeze instead of restart)
-     * for a checked callee. Reads its **own** key — not the master's — so the
-     * freeze rung can be measured in isolation.
+     * for a checked callee. Reads its own key **ANDed with the master** — the
+     * screen chains this row's visibility behind the master, and the hook
+     * honours the same chain, so a hidden row is also an inert one (the
+     * master/sub rule in [Prefs]).
      *
      * Fails to *disabled*, same reasoning as the master above.
      */
     private fun isAutostartRestartReleaseEnabled(module: XposedInterface): Boolean {
-        return try {
+        return isAutostartGateReleaseEnabled(module) && try {
             module.getRemotePreferences(Prefs.GROUP_CONFIG)
                 .also { HookLog.refresh(it) }
                 .getBoolean(Prefs.KEY_AUTOSTART_RESTART_RELEASE, false)
@@ -474,12 +478,15 @@ internal object AutostartGate {
 
     /**
      * Experiment switch: answer the autostart op query itself for a checked
-     * package. Reads its **own** key, same isolation reasoning.
+     * package. Reads its own key **ANDed with the whole chain above it** —
+     * the master and the freeze rung — matching the chained visibility on the
+     * screen: the row only shows when both ancestors are on, and only then
+     * does this answer.
      *
      * Fails to *disabled*, same reasoning as the master above.
      */
     private fun isAutostartRootReleaseEnabled(module: XposedInterface): Boolean {
-        return try {
+        return isAutostartRestartReleaseEnabled(module) && try {
             module.getRemotePreferences(Prefs.GROUP_CONFIG)
                 .also { HookLog.refresh(it) }
                 .getBoolean(Prefs.KEY_AUTOSTART_ROOT_RELEASE, false)

@@ -278,9 +278,10 @@ object Prefs {
      * packages (2026-10-07: `restart DENIED` with `callee` naming a checked
      * push target), which is the condition the probe was waiting for.
      *
-     * Reads **only its own key** — not the master above it — so the ladder
-     * stays a set of independently testable variables rather than an AND
-     * chain: isolating the freeze gate alone is the whole point of the rung.
+     * Reads its own key **ANDed with the master** above it: the screen chains
+     * this row's visibility behind the master, and the hook honours the same
+     * chain, so a hidden row is also an inert one (the master/sub rule at the
+     * top of this file, rule 1).
      *
      * Default **off**, like every other experiment.
      */
@@ -304,6 +305,11 @@ object Prefs {
      * pre-start punishment path reads the same query, so it is released too;
      * and a faked `noteOp` return skips the usage note, so the manager's own
      * autostart record can miss entries for checked apps.
+     *
+     * Reads its own key **ANDed with the whole chain above it** — the master
+     * and the freeze rung — matching the chained visibility on the screen:
+     * the row only shows when both ancestors are on, and only then does the
+     * hook answer.
      *
      * Default **off**, like every other experiment.
      */
