@@ -152,7 +152,7 @@ dependencies {
     // What Miuix's popups register their back handlers through. Comes in at 1.1.1
     // with miuix 0.9.1; declared so Dependabot sees it, pinned to what miuix asks
     // for rather than the 1.1.2 KernelSU uses with its newer miuix.
-    implementation 'androidx.navigationevent:navigationevent-compose:1.1.1'
+    implementation 'androidx.navigationevent:navigationevent-compose:1.2.0'
     // Material Views: two real consumers keep this here — the
     // `Theme.Material3.DayNight.NoActionBar` parent the app theme inherits from,
     // and DynamicColors (wallpaper accent) in theme/ThemeSupport.kt. The
