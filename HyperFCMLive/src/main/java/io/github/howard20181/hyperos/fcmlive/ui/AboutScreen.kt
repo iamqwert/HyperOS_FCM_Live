@@ -29,17 +29,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -205,10 +200,10 @@ private fun AboutBody(
     // Everything appearance-related reads its live value straight from
     // [AppearanceState] — the Compose state layer over ThemePrefs — so there is
     // no remembered mirror to keep in step: a setter writes the pref, the state
-    // every reader subscribes to, and the palette engine in one call. Only the
-    // two non-appearance values keep local state: the launcher-icon visibility
-    // is a system-side setting with no palette behind it, and the update badge
-    // is screen state by definition.
+    // every reader subscribes to, and the palette engine in one call. The
+    // non-appearance values keep local state: the launcher-icon visibility is a
+    // system-side setting with no palette behind it, and the update badge is
+    // screen state by definition.
     var hideIcon by remember { mutableStateOf(LauncherIcon.isHidden(context)) }
     // Read once per screen: the hook side owns the live value, and the mirror
     // is only the answer the UI last left behind (same rule as the experiment

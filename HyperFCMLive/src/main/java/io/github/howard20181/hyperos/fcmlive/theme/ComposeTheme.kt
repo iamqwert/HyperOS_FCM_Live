@@ -85,8 +85,8 @@ fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MaterialStyleTheme(content: @Composable () -> Unit) {
-    // isSystemInDarkTheme is only a fallback when no palette is applied yet;
-    // ThemeEngine.palette already resolves the user's theme mode.
+    // isSystemInDarkTheme is not consulted here: ThemeEngine.palette already
+    // resolves the user's theme mode.
     // Keying on ThemeEngine.generation is what makes an in-place theme switch
     // work: invalidate() bumps the counter, this composable re-executes, and
     // the palette recomputes — no Activity recreate, no window jump.

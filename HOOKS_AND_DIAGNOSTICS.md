@@ -11,7 +11,7 @@
 
 | 维度   | 说明                                                                            |
 | ---- | ----------------------------------------------------------------------------- |
-| 描述对象 | `Hooker.kt`（模块唯一 Xposed 入口）及其拆分出的同目录钩点族文件（`AmsHooks.kt`、`AlarmGate.kt`、`AutostartGate.kt`、`AllowlistGate.kt`、`GcmReconnectHooks.kt`、`GmsSupport.kt`、`GreezeHooks.kt`、`HookLog.kt`、`HookerSupport.kt`、`InstallBookkeeping.kt`、`ProcessCleanerHooks.kt`、`SleepModeGate.kt`、`SmartPowerHooks.kt`、`SystemProbes.kt`、`TrafficProbe.kt`、`WakePathProbe.kt`、`WifiWeakSignalSwitch.kt`），依赖 `Prefs.kt`、`UnsafeUtils.kt`、`hiddenapi:stubs`。行为与本文描述一致，仅文件位置随零行为重构分散 |
+| 描述对象 | `Hooker.kt`（模块唯一 Xposed 入口）及其拆分出的同目录钩点族文件（`AmsHooks.kt`、`AlarmGate.kt`、`AutostartGate.kt`、`AllowlistGate.kt`、`GmsSupport.kt`、`GreezeHooks.kt`、`HookLog.kt`、`HookerSupport.kt`、`InstallBookkeeping.kt`、`ProcessCleanerHooks.kt`、`SleepModeGate.kt`、`SmartPowerHooks.kt`、`SystemProbes.kt`、`TrafficProbe.kt`、`WakePathProbe.kt`、`WifiWeakSignalSwitch.kt`），依赖 `Prefs.kt`、`UnsafeUtils.kt`、`hiddenapi:stubs`。行为与本文描述一致，仅文件位置随零行为重构分散。`GcmReconnectHooks.kt` 已于 4.1.1 整族移除（见 3.10.1 退役注） |
 | 描述层级 | 方法级钩点、判定极性、数据来源、失效模式                                                          |
 | 不覆盖  | Compose UI、主题引擎、更新检查、licensing                                                |
 | 证据来源 | 源码注释中的字节码偏移结论、ROM 静态取证、运行时 `dumpsys`、LSPosed 导出的 `modules_*.log`              |
@@ -103,15 +103,16 @@ HyperOS 在这条链路上叠加了四组彼此独立的策略，模块的设计
 
 ### 2.2 注入域
 
-`META-INF/xposed/scope.list` 声明三个域，入口类由 `java_init.list` 指定为 `Hooker`：
+`META-INF/xposed/scope.list` 声明两个域（4.1.1 前为三个，含 GMS），入口类由 `java_init.list` 指定为 `Hooker`：
 
 | 域                      | 回调                                   | 承载的钩点组           |
 | ---------------------- | ------------------------------------ | ---------------- |
 | `system`               | `onSystemServerStarting`             | A、B、C 面 + 全部只读探针 |
 | `com.miui.powerkeeper` | `onPackageReady`（仅 `isFirstPackage`） | D 面              |
-| `com.google.android.gms` | `onPackageReady`（仅 `isFirstPackage`） | GCM 重连修复钩（见 3.10.1） |
 
-划分依据是类可见性：`NetdExecutor` 与 `GmsObserver` 只在 PowerKeeper 进程内被实例化，在 system_server 里解析不到类；greeze 系列则只在 system_server；GCM 心跳定时器类只存在于 GMS 自身进程（见 3.10.1）。强行合并会产生大量 `ClassNotFoundException`，也会让"缺失目标"计数失去意义。
+4.1.1 起 GMS 不再是注入域：GCM 重连修复钩整族移除后（见 3.10.1 退役注），模块不再在 `com.google.android.gms` 进程内安装任何钩子，scope 亦已收窄。
+
+划分依据是类可见性：`NetdExecutor` 与 `GmsObserver` 只在 PowerKeeper 进程内被实例化，在 system_server 里解析不到类；greeze 系列则只在 system_server。强行合并会产生大量 `ClassNotFoundException`，也会让"缺失目标"计数失去意义。
 
 ### 2.3 ROM 代次差异（OS3 / OS4）
 
@@ -637,18 +638,25 @@ wifi-weak-signal: reported 38 is below the chosen floor 45; left to the ROM's ow
 
 ⇒ 触发面窄是**设计选择而非缺口**：唯一"连接已死且 GMS 未必自愈"的时刻，就是 ROM 整夜物理掐网后退出（重连退避可能已耗尽）。重启条件不变：整宿观测出现"MCS 死亡 + GMS 未自愈 + 未进睡眠模式"的证据后再设计带门控的触发。
 
-#### 3.10.1 GCM 重连修复钩（4.0.3 新增，GMS 进程内）
+#### 3.10.1 GCM 重连修复钩（4.0.3 新增，4.1.1 已移除）
 
-P4 是出境广播；这一组是它的**进程内补位**：注入域 `com.google.android.gms`（见 2.2），安装组 `GCM reconnect repair`（`GcmReconnectHooks.kt`），开关 `gcm_reconnect_fix`（默认关，fail-closed）。形态：
+**退役注（4.1.1）**：本组钩子原注入 GMS 进程（`GcmReconnectHooks.kt`，安装组 `GCM reconnect repair`，开关 `gcm_reconnect_fix`），动态定位 GMS 心跳定时器族、在负心跳时触发进程内恢复。4.1.1 起 GMS 热更新加强了完整性检测，进程内注入被判定为破坏设备完整性，整族移除——`Hooker.hookPackage` 不再为 GMS 安装任何组，`gcm_reconnect_fix` 进 `RETIRED_CONFIG_KEYS`（服务绑定即双向清除），实验页 GMS 节删除，scope 收窄为 `system` + `com.miui.powerkeeper`。触发面收回到 P4 出境广播（3.10）的唯一形态；若未来要在 GMS 侧补位，必须先解决与完整性检测的兼容问题再议。
+
+<details>
+<summary>原实现描述（历史，4.0.3–4.1.0）</summary>
+
+原形态：注入域 `com.google.android.gms`（见 2.2），安装组 `GCM reconnect repair`，开关 `gcm_reconnect_fix`（默认关，fail-closed）。
 
 - 动态定位 GMS 心跳定时器族：遍历候选类，找 `(long)` 型 setter 与 alarm 字段；再钩其 `(Context,int,String)` 构造器。
 - 负心跳（重建类实例意味着心跳机制被判死）时触发恢复动作，日志行 `GCM reconnect repair armed…` / `hook point located…`。
 
-与 P4 的分工：P4 面向"GMS 整体该重连了"的粗粒度诱因，本组面向"心跳调度器自身已死"的细粒度诱因——后者 P4 的广播无法覆盖（GMS 收到广播也不一定能重建一个已经坏掉的调度器）。是否启用是实验档：定位逻辑依赖 GMS 内部混淆结构，跨版本漂移风险高，出问题必须能一键回到 P4-only 的形态。
+与 P4 的分工：P4 面向"GMS 整体该重连了"的粗粒度诱因，本组面向"心跳调度器自身已死"的细粒度诱因——后者 P4 的广播无法覆盖（GMS 收到广播也不一定能重建一个已经坏掉的调度器）。
+
+</details>
 
 ### 3.11 失效处理：分层隔离、fail-open 与安全零值
 
-**分层隔离**：挂载点组收在三张清单里——`systemServerGroups`（system_server，26 组）、`powerKeeperGroups`（PowerKeeper，7 组）与 `gmsGroups`（GMS 进程，1 组，即 3.10.1 的重连修复），**一组一行**；由 `installGroup` 逐组执行、每组一个独立 `try/catch(Throwable)`，外层再包一层，确保**装载失败不会导致 system_server 崩溃**——这是 Xposed 模块最基本的安全边界。新增一组 = 往清单加一行，不再复制一段 try/catch。
+**分层隔离**：挂载点组收在两张清单里——`systemServerGroups`（system_server，26 组）与 `powerKeeperGroups`（PowerKeeper，7 组），**一组一行**；由 `installGroup` 逐组执行、每组一个独立 `try/catch(Throwable)`，外层再包一层，确保**装载失败不会导致 system_server 崩溃**——这是 Xposed 模块最基本的安全边界。新增一组 = 往清单加一行，不再复制一段 try/catch。（4.1.1 前还有第三张清单 `gmsGroups`（GMS 进程，1 组），随 3.10.1 退役。）
 
 ```
 hookSystemServer
@@ -691,7 +699,7 @@ chain.proceed()      // 或返回已计算的结果
 | 远程 prefs 读取异常                          | 保留旧值，不清空                                | 宁可偏松不可丢推送                             |
 | `gmsUid()` 解析失败                        | 跳过本次注入并 WARN                            | 注入集合需要 uid，降级为空操作好过注入错误 uid           |
 | `getSystemContext()` 失败                | 回退 `getPowerKeeperContext()`，都没有则放弃本次动作 | 两个进程的 Context 不同源，都要缓存                |
-| 实验开关读取失败（睡眠保活双开关 / 微信 keepout / WiFi 弱信号双项 / 自启动三档 / `greeze_net_release` / `smartpower_release` / `gcm_reconnect_fix`） | **fail-closed**（按关处理）                   | 这些开关覆盖用户主动做出的省电、网络或投递决策，读不出来时必须让系统自己的策略生效 |
+| 实验开关读取失败（睡眠保活双开关 / 微信 keepout / WiFi 弱信号双项 / 自启动三档 / `greeze_net_release` / `smartpower_release`） | **fail-closed**（按关处理）                   | 这些开关覆盖用户主动做出的省电、网络或投递决策，读不出来时必须让系统自己的策略生效 |
 
 偏松的代价是额外耗电，偏紧的代价是丢推送；**保护类判定无法确定时一律偏松，实验类开关读取失败一律按关**。
 
@@ -724,8 +732,6 @@ GMS 发出 c2dm 广播
       ├─ caller 识别（getRecordForApp* → ProcessRecord.info.packageName，失败降级 binder uid）
       ├─ caller=GMS + moduleAppliesTo(target) → 补 FLAG_INCLUDE_STOPPED_PACKAGES
       │                                   → addToTemporaryAllowList(pkg, 102, "GOOGLE_C2DM", 2000)
-      ├─ [实验] 唤醒 开 + moduleAppliesTo(target) → 同一出口补同一标记（不限 caller/action）
-      │            └─ 副开关「复位停止状态」开 → setPackageStoppedState(pkg, false, userId)（同包 60 s 节流）
   → BroadcastQueueModernStubImpl#checkApplicationAutoStart   （冷启动路径）
   → GreezeManagerService#isRestrictReceiver                  （温而冻路径，附带 thawUidAsync）
   → GreezeManagerService#isAllowBroadcast                    （白名单谓词）
@@ -736,6 +742,8 @@ GMS 发出 c2dm 广播
 ```
 
 每层拦截点都会**读** `sAllowlist`（经 `getFcmAllowlist()`，带 10 s 陈旧度检查与异步重载触发）。
+
+> 上面这条链路在 3.7.0 前还有一条实验分支（现已不在图中）：开关 `wake_stopped_packages`（实验页「唤醒」组）开、且 `wakeExplicitlyAllows(target)` 成立时，**不限 caller / action** 地在同一出口补同一标记。它的判据不是 GMS 分支用的 `moduleAppliesTo`——后者无条件豁免 GMS，且当时的空名单语义 fail-open，与该开关「只对已勾选应用生效」的描述不符（两边现已同义，见 3.3.2）。其下的「复位停止状态」副开关调 `setPackageStoppedState(pkg, false, userId)`（同包 60 s 节流），3.6.1 即因该标记本就能打开同一个门而删除；主开关于 3.7.0 退役并进 `RETIRED_CONFIG_KEYS`——它能改变的结果只有非 FCM 广播的投递。
 
 **冻结 / 解冻与网络策略数据流**
 
@@ -1516,7 +1524,8 @@ adb logcat -d -v time | grep -a "notifySwitchNetworkByOtherStrategies"
 | powerkeeper   | 配置  | `UserConfigureHelper#getNoRestrictApps` + 所有 writer                                       | 追加 GMS / 重断言                     |
 | powerkeeper   | 配置  | `ActiveStateController#dealNoRestrictApp`                                                 | 校验并修复                            |
 | powerkeeper   | 配置  | `PowerKeeperAppConfigure#fillScenarioContent`                                             | scenario 0 → 8                   |
-| gms 进程        | 心跳  | GMS 心跳定时器族（动态定位 setter + alarm 字段 + 构造器）                                                  | 负心跳触发恢复（`gcm_reconnect_fix`，见 3.10.1） |
+
+（4.1.1 前还有 `gms 进程 | 心跳 | GMS 心跳定时器族 | 负心跳触发恢复` 一行，随 3.10.1 退役移除。）
 
 ## 附录 B：常量与阈值
 
@@ -1573,7 +1582,7 @@ adb logcat -d -v time | grep -a "notifySwitchNetworkByOtherStrategies"
 | `Prefs.KEY_AUTOSTART_ROOT_RELEASE`                                | `autostart_root_release`（默认关，AND 全链）                                                                | root 收口：AppOps 查询直答 ALLOWED           |
 | `Prefs.KEY_GREEZE_NET_RELEASE`                                    | `greeze_net_release`（默认关）                                                                           | 白名单 uid 免网络限制（见 3.5 实验档）              |
 | `Prefs.KEY_DEBUG_LOG`                                             | `debug_log`（默认关）                                                                                    | 调试日志总门（HookLog；默认只出 WARN/ERROR）       |
-| `Prefs.KEY_GCM_RECONNECT_FIX`                                     | `gcm_reconnect_fix`（默认关）                                                                            | GCM 重连修复钩（GMS 进程）                     |
+| ~~`Prefs.KEY_GCM_RECONNECT_FIX`~~                                 | ~~`gcm_reconnect_fix`~~（4.1.1 进 `RETIRED_CONFIG_KEYS`）                                               | ~~GCM 重连修复钩~~（GMS 进程，已随 3.10.1 移除）    |
 | `Prefs.KEY_SMARTPOWER_RELEASE`                                    | `smartpower_release`（默认关）                                                                           | Smart Power 拦截放行（仅 OS3）               |
 
 ## 附录 C：ROM 侧参考行为——「电量与性能」省电策略自动升格
@@ -1801,7 +1810,7 @@ persist.sys.adjust_maxfree.enable=true
 
 ## 附录 F：实验功能：原理与取舍
 
-以下内容自独立的《实验功能》文档（EXPERIMENT.md）整合而来，与「设置 → 关于 → 实验功能」的四个开关对应。本文档只写能左右使用效果的部分：干预发生在哪一步、哪些行为仍然按系统本意执行、以及哪些结论还没有实测支撑。使用方法见 HELP.md，此处不重复。
+以下内容自独立的《实验功能》文档（EXPERIMENT.md，已于 4.0.0 并入本附录）整合而来，与设置页「实验与调试」区的实验开关对应（4.0.3 起入口自「设置 → 关于 → 实验功能」迁入设置页，开关亦自早期的四个扩至：自启动三档（外加「自启动管理」入口）、放宽弱信号切换（含「调整 WiFi 弱信号标准」子项）、冻结期联网、Smart Power（仅 OS3）；显示调试日志与实验入口同栏，「保护 WiFi 不断网 / 保护移动数据不断网」与「禁止恢复微信电池未优化状态」已不属实验区、归设置页；GCM 重连修复曾在此列，4.1.1 随 GMS 进程内钩子整族退役，见 3.10.1）。本文档只写能左右使用效果的部分：干预发生在哪一步、哪些行为仍然按系统本意执行、以及哪些结论还没有实测支撑。使用方法见 HELP.md，此处不重复。
 
 ### F.1 睡眠模式：被拦下的只有两个动作
 

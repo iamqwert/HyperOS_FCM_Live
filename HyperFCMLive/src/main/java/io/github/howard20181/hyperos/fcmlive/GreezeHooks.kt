@@ -77,7 +77,10 @@ internal object GreezeHooks {
     @Volatile
     internal var broadcastGateAutostartAllowedCount = 0
 
-    /** c2dm from GMS reaching this checkpoint with the callee off the allowlist: handed back to the ROM. */
+    /**
+     * c2dm from GMS reaching this checkpoint with the callee off the allowlist:
+     * handed back to the ROM.
+     */
     @Volatile
     internal var broadcastGateAutostartSkippedCount = 0
 

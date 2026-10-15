@@ -39,7 +39,7 @@ This module rewrites those checks inside the framework: it lets Google push and 
 
 1. LSPosed (or another compatible Xposed framework) is installed on the device
 2. Install this module's APK
-3. Enable the module in LSPosed's module list and check its scope; the experimental "GCM reconnect repair" additionally needs Google Play services checked
+3. Enable the module in LSPosed's module list and check its scope
 4. An LSPosed manager that supports API 102 hot-reloads the scope automatically when the module is enabled or updated, and the change takes effect immediately; on older LSPosed builds, both the first install and later updates require a manual reboot
 5. Open the module and configure the allowlist as needed
 
@@ -56,7 +56,7 @@ HyperOS layers several gates on this chain; the module handles them gate by gate
 | Stage | System-side gate | What the module does |
 |---|---|---|
 | Broadcast delivery | `isAllowBroadcast` (the c2dm delivery check) | Allowed per the allowlist |
-| App is "stopped" | stopped-packages flag | Re-adds `FLAG_INCLUDE_STOPPED_PACKAGES` |
+| App is "stopped" | "stopped" package filter | Re-adds `FLAG_INCLUDE_STOPPED_PACKAGES` |
 | Autostart check | `checkApplicationAutoStart` | Allowed per the allowlist |
 | App is frozen | `isRestrictReceiver` (greeze broadcast gate) | Let through, replaying the stock unfreeze |
 | Broadcast deferred | `isNeedCachedBroadcast`, `deferBroadcast` | See [Known limitations](#9-known-limitations) |
@@ -267,15 +267,7 @@ Allows the app's FCM broadcasts and messaging service to start.
 - Visible on OS3 devices only: OS4 removed SmartPower's blocking decisions, so there is nothing to hook and the section is not rendered on OS4
 - Off by default; writes nothing to any setting
 
-### GMS
-
-**GCM reconnect repair**
-
-Triggers a reconnect when the GMS connection has dropped and the next reconnect alarm is overdue.
-
-- Needs Google Play services checked in LSPosed; without that scope the switch has no effect
-- Use it together with "Debug logging" on the Settings page when troubleshooting: normal operation logs GCM reconnect repair, and a negative heartbeat logs connect missed
-- The hook is installed inside the Google Play services process — the only experimental switch that does not work on the system side
+> An earlier experimental switch, "GCM reconnect repair", worked inside the Google Play services process. It was removed in 4.1.1: GMS hot updates tightened their integrity detection, and in-process hooks were flagged as breaking device integrity. This module no longer injects into the Google Play services process.
 
 ---
 
@@ -324,7 +316,7 @@ That does not affect the next push — the next one cold-starts the app again; m
 
 ### Why does FCM diagnostics always show disconnects?
 
-When GMS is (re)written into the no-restrict list, the module proactively asks it to re-establish the push connection; the experimental "GCM reconnect repair" (off by default), once enabled, also nudges a reconnect when the connection has dropped and the next reconnect alarm is overdue.
+When GMS is (re)written into the no-restrict list, the module proactively asks it to re-establish the push connection.
 
 The reason: a connection can be dead without anyone knowing. When the system restricts networking it cuts the underlying socket directly, and GMS only notices at the next heartbeat timeout — during that window pushes are not actually arriving, yet diagnostics still show "Connected".
 

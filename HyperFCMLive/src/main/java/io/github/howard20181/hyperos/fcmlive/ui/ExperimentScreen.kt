@@ -125,9 +125,6 @@ private fun ExperimentBody(
     var greezeNetRelease by remember {
         mutableStateOf(Prefs.readLocalGreezeNetRelease(context))
     }
-    var gcmReconnectFix by remember {
-        mutableStateOf(Prefs.readLocalGcmReconnectFix(context))
-    }
     var smartPowerRelease by remember {
         mutableStateOf(Prefs.readLocalSmartPowerRelease(context))
     }
@@ -377,24 +374,6 @@ private fun ExperimentBody(
                     stateLineOff = emptyAllowlistHint
                 )
             }
-        }
-        item {
-            // The GMS section: a keepalive experiment inside the GMS process
-            // itself. The hook is installed whenever GMS loads the module, but
-            // it only ever sends a broadcast when this switch is on — the flag
-            // is read live on every heartbeat-timer write, so flipping it lands
-            // on the next heartbeat with no reboot and no GMS restart.
-            SectionTitle(R.string.experiment_section_gms)
-            SettingsSwitchCard(
-                iconRes = R.drawable.ic_cloud_sync,
-                title = stringResource(R.string.experiment_gcm_reconnect),
-                description = stringResource(R.string.experiment_gcm_reconnect_desc),
-                checked = gcmReconnectFix,
-                onCheckedChange = { checked ->
-                    Prefs.writeGcmReconnectFix(context, Prefs.remote(), checked)
-                    gcmReconnectFix = checked
-                }
-            )
         }
         // The same 16dp tail the settings page ends on, so the last card does
         // not sit flush against the gesture strip on a fully scrolled page.

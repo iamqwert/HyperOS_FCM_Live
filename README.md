@@ -32,7 +32,7 @@
 | 列表过滤 | 展示支持 FCM 的应用、排除 MiPush 应用（默认开启）、显示系统应用 |
 | 工具 | 打开 GMS 自带诊断界面、白名单导出/导入、检查更新 |
 | 显示与外观 | 语言（简体中文 / English）、主题模式、动态颜色、调色风格、颜色规格、隐藏桌面图标 |
-| 实验功能 | 自启动三档放行（链式）、弱信号切换放宽、冻结期联网、GCM 重连修复、Smart Power（仅 OS3）；微信电池优化与睡眠保活在设置页 |
+| 实验功能 | 自启动三档放行（链式）、弱信号切换放宽、冻结期联网、Smart Power（仅 OS3）；微信电池优化与睡眠保活在设置页 |
 | 入口 | Shortcuts 直达设置、帮助、FCM 诊断 |
 
 > 「帮助」入口用浏览器打开在线文档 [HELP.md](HELP.md)，应用内不再内置帮助页
@@ -48,7 +48,7 @@
 | 环节 | 系统侧门控 | 模块的处理 |
 |---|---|---|
 | 广播能否送达 | `GreezeManagerService#isAllowBroadcast` | 按白名单，未勾选应用交回系统 |
-| 应用处于「已停止」 | stopped-packages 标记 | 补 `FLAG_INCLUDE_STOPPED_PACKAGES` |
+| 应用处于「已停止」 | 「已停止」过滤 | 补 `FLAG_INCLUDE_STOPPED_PACKAGES` |
 | 自启动判定 | `BroadcastQueueModernStubImpl#checkApplicationAutoStart` | 按白名单放行 |
 | 应用已被冻结 | `isRestrictReceiver`（greeze 广播门） | 放行并复现原生解冻 |
 | 省电场景 / 待机 | `AppStandbyController#setUidState` | 改写为 allow |
@@ -57,7 +57,7 @@
 | 重连/心跳被延后 | `deferBroadcastForMiui` | 仅 GMS 重连类动作返回不放行 |
 | 强停 | `isForceStopEnable` | 只对勾选的应用生效 |
 
-被 hook 的宿主：主线钩点在 `system`（系统框架）与 `com.miui.powerkeeper`；实验功能「GCM 重连修复」开启时还会在 `com.google.android.gms` 进程内安装钩子
+被 hook 的宿主：主线钩点在 `system`（系统框架）与 `com.miui.powerkeeper`；模块不注入 `com.google.android.gms` 进程（原「GCM 重连修复」实验功能因 GMS 热更新加强完整性检测，已于 4.1.1 移除）
 
 GMS 侧的四项保护：
 
@@ -79,7 +79,7 @@ GMS 侧的四项保护：
 ### 步骤
 
 1. 从 [Releases](https://github.com/iamqwert/HyperOS_FCM_Live/releases) 下载 APK 并安装
-2. 在 LSPosed 管理器启用模块及勾选作用域（使用实验功能「GCM 重连修复」需额外勾选 Google Play 服务）
+2. 在 LSPosed 管理器启用模块及勾选作用域
 3. 等待作用域自动热重载（LSPosed 需支持 API 102 +）；若失败或没通知，需手动重启设备以应用
 4. 打开模块配置列表
 

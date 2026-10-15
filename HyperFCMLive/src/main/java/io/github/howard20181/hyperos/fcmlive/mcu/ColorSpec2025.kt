@@ -26,10 +26,10 @@ import kotlin.math.min
  * The 2025 spec — Material 3 Expressive.
  *
  * The 2025 rules **replace** the 2021 ones for the four styles the spec covers, and the 2021 rules
- * stay in force for everything else. That is expressed with [DynamicColor.Builder
- * .extendSpecVersion]: each role below keeps `super.<role>()` (which is the 2021 definition) and
- * hands over its own definition tagged with [Scheme.Spec.SPEC_2025]. A color built this way resolves
- * per scheme, so one [DynamicColor] object correctly serves both versions.
+ * stay in force for everything else. That is expressed with
+ * [DynamicColor.Builder.extendSpecVersion]: each role below keeps `super.<role>()` (which is the
+ * 2021 definition) and hands over its own definition tagged with [Scheme.Spec.SPEC_2025]. A color
+ * built this way resolves per scheme, so one [DynamicColor] object correctly serves both versions.
  *
  * Two things change shape compared with 2021, and both are worth knowing before reading down:
  *  - **Tones are computed, not tabulated.** Where 2021 says "T30 in dark", 2025 asks the palette

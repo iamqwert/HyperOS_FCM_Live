@@ -6,8 +6,6 @@ import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
@@ -800,12 +798,12 @@ private fun SearchField(
  *   [LocalAppShapes] `menu`/`menuItem` puts the panel back on the same shape
  *   language as the settings menus.
  *
- * The width is intrinsic so the four check boxes land on one vertical line the
+ * The width is intrinsic so the three check boxes land on one vertical line the
  * way `popup_overflow.xml` aligned them, but the popup is still measured from
  * its widest row — never from the window, which is what made the settings menus
  * open at the card's left edge.
  *
- * There is deliberately no divider above "设置": the XML had none, and the four
+ * There is deliberately no divider above "设置": the XML had none, and the three
  * toggles plus a navigation row are one list, not two.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1081,17 +1079,15 @@ fun AppListPane(
  * the row; `weight(1f, fill = false)` says that directly, which is most of why
  * this is shorter than the adapter it replaces.
  *
- * [exempt] rows — GMS and its persistent process, and the odd framework package
- * whose only FCM marker is a leftover action — are drawn as unavailable:
+ * [exempt] rows — GMS and its persistent process — are drawn as unavailable:
  * desaturated to `onSurfaceVariant` at reduced emphasis, with the checkbox
  * replaced by a note saying why, and no ripple or click handling at all. For
  * GMS the module always acts for it whatever the allowlist says, so a checkbox
- * there would be a control that does nothing; for the others there is no FCM
- * client to act for at all. Either way, a control that does nothing reads as a
- * bug.
+ * there would be a control that does nothing — and a control that does nothing
+ * reads as a bug.
  *
  * [exemptNote] carries the reason as a string resource rather than being fixed
- * here, because the two cases are not the same sentence.
+ * here, so the sentence stays with the entry it describes.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1155,8 +1151,7 @@ private fun LazyItemScope.AppRow(
     )
     val mipushTag = stringResource(R.string.mipush_badge)
     // The reason this row is inert. Taken from the entry rather than fixed
-    // here: an exempt row's sentence has to match the reason, and there is
-    // more than one reason.
+    // here, so the sentence stays with the entry it describes.
     val exemptNoteText = if (exemptNote != 0) stringResource(exemptNote) else ""
     val selectionState = stringResource(
         if (rowSelected) R.string.row_selected else R.string.row_unselected

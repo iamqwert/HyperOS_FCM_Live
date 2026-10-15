@@ -45,7 +45,9 @@
 #
 # tag / release name 由 APK 文件名推出（见 release job，tag = v<versionName.versionCode>）；
 # 发行说明 = CHANGELOG.md 的 `## <versionName>` 小节 + .github/release-notes.md
-# ⇒ 改 CHANGELOG 就等于改发行说明。无 SIGNING_KEY secret 时自动 -PallowDebugSignedRelease（warning 级）。
+# ⇒ 改 CHANGELOG 就等于改发行说明。双语条目在小节内按「### 简体中文」/「### English」
+# 两个三级标题分块写（下面的 awk 只按 `^## ` 截断，三级标题不会提前终止抽取）。
+# 无 SIGNING_KEY secret 时自动 -PallowDebugSignedRelease（warning 级）。
 name: Android CI
 
 on:

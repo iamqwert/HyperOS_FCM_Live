@@ -63,12 +63,7 @@ class AppPalette internal constructor(
     @JvmField
     val cardBg: Int
     @JvmField
-    val iconTint: Int
-    @JvmField
     val popupBg: Int
-    /** Neutral press ripple: onSurface at low alpha, not the accent hue. */
-    @JvmField
-    val ripple: Int
 
     @JvmField
     val dark: Boolean = dark
@@ -136,7 +131,6 @@ class AppPalette internal constructor(
         cardBg = if (amoledRamp) 0xFF141414.toInt() else scheme.surfaceBright
         popupBg = if (amoledRamp) 0xFF202020.toInt() else scheme.surfaceContainer
 
-        iconTint = onSurfaceVariant
         // No tooltip colours here, and no `hint` either. Both used to be
         // hand-picked pairs from the View era (`#1C1B1F`/`#E6E0E5` and their
         // dark twins; `outlineVariant` as a hint grey) and both outlived their
@@ -146,15 +140,12 @@ class AppPalette internal constructor(
         // is `inverseSurface` on `inverseOnSurface`, the official role read off
         // this very scheme, so a copy here would only be a second, drifting
         // answer. A field with no reader is not a setting.
-        // Grey state layer (onSurface @ ~16%): accent ripples read as a
-        // color-style surprise on Neutral / Vibrant / etc. A neutral wash
-        // stays quiet on every palette style.
-        ripple = withAlpha(onSurface, 0x29)
-    }
-
-    private companion object {
-        private fun withAlpha(argb: Int, alpha: Int): Int {
-            return (alpha shl 24) or (argb and 0x00FFFFFF)
-        }
+        //
+        // No press colour lives here either. Press feedback is the Miuix
+        // indication, installed in `ComposeTheme.kt` as
+        // `MiuixIndication(colors.onBackground)`, and it stays neutral rather
+        // than taking the accent hue: an accent ripple reads as a color-style
+        // surprise on Neutral / Vibrant / etc., while a neutral wash stays
+        // quiet on every palette style.
     }
 }

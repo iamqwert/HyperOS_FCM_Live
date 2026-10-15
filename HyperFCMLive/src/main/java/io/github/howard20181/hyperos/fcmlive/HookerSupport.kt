@@ -52,24 +52,6 @@ internal object HookerSupport {
         "com.miui.powerkeeper.statemachine.PhoneSleepModeController"
 
     /**
-     * Push-family actions the autostart pair acts on.
-     *
-     * The c2dm ones match by suffix because the family has historical
-     * prefixes; the Firebase ones are exact. Everything the autostart
-     * branches do is gated on this being true, which is what keeps them off
-     * the hot path of the broadcast queue.
-     */
-    internal val PUSH_ACTION_SUFFIXES = arrayOf(
-        ".android.c2dm.intent.RECEIVE",
-        ".android.c2dm.intent.REGISTRATION"
-    )
-    internal val PUSH_ACTIONS = setOf(
-        "com.google.firebase.MESSAGING_EVENT",
-        "com.google.firebase.INSTANCE_ID_EVENT",
-        "com.google.firebase.NEW_TOKEN"
-    )
-
-    /**
      * MIUI's autostart AppOp — `com.miui.internal.os.MiuiHooks.OP_AUTO_START`.
      * Not an AOSP op: the MIUI range starts at 10000.
      *
@@ -79,9 +61,10 @@ internal object HookerSupport {
      * together, but writing `10008` alone is already enough to change what
      * the ROM does. The module's write switch used to write `10008` alone,
      * which left packages at `10008=allow / 10053=ignore` — functionally
-     * allowed, only the manager row lying. The pair is written together now
-     * (and backfilled once per boot), so the two-step revert corollary no
-     * longer applies to anything the current build writes.
+     * allowed, only the manager row lying. Nothing in the module writes `10008`
+     * any more — the pair is reconciled by the `10053` backfill once per boot —
+     * so the two-step revert corollary no longer applies to anything the
+     * current build writes.
      *
      * **Why this op decides delivery although the module already answers
      * the broadcast gate.** The hook on
@@ -89,7 +72,7 @@ internal object HookerSupport {
      * at method entry for caller=GMS + c2dm, so on the FCM hop the op is
      * never even read there. The op is read by the *other* checkpoints
      * (see HOOKS_AND_DIAGNOSTICS §「自启动 AppOps 10008 共四类检查点」):
-     * service start/bind (`AutoStartManagerServiceStub#isAllowStartService`
+     * service start/bind (`AutoStartManagerServiceStubImpl#isAllowStartService`
      * and friends) and process start (`ProcessManagerService#isAllowAutoStart`).
      * A message whose process is cached still has to start the messaging
      * service; one whose process was reaped has to start the process. Both

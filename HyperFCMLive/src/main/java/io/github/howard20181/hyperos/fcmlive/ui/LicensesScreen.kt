@@ -586,10 +586,11 @@ private val REFERENCES = arrayOf(
     arrayOf("Howard20181/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/Howard20181/HyperOS_FCM_Live"),
     arrayOf("Kr328/HyperOSFCMFix", "MIT License", "https://github.com/Kr328/HyperOSFCMFix"),
     arrayOf("Kwensiu/DPIS", "GPL-3.0", "https://github.com/Kwensiu/DPIS"),
-    // The GCM reconnect repair (实验功能) follows this module's catch-up shape:
-    // a stale-connection check after the heartbeat timer's countdown expires,
-    // then a GCM_RECONNECT broadcast. No LICENSE file in the repository — shown
-    // as 「—」, the row links to the project like the other unlicensed ones.
+    // The retired GCM reconnect repair (4.1.1) followed this module's catch-up
+    // shape: a stale-connection check after the heartbeat timer's countdown
+    // expires, then a GCM_RECONNECT broadcast. No LICENSE file in the
+    // repository — shown as 「—」, the row links to the project like the other
+    // unlicensed ones.
     arrayOf("kooritea/fcmfix", "—", "https://github.com/kooritea/fcmfix"),
     arrayOf("tiann/KernelSU", "GPL-3.0", "https://github.com/tiann/KernelSU"),
     // No LICENSE file in the repository — shown as 「—」. There is no text to

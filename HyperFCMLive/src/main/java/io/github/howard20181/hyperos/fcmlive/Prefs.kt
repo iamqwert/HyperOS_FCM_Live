@@ -32,7 +32,7 @@ import java.util.concurrent.Executors
  *
  *  1. every hook read site **ANDs the master flag** (including secondary gates
  *     shared by both branches) — see `isSleepKeepaliveDataEnabled()` in
- *     Hooker.kt;
+ *     SleepModeGate.kt;
  *  2. the UI keeps the sub switch inside the *same* `AnimatedVisibility` as the
  *     master;
  *  3. the key is added to `MainActivity.reloadAllowlist`'s pending-repair set,
@@ -60,7 +60,7 @@ import java.util.concurrent.Executors
  * `sleep_keepalive_data` used to be one of these and are now **peers**: each
  * radio in sleep mode's cutoff follows its own key, neither gates the other, and
  * the screen shows both rows — see
- * `isSleepKeepaliveDataEnabled()` in Hooker.kt for why rule 1 stopped applying
+ * `isSleepKeepaliveDataEnabled()` in SleepModeGate.kt for why rule 1 stopped applying
  * to that pair. A `…_charging_only` sibling
  * used to live beside them and was later removed — see
  * HOOKS_AND_DIAGNOSTICS.md §5.5 for why ("only while charging" narrowed the
@@ -361,23 +361,6 @@ object Prefs {
     private const val KEY_DEBUG_LOG_PENDING_PUSH = "debug_log_pending_push"
 
     /**
-     * Remote + local: "GCM reconnect repair".
-     *
-     * Read inside the GMS process by [GcmReconnectHooks]: when on, a missed
-     * heartbeat/reconnect deadline makes GMS dial out immediately instead of
-     * waiting for its own (possibly deferred) next alarm. The read happens on
-     * every qualifying timer write, so flipping the switch lands on the next
-     * heartbeat — no reboot, no GMS restart. Off, the repair's only cost is
-     * one alarm-type field read per timer write, same quiet mode as every
-     * other experiment.
-     *
-     * Default **off**, like every other experiment.
-     */
-    const val KEY_GCM_RECONNECT_FIX = "gcm_reconnect_fix"
-    /** UI-only: set while the mirror holds a reconnect-fix change the module never saw. */
-    private const val KEY_GCM_RECONNECT_FIX_PENDING_PUSH = "gcm_reconnect_fix_pending_push"
-
-    /**
      * Remote + local: "Smart Power 拦截放行"（OS3 世代实验功能）。
      *
      * Read inside system_server by [SmartPowerHooks]: when on, a c2dm
@@ -458,7 +441,10 @@ object Prefs {
         localPrefs(context).edit().putBoolean(KEY_PENDING_PUSH, false).apply()
     }
 
-    /** Sleep-keepalive value as the UI last left it; the mirror is what the experiment screen shows. */
+    /**
+     * Sleep-keepalive value as the UI last left it; the mirror is what the
+     * experiment screen shows.
+     */
     @JvmStatic
     fun readLocalSleepKeepalive(context: Context): Boolean {
         return localPrefs(context).getBoolean(KEY_SLEEP_KEEPALIVE, false)
@@ -501,7 +487,7 @@ object Prefs {
         }
     }
 
-    /** Sleep-keepalive data sub-switch value as the UI last left it. */
+    /** Sleep-keepalive data switch value as the UI last left it. */
     @JvmStatic
     fun readLocalSleepKeepaliveData(context: Context): Boolean {
         return localPrefs(context).getBoolean(KEY_SLEEP_KEEPALIVE_DATA, false)
@@ -514,7 +500,7 @@ object Prefs {
     }
 
     /**
-     * Write the sleep-keepalive data sub-switch and make it live.
+     * Write the sleep-keepalive data switch and make it live.
      *
      * Same shape as [writeSleepKeepalive]. The hook in the PowerKeeper process
      * reads the remote value lazily at each qualifying call, so flipping this
@@ -545,7 +531,10 @@ object Prefs {
         }
     }
 
-    /** WeChat-doze-keepout value as the UI last left it; the mirror is what the experiment screen shows. */
+    /**
+     * WeChat-doze-keepout value as the UI last left it; the mirror is what the
+     * experiment screen shows.
+     */
     @JvmStatic
     fun readLocalWechatDozeKeepout(context: Context): Boolean {
         return localPrefs(context).getBoolean(KEY_WECHAT_DOZE_KEEPOUT, false)
@@ -937,53 +926,6 @@ object Prefs {
         }
     }
 
-    /** GCM reconnect switch value as the UI last left it. */
-    @JvmStatic
-    fun readLocalGcmReconnectFix(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_GCM_RECONNECT_FIX, false)
-    }
-
-    /** GCM-reconnect counterpart of [hasPendingPush]. */
-    @JvmStatic
-    fun hasPendingGcmReconnectFixPush(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_GCM_RECONNECT_FIX_PENDING_PUSH, false)
-    }
-
-    /**
-     * Write the GCM reconnect switch and make it live.
-     *
-     * Same shape as [writeDebugLog]: the write announces the ordinary reload
-     * broadcast for system_server symmetry, and the GMS-side hook reads the
-     * remote group directly on each qualifying timer write, so the value
-     * takes effect on the next heartbeat without a reboot.
-     */
-    @JvmStatic
-    fun writeGcmReconnectFix(
-        context: Context,
-        remotePrefs: SharedPreferences?,
-        enabled: Boolean
-    ) {
-        val app = appContext(context)
-        localPrefs(app).edit().putBoolean(KEY_GCM_RECONNECT_FIX, enabled).apply()
-        if (remotePrefs == null) {
-            localPrefs(app).edit()
-                .putBoolean(KEY_GCM_RECONNECT_FIX_PENDING_PUSH, true).apply()
-            broadcastAllowlistChanged(app)
-            return
-        }
-        localPrefs(app).edit()
-            .putBoolean(KEY_GCM_RECONNECT_FIX_PENDING_PUSH, false).apply()
-        WRITER.execute {
-            try {
-                remotePrefs.edit().putBoolean(KEY_GCM_RECONNECT_FIX, enabled).commit()
-            } catch (t: Throwable) {
-                localPrefs(app).edit()
-                    .putBoolean(KEY_GCM_RECONNECT_FIX_PENDING_PUSH, true).apply()
-            }
-            broadcastAllowlistChanged(app)
-        }
-    }
-
     /** Smart Power 放行开关在 UI 侧留下的最近值。 */
     @JvmStatic
     fun readLocalSmartPowerRelease(context: Context): Boolean {
@@ -999,7 +941,7 @@ object Prefs {
     /**
      * Write the Smart Power switch and make it live.
      *
-     * Same shape as [writeGcmReconnectFix]: the write announces the ordinary
+     * Same shape as [writeDebugLog]: the write announces the ordinary
      * reload broadcast, and the system_server-side hook reads the remote
      * group on each qualifying decision, so the value takes effect on the
      * next broadcast without a reboot.
@@ -1080,6 +1022,12 @@ object Prefs {
         "strict_mode_pending_push",
         "wake_write_autostart_switch",
         "wake_write_autostart_switch_pending_push",
+        // GCM reconnect repair: the GMS-side hook family it drove was retired
+        // in 4.1.1 (GMS hot updates flag in-process instrumentation), and the
+        // switch must not survive as a dead preference the screen no longer
+        // owns.
+        "gcm_reconnect_fix",
+        "gcm_reconnect_fix_pending_push",
         "wake_write_autostart",
         "wake_write_autostart_pending_push"
     )
