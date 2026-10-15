@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.1.1 (53)
+
+### 简体中文
+
+- 移除 GMS 作用域，GMS 检测手段不断更新，hook GMS 已被证实不可行；从旧版本升级、且曾勾选 GMS 作用域的用户，在升级后请强制停止一次「Google Play 服务」或重启设备，以彻底清除仍驻留在 GMS 进程内的旧钩子。
+
+### English
+
+- Remove the GMS scope. GMS detection methods are constantly being updated, and hooking GMS has been proven infeasible; users upgrading from an older version who previously checked the GMS scope should force-stop "Google Play Services" once or restart the device after upgrading to completely clear old hooks still residing in the GMS process.
+
 ## 4.1.0 (52)
 
 - 更新应用图标 Update app icon

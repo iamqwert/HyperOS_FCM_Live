@@ -66,7 +66,10 @@ internal class ToneDeltaPair(
     val constraint: DeltaConstraint
 ) {
 
-    /** Upstream constructor with the "stay together" flag; the constraint is [DeltaConstraint.EXACT]. */
+    /**
+     * Upstream constructor with the "stay together" flag; the constraint is
+     * [DeltaConstraint.EXACT].
+     */
     constructor(
         roleA: DynamicColor,
         roleB: DynamicColor,

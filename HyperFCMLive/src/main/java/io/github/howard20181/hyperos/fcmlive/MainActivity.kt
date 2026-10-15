@@ -52,8 +52,8 @@ import kotlinx.coroutines.launch
 
 /**
  * Settings screen: pick which apps FCM may wake / auto-launch.
- * MD3-inspired card list; search + overflow (system apps / hide icon) in the
- * top bar; FAB opens GMS FCM diagnostics.
+ * MD3-inspired card list; search + overflow (FCM-supported / MiPush / system
+ * apps) in the top bar; FAB opens GMS FCM diagnostics.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -1109,13 +1109,6 @@ class MainActivity : AppCompatActivity() {
             // against what the screen shows.
             Prefs.writeDebugLog(this, prefs, Prefs.readLocalDebugLog(this))
         }
-        if (Prefs.hasPendingGcmReconnectFixPush(this)) {
-            // Same repair for the GCM reconnect switch; the GMS-side hook reads
-            // the remote group per timer write, so a flip made before the
-            // service bound would leave GMS acting against what the screen
-            // shows until the next app-side write.
-            Prefs.writeGcmReconnectFix(this, prefs, Prefs.readLocalGcmReconnectFix(this))
-        }
         if (Prefs.hasPendingSmartPowerReleasePush(this)) {
             // Same repair for the Smart Power switch; the system_server-side
             // hook reads the remote group per decision, so a flip made before
@@ -1359,7 +1352,7 @@ class MainActivity : AppCompatActivity() {
          * ([EXEMPT_PACKAGES]) *and* it is listed as push-capable whatever its
          * Manifest holds ([scanPushSupport]).
          *
-         * The hook side has its own private copy (`Hooker.GMS_PACKAGE_NAME`) in
+         * The hook side has its own private copy (`HookerSupport.GMS_PACKAGE_NAME`) in
          * the `system_server` process, which this one cannot reach into.
          */
         private const val GMS_PACKAGE_NAME = "com.google.android.gms"
@@ -1463,9 +1456,9 @@ class MainActivity : AppCompatActivity() {
          * an app that ships one of the SDK's own components is a client whether
          * or not anything else in its Manifest corroborates it.
          *
-         * The names are `Hooker`'s constants, and the module asks the same
-         * questions in system_server (`Hooker#declaresFcmComponent`) — asking it
-         * the same way is the point. GMS is the one deliberate divergence there
+         * The names are `HookerSupport`'s constants, and the module asks the same
+         * questions in system_server (`ProcessCleanerHooks#declaresFcmComponent`) —
+         * asking it the same way is the point. GMS is the one deliberate divergence there
          * too: the hook exempts it before asking any of this (see
          * `AllowlistGate.moduleAppliesTo`), so it never depends on the answer.
          *

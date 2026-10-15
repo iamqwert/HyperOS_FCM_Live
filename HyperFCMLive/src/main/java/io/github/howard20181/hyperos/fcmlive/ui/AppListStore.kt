@@ -49,8 +49,8 @@ class AppListStore(context: Context, private val onIconsReady: (Map<String, Draw
          * here rather than being recomputed at each of the gesture call sites.
          *
          * [exemptNote] is the string resource explaining *why* this particular
-         * row is inert — the two cases have different reasons and a single
-         * shared sentence would be wrong for one of them.
+         * row is inert, carried on the entry rather than fixed in the row
+         * composable.
          */
         @JvmField
         var exempt: Boolean = false
@@ -111,7 +111,7 @@ class AppListStore(context: Context, private val onIconsReady: (Map<String, Draw
     /**
      * Re-decode a bitmap icon at the size the row actually paints.
      *
-     * Every loaded icon is kept on its [AppEntry] for the whole session, and a
+     * Every loaded icon is kept for the whole session, and a
      * few hundred of them at full resolution is real memory the list never
      * uses: the row is 44dp, so anything larger is stored at a size that can
      * only ever be drawn scaled down. Shrinking to the row size caps that.

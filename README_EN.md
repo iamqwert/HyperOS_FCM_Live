@@ -32,7 +32,7 @@ It does **not** keep FCM apps alive, does **not** stop the system from reclaimin
 | List filters | Show FCM-capable apps, exclude MiPush apps (on by default), show system apps |
 | Tools | Opens GMS's built-in diagnostics screen, allowlist export/import, update check |
 | Display & appearance | Language (Simplified Chinese / English), theme mode, dynamic color, palette style, color spec, hide launcher icon |
-| Experimental | Three-tier chained autostart release, weak-signal switching relief, network while frozen, GCM reconnect repair, Smart Power (OS3 only); WeChat battery optimization and sleep keep-alive live on the Settings page |
+| Experimental | Three-tier chained autostart release, weak-signal switching relief, network while frozen, Smart Power (OS3 only); WeChat battery optimization and sleep keep-alive live on the Settings page |
 | Entries | Shortcuts to Settings, Help and FCM diagnostics |
 
 > The "Help" entry opens the online guide ([HELP_EN.md](HELP_EN.md)) in a browser; there is no in-app help page.
@@ -48,7 +48,7 @@ HyperOS layers several gates on this chain; the module handles them gate by gate
 | Stage | System-side gate | What the module does |
 |---|---|---|
 | Broadcast delivery | `GreezeManagerService#isAllowBroadcast` | Allowlist-based; unselected apps fall back to the system's own decision |
-| App is "stopped" | stopped-packages flag | Re-adds `FLAG_INCLUDE_STOPPED_PACKAGES` |
+| App is "stopped" | "stopped" package filter | Re-adds `FLAG_INCLUDE_STOPPED_PACKAGES` |
 | Autostart check | `BroadcastQueueModernStubImpl#checkApplicationAutoStart` | Allowed for allowlisted apps |
 | App is frozen | `isRestrictReceiver` (greeze broadcast gate) | Let through, replaying the stock unfreeze |
 | Power-saving profile / standby | `AppStandbyController#setUidState` | Rewritten to allow |
@@ -57,7 +57,7 @@ HyperOS layers several gates on this chain; the module handles them gate by gate
 | Reconnect/heartbeat deferred | `deferBroadcastForMiui` | Only GMS reconnect-type intents are answered; nothing else is let through |
 | Force stop | `isForceStopEnable` | Applies to selected apps only |
 
-The hooked hosts: the mainline hooks live in `system` (the framework) and `com.miui.powerkeeper`; when the experimental "GCM reconnect repair" is on, hooks are also installed inside the `com.google.android.gms` process.
+The hooked hosts: the mainline hooks live in `system` (the framework) and `com.miui.powerkeeper`. The module does not inject into the `com.google.android.gms` process — the former "GCM reconnect repair" experiment was removed in 4.1.1 after GMS hot updates tightened their integrity detection.
 
 The four GMS-side protections:
 
@@ -79,7 +79,7 @@ The four GMS-side protections:
 ### Steps
 
 1. Download the APK from [Releases](https://github.com/iamqwert/HyperOS_FCM_Live/releases) and install it
-2. Enable the module in LSPosed and check its scope (the experimental "GCM reconnect repair" additionally needs Google Play services checked)
+2. Enable the module in LSPosed and check its scope
 3. Wait for the scope to hot-reload (requires an LSPosed build with API 102+); if that fails or no notification shows up, reboot manually to apply
 4. Open the module's allowlist
 

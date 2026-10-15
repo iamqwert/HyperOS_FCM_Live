@@ -226,10 +226,6 @@
     <string name="experiment_debug_log">Debug logging</string>
     <string name="experiment_debug_log_desc">Writes debug logs; turn on when troubleshooting</string>
 
-    <string name="experiment_section_gms">GMS</string>
-    <string name="experiment_gcm_reconnect">GCM reconnect repair</string>
-    <string name="experiment_gcm_reconnect_desc">Triggers a reconnect when the GMS connection has dropped and the next reconnect alarm is overdue</string>
-
     <!-- 模块状态页 -->
     <string name="status_yes">Yes</string>
     <string name="status_no">No</string>

@@ -30,7 +30,6 @@ class UpdateCheckerVersionTest {
 
     @Test
     fun missingSegmentsTreatedAsZero() {
-        // 2.3 vs 2.3.0.0 is equal
         assertEquals(0, UpdateChecker.compareVersions("2.3", "2.3.0.0"))
         assertTrue(UpdateChecker.compareVersions("2.3.1", "2.3") > 0)
     }

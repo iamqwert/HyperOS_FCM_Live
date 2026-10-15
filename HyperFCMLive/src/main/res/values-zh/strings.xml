@@ -222,10 +222,6 @@
     <string name="experiment_debug_log">显示调试日志</string>
     <string name="experiment_debug_log_desc">输出调试日志，排查问题时启用</string>
 
-    <string name="experiment_section_gms">GMS</string>
-    <string name="experiment_gcm_reconnect">GCM 重连修复</string>
-    <string name="experiment_gcm_reconnect_desc">GMS 长连接断开且下次重连闹钟已过期时，主动触发重连</string>
-
     <!-- 模块状态页 -->
     <string name="status_yes">是</string>
     <string name="status_no">否</string>

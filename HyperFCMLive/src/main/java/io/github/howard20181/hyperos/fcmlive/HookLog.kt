@@ -12,7 +12,7 @@ import io.github.libxposed.api.XposedInterface
  * verdicts, probe findings. That volume is diagnostic gold but everyday noise,
  * so the default output is now **warnings and worse only** — the module stays
  * silent as long as nothing goes wrong, and [Prefs.KEY_DEBUG_LOG] restores the
- * full stream for a troubleshooting session. The rule of Prefs.kt 73 is
+ * full stream for a troubleshooting session. The rule at the top of Prefs.kt is
  * untouched: an "applied" line still exists for every rare path; it is the
  * gate that decides whether it is *emitted*, not whether it is *written*.
  *

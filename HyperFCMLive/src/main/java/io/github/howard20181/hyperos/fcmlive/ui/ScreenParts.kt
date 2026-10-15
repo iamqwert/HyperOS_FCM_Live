@@ -75,7 +75,6 @@ import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
 import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
-import top.yukonga.miuix.kmp.basic.ListPopupColumn
 import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -84,7 +83,6 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
-import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.overlay.OverlayListPopup
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
@@ -226,8 +224,6 @@ fun GroupRowGap() {
     }
 }
 
-/** Miuix CardDefaults.CornerRadius, the group radius under the Miuix look. */
-
 /**
  * The horizontal inset of a settings page's list: 16dp under Material, where the
  * M3 guideline puts it, and 12dp under Miuix, the margin the reference apps
@@ -237,6 +233,8 @@ fun GroupRowGap() {
 fun pageHorizontalInset(): Dp {
     return if (LocalUiStyle.current == UiStyle.Miuix) 12.dp else 16.dp
 }
+
+/** Miuix CardDefaults.CornerRadius, the group radius under the Miuix look. */
 private val MIUIX_CARD_RADIUS = 16.dp
 
 /**

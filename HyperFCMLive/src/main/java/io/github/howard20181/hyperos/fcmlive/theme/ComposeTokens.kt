@@ -7,7 +7,7 @@
  *   spills outside the shape.
  * - A FAB needs an explicit FAB_CLEARANCE (88.dp) above the list; the
  *   scaffold does not reserve it.
- * - material3 is pinned to 1.5.0-alpha27, which does not accept
+ * - material3 is pinned to 1.5.0-beta01, which does not accept
  *   `menuAnchorPosition`: right-aligned dropdowns are done with
  *   `matchParentSize().wrapContentSize(BottomEnd)` instead.
  * - Icons — **BOTTOM LINE: every icon in this app is a Material Symbols
@@ -120,7 +120,7 @@
  *   both with a measured reason:
  *   - a menu entry that is the current value wears `PrimaryContainer` /
  *     `OnPrimaryContainer` (`ui/ScreenParts.kt` `MenuItemRow`), and **not** the
- *     `StandardMenuTokens.ItemSelectedContainerColor` the pinned alpha27 names.
+ *     `StandardMenuTokens.ItemSelectedContainerColor` the pinned build names.
  *     On this app's own default setting that token renders a pink plate
  *     (`#F4BFE3`, TONAL_SPOT / 2025 spec, light) beside a purple accent, and in
  *     dark mode it renders that same pale pink — the loudest thing on screen.

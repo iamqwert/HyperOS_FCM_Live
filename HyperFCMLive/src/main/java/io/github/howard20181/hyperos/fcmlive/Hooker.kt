@@ -270,17 +270,15 @@ class Hooker : XposedModule() {
 
     private fun hookPackage(packageName: String, classLoader: ClassLoader) {
         // Same reasoning as [hookSystemServer]: this is also the hot-reload entry
-        // point. Only the PowerKeeper and GMS domains install anything, so for
-        // any other package both buffers are empty and the flush is a no-op.
+        // point. Only the PowerKeeper domain installs anything, so for any other
+        // package both buffers are empty and the flush is a no-op. GMS is
+        // deliberately NOT a domain: the GMS-side hook family (GCM reconnect
+        // repair) was retired in 4.1.1 after GMS hot updates started flagging
+        // in-process instrumentation as an integrity violation.
         installBook.installPassCollecting = true
         try {
             if ("com.miui.powerkeeper" == packageName) {
                 for (group in powerKeeperGroups(packageName, classLoader)) {
-                    installBook.installGroup(group)
-                }
-            }
-            if ("com.google.android.gms" == packageName) {
-                for (group in gmsGroups(classLoader)) {
                     installBook.installGroup(group)
                 }
             }
@@ -290,14 +288,6 @@ class Hooker : XposedModule() {
             flushProbes()
         }
     }
-
-    /** The GMS install surface: reconnect repair only, auto-discovered in process. */
-    private fun gmsGroups(classLoader: ClassLoader): List<Group> =
-        listOf(
-            Group("hook", "GCM reconnect repair") {
-                GcmReconnectHooks.hookGcmReconnect(this, classLoader, ::hookE, ::logSkip)
-            },
-        )
 
     /** The PowerKeeper install surface: same shape and same rules as [systemServerGroups]. */
     private fun powerKeeperGroups(packageName: String, classLoader: ClassLoader): List<Group> =
@@ -651,12 +641,6 @@ class Hooker : XposedModule() {
 
     @Volatile
     private var restrictNetMatchLogged = false
-
-    /**
-     * P0/P1 broadcast-gate counters live with [GreezeHooks] now (they are only
-     * written by the greeze hooks); the wake-path half lives with
-     * [WakePathProbe]. This summary reads them from there.
-     */
 
     /**
      * `InternationalPolicyManager#isPushApp` — kept as is, and deliberately
