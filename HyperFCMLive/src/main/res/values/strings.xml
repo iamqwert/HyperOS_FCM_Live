@@ -96,6 +96,8 @@
     <string name="about_sub_miuix_monet">Pick colors from your wallpaper</string>
     <string name="about_sub_miuix_accent">Pick the accent color for the Monet palette</string>
     <string name="about_sub_miuix_floating_bar">Off for the docked pane, on for the floating glass capsule</string>
+    <string name="swipe_back">Swipe Back Gesture</string>
+    <string name="about_sub_swipe_back">Swipe a page to go back; the direction follows the layout</string>
     <string name="about_sub_palette_style">Choose a dynamic color style</string>
     <string name="about_sub_color_spec">Choose the Material color spec</string>
     <string name="language">Language</string>

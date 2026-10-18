@@ -57,6 +57,7 @@ object ThemePrefs {
      * removes the dead key. See [floatingBar].
      */
     private const val KEY_FLOATING_BAR = "miuix_floating_bar"
+    private const val KEY_SWIPE_BACK = "swipe_back"
     /** Retired: the material row this key outlived; see [KEY_FLOATING_BAR]. */
     private const val KEY_BAR_MATERIAL = "miuix_bar_material"
     /** Retired: the liquid refraction sub-switch, deleted with the Example alignment. */
@@ -219,6 +220,23 @@ object ThemePrefs {
     @JvmStatic
     fun setFloatingBar(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_FLOATING_BAR, enabled).apply()
+    }
+
+    /**
+     * Whether a pushed page may be popped by a swipe anywhere on it — the
+     * 横移返回手势 / "Enable Swipe Back" row the references carry. Off is what
+     * both of them ship, and it is the honest default: this is an app-level
+     * gesture working on top of the system's own, on every edge and on three-
+     * button navigation alike, so it is asked for rather than assumed. The
+     * direction it runs in is read from the layout direction at the moment of
+     * the swipe, not stored here.
+     */
+    @JvmStatic
+    fun swipeBack(context: Context): Boolean = prefs(context).getBoolean(KEY_SWIPE_BACK, false)
+
+    @JvmStatic
+    fun setSwipeBack(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SWIPE_BACK, enabled).apply()
     }
 
     /**
