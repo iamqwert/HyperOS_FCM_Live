@@ -385,10 +385,11 @@ fun MainScreen(
                 if (glass) {
                     HazeGlassBar(
                         hazeState = hazeState,
-                        scrim = MaterialTheme.colorScheme.background,
-                        // The 柔光玻璃 look's blur reads the recorded layer; the
-                        // layer is only recorded where that look is live.
-                        backdrop = if (chromeGlass) pageBackdrop else null
+                        scrim = MaterialTheme.colorScheme.background
+                        // No backdrop: the apps page's bar keeps the Gaussian
+                        // band under every look, the soft-glass one included —
+                        // the progressive recipe rides only the second-level
+                        // pages (see [PageScaffold]).
                     ) {
                         bar()
                     }
