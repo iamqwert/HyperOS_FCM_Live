@@ -540,10 +540,15 @@ private fun AboutHeroMiuix(
         )
         // "v4.1.1 (53)" — the release tag, not a sentence about versions.
         // First of the three stages to leave, through its ink like the
-        // wordmark above: no deferred layer on the node. The ink is the
-        // reference's own onSurfaceVariantSummary at every scroll position —
-        // it does not travel with the collapse — and only the alpha fades the
-        // tag out, exactly as the reference's versionCodeProgress does.
+        // wordmark above: no deferred layer on the node. Both references give
+        // the tag ONE ink for its whole life — colorScheme.onSurfaceVariantSummary,
+        // never interpolated — and let only the alpha ride the collapse; in the
+        // dark scheme that token is itself white at half alpha (0x80FFFFFF,
+        // against the wordmark's 0xE6FFFFFF), which is what makes the tag read
+        // as a soft grey rather than a second headline. Any hue travel here at
+        // all puts the full-strength page ink under the wordmark at rest and
+        // the look is gone until the tag has been scrolled down to the
+        // reference's own colour.
         val tagProgress =
             ((scrollProgressProvider() - 0.05f) / 0.15f).coerceIn(0f, 1f)
         MiuixText(
