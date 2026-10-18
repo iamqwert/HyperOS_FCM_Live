@@ -525,15 +525,26 @@ private fun AboutHeroMiuix(
         // so an in-ink fade fades the whole glass. The node is made to match
         // the glass cards' proven shape in every respect the blur can see —
         // full-width, no graphicsLayer ahead of the blur.
+        //
+        // The reference fades this stage with a layer OVER an untouched ink —
+        // color = colorScheme.onBackground, and a graphicsLayer { alpha = 1 -
+        // projectNameProgress } (plus a 5% shrink) multiplying it — so the ink
+        // keeps its own 0xE6 alpha and the glass mask is 90% at rest.
+        // This hero takes no layer, so the same product is taken in ink
+        // instead: ink.alpha * (1 - nameProgress). Copying over that alpha
+        // (alpha = 1f - progress) would paint the mask at 100% — a glass
+        // wordmark a tenth brighter than the reference's, and a plain glyph at
+        // full strength when the blur is off.
         val nameProgress =
             ((scrollProgressProvider() - 0.20f) / 0.15f).coerceIn(0f, 1f)
+        val nameInk = MiuixTheme.colorScheme.onBackground
         MiuixText(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 12.dp, bottom = 5.dp)
                 .then(nameGlass),
             text = stringResource(R.string.launcher_name),
-            color = MiuixTheme.colorScheme.onBackground.copy(alpha = 1f - nameProgress),
+            color = nameInk.copy(alpha = nameInk.alpha * (1f - nameProgress)),
             fontWeight = FontWeight.Bold,
             fontSize = 35.sp,
             textAlign = TextAlign.Center
