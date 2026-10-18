@@ -95,13 +95,17 @@ import io.github.howard20181.hyperos.fcmlive.ui.softglass.LocalSoftGlassBackdrop
 import io.github.howard20181.hyperos.fcmlive.ui.softglass.LocalSoftGlassSpec
 import io.github.howard20181.hyperos.fcmlive.ui.softglass.SoftGlassIconButton
 import io.github.howard20181.hyperos.fcmlive.ui.softglass.SoftGlassRecipes
+import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.BackdropEffectScope
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurBlendMode
 import top.yukonga.miuix.kmp.blur.BlurColors
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import top.yukonga.miuix.kmp.blur.ProgressiveBlur
 import top.yukonga.miuix.kmp.blur.colorControls
+import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.basic.BasicComponent
@@ -917,20 +921,42 @@ private const val MIN_ICON_CONTRAST = 3.0f
  */
 private const val BAR_GLASS_SCRIM_GAUSSIAN = 0.8f
 
-/**
- * The blurred title-bar glass runs on Haze (dev.chrisbanes.haze), not miuix's
- * own blur — the "why" lives with the dependency in build.gradle. One uniform
- * pass: [GLASS_BLUR_GAUSSIAN] blur with a page-tone tint at
- * [BAR_GLASS_SCRIM_GAUSSIAN], a band with a hard bottom edge — no spatial fade.
- *
- * The glass breathes with the page: [progress] — the caller's bar-collapse
- * fraction — scales the radius and the tint together, so a page at its top
- * reads as plain background paint and the depth builds as rows travel under
- * the bar.
- */
-
-/** The blur strength of the title-bar glass, in dp — the example's own. */
+/** The blur strength of the plain-Miuix title-bar glass, in dp — the example's own. */
 private val GLASS_BLUR_GAUSSIAN = 25.dp
+
+/**
+ * The 柔光玻璃 look's title-bar blur, verbatim from the example's progressive
+ * recipe (`PageUtils.BlurredBar`): a 10dp blur that is strongest at the bar's
+ * top edge and fades to clear pixels at its foot, the falloff reshaped by the
+ * example's 2.2 power curve, with the page tone blended at 0.3. Drawn by
+ * miuix's own [progressiveTextureBlur] — the RuntimeShader path Haze has no
+ * counterpart for — so this style only engages where a RuntimeShader exists;
+ * anything older falls back to the Gaussian band.
+ */
+private val GLASS_BLUR_PROGRESSIVE = 10f
+
+/** The page-tone blend under the progressive blur — the example's own. */
+private const val BAR_GLASS_SCRIM_PROGRESSIVE = 0.3f
+
+/** The falloff curve of the progressive blur — the example's own. */
+private const val GLASS_BLUR_CURVE = 2.2f
+
+/**
+ * The blurred title-bar glass, one recipe per look. The plain Miuix look runs
+ * on Haze (dev.chrisbanes.haze), not miuix's own blur — the "why" lives with
+ * the dependency in build.gradle — as one uniform pass: [GLASS_BLUR_GAUSSIAN]
+ * blur with a page-tone tint at [BAR_GLASS_SCRIM_GAUSSIAN], a band with a hard
+ * bottom edge and no spatial fade. The 柔光玻璃 look instead draws the
+ * example's progressive blur through miuix's [progressiveTextureBlur] (see
+ * [GLASS_BLUR_PROGRESSIVE]), which needs the page's recorded [Backdrop] — the
+ * caller hands it in only where the style has recorded one, and a missing
+ * shader engine falls back to the Haze band.
+ *
+ * Either way the glass breathes with the page: [progress] — the caller's
+ * bar-collapse fraction — scales the radius and the tint together, so a page
+ * at its top reads as plain background paint and the depth builds as rows
+ * travel under the bar.
+ */
 
 /**
  * A switch row — icon, title, optional state line, description and the switch
@@ -1415,6 +1441,10 @@ internal fun MiuixSwitchSlice(
  *   scenery behind it reads sharp and no tint is laid over it. That is what a
  *   page carrying scenery of its own wears while the glass is switched off: it
  *   still needs the pane, because an opaque bar would guillotine its scenery.
+ * @param backdrop the page's recorded layer, handed in only by the 柔光玻璃
+ *   look — its blur runs on miuix's progressive shader, which reads the layer
+ *   instead of Haze's sources (see [GLASS_BLUR_PROGRESSIVE]). `null` — every
+ *   other look, or a device without a shader engine — keeps the Haze band.
  */
 @Composable
 fun HazeGlassBar(
@@ -1423,6 +1453,7 @@ fun HazeGlassBar(
     modifier: Modifier = Modifier,
     progress: Float = 1f,
     frost: Float = 1f,
+    backdrop: Backdrop? = null,
     content: @Composable () -> Unit
 ) {
     // The collapse fraction reads as NaN before the bar's scroll range has
@@ -1436,39 +1467,64 @@ fun HazeGlassBar(
     // Frost rides the same ramp the progress does: one strength drives both, so
     // the switch can only ever scale the glass down to plain paper thin air.
     val strength = safeProgress * frost.coerceIn(0f, 1f)
-    // One recipe, the Example's Gaussian: a uniform frosted band, a 25dp blur
-    // with the page tone at 0.8, the hard bottom edge a classic frosted bar
-    // has. The progressive variant (10dp, tone 0.3, fading to sharp pixels
-    // past the foot) was removed — its fade dissolved the glass right where
-    // the apps page's search capsule hangs, the one pairing that tested worse
-    // than either style alone, so the pick itself went and the band is all
-    // that is left.
+    // One recipe per look. The plain Miuix look runs the Example's Gaussian on
+    // Haze: a uniform frosted band, a 25dp blur with the page tone at 0.8, the
+    // hard bottom edge a classic frosted bar has. The 柔光玻璃 look runs the
+    // Example's progressive blur on miuix's own shader instead — 10dp strongest
+    // at the top edge, fading to clear at the foot on the 2.2 curve, page tone
+    // at 0.3 — which is exactly the pairing the reference draws; it needs the
+    // page's recorded layer and a working RuntimeShader, so anything without
+    // either lands back on the Gaussian band. (An earlier take removed the
+    // progressive style outright because its fade washed out the apps page's
+    // search capsule; the capsule has since gone plain, which was the whole
+    // conflict, and the style is back — scoped to this look, no switch.)
     val blurRadius = (GLASS_BLUR_GAUSSIAN * strength).coerceAtLeast(1.dp)
     val scrimAlpha = BAR_GLASS_SCRIM_GAUSSIAN * strength
+    val progressive = backdrop != null && isRuntimeShaderSupported()
     Box(modifier = modifier.fillMaxWidth()) {
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .hazeBlur(
-                    input = HazeInput.Sources(hazeState),
-                    style = HazeBlurStyle {
-                        blurRadius(blurRadius)
-                        // Page tone: the resting glass reads as the bar's paint,
-                        // not as a grey film over it. The tint rides the same
-                        // ramp as the blur, so the two never fall out of step.
-                        backgroundColor(scrim)
-                        colorEffects(
-                            listOf(
-                                HazeColorEffect.tint(
-                                    scrim.copy(alpha = scrimAlpha)
+        if (progressive) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .progressiveTextureBlur(
+                        backdrop = backdrop!!,
+                        shape = RectangleShape,
+                        blurRadius = (GLASS_BLUR_PROGRESSIVE * strength).coerceAtLeast(1f),
+                        gradient = ProgressiveBlur.Top.copy(curve = GLASS_BLUR_CURVE),
+                        colors = BlurColors(
+                            blendColors = listOf(
+                                BlendColorEntry(
+                                    color = scrim.copy(alpha = BAR_GLASS_SCRIM_PROGRESSIVE * strength)
                                 )
                             )
                         )
-                        // Scroll-invariant: [progress] moves strength, never
-                        // the mask shape.
-                    }
-                )
-        )
+                    )
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .hazeBlur(
+                        input = HazeInput.Sources(hazeState),
+                        style = HazeBlurStyle {
+                            blurRadius(blurRadius)
+                            // Page tone: the resting glass reads as the bar's paint,
+                            // not as a grey film over it. The tint rides the same
+                            // ramp as the blur, so the two never fall out of step.
+                            backgroundColor(scrim)
+                            colorEffects(
+                                listOf(
+                                    HazeColorEffect.tint(
+                                        scrim.copy(alpha = scrimAlpha)
+                                    )
+                                )
+                            )
+                            // Scroll-invariant: [progress] moves strength, never
+                            // the mask shape.
+                        }
+                    )
+            )
+        }
         content()
     }
 }
@@ -1690,7 +1746,10 @@ fun PageScaffold(
                         progress = barScrollProgress ?: scrollBehavior.state.collapsedFraction,
                         // The pane never goes away in this look; the glass is
                         // always full.
-                        frost = 1f
+                        frost = 1f,
+                        // The 柔光玻璃 look's blur reads the recorded layer; the
+                        // layer is only recorded where that look is live.
+                        backdrop = if (chromeGlass) pageBackdrop else null
                     ) {
                         bar()
                     }

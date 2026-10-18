@@ -385,7 +385,10 @@ fun MainScreen(
                 if (glass) {
                     HazeGlassBar(
                         hazeState = hazeState,
-                        scrim = MaterialTheme.colorScheme.background
+                        scrim = MaterialTheme.colorScheme.background,
+                        // The 柔光玻璃 look's blur reads the recorded layer; the
+                        // layer is only recorded where that look is live.
+                        backdrop = if (chromeGlass) pageBackdrop else null
                     ) {
                         bar()
                     }
