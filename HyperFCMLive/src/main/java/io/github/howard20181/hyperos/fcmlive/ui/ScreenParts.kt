@@ -1633,7 +1633,10 @@ private fun MiuixBackControl(
             targetValue = if (LocalSoftGlassBarReveal.current) 1f else 0f,
             animationSpec = SOFT_GLASS_REVEAL_FADE
         )
-        Box {
+        // Centre the stack: the bare button and the plate differ in size, and
+        // Box's default top-start alignment would slide the glyph as the
+        // plate fades over it.
+        Box(contentAlignment = Alignment.Center) {
             IconButton(onClick = onClick, content = glyph)
             if (reveal > 0f) {
                 SoftGlassIconButton(

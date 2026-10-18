@@ -1075,7 +1075,10 @@ private fun BarIconButton(
             targetValue = if (LocalSoftGlassBarReveal.current) 1f else 0f,
             animationSpec = SOFT_GLASS_REVEAL_FADE
         )
-        Box(modifier = modifier) {
+        // Centre the stack: the bare button (48dp) and the plate (44dp)
+        // differ in size, and Box's default top-start alignment would slide
+        // the glyph a couple of pixels as the plate fades over it.
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
             MiuixIconButton(onClick = onClick, content = content)
             if (reveal > 0f) {
                 SoftGlassIconButton(
