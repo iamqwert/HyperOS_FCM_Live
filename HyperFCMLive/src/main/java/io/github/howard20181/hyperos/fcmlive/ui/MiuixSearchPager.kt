@@ -307,58 +307,80 @@ fun SearchBar(
         { onSearchStatusChangeUpdated.value(searchStatusUpdated.value.copy(searchText = "")) }
     }
 
-    InputField(
-        query = searchStatus.searchText,
-        onQueryChange = { onSearchStatusChange(searchStatus.copy(searchText = it)) },
-        label = searchStatus.label,
-        leadingIcon = {
-            Icon(
-                imageVector = MiuixIcons.Basic.Search,
-                contentDescription = "back",
-                modifier = Modifier
-                    .size(44.dp)
-                    .padding(start = 16.dp, end = 8.dp),
-                tint = MiuixTheme.colorScheme.onSurfaceContainerHigh,
-            )
-        },
-        trailingIcon = {
-            AnimatedVisibility(
-                searchStatus.searchText.isNotEmpty(),
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut(),
-            ) {
+    // 柔光玻璃 dresses the expanding bar exactly as it dresses the resting
+    // capsule it replaces (see [SearchBarFake]): the field's own container is
+    // cleared and the material carries the plate, sampling the page's recorded
+    // layer the caller provides. The two bars therefore read as ONE bar in two
+    // positions — the capsule fades out under a bar that looks just like it,
+    // and the collapsing bar hands back to a capsule that looks just like it,
+    // so the ride never pops from a plain bar to a glass one.
+    val glass = softGlassChrome()
+    val field: @Composable (Modifier) -> Unit = { fieldModifier ->
+        InputField(
+            query = searchStatus.searchText,
+            onQueryChange = { onSearchStatusChange(searchStatus.copy(searchText = it)) },
+            label = searchStatus.label,
+            leadingIcon = {
                 Icon(
-                    imageVector = MiuixIcons.Basic.SearchCleanup,
-                    tint = MiuixTheme.colorScheme.onSurface,
-                    contentDescription = "Clean",
+                    imageVector = MiuixIcons.Basic.Search,
+                    contentDescription = "back",
                     modifier = Modifier
                         .size(44.dp)
-                        .padding(start = 8.dp, end = 16.dp)
-                        .clickable(
-                            interactionSource = null,
-                            indication = null,
-                            onClick = onClearSearch,
-                        ),
+                        .padding(start = 16.dp, end = 8.dp),
+                    tint = MiuixTheme.colorScheme.onSurfaceContainerHigh,
                 )
-            }
-        },
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .padding(bottom = 6.dp)
-            .topInset(searchBarTopPadding)
-            .focusRequester(focusRequester),
-        color = color,
-        onSearch = {},
-        expanded = searchStatus.shouldExpand(),
-        onExpandedChange = {
-            onSearchStatusChange(
-                searchStatus.copy(
-                    current = if (it) SearchStatus.Status.EXPANDED else SearchStatus.Status.COLLAPSED,
-                ),
-            )
-        },
-    )
+            },
+            trailingIcon = {
+                AnimatedVisibility(
+                    searchStatus.searchText.isNotEmpty(),
+                    enter = fadeIn() + scaleIn(),
+                    exit = fadeOut() + scaleOut(),
+                ) {
+                    Icon(
+                        imageVector = MiuixIcons.Basic.SearchCleanup,
+                        tint = MiuixTheme.colorScheme.onSurface,
+                        contentDescription = "Clean",
+                        modifier = Modifier
+                            .size(44.dp)
+                            .padding(start = 8.dp, end = 16.dp)
+                            .clickable(
+                                interactionSource = null,
+                                indication = null,
+                                onClick = onClearSearch,
+                            ),
+                    )
+                }
+            },
+            modifier = fieldModifier.focusRequester(focusRequester),
+            color = if (glass) Color.Transparent else color,
+            onSearch = {},
+            expanded = searchStatus.shouldExpand(),
+            onExpandedChange = {
+                onSearchStatusChange(
+                    searchStatus.copy(
+                        current = if (it) SearchStatus.Status.EXPANDED else SearchStatus.Status.COLLAPSED,
+                    ),
+                )
+            },
+        )
+    }
+    val placement = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 12.dp)
+        .padding(bottom = 6.dp)
+        .topInset(searchBarTopPadding)
+    if (glass) {
+        SoftGlassSurface(
+            modifier = placement,
+            tint = LocalSoftGlassSpec.current.fineTuning
+                .softGlassTintColor(MiuixTheme.colorScheme.onSurface.luminance() > 0.5f)
+                .copy(alpha = LocalSoftGlassSpec.current.topBarTintAlpha),
+        ) {
+            field(Modifier.fillMaxWidth())
+        }
+    } else {
+        field(placement)
+    }
     LaunchedEffect(Unit) {
         if (!expanded && searchStatus.shouldExpand()) {
             focusRequester.requestFocus()

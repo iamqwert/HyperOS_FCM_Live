@@ -460,7 +460,16 @@ fun MainScreen(
         // empty, fully transparent, non-intercepting layer; expanded it
         // carries the results, the same rows the page's list shows, one card
         // to a row with the reference's own 12/6 spacing.
-        searchStatus.SearchPager(
+        //
+        // The provider hands the pager's expanding bar the page's recorded
+        // layer — the same one the resting capsule reads — so the real bar
+        // wears the 柔光玻璃 material exactly as the capsule it replaces does:
+        // glass over the live list, and no material pop at either end of the
+        // ride (the capsule fades out under a bar that looks just like it,
+        // and the collapsing bar hands back to a capsule that looks just
+        // like it).
+        CompositionLocalProvider(LocalSoftGlassBackdrop provides pageBackdrop) {
+            searchStatus.SearchPager(
                 onSearchStatusChange = updateSearchStatus,
                 offsetY = searchOffsetY,
                 defaultResult = {},
@@ -484,6 +493,7 @@ fun MainScreen(
                     )
                 }
             }
+        }
         }
         return
     }
