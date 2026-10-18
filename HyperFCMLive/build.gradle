@@ -156,13 +156,15 @@ dependencies {
     // — verified on device, and verified against 1.13.0's own sources, where
     // ComponentActivity.onCreate does window.decorView.setViewTree...(this).
     implementation 'androidx.activity:activity:1.13.0'
-    // BackHandler for ui/SwipeBack.kt. Same version line as `activity` above:
-    // the Compose integration and the core artifact are versioned together, and
-    // declaring the pair keeps Dependabot moving them as one.
+    // Compose entry points for the Activities (setContent). Same version line as
+    // `activity` above: the Compose integration and the core artifact are
+    // versioned together, and declaring the pair keeps Dependabot moving them as
+    // one.
     implementation 'androidx.activity:activity-compose:1.13.0'
-    // What Miuix's popups register their back handlers through. Comes in at 1.1.1
-    // with miuix 0.9.1; declared so Dependabot sees it, pinned to what miuix asks
-    // for rather than the 1.1.2 KernelSU uses with its newer miuix.
+    // What Miuix's popups register their back handlers through, and the stream
+    // ui/PredictiveBack.kt consumes. Declared so Dependabot sees it: miuix 0.9.4
+    // — the version this module and KernelSU's manager both run — asks for the
+    // 1.1.x line, resolved here at 1.2.0.
     implementation 'androidx.navigationevent:navigationevent-compose:1.2.0'
     // Lifecycle: the only direct consumer is ui/WindowSnapshot.kt
     // (LifecycleOwner.lifecycle.currentState, to tell whether a host window is
