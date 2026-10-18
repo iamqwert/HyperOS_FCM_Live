@@ -107,13 +107,22 @@ fun ModuleStatusScreen(
             )
         ) {
             item {
-                StatusHero(
-                    active = active,
-                    apiVersion = apiVersion,
-                    versionName = versionName,
-                    versionCode = versionCode,
-                    onRecheck = onRecheck
-                )
+                // The reference home breathes a 12dp gap between the bar and
+                // the first card (its list's first item pads top 12dp) — the
+                // Miuix look rides that air; the M3 cut keeps its own rhythm.
+                Column(
+                    modifier = Modifier.padding(
+                        top = if (LocalUiStyle.current.isMiuixBased) 12.dp else 0.dp
+                    )
+                ) {
+                    StatusHero(
+                        active = active,
+                        apiVersion = apiVersion,
+                        versionName = versionName,
+                        versionCode = versionCode,
+                        onRecheck = onRecheck
+                    )
+                }
             }
             item {
                 // No section title here — the home reads as one page, not a
@@ -384,41 +393,51 @@ private fun MiuixStatusHero(
                         )
                     }
                 }
-                Column(
+                // The text block, the reference's own split: verdict and
+                // version anchored to the card's top-start inside one
+                // padding(16, 14) layer, the API level dropped to a layer of
+                // its own pinned bottom-start with padding(16, 10) — that is
+                // how the reference seats its working-mode line, low in the
+                // card at its own size, not stacked on the version's elbow.
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp, 14.dp)
+                        .fillMaxSize()
+                        .padding(16.dp, 14.dp),
+                    contentAlignment = Alignment.TopStart
                 ) {
-                    MiuixText(
-                        text = stringResource(
-                            if (active) R.string.status_activated else R.string.status_not_activated
-                        ),
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(1.dp))
-                    // Version and API ride as their own plain lines, the way
-                    // the reference prints them — no badge, no prefix. The API
-                    // line sits LOW in the card, not on the version's elbow:
-                    // stacked tight it crowded the card's top edge while the
-                    // foot went empty, so the pair splits — version under the
-                    // status word, API dropped to the card's lower half.
-                    MiuixText(
-                        text = "$versionName ($versionCode)",
-                        fontSize = 15.sp,
-                        // One step up from the plain default: the version is a
-                        // fact of this card, not a caption under the verdict.
-                        fontWeight = FontWeight.Medium
-                    )
-                    if (apiVersion > 0) {
-                        Spacer(modifier = Modifier.height(16.dp))
+                    Column {
+                        MiuixText(
+                            text = stringResource(
+                                if (active) R.string.status_activated else R.string.status_not_activated
+                            ),
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(1.dp))
+                        // The reference's version line: plain 15sp, no weight
+                        // of its own — a fact under the verdict, not a second
+                        // headline. The prefixed form comes from the string.
+                        MiuixText(
+                            text = stringResource(
+                                R.string.status_card_version, versionName, versionCode
+                            ),
+                            fontSize = 15.sp
+                        )
+                    }
+                }
+                if (apiVersion > 0) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp, 10.dp),
+                        contentAlignment = Alignment.BottomStart
+                    ) {
+                        // The reference's working-mode recipe verbatim: 16sp
+                        // Medium, riding the card's lower-left corner.
                         MiuixText(
                             text = "API $apiVersion",
-                            fontSize = 15.sp,
-                            // Half a step up again from the version line: the
-                            // API level is the fact people come to this card
-                            // for. SemiBold, a step under the status word.
-                            fontWeight = FontWeight.SemiBold
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }

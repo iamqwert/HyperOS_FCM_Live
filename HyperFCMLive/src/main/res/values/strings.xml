@@ -181,6 +181,9 @@
     <string name="status_activated">Active</string>
     <string name="status_not_activated">Not active</string>
     <string name="status_version_line">Version %1$s (%2$d)</string>
+    <!-- The status card's version line under the Miuix look — the prefixed
+         form the reference status card prints. Half-width colon in English. -->
+    <string name="status_card_version">Version: %1$s (%2$d)</string>
     <string name="status_device_name">Device Model</string>
     <string name="status_os_version">System Version</string>
     <string name="status_android_version">Android Version</string>
