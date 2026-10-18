@@ -540,21 +540,30 @@ private fun AboutHeroMiuix(
         )
         // "v4.1.1 (53)" — the release tag, not a sentence about versions.
         // First of the three stages to leave, through its ink like the
-        // wordmark above: no deferred layer on the node. Both references give
-        // the tag ONE ink for its whole life — colorScheme.onSurfaceVariantSummary,
-        // never interpolated — and let only the alpha ride the collapse; in the
-        // dark scheme that token is itself white at half alpha (0x80FFFFFF,
-        // against the wordmark's 0xE6FFFFFF), which is what makes the tag read
-        // as a soft grey rather than a second headline. Any hue travel here at
-        // all puts the full-strength page ink under the wordmark at rest and
-        // the look is gone until the tag has been scrolled down to the
-        // reference's own colour.
+        // wordmark above: no deferred layer on the node.
+        //
+        // The ink is the reference's own — colorScheme.onSurfaceVariantSummary,
+        // never interpolated — and the reference never rewrites its alpha:
+        // that token is 0x80FFFFFF, a colour that CARRIES its half alpha, so
+        // the tag is the soft grey beside the wordmark the moment it is
+        // painted. KernelSU fades it with a LAYER over that ink
+        // (graphicsLayer { alpha = 1 - versionCodeProgress }, plus a 5%
+        // shrink), which multiplies layer × ink and leaves the 50% intact at
+        // rest.
+        //
+        // This hero wears no layers (see the note above the wordmark), so the
+        // fade multiplies the token's own alpha in ink instead —
+        // tagInk.alpha * (1 - tagProgress) — the same product the reference's
+        // layer produces. What it must never do is REPLACE that alpha:
+        // copy(alpha = 1f - progress) paints the tag 0xFFFFFFFF at rest, a
+        // second headline under the wordmark instead of the reference's grey.
         val tagProgress =
             ((scrollProgressProvider() - 0.05f) / 0.15f).coerceIn(0f, 1f)
+        val tagInk = MiuixTheme.colorScheme.onSurfaceVariantSummary
         MiuixText(
             modifier = Modifier.fillMaxWidth(),
             text = versionTag,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 1f - tagProgress),
+            color = tagInk.copy(alpha = tagInk.alpha * (1f - tagProgress)),
             fontSize = 14.sp,
             textAlign = TextAlign.Center
         )
