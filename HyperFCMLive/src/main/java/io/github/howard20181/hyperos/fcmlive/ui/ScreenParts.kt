@@ -68,6 +68,7 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -136,6 +137,8 @@ import dev.chrisbanes.haze.rememberHazeState
 import dev.chrisbanes.haze.blur.HazeBlurStyle
 import dev.chrisbanes.haze.blur.hazeBlur
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.asPaddingValues
@@ -379,9 +382,18 @@ val LocalSoftGlassBarReveal = compositionLocalOf { true }
 /**
  * The reveal read for the fraction a Miuix scroll state reports: top of the
  * page — including the pre-measure NaN the fraction holds before the scroll
- * range exists (see [HazeGlassBar]) — reads as bare, anything past it as glass.
+ * range exists (see [HazeGlassBar]) — reads as bare. The plate waits until the
+ * card group has ridden most of the large title's collapse travel — the
+ * system-settings reference reveals its bar chrome about when the large title
+ * has all but folded away — then fades in across the bare glyph, finishing
+ * the dissolve right as the bar reaches its small form.
  */
-internal fun softGlassReveal(fraction: Float): Boolean = !fraction.isNaN() && fraction > 0f
+private const val SOFT_GLASS_REVEAL_FRACTION = 0.7f
+internal fun softGlassReveal(fraction: Float): Boolean =
+    !fraction.isNaN() && fraction > SOFT_GLASS_REVEAL_FRACTION
+
+/** The fade the plate runs across the bare glyph on reveal and dismissal. */
+internal val SOFT_GLASS_REVEAL_FADE = tween<Float>(durationMillis = 220)
 
 /**
  * The glass tints' dark read. The app's own palette owns darkness — it can force
@@ -1613,12 +1625,25 @@ private fun MiuixBackControl(
             modifier = Modifier.size(24.dp)
         )
     }
-    if (glass && LocalSoftGlassBarReveal.current) {
-        SoftGlassIconButton(
-            onClick = onClick,
-            recipe = SoftGlassRecipes.floatingNavigation(LocalSoftGlassSpec.current.fineTuning),
-            content = glyph
+    if (glass) {
+        // The bare button stays mounted underneath; the plate fades across it
+        // once the page has scrolled a slice past its top, so the reveal is a
+        // material dissolve rather than a control swap.
+        val reveal by animateFloatAsState(
+            targetValue = if (LocalSoftGlassBarReveal.current) 1f else 0f,
+            animationSpec = SOFT_GLASS_REVEAL_FADE
         )
+        Box {
+            IconButton(onClick = onClick, content = glyph)
+            if (reveal > 0f) {
+                SoftGlassIconButton(
+                    onClick = onClick,
+                    recipe = SoftGlassRecipes.floatingNavigation(LocalSoftGlassSpec.current.fineTuning),
+                    modifier = Modifier.graphicsLayer(alpha = reveal),
+                    content = glyph
+                )
+            }
+        }
     } else {
         IconButton(onClick = onClick, content = glyph)
     }

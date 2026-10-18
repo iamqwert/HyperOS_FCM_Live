@@ -83,6 +83,8 @@ import dev.chrisbanes.haze.rememberHazeState
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -1065,8 +1067,24 @@ private fun BarIconButton(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    if (softGlassChrome() && LocalSoftGlassBarReveal.current) {
-        SoftGlassIconButton(onClick = onClick, modifier = modifier, content = content)
+    if (softGlassChrome()) {
+        // Same dissolve as the back disc: the bare button stays mounted and
+        // the plate fades across it once the page has scrolled a slice past
+        // its top, instead of the controls swapping outright.
+        val reveal by animateFloatAsState(
+            targetValue = if (LocalSoftGlassBarReveal.current) 1f else 0f,
+            animationSpec = SOFT_GLASS_REVEAL_FADE
+        )
+        Box(modifier = modifier) {
+            MiuixIconButton(onClick = onClick, content = content)
+            if (reveal > 0f) {
+                SoftGlassIconButton(
+                    onClick = onClick,
+                    modifier = Modifier.graphicsLayer(alpha = reveal),
+                    content = content
+                )
+            }
+        }
     } else {
         MiuixIconButton(onClick = onClick, modifier = modifier, content = content)
     }
