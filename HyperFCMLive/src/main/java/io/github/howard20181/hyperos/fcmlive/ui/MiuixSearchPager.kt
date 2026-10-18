@@ -46,10 +46,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.luminance
-import io.github.howard20181.hyperos.fcmlive.ui.softglass.LocalSoftGlassSpec
-import io.github.howard20181.hyperos.fcmlive.ui.softglass.SoftGlassSurface
-import io.github.howard20181.hyperos.fcmlive.ui.softglass.softGlassTintColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
@@ -378,17 +374,15 @@ fun SearchBarFake(
     searchBarTopPadding: () -> Dp = { 12.dp },
     capsuleColor: Color? = null,
 ) {
-    // The capsule's own plate, over the bar's frost. It is the look that decides,
-    // and only the look: the caller's [capsuleColor] is the fill that stands in
-    // for the material under a frosted bar (the reference's High at 80%), so it
-    // is exactly what the material replaces when it is drawn — and the plate now
-    // samples the same list the bar's frost does, so the two agree.
+    // The capsule is plain in every look, the soft-glass one included — the
+    // style's glass is the bar's frost and the floating chrome, and the search
+    // field is not chrome. Under the frosted bar the caller supplies the
+    // reference's own blurred-bar variant (the High fill at 80%) as
+    // [capsuleColor], which is exactly what the reference draws for a capsule
+    // sitting on its frosted bar; elsewhere the field's own High answers.
     //
     // The field itself is untouched: same [InputField], same icon, same padding,
-    // same geometry — its own opaque container colour is simply cleared so the
-    // material shows instead of a second surface, exactly as the home foot's pill
-    // keeps the library's capsule and takes the glass as paint.
-    val glass = softGlassChrome()
+    // same geometry.
     val field: @Composable (Modifier) -> Unit = { fieldModifier ->
         InputField(
             query = "",
@@ -405,32 +399,20 @@ fun SearchBarFake(
                 )
             },
             modifier = fieldModifier,
-            color = if (glass) Color.Transparent else {
-                capsuleColor ?: MiuixTheme.colorScheme.surfaceContainerHigh
-            },
+            color = capsuleColor ?: MiuixTheme.colorScheme.surfaceContainerHigh,
             onSearch = { },
             enabled = false,
             expanded = false,
             onExpandedChange = { },
         )
     }
-    val placement = Modifier
-        .fillMaxWidth()
-        .padding(horizontal = 12.dp)
-        .padding(bottom = 6.dp)
-        .topInset(searchBarTopPadding)
-    if (glass) {
-        SoftGlassSurface(
-            modifier = placement,
-            tint = LocalSoftGlassSpec.current.fineTuning
-                .softGlassTintColor(MiuixTheme.colorScheme.onSurface.luminance() > 0.5f)
-                .copy(alpha = LocalSoftGlassSpec.current.topBarTintAlpha),
-        ) {
-            field(Modifier.fillMaxWidth())
-        }
-    } else {
-        field(placement)
-    }
+    field(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .padding(bottom = 6.dp)
+            .topInset(searchBarTopPadding)
+    )
 }
 
 /** Reserves [inset] above the content, read during layout so a changing value never recomposes the caller. */
