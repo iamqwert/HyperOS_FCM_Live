@@ -84,7 +84,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -362,7 +361,7 @@ fun MainScreen(
                     // appear once the list has scrolled under the bar.
                     CompositionLocalProvider(
                         LocalSoftGlassBackdrop provides pageBackdrop,
-                        LocalSoftGlassBarReveal provides softGlassReveal(
+                        LocalSoftGlassBarReveal provides softGlassBarMaterialProgress(
                             scrollBehavior.state.collapsedFraction
                         )
                     ) {
@@ -1052,9 +1051,10 @@ fun TopBarIconButton(
  * from: the library's bare button on both plain looks, the 柔光玻璃 plate under
  * [UiStyle.SoftGlass] — the same material, sizes, glyph ink and press language
  * everywhere else in that look, so a bar cannot end up half dressed. The plate
- * is chrome for a bar with content under it, so it appears only once the page
- * has moved off its top ([LocalSoftGlassBarReveal]); at rest the button stays
- * bare like its peers.
+ * is chrome for a bar with content under it, so its material fades with the
+ * page's collapse ([LocalSoftGlassBarReveal]) — the reference's own
+ * construction, one control whose glass plate breathes over a glyph that never
+ * changes identity, not two controls cross-fading.
  *
  * The plates sample the PAGE's own layer, carried here by [MainScreen] and
  * [PageScaffold] (see [rememberPageLayerBackdrop]) rather than read off the
@@ -1068,26 +1068,19 @@ private fun BarIconButton(
     content: @Composable () -> Unit
 ) {
     if (softGlassChrome()) {
-        // Same dissolve as the back disc: the bare button stays mounted and
-        // the plate fades across it once the page has scrolled a slice past
-        // its top, instead of the controls swapping outright.
+        // One control, the reference way: the plate's material alpha rides the
+        // collapse progress, so at the page's top this reads as a bare glyph —
+        // same button, same spot, the glass simply not there yet.
         val reveal by animateFloatAsState(
-            targetValue = if (LocalSoftGlassBarReveal.current) 1f else 0f,
+            targetValue = LocalSoftGlassBarReveal.current,
             animationSpec = SOFT_GLASS_REVEAL_FADE
         )
-        // Centre the stack: the bare button (48dp) and the plate (44dp)
-        // differ in size, and Box's default top-start alignment would slide
-        // the glyph a couple of pixels as the plate fades over it.
-        Box(modifier = modifier, contentAlignment = Alignment.Center) {
-            MiuixIconButton(onClick = onClick, content = content)
-            if (reveal > 0f) {
-                SoftGlassIconButton(
-                    onClick = onClick,
-                    modifier = Modifier.graphicsLayer(alpha = reveal),
-                    content = content
-                )
-            }
-        }
+        SoftGlassIconButton(
+            onClick = onClick,
+            modifier = modifier,
+            materialAlpha = reveal,
+            content = content
+        )
     } else {
         MiuixIconButton(onClick = onClick, modifier = modifier, content = content)
     }

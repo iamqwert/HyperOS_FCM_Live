@@ -68,7 +68,6 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -136,6 +135,7 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import dev.chrisbanes.haze.blur.HazeBlurStyle
 import dev.chrisbanes.haze.blur.hazeBlur
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -377,23 +377,32 @@ val LocalFloatingBarClearance = compositionLocalOf { 0.dp }
  * bar-collapse fraction here; the default keeps today's always-glass behaviour
  * for any control composed outside a scaffold's bar.
  */
-val LocalSoftGlassBarReveal = compositionLocalOf { true }
+val LocalSoftGlassBarReveal = compositionLocalOf { 1f }
 
 /**
- * The reveal read for the fraction a Miuix scroll state reports: top of the
+ * The material progress the plates read for the fraction a Miuix scroll state
+ * reports — the reference implementation's own curve (F1Info/Deadliner's
+ * `resolveTopBarButtonMaterialProgress`), verbatim: the plate holds off for the
+ * first sliver of the collapse travel, then rides a smoothstep across a short
+ * window so the material is fully in by a fifth of the way down. Top of the
  * page — including the pre-measure NaN the fraction holds before the scroll
- * range exists (see [HazeGlassBar]) — reads as bare. The plate waits until the
- * card group has ridden most of the large title's collapse travel — the
- * system-settings reference reveals its bar chrome about when the large title
- * has all but folded away — then fades in across the bare glyph, finishing
- * the dissolve right as the bar reaches its small form.
+ * range exists (see [HazeGlassBar]) — reads as fully bare.
  */
-private const val SOFT_GLASS_REVEAL_FRACTION = 0.7f
-internal fun softGlassReveal(fraction: Float): Boolean =
-    !fraction.isNaN() && fraction > SOFT_GLASS_REVEAL_FRACTION
+private const val SOFT_GLASS_REVEAL_START = 0.015f
+private const val SOFT_GLASS_REVEAL_RANGE = 0.18f
 
-/** The fade the plate runs across the bare glyph on reveal and dismissal. */
-internal val SOFT_GLASS_REVEAL_FADE = tween<Float>(durationMillis = 220)
+internal fun softGlassBarMaterialProgress(fraction: Float): Float {
+    if (fraction.isNaN()) return 0f
+    val normalized = (
+        (fraction.coerceIn(0f, 1f) - SOFT_GLASS_REVEAL_START) /
+            SOFT_GLASS_REVEAL_RANGE
+    )
+        .coerceIn(0f, 1f)
+    return normalized * normalized * (3f - 2f * normalized)
+}
+
+/** The settle the plate's material progress animates along, as the reference runs it. */
+internal val SOFT_GLASS_REVEAL_FADE = tween<Float>(durationMillis = 280, easing = FastOutSlowInEasing)
 
 /**
  * The glass tints' dark read. The app's own palette owns darkness — it can force
@@ -1605,8 +1614,10 @@ internal fun rememberPageLayerBackdrop(): LayerBackdrop {
  * wears ([SoftGlassIconButton]), which the bar carries as its sibling of the
  * page's recorded layer — see [rememberPageLayerBackdrop] for why that has to be
  * the page's own layer rather than the shell's. The plate is the look's chrome
- * for a bar with content under it, so it appears only once the page has moved
- * off its top ([LocalSoftGlassBarReveal]); at rest the control stays bare.
+ * for a bar with content under it, so its material fades with the page's
+ * collapse ([LocalSoftGlassBarReveal]) — the reference's own construction, one
+ * control whose glass plate breathes over a glyph that never changes identity,
+ * not two controls cross-fading.
  *
  * The glyph keeps the bare control's ink and size in both, so the material is the
  * only difference between the two.
@@ -1626,27 +1637,19 @@ private fun MiuixBackControl(
         )
     }
     if (glass) {
-        // The bare button stays mounted underneath; the plate fades across it
-        // once the page has scrolled a slice past its top, so the reveal is a
-        // material dissolve rather than a control swap.
+        // One control, the reference way: the plate's material alpha rides the
+        // collapse progress, so at the page's top this reads as a bare glyph —
+        // same button, same spot, the glass simply not there yet.
         val reveal by animateFloatAsState(
-            targetValue = if (LocalSoftGlassBarReveal.current) 1f else 0f,
+            targetValue = LocalSoftGlassBarReveal.current,
             animationSpec = SOFT_GLASS_REVEAL_FADE
         )
-        // Centre the stack: the bare button and the plate differ in size, and
-        // Box's default top-start alignment would slide the glyph as the
-        // plate fades over it.
-        Box(contentAlignment = Alignment.Center) {
-            IconButton(onClick = onClick, content = glyph)
-            if (reveal > 0f) {
-                SoftGlassIconButton(
-                    onClick = onClick,
-                    recipe = SoftGlassRecipes.floatingNavigation(LocalSoftGlassSpec.current.fineTuning),
-                    modifier = Modifier.graphicsLayer(alpha = reveal),
-                    content = glyph
-                )
-            }
-        }
+        SoftGlassIconButton(
+            onClick = onClick,
+            recipe = SoftGlassRecipes.floatingNavigation(LocalSoftGlassSpec.current.fineTuning),
+            materialAlpha = reveal,
+            content = glyph
+        )
     } else {
         IconButton(onClick = onClick, content = glyph)
     }
@@ -1753,7 +1756,7 @@ fun PageScaffold(
                     // plates appear once the page has scrolled under the bar.
                     CompositionLocalProvider(
                         LocalSoftGlassBackdrop provides pageBackdrop,
-                        LocalSoftGlassBarReveal provides softGlassReveal(
+                        LocalSoftGlassBarReveal provides softGlassBarMaterialProgress(
                             barScrollProgress ?: scrollBehavior.state.collapsedFraction
                         )
                     ) {
