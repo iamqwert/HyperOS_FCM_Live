@@ -913,7 +913,7 @@ private fun AboutBody(
     val seed by AppearanceState.seedColor
     val miuixMonet by AppearanceState.miuixMonet
     val miuixAccent by AppearanceState.miuixAccent
-    val barMaterial by AppearanceState.barMaterial
+    val floatingBar by AppearanceState.floatingBar
     val paletteStyle by AppearanceState.paletteStyle
     val colorSpec by AppearanceState.colorSpec
     // The whole theme section is scoped by this: 动态颜色 / 调色风格 / 颜色规格 are
@@ -928,7 +928,7 @@ private fun AboutBody(
 
     val modeEntries = stringArrayResource(R.array.theme_mode_entries)
     val uiStyleEntries = stringArrayResource(R.array.ui_style_entries)
-    val barMaterialEntries = stringArrayResource(R.array.bar_material_entries)
+    val floatingBarEntries = stringArrayResource(R.array.floating_bar_entries)
     val styleEntries = stringArrayResource(R.array.palette_style_entries)
     val specEntries = stringArrayResource(R.array.color_spec_entries)
     // 强调色's menu: entry 0 is the stored 0 (跟随壁纸), the rest are
@@ -1075,6 +1075,11 @@ private fun AboutBody(
                 // second Monet row would offer a choice that changes nothing — and the
                 // one that does change something would be a row away from it.
                 if (miuixStyle) {
+                    // The floating-bar row belongs to the Miuix look alone: the
+                    // SoftGlass look always floats its own glass tab bar, so the
+                    // switch would name a choice the home frame is not offering.
+                    // Whatever rows precede it close the group when it is gone.
+                    val barRowVisible = uiStyle == ThemePrefs.UI_STYLE_MIUIX
                     SettingsSwitchCard(
                         iconRes = R.drawable.ic_dynamic_color,
                         title = stringResource(R.string.miuix_monet),
@@ -1085,9 +1090,9 @@ private fun AboutBody(
                             actions.onAppearanceChange()
                         },
                         first = false,
-                        // Mid-group while the 强调色 row and the bottom-bar
-                        // material menu follow it; that menu closes the group.
-                        last = false
+                        // Closes the group only when nothing follows: no 强调色
+                        // row (Monet off) and no floating-bar row (SoftGlass).
+                        last = !barRowVisible && !miuixMonet
                     )
                     // The key colour the Monet derivation starts from, offered as the
                     // reference manager (KernelSU's colour palette) offers its own:
@@ -1106,7 +1111,7 @@ private fun AboutBody(
                             currentIndex = accentValues.indexOf(miuixAccent)
                                 .takeIf { it >= 0 } ?: 0,
                             first = false,
-                            last = false,
+                            last = !barRowVisible,
                             onPick = { index ->
                                 AppearanceState.setMiuixAccent(context, accentValues[index])
                                 actions.onAppearanceChange()
@@ -1118,29 +1123,26 @@ private fun AboutBody(
                     // bottom bar are always frosted — so a switch would only
                     // offer the way back to a look the Example never ships.
                     //
-                    // What *is* a taste is the foot's material, and it is a menu
-                    // rather than the switch it used to be, because the two states
-                    // it could hold are the two materials the row now names: the
-                    // library's docked pane, or the floating 柔光玻璃 pill. The menu
-                    // shows the material in force — a value derived from 界面风格
-                    // until it is picked by hand (see [AppearanceState.barMaterialPicked])
-                    // — so the row can never name a bar the home frame is not
-                    // building.
-                    PopupCard(
-                        iconRes = R.drawable.ic_ui_style,
-                        title = stringResource(R.string.miuix_floating_bar),
-                        subtitle = stringResource(R.string.about_sub_miuix_floating_bar),
-                        entries = barMaterialEntries.toList(),
-                        currentIndex = barMaterial,
-                        first = false,
-                        // Closes the group: the style sub-row it used to open is
-                        // gone — the pill wears the library's Default capsule.
-                        last = true,
-                        onPick = { index ->
-                            AppearanceState.setBarMaterial(context, index)
-                            actions.onAppearanceChange()
-                        }
-                    )
+                    // What *is* a taste is whether the foot floats: off is the
+                    // library's docked pane, on is the texture-blur glass capsule
+                    // hovered over the list. Miuix look only — the SoftGlass look
+                    // always floats its own glass tab bar, so under it this row
+                    // would name a choice the home frame is not offering.
+                    if (barRowVisible) {
+                        PopupCard(
+                            iconRes = R.drawable.ic_ui_style,
+                            title = stringResource(R.string.miuix_floating_bar),
+                            subtitle = stringResource(R.string.about_sub_miuix_floating_bar),
+                            entries = floatingBarEntries.toList(),
+                            currentIndex = if (floatingBar) 1 else 0,
+                            first = false,
+                            last = true,
+                            onPick = { index ->
+                                AppearanceState.setFloatingBar(context, index == 1)
+                                actions.onAppearanceChange()
+                            }
+                        )
+                    }
                 }
                 // Material only, on screen: these are the app's own colour engine's
                 // controls and the Miuix look is not dressed by that engine. Hidden here

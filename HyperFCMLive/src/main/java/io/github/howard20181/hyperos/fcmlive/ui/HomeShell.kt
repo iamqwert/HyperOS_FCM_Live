@@ -17,6 +17,7 @@ import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.background
@@ -54,19 +55,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.theme.AppearanceState
-import io.github.howard20181.hyperos.fcmlive.theme.ThemePrefs
-import io.github.howard20181.hyperos.fcmlive.ui.softglass.LocalSoftGlassSpec
-import io.github.howard20181.hyperos.fcmlive.ui.softglass.SoftGlassRecipes
-import io.github.howard20181.hyperos.fcmlive.ui.softglass.softGlassMaterial
-import io.github.howard20181.hyperos.fcmlive.ui.softglass.softGlassTintColor
+import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
+import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
+import io.github.howard20181.hyperos.fcmlive.ui.softglass.MiuixFloatingTabBar
+import io.github.howard20181.hyperos.fcmlive.ui.softglass.MiuixFloatingTabBarDefaults
+import io.github.howard20181.hyperos.fcmlive.ui.softglass.MiuixFloatingTabItem
+import io.github.howard20181.hyperos.fcmlive.ui.softglass.MiuixFloatingTabLayout
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurColors
+import top.yukonga.miuix.kmp.blur.highlight.Highlight
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
@@ -74,9 +78,7 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.GridView
 import top.yukonga.miuix.kmp.icon.extended.Home
 import top.yukonga.miuix.kmp.icon.extended.Settings
-import top.yukonga.miuix.kmp.basic.NavigationItem
 import top.yukonga.miuix.kmp.basic.FloatingNavigationBar
-import io.github.howard20181.hyperos.fcmlive.ui.liquid.IosLiquidGlassNavigationBar
 import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
 import top.yukonga.miuix.kmp.utils.springAnimateToPage
 import kotlinx.coroutines.Job
@@ -226,11 +228,16 @@ fun HomeShell(
 }
 
 /**
- * The Miuix home frame — the same three tabs as [HomeShell]. By default it is
- * docked on the library's own [NavigationBar] (the standard HyperOS bottom bar,
- * not the M3 bar wearing Miuix colours); with the floating-bar switch on it
- * becomes the library's own [FloatingNavigationBar] pill hovering over the
- * content, wearing liquid glass when the 液态玻璃 switch asks for it.
+ * The Miuix home frame — the same three tabs as [HomeShell]. What the foot
+ * looks like is decided by the look and, under the Miuix look, by one switch:
+ *
+ *  - Miuix look, 悬浮底栏 off: the library's own docked [MiuixNavigationBar],
+ *    frosted — the standard HyperOS bottom bar.
+ *  - Miuix look, 悬浮底栏 on: the same bar lifted into a floating capsule,
+ *    its glass the Example's textureBlur recipe over the recorded pages.
+ *  - SoftGlass look: always floating, and the bar is the reference project's
+ *    own glass tab bar ([MiuixFloatingTabBar]) — the look's defining chrome,
+ *    so it is not a switch but a certainty.
  *
  * The skeleton mirrors [HomeShell] exactly, for the same reasons: the bar is a
  * plain sibling below the content box (each tab is itself a full
@@ -243,14 +250,14 @@ fun HomeShell(
  * screen edge), so the content box consumes that inset — the same
  * `consumeWindowInsets` pass [HomeShell] runs — and each tab's Scaffold reads
  * a zero bottom inset instead of padding a dead band of page background above
- * the bar. The floating frame keeps the same consume: nothing reserves the
- * pill's height, so the page content scrolls under the glass.
+ * the bar. The floating frames keep the same consume: nothing reserves the
+ * bar's height, so the page content scrolls under the glass.
  *
- * The tab glyphs come from the same Material Symbol pairs as the M3 bar, read
- * as vectors because the library item takes an [ImageVector], not a painter:
- * outlined (fill=0) at rest, filled (fill=1) on the selected tab.
+ * The tab glyphs are the library's own icon set (see [miuixIcon]) under every
+ * floating chrome; selection is the chrome's own ink treatment, never a fill
+ * swap between two cuts.
  *
- * Miuix only — never composed under the Material look.
+ * Miuix-dressed looks only — never composed under the Material look.
  */
 @Composable
 fun MiuixHomeShell(
@@ -259,18 +266,13 @@ fun MiuixHomeShell(
     modifier: Modifier = Modifier,
     content: @Composable (HomeTab) -> Unit
 ) {
-    // The one row this frame answers to is the foot's material, and it carries
-    // both halves the retired floating switch used to: [ThemePrefs.BAR_MATERIAL_MIUIX]
-    // is the library's docked frosted pane, [ThemePrefs.BAR_MATERIAL_SOFT_GLASS] is
-    // the tab bar lifted onto the 柔光玻璃 pill. The chrome glass itself is this
-    // look's default dressing (the Example ships it enabled, so there is no row to
-    // turn it off), and the pill's geometry is the library's Default capsule either
-    // way — the iOS-like port stays in the tree below but is never selected.
+    // The chrome glass itself is this look's default dressing (the Example
+    // ships it enabled, so there is no row to turn it off).
     val glass = true
-    val barMaterial by AppearanceState.barMaterial
-    val softGlassBar = barMaterial == ThemePrefs.BAR_MATERIAL_SOFT_GLASS
-    val floating = softGlassBar
-    val barStyle = 0
+    val floatingBar by AppearanceState.floatingBar
+    val softGlassStyle = LocalUiStyle.current == UiStyle.SoftGlass
+    // SoftGlass floats by definition; the Miuix look floats when its row says so.
+    val floating = softGlassStyle || floatingBar
     // A popup's veil IS part of the recorded layer here — the pages host their
     // own popups, so the scrim lands inside the record — and the Example is
     // fine with exactly that: its bar with a dropdown open still shows blurred,
@@ -365,11 +367,18 @@ fun MiuixHomeShell(
             // or its glass has nothing to sample. The air is [FLOATING_BAR_GAP],
             // the same 16dp the app list keeps between its search box and its
             // first row — one value for the gap between chrome and content
-            // everywhere, rather than one per page.
-            val clearance = if (floating) {
-                FLOATING_BAR_MIN_HEIGHT + pillBottomAir + FLOATING_BAR_GAP
-            } else {
-                barHeight + FLOATING_BAR_GAP
+            // everywhere, rather than one per page. The extent itself is per
+            // frame: the SoftGlass bar is its 54dp height plus the reference
+            // layout's paddings (12 above, 4 below) riding on the navigation
+            // inset; the Miuix capsule is its 52dp minimum plus the air the
+            // official pill keeps; the docked pane is measured off its wrapper.
+            val clearance = when {
+                softGlassStyle ->
+                    MiuixFloatingTabBarDefaults.Height + 12.dp + 4.dp + insetDp + FLOATING_BAR_GAP
+                floating ->
+                    FLOATING_BAR_MIN_HEIGHT + pillBottomAir + FLOATING_BAR_GAP
+                else ->
+                    barHeight + FLOATING_BAR_GAP
             }
             CompositionLocalProvider(LocalFloatingBarClearance provides clearance) {
                 Box(
@@ -460,106 +469,108 @@ fun MiuixHomeShell(
                 }
             }
             if (floating) {
-                // The official pill: the library's own FloatingNavigationBar with
-                // FloatingNavigationBarItem tabs, replacing the hand-rolled glass
-                // capsule entirely — structure, gestures, spacing and the tab
-                // look are the library's business now. What remains ours is only
-                // the glass paint, and the master (标题栏模糊样式) drives it —
-                // there is no separate pill layer switch anymore. The paint is
-                // STRUCTURE-STABLE across popups: the glass never detaches and
-                // never goes opaque — a menu open just dims what the glass
-                // samples, the Example's exact behaviour.
-                val pillGlass = glass
-                // The example reads darkness straight off the system flag; this
-                // app can force a look the system does not, so the bar's own
-                // page tone decides — the same read the top-bar glass uses.
-                val pillIsDark = MiuixTheme.colorScheme.background.luminance() < 0.5f
-                // Placement is ours through a wrapper Box: the component hands
-                // the caller's modifier to its inner pill Row, while its own
-                // outer fillMaxWidth Column is the shell Box's direct child and
-                // parks at TopStart unless pinned — an `align` inside the passed
-                // modifier never reaches that Column (it lands on the Row, which
-                // is not the Box's child, and is silently dropped — the "pill at
-                // the top-left" build). The wrapper owns the corner; the Row
-                // centers itself inside the component's full-width column, so
-                // the pill sits centered with its own natural margins.
-                Box(modifier = Modifier.align(Alignment.BottomCenter)) {
-                    if (barStyle == 1) {
-                        // The iOS-like bar, ported from the official example:
-                        // a 64dp pill with a damped-drag indicator the finger
-                        // can slide across the tabs. Its glass answers to the
-                        // 模糊 switch alone; without the glass it is the
-                        // example's solid container with the accent indicator.
-                        IosLiquidGlassNavigationBar(
-                            items = HomeTab.entries.map { tab ->
-                                // ONE glyph for every state, like the Example's
-                                // demo items: selection colour comes entirely
-                                // from the bar's own refraction layer, not from
-                                // the passed icon varying — and the glyph is the
-                                // library's own mark, not a Material Symbol.
-                                NavigationItem(
+                if (softGlassStyle) {
+                    // The SoftGlass look's own foot: the reference project's
+                    // glass tab bar, ported whole — its glass recipe, drag
+                    // physics and stacked layout are that bar's business, and
+                    // the bar reads the 柔光玻璃 spec through the locals the
+                    // theme already provides. Placement is the reference's own:
+                    // pinned to the bottom-center, lifted over the navigation
+                    // inset, 16dp off the sides, 4dp off the inset.
+                    MiuixFloatingTabBar(
+                        items = HomeTab.entries.map { tab ->
+                            MiuixFloatingTabItem(
+                                key = tab.name,
+                                label = stringResource(tab.titleRes),
+                                // ONE glyph for both states, as the reference's
+                                // items carry: selection is the bar's own ink
+                                // and indicator treatment, not a fill swap.
+                                selectedIcon = rememberVectorPainter(tab.miuixIcon),
+                                unselectedIcon = rememberVectorPainter(tab.miuixIcon),
+                            )
+                        },
+                        selectedKey = selected.name,
+                        onItemSelected = { onSelect(HomeTab.valueOf(it.key)) },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .navigationBarsPadding()
+                            .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 4.dp),
+                        layout = MiuixFloatingTabLayout.Stacked,
+                        backdrop = backdrop,
+                    )
+                } else {
+                    // The Miuix look's floating capsule: the library's own
+                    // FloatingNavigationBar wearing the Example's textureBlur
+                    // recipe over the recorded pages — 25dp blur, the surface
+                    // blended at 0.6, a glass-stroke rim keyed to the page tone.
+                    // The paint is STRUCTURE-STABLE across popups: the glass
+                    // never detaches and never goes opaque — a menu open just
+                    // dims what the glass samples, the Example's exact behaviour.
+                    //
+                    // The example reads darkness straight off the system flag;
+                    // this app can force a look the system does not, so the bar's
+                    // own page tone decides — the same read the top-bar glass
+                    // uses.
+                    val pillIsDark = MiuixTheme.colorScheme.background.luminance() < 0.5f
+                    // Placement is ours through a wrapper Box: the component hands
+                    // the caller's modifier to its inner pill Row, while its own
+                    // outer fillMaxWidth Column is the shell Box's direct child and
+                    // parks at TopStart unless pinned — an `align` inside the
+                    // passed modifier never reaches that Column (it lands on the
+                    // Row, which is not the Box's child, and is silently dropped —
+                    // the "pill at the top-left" build). The wrapper owns the
+                    // corner; the Row centers itself inside the component's
+                    // full-width column, so the pill sits centered with its own
+                    // natural margins.
+                    Box(modifier = Modifier.align(Alignment.BottomCenter)) {
+                        FloatingNavigationBar(
+                            modifier = Modifier.textureBlur(
+                                backdrop = backdrop,
+                                shape = RoundedCornerShape(FLOATING_BAR_CORNER),
+                                blurRadius = DOCK_BLUR.value,
+                                colors = BlurColors(
+                                    blendColors = listOf(
+                                        BlendColorEntry(
+                                            MiuixTheme.colorScheme.surfaceContainer
+                                                .copy(alpha = 0.6f)
+                                        )
+                                    )
+                                ),
+                                highlight = if (pillIsDark) {
+                                    Highlight.GlassStrokeMiddleDark
+                                } else {
+                                    Highlight.GlassStrokeMiddleLight
+                                },
+                            ),
+                            // The capsule's own surface is absent: the glass
+                            // above it is the surface now.
+                            color = Color.Transparent,
+                            showDivider = false,
+                        ) {
+                            HomeTab.entries.forEach { tab ->
+                                // Mishka's floating-bar item, verbatim: the
+                                // capsule's own item language with the label
+                                // under the glyph — 22dp icon + 11sp word in one
+                                // shared ink (selection stays a tint question,
+                                // never a fill swap), 48dp minimum plate,
+                                // selectable() with no indication. The library's
+                                // FloatingNavigationBarItem drops the label on
+                                // the floor (contentDescription only), so the
+                                // text can only come from owning the item.
+                                PillTabItem(
                                     label = stringResource(tab.titleRes),
                                     icon = tab.miuixIcon,
+                                    selected = tab == selected,
+                                    showLabel = true,
+                                    onClick = {
+                                        // Deliberately silent, exactly like both
+                                        // docked bars: a tab swap is not a press
+                                        // on content.
+                                        onSelect(tab)
+                                    }
                                 )
-                            },
-                            selectedIndex = selected.ordinal,
-                            onItemClick = { onSelect(HomeTab.entries[it]) },
-                            backdrop = backdrop,
-                            isBlurActive = pillGlass,
-                        )
-                    } else {
-                    val softGlass = LocalSoftGlassSpec.current
-                    FloatingNavigationBar(
-                        // The pill IS the 柔光玻璃 material — the row's other
-                        // option is the docked pane composed above — so its paint
-                        // is the optical stack rather than a hand-rolled blur: the
-                        // same recipe every other glass surface of this look reads,
-                        // resolved against the layer the pages recorded. The
-                        // library still owns the pill's geometry, its gestures and
-                        // its spacing; this is paint only, which is why it rides on
-                        // the modifier the component hands to its own Row.
-                        modifier = Modifier.softGlassMaterial(
-                            softGlass = softGlass,
-                            backdrop = backdrop,
-                            shape = RoundedCornerShape(FLOATING_BAR_CORNER),
-                            // What [SoftGlassSurface] would have resolved on its
-                            // own — spelled out because this modifier is not
-                            // wrapped in one.
-                            tint = softGlass.fineTuning.softGlassTintColor(pillIsDark)
-                                .copy(alpha = softGlass.navigationTintAlpha),
-                            isDark = pillIsDark,
-                            recipe = SoftGlassRecipes.floatingNavigation(softGlass.fineTuning),
-                        ),
-                        // The pill's own surface is absent: the glass above it is
-                        // the surface now.
-                        color = Color.Transparent,
-                        // The example's own shadow: the library default (1dp
-                        // dropShadow) — the earlier "no shadow" rule is superseded
-                        // by the parity-with-the-example ask.
-                        showDivider = false,
-                    ) {
-                        HomeTab.entries.forEach { tab ->
-                            // Mishka's floating-bar item, verbatim: the pill's
-                            // own item language with the label under the glyph —
-                            // 22dp icon + 11sp word in one shared ink (selection
-                            // stays a tint question, never a fill swap), 48dp
-                            // minimum plate, selectable() with no indication.
-                            // The library's FloatingNavigationBarItem drops the
-                            // label on the floor (contentDescription only), so
-                            // the text can only come from owning the item.
-                            PillTabItem(
-                                label = stringResource(tab.titleRes),
-                                icon = tab.miuixIcon,
-                                selected = tab == selected,
-                                showLabel = true,
-                                onClick = {
-                                    // Deliberately silent, exactly like both docked
-                                    // bars: a tab swap is not a press on content.
-                                    onSelect(tab)
-                                }
-                            )
+                            }
                         }
-                    }
                     }
                 }
             }

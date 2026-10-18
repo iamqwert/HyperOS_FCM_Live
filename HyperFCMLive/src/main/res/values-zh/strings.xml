@@ -96,7 +96,7 @@
     <string name="about_sub_ui_style">选择应用的界面风格</string>
     <string name="about_sub_miuix_monet">跟随壁纸为界面取色</string>
     <string name="about_sub_miuix_accent">挑选莫奈配色的主色调</string>
-    <string name="about_sub_miuix_floating_bar">停靠式面板，或悬浮玻璃胶囊</string>
+    <string name="about_sub_miuix_floating_bar">关闭为停靠式面板，开启为悬浮玻璃胶囊</string>
     <string name="about_sub_palette_style">选择动态取色风格</string>
     <string name="about_sub_color_spec">选择 Material 颜色规范</string>
     <string name="language">语言</string>
@@ -115,10 +115,10 @@
         <item>Miuix</item>
         <item>柔光玻璃</item>
     </string-array>
-    <!-- 顺序与 ThemePrefs.BAR_MATERIAL_* 一致，索引即取值。 -->
-    <string-array name="bar_material_entries">
-        <item>Miuix</item>
-        <item>柔光玻璃</item>
+    <!-- 悬浮底栏开关的两档选项：索引 0 为关闭（停靠），1 为开启（悬浮）。 -->
+    <string-array name="floating_bar_entries">
+        <item>关闭</item>
+        <item>MIUIX</item>
     </string-array>
     <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格 + 末位 CMF），选项保留英文原文。 -->
     <string-array name="palette_style_entries">

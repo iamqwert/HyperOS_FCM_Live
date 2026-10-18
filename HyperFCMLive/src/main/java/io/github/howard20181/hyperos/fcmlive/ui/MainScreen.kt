@@ -731,6 +731,12 @@ fun MainTopBar(
                             allVisibleSelected = state.allVisibleSelected,
                             onSelectAll = actions.onSelectAll
                         )
+                        // The bar packs its actions edge to edge, which the
+                        // 24dp ink buttons absorb but the 柔光玻璃 44dp glass
+                        // discs do not — two of them parked adjacent read as
+                        // one blob, rims nearly touching. Give the glass some
+                        // air; the plain buttons keep the bar's own rhythm.
+                        if (softGlassChrome()) Spacer(Modifier.width(8.dp))
                         BarIconButton(onClick = {
                             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                             actions.onBatchSave()
@@ -767,6 +773,9 @@ fun MainTopBar(
                                 actions.onStartMultiSelect()
                             }
                         )
+                        // Same air the batch bar gets: under 柔光玻璃 these are
+                        // 44dp glass discs parked rim to rim without it.
+                        if (softGlassChrome()) Spacer(Modifier.width(8.dp))
                         OverflowMenu(state.overflow, actions)
                     },
                     scrollBehavior = scrollBehavior,

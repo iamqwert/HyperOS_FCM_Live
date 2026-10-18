@@ -95,7 +95,7 @@
     <string name="about_sub_ui_style">Choose the app\'s UI style</string>
     <string name="about_sub_miuix_monet">Pick colors from your wallpaper</string>
     <string name="about_sub_miuix_accent">Pick the accent color for the Monet palette</string>
-    <string name="about_sub_miuix_floating_bar">The docked pane, or the floating glass pill</string>
+    <string name="about_sub_miuix_floating_bar">Off for the docked pane, on for the floating glass capsule</string>
     <string name="about_sub_palette_style">Choose a dynamic color style</string>
     <string name="about_sub_color_spec">Choose the Material color spec</string>
     <string name="language">Language</string>
@@ -114,10 +114,10 @@
         <item>Miuix</item>
         <item>Soft glass</item>
     </string-array>
-    <!-- Order matches ThemePrefs.BAR_MATERIAL_*; the index is the value. -->
-    <string-array name="bar_material_entries">
-        <item>Miuix</item>
-        <item>Soft glass</item>
+    <!-- The floating-bar switch as a two-option row: index 0 is off (docked), 1 is on (floating). -->
+    <string-array name="floating_bar_entries">
+        <item>Off</item>
+        <item>MIUIX</item>
     </string-array>
     <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格 + 末位 CMF），选项保留英文原文。 -->
     <string-array name="palette_style_entries">

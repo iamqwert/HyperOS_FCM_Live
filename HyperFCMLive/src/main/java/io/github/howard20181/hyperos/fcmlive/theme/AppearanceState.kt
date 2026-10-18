@@ -61,21 +61,11 @@ object AppearanceState {
     val miuixAccent: MutableIntState = mutableIntStateOf(0)
 
     /**
-     * The material the Miuix home foot is milled from — [ThemePrefs.BAR_MATERIAL_MIUIX]
-     * or [ThemePrefs.BAR_MATERIAL_SOFT_GLASS]. Held as the value **in force**, not
-     * the stored one: with no pick on disk the style answers for it, so this is
-     * what the appearance row shows and what the home frame builds.
+     * Whether the Miuix home foot floats — off is the docked pane, on is the
+     * texture-blur glass capsule. Only the Miuix look reads this; the SoftGlass
+     * look always floats its own glass tab bar and never consults the switch.
      */
-    val barMaterial: MutableIntState = mutableIntStateOf(ThemePrefs.BAR_MATERIAL_MIUIX)
-
-    /**
-     * Whether [barMaterial] came from the user's own pick rather than from the
-     * style's default. The distinction only matters on a style switch: an
-     * unpicked bar follows the look onto its default material (choosing 柔光玻璃
-     * as a look must glass the foot without asking for a second decision),
-     * while a picked one is a decision of its own and is left where it was put.
-     */
-    val barMaterialPicked: MutableState<Boolean> = mutableStateOf(false)
+    val floatingBar: MutableState<Boolean> = mutableStateOf(false)
 
     /**
      * Re-read every value from disk. Idempotent and cheap: assigning the value
@@ -92,8 +82,7 @@ object AppearanceState {
         colorSpec.intValue = ThemePrefs.specVersion(context)
         miuixMonet.value = ThemePrefs.miuixMonet(context)
         miuixAccent.intValue = ThemePrefs.miuixAccent(context)
-        barMaterialPicked.value = ThemePrefs.barMaterialPicked(context)
-        barMaterial.intValue = ThemePrefs.barMaterial(context)
+        floatingBar.value = ThemePrefs.floatingBar(context)
     }
 
     @JvmStatic
@@ -103,19 +92,10 @@ object AppearanceState {
         ThemeEngine.invalidate()
     }
 
-    /**
-     * Stores the style and, while the bar material has never been picked,
-     * re-derives it from the new look — see [barMaterialPicked]. The two rows are
-     * read together on the appearance page, so leaving the derived one behind on
-     * a switch would show a material the frame is not building.
-     */
     @JvmStatic
     fun setUiStyle(context: Context, style: Int) {
         ThemePrefs.setUiStyle(context, style)
         uiStyle.intValue = style
-        if (!barMaterialPicked.value) {
-            barMaterial.intValue = ThemePrefs.defaultBarMaterial(style)
-        }
         ThemeEngine.invalidate()
     }
 
@@ -174,10 +154,9 @@ object AppearanceState {
     }
 
     @JvmStatic
-    fun setBarMaterial(context: Context, material: Int) {
-        ThemePrefs.setBarMaterial(context, material)
-        barMaterial.intValue = material
-        barMaterialPicked.value = true
+    fun setFloatingBar(context: Context, enabled: Boolean) {
+        ThemePrefs.setFloatingBar(context, enabled)
+        floatingBar.value = enabled
         ThemeEngine.invalidate()
     }
 }

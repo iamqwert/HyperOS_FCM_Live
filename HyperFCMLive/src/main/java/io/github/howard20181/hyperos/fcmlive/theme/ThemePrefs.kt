@@ -33,13 +33,6 @@ object ThemePrefs {
     /** Miuix's own screens, milled from the 柔光玻璃 material. See [UiStyle.SoftGlass]. */
     const val UI_STYLE_SOFT_GLASS = 2
 
-    /** The library's docked pane — the standard HyperOS foot. See [KEY_BAR_MATERIAL]. */
-    const val BAR_MATERIAL_MIUIX = 0
-    /** The floating 柔光玻璃 pill, hovered over the list. See [KEY_BAR_MATERIAL]. */
-    const val BAR_MATERIAL_SOFT_GLASS = 1
-    /** [barMaterialPick]'s "the user has never chosen" answer, which nothing stores. */
-    private const val BAR_MATERIAL_NONE = -1
-
     private const val KEY_UI_STYLE = "ui_style"
     /** Updating installs within this window of their first install read as fresh. */
     private const val UPGRADE_TOLERANCE_MS = 5_000L
@@ -53,19 +46,19 @@ object ThemePrefs {
      */
     private const val KEY_MIUIX_ACCENT = "miuix_accent"
     /**
-     * Which material the Miuix home foot is milled from: [BAR_MATERIAL_MIUIX]
-     * (the library's docked pane) or [BAR_MATERIAL_SOFT_GLASS] (the floating
-     * 柔光玻璃 pill). A stored pick wins; with none stored the style's own
-     * default answers ([defaultBarMaterial]), so a fresh install follows the
-     * look it chose instead of needing a second decision to stay consistent.
-     */
-    private const val KEY_BAR_MATERIAL = "miuix_bar_material"
-    /**
-     * Retired: the floating-bar switch this row replaced. Its two states are
-     * the two materials now, so the first read migrates it (on → 柔光玻璃,
-     * off → Miuix) and writes the pick down; see [barMaterialPick].
+     * Whether the Miuix home foot floats: off is the library's docked pane, on
+     * is the texture-blur glass capsule hovered over the list. Only the Miuix
+     * look reads this — the SoftGlass look always floats its own glass tab bar,
+     * so the row is hidden there and the value ignored.
+     *
+     * This key was briefly replaced by a material row (`miuix_bar_material`);
+     * that experiment is reverted, and the first read migrates the material
+     * pick back (1 — 柔光玻璃 — means floating, anything else means docked) and
+     * removes the dead key. See [floatingBar].
      */
     private const val KEY_FLOATING_BAR = "miuix_floating_bar"
+    /** Retired: the material row this key outlived; see [KEY_FLOATING_BAR]. */
+    private const val KEY_BAR_MATERIAL = "miuix_bar_material"
     /** Retired: the liquid refraction sub-switch, deleted with the Example alignment. */
     private const val KEY_LIQUID_GLASS = "miuix_liquid_glass"
 
@@ -201,72 +194,31 @@ object ThemePrefs {
     }
 
     /**
-     * The material stored for the Miuix home foot, or [BAR_MATERIAL_NONE] when
-     * the user has never picked one.
+     * Whether the Miuix home foot floats. Off — the default — is the library's
+     * docked pane; on is the texture-blur glass capsule. Only the Miuix look
+     * reads this: the Material look always docks its own bar, and the SoftGlass
+     * look always floats its own glass tab bar, so neither is allowed to
+     * disagree with what their frame builds.
      *
-     * The first read on an install that predates this row migrates the retired
-     * floating-bar switch it replaces — that switch's two states *were* these two
-     * materials, and a user who had moved the pill into place must not be handed
-     * the docked pane back — and writes the migrated value down, because the
-     * switch was itself a decision. Installs with neither key are left unset, so
-     * the style they chose answers for them ([defaultBarMaterial]) instead of
-     * having a default written over it that they never asked for.
+     * The first read on an install that ran the brief material-row build
+     * migrates that row's pick back into this switch — 柔光玻璃 (1) was the
+     * floating foot, Miuix (0) the docked one — and removes the dead key, so a
+     * capsule the user put in place is not handed back the pane.
      */
-    private fun barMaterialPick(context: Context): Int {
+    @JvmStatic
+    fun floatingBar(context: Context): Boolean {
         val p = prefs(context)
-        if (p.contains(KEY_BAR_MATERIAL)) {
-            return if (p.getInt(KEY_BAR_MATERIAL, BAR_MATERIAL_MIUIX) == BAR_MATERIAL_SOFT_GLASS) {
-                BAR_MATERIAL_SOFT_GLASS
-            } else {
-                BAR_MATERIAL_MIUIX
-            }
-        }
-        if (p.contains(KEY_FLOATING_BAR)) {
-            val migrated =
-                if (p.getBoolean(KEY_FLOATING_BAR, false)) {
-                    BAR_MATERIAL_SOFT_GLASS
-                } else {
-                    BAR_MATERIAL_MIUIX
-                }
-            p.edit().putInt(KEY_BAR_MATERIAL, migrated).apply()
+        if (!p.contains(KEY_FLOATING_BAR) && p.contains(KEY_BAR_MATERIAL)) {
+            val migrated = p.getInt(KEY_BAR_MATERIAL, 0) == 1
+            p.edit().putBoolean(KEY_FLOATING_BAR, migrated).remove(KEY_BAR_MATERIAL).apply()
             return migrated
         }
-        return BAR_MATERIAL_NONE
-    }
-
-    /**
-     * Whether the user has picked a bar material themselves. False means the
-     * value on screen is the style's own default, which is what the appearance
-     * page needs to know before it shows a row as chosen rather than derived.
-     */
-    @JvmStatic
-    fun barMaterialPicked(context: Context): Boolean = barMaterialPick(context) != BAR_MATERIAL_NONE
-
-    /**
-     * The material in force for the Miuix home foot: the stored pick, else the
-     * style's default. Read only by looks that are [UiStyle.isMiuixBased] — the
-     * Material look always keeps its own docked bar, so the value is ignored
-     * there rather than cleared on a style switch.
-     */
-    @JvmStatic
-    fun barMaterial(context: Context): Int {
-        val picked = barMaterialPick(context)
-        return if (picked != BAR_MATERIAL_NONE) picked else defaultBarMaterial(uiStyle(context))
-    }
-
-    /** The material a style implies while nothing has been picked. */
-    @JvmStatic
-    fun defaultBarMaterial(style: Int): Int {
-        return if (style == UI_STYLE_SOFT_GLASS) {
-            BAR_MATERIAL_SOFT_GLASS
-        } else {
-            BAR_MATERIAL_MIUIX
-        }
+        return p.getBoolean(KEY_FLOATING_BAR, false)
     }
 
     @JvmStatic
-    fun setBarMaterial(context: Context, material: Int) {
-        prefs(context).edit().putInt(KEY_BAR_MATERIAL, material).apply()
+    fun setFloatingBar(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_FLOATING_BAR, enabled).apply()
     }
 
     /**
