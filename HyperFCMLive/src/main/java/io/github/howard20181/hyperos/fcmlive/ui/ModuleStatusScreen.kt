@@ -164,9 +164,9 @@ fun ModuleStatusScreen(
                     )
                 }
             }
-            // The three doors the home keeps at the foot of the page:
-            // diagnostics, the user guide, and about — one group, three rows,
-            // diagnostics heading them.
+            // The doors the home keeps at the foot of the page: diagnostics
+            // stands alone in its own group as before; the user guide joins
+            // about in the second group — one card-pair, guide on top.
             item {
                 Spacer(modifier = Modifier.height(pageGap))
                 SettingsGroup {
@@ -176,14 +176,17 @@ fun ModuleStatusScreen(
                         subtitle = "",
                         onClick = onDiagnostics,
                         first = true,
-                        last = false
+                        last = true
                     )
+                }
+                Spacer(modifier = Modifier.height(pageGap))
+                SettingsGroup {
                     NavCard(
                         iconRes = R.drawable.ic_help,
                         title = stringResource(R.string.help_guide),
                         subtitle = "",
                         onClick = onHelp,
-                        first = false,
+                        first = true,
                         last = false
                     )
                     NavCard(
