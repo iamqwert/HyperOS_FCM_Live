@@ -392,6 +392,12 @@ class MainActivity : AppCompatActivity() {
                     versionName = moduleVersionName,
                     versionCode = moduleVersionCode,
                     onDiagnostics = { openFcmDiagnostics() },
+                    onHelp = {
+                        // The guide lives on GitHub, in the app's own locale —
+                        // the same URL the shortcut and the about page's help
+                        // row open.
+                        UiUtils.openUrl(this, AboutDelegate.helpUrl(this))
+                    },
                     onAbout = {
                         // A real sub-page, like licences: the same window
                         // transition slides it in from the right, and the

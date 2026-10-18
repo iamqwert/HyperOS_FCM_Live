@@ -74,6 +74,8 @@ fun ModuleStatusScreen(
     versionCode: Long,
     /** Opens the FCM diagnostics page — the reference app keeps its entry on the home too. */
     onDiagnostics: () -> Unit,
+    /** Opens the user guide, in the browser. */
+    onHelp: () -> Unit,
     /** Opens the about page. */
     onAbout: () -> Unit,
     /** Re-runs the activation check — the tap target when the module reads inactive. */
@@ -162,10 +164,9 @@ fun ModuleStatusScreen(
                     )
                 }
             }
-            // The two doors the reference home keeps at the foot of the page:
-            // diagnostics and about. Each in its own group — one card each —
-            // so neither reads as a row of the other's container. A full gap
-            // (not the 2dp row seam) keeps each card clear of its neighbour.
+            // The three doors the home keeps at the foot of the page:
+            // diagnostics, the user guide, and about — one group, three rows,
+            // diagnostics heading them.
             item {
                 Spacer(modifier = Modifier.height(pageGap))
                 SettingsGroup {
@@ -175,17 +176,22 @@ fun ModuleStatusScreen(
                         subtitle = "",
                         onClick = onDiagnostics,
                         first = true,
-                        last = true
+                        last = false
                     )
-                }
-                Spacer(modifier = Modifier.height(pageGap))
-                SettingsGroup {
+                    NavCard(
+                        iconRes = R.drawable.ic_help,
+                        title = stringResource(R.string.help_guide),
+                        subtitle = "",
+                        onClick = onHelp,
+                        first = false,
+                        last = false
+                    )
                     NavCard(
                         iconRes = R.drawable.ic_info,
                         title = stringResource(R.string.nav_about),
                         subtitle = "",
                         onClick = onAbout,
-                        first = true,
+                        first = false,
                         last = true
                     )
                 }
