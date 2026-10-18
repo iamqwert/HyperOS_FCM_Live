@@ -83,7 +83,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode as ComposeBlendMode
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Path
@@ -541,24 +540,16 @@ private fun AboutHeroMiuix(
         )
         // "v4.1.1 (53)" — the release tag, not a sentence about versions.
         // First of the three stages to leave, through its ink like the
-        // wordmark above: no deferred layer on the node. Expanded it wears the
-        // page's own ink (strong ink belongs to strong type, and a 14sp tag
-        // under a 35sp wordmark only ever reads as a shadow — the reference
-        // shows only the collapsed end of this journey, where the tag is
-        // small); as the column collapses the ink cools to the reference's
-        // own onSurfaceVariantSummary, so by the time the tag reaches the
-        // reference's size it already wears the reference's colour.
+        // wordmark above: no deferred layer on the node. The ink is the
+        // reference's own onSurfaceVariantSummary at every scroll position —
+        // it does not travel with the collapse — and only the alpha fades the
+        // tag out, exactly as the reference's versionCodeProgress does.
         val tagProgress =
             ((scrollProgressProvider() - 0.05f) / 0.15f).coerceIn(0f, 1f)
-        val tagInk = lerp(
-            MiuixTheme.colorScheme.onBackground,
-            MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            tagProgress
-        )
         MiuixText(
             modifier = Modifier.fillMaxWidth(),
             text = versionTag,
-            color = tagInk.copy(alpha = 1f - tagProgress),
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 1f - tagProgress),
             fontSize = 14.sp,
             textAlign = TextAlign.Center
         )
