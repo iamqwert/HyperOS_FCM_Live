@@ -145,7 +145,7 @@ The allowlist decides whether the target app gets the wake-up privileges — aut
 | Search | Filter by app name or package name |
 | Long-press a card | Enter multi-select to batch add/remove allowlist entries |
 | Select all / deselect all | Applies to the current list in multi-select mode |
-| More options (top right) | Show supported apps, exclude MiPush apps, show system apps, Settings |
+| More options (top right) | Exclude MiPush apps, show system apps, Settings |
 | FCM diagnostics | Opens GMS's built-in diagnostics screen; falls back to GMS's app details page when unavailable |
 
 ### Settings page
@@ -289,18 +289,21 @@ Selecting only the apps that genuinely need instant push reduces how often apps 
 
 But this is not about turning the module off for other apps: GMS and push broadcasts are protected regardless.
 
-### How is "show supported apps" determined?
+### Where does the app list come from? Why only push-capable apps?
 
-Four push-related declarations in an app's manifest; the judgment is based on them:
+The list requires **no permission at all**: the module declares the push-related component actions in its manifest, and Android 11+'s package visibility automatically grants access to apps matching those declarations — in other words, the system only ever lets the module see apps that declare push components, and nothing else. This is not an extra filter toggle.
 
-- ② declares the receiver class `com.google.firebase.iid.FirebaseInstanceIdReceiver`
+Three push-related declarations are checked in an app's manifest:
+
+- ② declares the broadcast action `com.google.firebase.INSTANCE_ID_EVENT`
 - ③ declares the broadcast action `com.google.firebase.MESSAGING_EVENT`
 - ④ declares the broadcast action `com.google.android.c2dm.intent.RECEIVE`
-- ① declares the service class `com.google.firebase.messaging.FirebaseMessagingService`
 
-The rule: **any two of ②③④ qualify the app; only ② or only ③ also qualifies; only ① or only ④ does not.**
+The rule: **any two of ②③④ qualify the app; only ② or only ③ also qualifies; only ④ does not.** Additionally, an app whose RECEIVE receiver resolves to Google's own push entrypoint (a PushReceiver under the `com.google.android.libraries.notifications.` namespace) qualifies directly — Google's own apps are built that way.
 
-Why ② is not required: push SDKs let apps declare their own receiver to catch the `RECEIVE` broadcast without subclassing the SDK's receiver class — Google Play services itself does exactly that. So "no ②" is not an exclusion criterion. ① alone does not qualify because it is the SDK's public base class, carried even by apps that only integrated the library without wiring up push. ④ alone does not qualify because components from the early C2DM era still carry that action.
+Why ② is not required: push SDKs let apps declare their own receiver to catch the `RECEIVE` broadcast without subclassing the SDK's receiver class — Google Play services itself does exactly that. So "no ②" is not an exclusion criterion. ④ alone does not qualify because components from the early C2DM era still carry that action (one lives in the system framework, unrelated to push).
+
+Google Play services is exempt from this rule and always listed.
 
 ### What counts as a MiPush app?
 
@@ -345,10 +348,11 @@ These are the module's real behaviors, listed to prevent misreading:
 
 ## 10. Privacy and permissions
 
-| Permission | What it is for |
+The module requests **no sensitive permissions** — the app list needs no "read installed apps" grant:
+
+| Declaration | What it is for |
 |---|---|
-| `android.permission.QUERY_ALL_PACKAGES` | Reads installed apps locally |
-| `com.android.permission.GET_INSTALLED_APPS` | Needed for a full app list on HyperOS; without it the list may be incomplete |
+| `<queries>` (manifest declaration, not a permission) | Android 11+ package visibility: the system only grants access to apps declaring push components, so the module cannot see the full app list even by design |
 | `android.permission.INTERNET` | Used only to check for updates on GitHub |
 
 Privacy commitment: no personal data is collected or uploaded; the allowlist and settings stay on this device; no analytics, ads or tracking SDKs; the code is open source and auditable.

@@ -1,6 +1,11 @@
 package io.github.howard20181.hyperos.fcmlive.ui
 
+import android.annotation.SuppressLint
+import android.content.Context
+import android.os.Build
+import android.view.RoundedCorner
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -23,23 +28,39 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.fastForEach
+import androidx.compose.ui.util.fastRoundToInt
 import androidx.navigationevent.NavigationEvent
 import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.NavigationEventHandler
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
+import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.squircle.absoluteSquircleClip
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * Predictive back with the Miuix navigation look — the same treatment `miuix-nav`
  * applies through its `NavTransitions.MiuixDefault` transition plus
- * `NavDisplayEffects` (corner clip + dim), which is what KernelSU and
- * InstallerX-Revived ship as their "MIUIX" return animation:
+ * `NavDisplayEffects` (corner clip + dim + input blocking), which is what KernelSU
+ * and InstallerX-Revived ship as their "MIUIX" return animation:
  *
  * - the page in use slides out full-width, corner-rounded, following the
  *   system's predictive-back progress 1:1;
@@ -49,13 +70,39 @@ import kotlinx.coroutines.launch
  *   starts (0.5, the miuix default `dimAmount`) and lifting linearly to nothing
  *   as the page is uncovered.
  *
+ * Under the **Miuix look** ([UiStyle.Miuix]) the settle physics and the clip
+ * treatment are lifted from `miuix-nav`'s driver, constant for constant:
+ *
+ * - a **commit** converges on the shared settle spring — critically damped,
+ *   stiffness 146, visibility threshold 0.0025 on the depth axis — seeded with
+ *   the release velocity estimated from the gesture's last two timestamped
+ *   events, floored at the exact no-overshoot bound (`√stiffness · remaining`)
+ *   so even a hard fling cannot bounce back past the fully-popped position;
+ * - a **discrete back key** (no progress stream, from rest) plays the
+ *   fixed-duration programmatic curve instead — 500 ms of `NavProgrammaticEasing`,
+ *   the underdamped step response baked into an easing that pins the total
+ *   duration;
+ * - a **cancel** runs the same spring back to rest with the rest position pinned
+ *   as a bound (`settleCancel`), so the page can never overshoot into the wrong
+ *   direction;
+ * - while a transition owns the page it is squircle-clipped on its **leading**
+ *   corner pair at the physical screen corner radius (`NavCornerClipMode.Leading`
+ *   with `rememberNavSystemCornerRadius`), and every pointer event is consumed on
+ *   the Initial pass (the block-input bucket) — both lifted verbatim from
+ *   `NavDisplay`;
+ * - the sheet rides whole pixels (`fastRoundToInt` on `translationX`) so the
+ *   squircle mask's edge cannot shimmer between two pixel alignments.
+ *
+ * Under the **Material look** the previous behaviour stands: an eased 220 ms
+ * tween commit, a non-bouncy `StiffnessMediumLow` cancel from rest, a
+ * full-corner rounded-rectangle clip at 14.33% of the panel width, no input
+ * blocking.
+ *
  * The gesture itself is **the system's**: this container never touches the
  * pointer. `androidx.navigationevent` bridges the platform's predictive-back
  * stream (edge swipe on gesture navigation, a discrete back key otherwise) into
  * the callbacks below, and `enableOnBackInvokedCallback` in the manifest opts
- * the process in. Replacing the previous in-house drag recognizer — and the
- * touch-slop / overscroll arbitration it needed — with the OS's own gesture
- * recognition is the whole point of this shape.
+ * the process in.
  *
  * What is **not** portable from `miuix-nav` is the layer underneath. There, a
  * `NavDisplay` keeps the previous entry composed and the reveal shows a live
@@ -65,16 +112,9 @@ import kotlinx.coroutines.launch
  * the container colour — the animation still runs, the revealed layer is simply
  * flat.
  *
- * A commit plays the slide-out under an eased tween, then hands over; the host
- * is told the page has already slid off screen so it can suppress the system's
- * own exit animation instead of replaying a second transition over an empty
- * frame ([finishPredictiveBack] handles that). A cancel springs the page back to
- * rest; the system does not report a release velocity for a cancelled gesture,
- * so the spring starts from rest.
- *
- * The back key on a three-button navigation bar arrives as a *discrete* commit
- * — no progress stream — and gets the same slide-out animation from rest, which
- * is what makes the keyboard path look like the gesture path.
+ * After a commit the host is told the page has already slid off screen so it can
+ * suppress the system's own exit animation instead of replaying a second
+ * transition over an empty frame ([finishPredictiveBack] handles that).
  *
  * @param onBack Commits the back action — for an `Activity` host, `finish()`.
  *   The `Boolean` says whether the page has **already slid off screen**: `true`
@@ -107,6 +147,12 @@ fun PredictiveBackContainer(
     val layoutDirection = LocalLayoutDirection.current
     val scope = rememberCoroutineScope()
 
+    // The settle treatment is keyed to the active 界面风格: the Miuix look runs the
+    // miuix-nav driver physics; the Material look keeps this file's original,
+    // simpler motion. Read in composition so a style switch rebuilds the driver
+    // with the right branch (the DisposableEffect below is keyed on it too).
+    val isMiuix = LocalUiStyle.current.isMiuixBased
+
     // The parent's picture, read here rather than handed in — same reason as
     // ever: the read must be part of this composable's own recomposition scope,
     // so a theme change re-reads it instead of serving a stale photograph.
@@ -125,37 +171,114 @@ fun PredictiveBackContainer(
     // needs no second code path for RTL.
     val forward = if (layoutDirection == LayoutDirection.Ltr) 1f else -1f
 
-    val backdropColor = MaterialTheme.colorScheme.background
+    // MiuixDefault paints the revealed layer in the theme's surface (what the
+    // Example hands `NavDisplay` as `backdropColor`); the Material look keeps
+    // its own background role.
+    val backdropColor = if (isMiuix) {
+        MiuixTheme.colorScheme.surface
+    } else {
+        MaterialTheme.colorScheme.background
+    }
 
     // Displacement of the page from its resting place, in pixels, 0..width.
     // Driven by the system's predictive-back progress; the commit/cancel
     // settles animate this same value, so gesture and key paths share one
-    // motion.
+    // motion. The depth axis of miuix-nav runs the other way (topIndex down to
+    // topIndex-1); every constant translated here flips sign accordingly.
     val offsetPx = remember { Animatable(0f) }
     var widthPx by remember { mutableFloatStateOf(0f) }
 
+    // True from the moment a back gesture/key claims the page until a cancel
+    // settle has landed. Drives the two transition-time treatments miuix-nav
+    // applies through its depth buckets — the leading squircle clip and the
+    // input blackout — exactly while the page is off its rest position (at rest
+    // the sheet is full-bleed and interactive, as there).
+    var transitionActive by remember { mutableStateOf(false) }
+
     // Corner radius of the sheet while it is displaced, as a fraction of the
-    // screen width — measured off the reference implementation (KernelSU,
-    // miuix-nav), whose revealed card traces a quarter circle spanning 14.33%
-    // of the panel width. The `widthPx > 0` guard matters: before the first
-    // layout pass the width is 0, and a radius of 0 would draw square corners
-    // for one frame.
+    // screen width — the **Material** look's treatment, measured off KernelSU,
+    // whose revealed card traces a quarter circle spanning 14.33% of the panel
+    // width. The `widthPx > 0` guard matters: before the first layout pass the
+    // width is 0, and a radius of 0 would draw square corners for one frame.
     val cardCornerRadius = if (widthPx > 0f) {
         with(density) { (widthPx * CARD_CORNER_FRACTION).toDp() }
     } else {
         0.dp
     }
 
-    // One driver per page. `settled` makes a commit terminal: the slide-out
-    // tween then owns the value, and a second back event arriving during it
-    // (the key can repeat faster than the tween finishes) must not re-enter.
+    // The **Miuix** look clips at the physical screen corner instead — read the
+    // way miuix-nav's `rememberNavSystemCornerRadius` does. Consumed only while
+    // a transition owns the page, on the leading corner pair.
+    val screenCornerRadius = rememberSystemScreenCornerRadius()
+
+    // Corner clip, straight out of NavDisplay's `NavCornerClipMode.Leading` arm:
+    // the squircle mask rides only the transitioning sheet, and only on the
+    // corners that meet the screen edge as the page slides out — left pair for
+    // LTR, right pair for RTL. `absoluteSquircleClip` takes physical corners
+    // (never flipped by layout direction), so the side is picked here.
+    val miuixClipModifier = if (isMiuix && transitionActive) {
+        if (layoutDirection == LayoutDirection.Ltr) {
+            Modifier.absoluteSquircleClip(
+                topLeft = screenCornerRadius,
+                topRight = 0.dp,
+                bottomRight = 0.dp,
+                bottomLeft = screenCornerRadius
+            )
+        } else {
+            Modifier.absoluteSquircleClip(
+                topLeft = 0.dp,
+                topRight = screenCornerRadius,
+                bottomRight = screenCornerRadius,
+                bottomLeft = 0.dp
+            )
+        }
+    } else {
+        Modifier
+    }
+
+    // Input blackout while a transition owns the page — NavDisplay's block-input
+    // bucket, verbatim: an Initial-pass sink that consumes every pointer event
+    // before any child can see it, so taps launched mid-transition cannot land
+    // on a page that is sliding out (or on the one being revealed).
+    val blockInputModifier = if (isMiuix && transitionActive) {
+        Modifier.pointerInput(BLOCK_INPUT_KEY) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                    event.changes.fastForEach { it.consume() }
+                }
+            }
+        }
+    } else {
+        Modifier
+    }
+
+    // One driver per page (rebuilt on a style switch). `settled` makes a commit
+    // terminal: the settle animation then owns the value, and a second back
+    // event arriving during it (the key can repeat faster than the settle
+    // finishes) must not re-enter.
     class Driver : NavigationEventHandler<NavigationEventInfo>(
         initialInfo = NavigationEventInfo.None,
         isBackEnabled = true
     ) {
         var settled = false
 
+        // Per-gesture trackers — a straight lift of NavDisplay's onProgress
+        // bookkeeping: the last two timestamped events estimate the release
+        // velocity (progress-units per second, positive toward the exit edge),
+        // which the commit spring is seeded with so the snap -> spring boundary
+        // is velocity-continuous. Reset at every gesture start.
+        var sawProgress = false
+        var lastProgress = 0f
+        var lastTimeMillis = 0L
+        var progressVelocity = 0f
+
         override fun onBackStarted(event: NavigationEvent) {
+            sawProgress = false
+            lastProgress = 0f
+            lastTimeMillis = 0L
+            progressVelocity = 0f
+            transitionActive = true
             // The picture underneath may be one palette behind, or still
             // carrying the press that left the page: an appearance change and a
             // launch both defer their retake so the tap that caused them does
@@ -171,39 +294,124 @@ fun PredictiveBackContainer(
         }
 
         override fun onBackProgressed(event: NavigationEvent) {
+            sawProgress = true
             onGesture(event)
         }
 
         override fun onBackCompleted() {
             if (settled) return
+            // navBackCompletionDecision: the platform already classified this
+            // terminal callback as a completion and it is accepted regardless of
+            // progress — unless the finger was flung hard back inward, the one
+            // motion strong enough to override an OEM completion. That release
+            // cancels instead of committing.
+            if (isMiuix && sawProgress && progressVelocity <= -MIUIX_COMMIT_VELOCITY_THRESHOLD) {
+                cancelBack()
+                return
+            }
             settled = true
-            // Slide out under the tween from wherever the finger left the page,
-            // then hand over. `alreadySlidOut = true` lets the host suppress
-            // its own exit transition — the page is off screen already.
             scope.launch {
-                offsetPx.animateTo(widthPx, tween(durationMillis = EXIT_MS))
+                if (isMiuix) {
+                    if (sawProgress) {
+                        // Velocity-continuous commit: the shared settle spring
+                        // (critical damping, stiffness 146, threshold 0.0025 of
+                        // the depth axis = a screen width here), seeded with the
+                        // release velocity. The no-overshoot cap mirrors
+                        // `commitVelocityFloor`: a critically damped spring
+                        // crosses its target once when the seed exceeds
+                        // `√stiffness · remaining`, so only that excess — the
+                        // speed that could ONLY become a visible bounce-back —
+                        // is dropped. The remaining distance is read from the
+                        // value the settle actually starts at: the launches queue
+                        // FIFO on the main dispatcher, so the last finger snap
+                        // has landed before this runs.
+                        val remaining = (widthPx - offsetPx.value).coerceAtLeast(0f)
+                        val noOvershootCap = if (remaining <= 0f) {
+                            0f
+                        } else {
+                            sqrt(MIUIX_SETTLE_STIFFNESS) * remaining
+                        }
+                        offsetPx.animateTo(
+                            targetValue = widthPx,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = MIUIX_SETTLE_STIFFNESS,
+                                visibilityThreshold = MIUIX_DEPTH_VISIBILITY_THRESHOLD * widthPx
+                            ),
+                            initialVelocity = (progressVelocity * widthPx).coerceAtMost(noOvershootCap)
+                        )
+                    } else {
+                        // Discrete back key: no progress stream, so no velocity
+                        // to continue — exactly the "from-rest, full-step
+                        // programmatic" case, which settles on the fixed-duration
+                        // curve (500 ms of the baked underdamped step response)
+                        // rather than the live spring, pinning the total duration
+                        // the way `settleProgrammatic` does.
+                        offsetPx.animateTo(
+                            targetValue = widthPx,
+                            animationSpec = tween(
+                                durationMillis = MIUIX_PROGRAMMATIC_DURATION_MILLIS,
+                                easing = MiuixNavProgrammaticEasing
+                            )
+                        )
+                    }
+                } else {
+                    // Slide out under the tween from wherever the finger left the
+                    // page, then hand over. `alreadySlidOut = true` lets the host
+                    // suppress its own exit transition — the page is off screen
+                    // already.
+                    offsetPx.animateTo(widthPx, tween(durationMillis = EXIT_MS))
+                }
                 onBack(true)
             }
         }
 
         override fun onBackCancelled() {
             if (settled) return
+            cancelBack()
+        }
+
+        private fun cancelBack() {
             // Drop the gesture-time capture so the resting read takes over again;
             // the state write itself recomposes this body, re-reading background()
             // from the now-current cache.
             gestureBackground = null
-            // Spring back to rest from wherever the finger left it. The system
-            // reports no release velocity for a cancelled gesture, so the
-            // spring starts from rest; a non-bouncy spec cannot overshoot and
-            // flash the layer behind in the wrong direction.
             scope.launch {
-                offsetPx.animateTo(
-                    targetValue = 0f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow
+                if (isMiuix) {
+                    // `settleCancel`: the same shared spring back to rest, with
+                    // the rest position pinned as a bound so even this spring can
+                    // never carry the page past rest into the wrong direction;
+                    // bounds are cleared afterwards even if the settle is
+                    // interrupted. No explicit velocity seed — the finger snaps
+                    // zeroed the Animatable's own velocity, exactly as the
+                    // driver's `snapToFinger` stream does upstream.
+                    offsetPx.updateBounds(lowerBound = 0f, upperBound = null)
+                    try {
+                        offsetPx.animateTo(
+                            targetValue = 0f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = MIUIX_SETTLE_STIFFNESS,
+                                visibilityThreshold = MIUIX_DEPTH_VISIBILITY_THRESHOLD * widthPx
+                            )
+                        )
+                    } finally {
+                        offsetPx.updateBounds(lowerBound = null, upperBound = null)
+                    }
+                    transitionActive = false
+                } else {
+                    // Spring back to rest from wherever the finger left it. The
+                    // system reports no release velocity for a cancelled gesture,
+                    // so the spring starts from rest; a non-bouncy spec cannot
+                    // overshoot and flash the layer behind in the wrong direction.
+                    offsetPx.animateTo(
+                        targetValue = 0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
                     )
-                )
+                }
             }
         }
 
@@ -211,6 +419,19 @@ fun PredictiveBackContainer(
             if (settled) return
             val extent = widthPx
             if (extent <= 0f) return
+            // Release-velocity estimation, verbatim from NavDisplay's event
+            // filter: the last two timestamped events divide their progress
+            // delta by their frame delta. Platforms without usable frame timing
+            // deliver `frameTimeMillis == 0` and are skipped, leaving the seed
+            // at 0 — still a commit, just without momentum.
+            if (event.frameTimeMillis > lastTimeMillis && lastTimeMillis != 0L) {
+                progressVelocity =
+                    (event.progress - lastProgress) * 1000f / (event.frameTimeMillis - lastTimeMillis)
+            }
+            if (event.frameTimeMillis != 0L) {
+                lastProgress = event.progress
+                lastTimeMillis = event.frameTimeMillis
+            }
             // Devices have been seen misreporting progress past 1; the visual
             // math below assumes 0..1.
             val progress = event.progress.coerceIn(0f, 1f)
@@ -218,7 +439,7 @@ fun PredictiveBackContainer(
         }
     }
 
-    DisposableEffect(dispatcher) {
+    DisposableEffect(dispatcher, isMiuix) {
         val driver = Driver()
         dispatcher.addHandler(driver)
         onDispose { driver.remove() }
@@ -228,6 +449,7 @@ fun PredictiveBackContainer(
         modifier = Modifier
             .fillMaxSize()
             .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
+            .then(blockInputModifier)
     ) {
         // The parent — 上一层页面, the page being returned to.
         //
@@ -306,18 +528,29 @@ fun PredictiveBackContainer(
         // width with the system's progress, and that is ALL it does.
         //
         // No wash, no gradient, no elevation shadow on this layer. The shadow
-        // belongs to the card below, and it is drawn there.
+        // belongs to the card below, and it is drawn there. Under the Miuix look
+        // the sheet rides whole pixels — miuix-nav rounds `translationX` the same
+        // way so the squircle mask's edge cannot shimmer between two pixel
+        // alignments frame to frame; the M3 look keeps the raw value.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    translationX = offsetPx.value * forward
-                    // Round the sheet only while it is off its rest position. At
-                    // rest it is full-bleed, and rounding it there would cut
-                    // visible notches out of the page everyone looks at.
-                    clip = offsetPx.value > 0f
-                    shape = RoundedCornerShape(cardCornerRadius)
+                    translationX = if (isMiuix) {
+                        offsetPx.value.fastRoundToInt().toFloat() * forward
+                    } else {
+                        offsetPx.value * forward
+                    }
+                    // The M3 look rounds the sheet with its own rectangle shape,
+                    // only while off rest. The Miuix look clips through the
+                    // squircle modifier appended below instead — same "only while
+                    // transitioning" rule, a different mask.
+                    if (!isMiuix) {
+                        clip = offsetPx.value > 0f
+                        shape = RoundedCornerShape(cardCornerRadius)
+                    }
                 }
+                .then(miuixClipModifier)
         ) {
             content()
         }
@@ -341,17 +574,123 @@ private const val PARALLAX_FRACTION = 0.25f
 /** Alpha the covered layer loses while fully buried — the MiuixDefault falloff. */
 private const val COVER_ALPHA_FALLOFF = 0.1f
 
-/** Duration of the commit slide. The M3 "medium" expressive duration. */
+/** Duration of the commit slide under the Material look. The M3 "medium" expressive duration. */
 private const val EXIT_MS = 220
 
 /**
- * Corner radius of the sheet, as a fraction of the screen width.
+ * Corner radius of the sheet under the Material look, as a fraction of the screen
+ * width.
  *
  * Measured off the reference implementation rather than chosen: KernelSU's
  * settings page (miuix-nav) traces a quarter circle whose horizontal travel is
  * 172 px on a 1200 px panel — 14.33%, fitted with an rms error of 1.7 px. A
  * fraction rather than a dp constant, so it tracks the reference on any panel;
  * a fixed dp was measured to fail because the arc's apex falls above the top of
- * the window and only its near-vertical tail is visible.
+ * the window and only its near-vertical tail is visible. The Miuix look clips at
+ * the physical screen corner instead and never consumes this.
  */
 private const val CARD_CORNER_FRACTION = 0.1433f
+
+/**
+ * Canonical constants of miuix-nav's shared driver (`NavDriverSpec`), consumed by
+ * the Miuix look's settle physics:
+ *
+ * - [MIUIX_SETTLE_STIFFNESS]: low stiffness on the depth scale. With critical
+ *   damping and the tight threshold, a full one-step pop settles in roughly half
+ *   a second — the established miuix navigation feel.
+ * - [MIUIX_DEPTH_VISIBILITY_THRESHOLD]: the depth axis converges once within a
+ *   few ten-thousandths of a step; translated to this file's pixel axis that is
+ *   a fraction of the screen width.
+ * - [MIUIX_COMMIT_VELOCITY_THRESHOLD]: release velocity (progress-units per
+ *   second) above which velocity alone decides; only a return fling stronger
+ *   than this overrides an OEM completion.
+ * - [MIUIX_PROGRAMMATIC_DURATION_MILLIS]: the fixed duration of the
+ *   from-rest programmatic settle, identical for any distance.
+ */
+private const val MIUIX_SETTLE_STIFFNESS = 146f
+private const val MIUIX_DEPTH_VISIBILITY_THRESHOLD = 0.0025f
+private const val MIUIX_COMMIT_VELOCITY_THRESHOLD = 1.0f
+private const val MIUIX_PROGRAMMATIC_DURATION_MILLIS = 500
+
+/** Key of the transition-time input blackout, matching NavDisplay's `BLOCK_INPUT_KEY` role. */
+private const val BLOCK_INPUT_KEY = "miuix-block-input-during-transition"
+
+/**
+ * The step response of an underdamped spring baked into an [Easing], played over
+ * a fixed tween duration — a lift of miuix-nav's `NavSettleEasing`.
+ *
+ * This reproduces, point for point, the established enter/exit curve of miuix
+ * navigation, so a discrete back-key commit keeps the exact same pacing: a brisk
+ * middle (≈48% at a fifth of the duration) and a long, gentle tail. The curve is
+ * monotone within `0..1` for the shipped parameters, so it never bounces;
+ * `transform(1f)` lands at ≈0.99933 and the tween's final frame snaps the
+ * residue. Gesture handoffs use the live spring instead because they must seed a
+ * release velocity, which a tween cannot do.
+ *
+ * @param response oscillation period of the underlying spring, in units of the
+ *   played duration.
+ * @param damping damping ratio of the underlying spring (`< 1`, underdamped).
+ */
+private class MiuixSettleEasing(
+    response: Float,
+    damping: Float,
+) : Easing {
+    private val r: Float
+    private val w: Float
+    private val c2: Float
+
+    init {
+        val omega = 2.0 * PI / response
+        val k = omega * omega
+        val c = damping * 4.0 * PI / response
+
+        w = (sqrt(4.0 * k - c * c) / 2.0).toFloat()
+        r = (-c / 2.0).toFloat()
+        c2 = r / w
+    }
+
+    override fun transform(fraction: Float): Float {
+        val t = fraction.toDouble()
+        val decay = exp(r * t)
+        return (decay * (-cos(w * t) + c2 * sin(w * t)) + 1.0).toFloat()
+    }
+}
+
+/**
+ * The single programmatic settle curve (`response = 0.8`, `damping = 0.95`) —
+ * miuix-nav's `NavProgrammaticEasing`, the default curve of a from-rest,
+ * full-step programmatic pop.
+ */
+private val MiuixNavProgrammaticEasing: Easing =
+    MiuixSettleEasing(response = 0.8f, damping = 0.95f)
+
+/**
+ * Reads the device screen corner radius — a lift of miuix-nav's
+ * `rememberNavSystemCornerRadius`. Prefers the standard [RoundedCorner]
+ * window-insets API (API 31+, bottom-left position); otherwise falls back to the
+ * framework `rounded_corner_radius_bottom` dimen, and finally to `0.dp` for
+ * flat-corner screens.
+ */
+@Composable
+private fun rememberSystemScreenCornerRadius(): Dp {
+    val context = LocalContext.current
+    val density = LocalDensity.current.density
+    val view = LocalView.current
+    val insets = view.rootWindowInsets
+    val radiusPx = remember(context, view, insets) {
+        val fromInsets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            insets?.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT)?.radius?.takeIf { it > 0 }
+        } else {
+            null
+        }
+        fromInsets ?: bottomCornerRadiusFromResources(context)
+    }
+    return (radiusPx / density).dp
+}
+
+/** Framework `android`-package dimen fallback for the bottom screen corner radius; 0 when absent. */
+@SuppressLint("DiscouragedApi")
+private fun bottomCornerRadiusFromResources(context: Context): Int {
+    val id = context.resources.getIdentifier("rounded_corner_radius_bottom", "dimen", "android")
+    return if (id > 0) context.resources.getDimensionPixelSize(id) else 0
+}

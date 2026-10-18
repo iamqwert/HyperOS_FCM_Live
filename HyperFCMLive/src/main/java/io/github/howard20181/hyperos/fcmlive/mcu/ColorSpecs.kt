@@ -28,8 +28,9 @@ package io.github.howard20181.hyperos.fcmlive.mcu
  * [DynamicColor.Builder.extendSpecVersion] together with the version it was introduced in, so a
  * single color object resolves to the right definition for whichever scheme asks.
  *
- * This port publishes 2021 and 2025 — the two the app offers — so the newest spec is
- * [SPEC_2025] and it plays the role upstream gives its newest.
+ * This port publishes 2021, 2025 and 2026 — the first two are what the spec menu offers every
+ * style, the third is the CMF style's own layer — so the newest spec is [SPEC_2026] and it plays
+ * the role upstream gives its newest.
  *
  * Two ways in, mirroring upstream:
  *  - **Building a role** (which palette, which tone function, which background) goes through
@@ -46,13 +47,19 @@ internal object ColorSpecs {
     /** The 2025 Material 3 Expressive spec, layered on top of [SPEC_2021]. */
     val SPEC_2025: ColorSpec2025 = ColorSpec2025()
 
+    /** The 2026 spec, layered on top of [SPEC_2025] — the CMF style's own rules. */
+    val SPEC_2026: ColorSpec2026 = ColorSpec2026()
+
     /**
      * The spec that builds roles. Upstream uses its newest spec here for every scheme, so that is
      * what this does too.
      */
-    val newest: ColorSpec2021 = SPEC_2025
+    val newest: ColorSpec2021 = SPEC_2026
 
     /** The spec that resolves values for a scheme of the given version. */
-    fun get(specVersion: Scheme.Spec): ColorSpec2021 =
-        if (specVersion == Scheme.Spec.SPEC_2025) SPEC_2025 else SPEC_2021
+    fun get(specVersion: Scheme.Spec): ColorSpec2021 = when (specVersion) {
+        Scheme.Spec.SPEC_2026 -> SPEC_2026
+        Scheme.Spec.SPEC_2025 -> SPEC_2025
+        Scheme.Spec.SPEC_2021 -> SPEC_2021
+    }
 }

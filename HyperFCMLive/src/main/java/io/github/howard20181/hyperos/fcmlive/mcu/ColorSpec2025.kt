@@ -39,7 +39,9 @@ import kotlin.math.min
  *    surfaces get closer together, so `getHct` multiplies the palette chroma for exactly the roles
  *    that opt in. See [getHct].
  */
-internal class ColorSpec2025 : ColorSpec2021() {
+// `open` for ColorSpec2026, which layers the CMF scheme's own tone rules on top of this spec —
+// exactly the subclassing upstream uses between its 2025 and 2026 spec classes.
+internal open class ColorSpec2025 : ColorSpec2021() {
 
     // ----------------------------------------------------------------- surfaces
 

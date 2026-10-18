@@ -29,6 +29,13 @@ class ExperimentActivity : AppCompatActivity() {
         super.attachBaseContext(ThemeSupport.attach(newBase))
     }
 
+    // A language pick lands here instead of a recreate (configChanges in the
+    // manifest) — no window swap, no flash.
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        AppLocale.onLocaleConfigChanged()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ThemeSupport.onCreate(this)
@@ -41,7 +48,11 @@ class ExperimentActivity : AppCompatActivity() {
                         // the exit transition is suppressed for that path only;
                         // a plain finish from the top-bar arrow still animates.
                         onBack = { alreadySlidOut -> finishPredictiveBack(alreadySlidOut) },
-                        background = { WindowSnapshot.forParent(AboutActivity::class.java) }
+                        // Whoever launched us is the layer the reveal shows —
+                        // read from the launch-time record, not a static list
+                        // (both the M3 settings tab and the Miuix about page
+                        // open this window).
+                        background = { WindowSnapshot.forLaunchingParent(ExperimentActivity::class.java) }
                     ) {
                         ExperimentScreen(onBack = { finishPredictiveBack(alreadySlidOut = false) })
                     }

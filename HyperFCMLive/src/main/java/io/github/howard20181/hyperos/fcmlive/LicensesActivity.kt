@@ -31,6 +31,13 @@ class LicensesActivity : AppCompatActivity() {
         super.attachBaseContext(ThemeSupport.attach(newBase))
     }
 
+    // A language pick lands here instead of a recreate (configChanges in the
+    // manifest) — no window swap, no flash.
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        AppLocale.onLocaleConfigChanged()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ThemeSupport.onCreate(this)
@@ -43,7 +50,11 @@ class LicensesActivity : AppCompatActivity() {
                         // the exit transition is suppressed for that path only;
                         // a plain finish from the top-bar arrow still animates.
                         onBack = { alreadySlidOut -> finishPredictiveBack(alreadySlidOut) },
-                        background = { WindowSnapshot.forParent(AboutActivity::class.java) }
+                        // Whoever launched us is the layer the reveal shows —
+                        // read from the launch-time record, not a static list
+                        // (the static order served a stale home picture when
+                        // this page was opened from the about page).
+                        background = { WindowSnapshot.forLaunchingParent(LicensesActivity::class.java) }
                     ) {
                         LicensesScreen(onBack = { finishPredictiveBack(alreadySlidOut = false) })
                     }

@@ -47,24 +47,17 @@ class AppListStore(context: Context, private val onIconsReady: (Map<String, Draw
          * so its checkbox carries no meaning. Drawn greyed out and made
          * non-interactive by the row composable, which is why the flag lives
          * here rather than being recomputed at each of the gesture call sites.
-         *
-         * [exemptNote] is the string resource explaining *why* this particular
-         * row is inert, carried on the entry rather than fixed in the row
-         * composable.
          */
         @JvmField
         var exempt: Boolean = false
 
-        @JvmField
-        var exemptNote: Int = 0
-
-        /** Manifest components (Firebase service / receiver, or their actions). */
-        @JvmField
-        var supportFcm: Boolean = false
-
         /**
          * Declares the MiPush service: the app has its own system-channel push
          * route, so waking FCM for it is usually unnecessary. Shown as a tag.
+         *
+         * (There is no `supportFcm` flag: every row in the list got there by
+         * matching a push manifest query, so support is the list's admission
+         * criterion, not a per-row attribute.)
          */
         @JvmField
         var supportMiPush: Boolean = false

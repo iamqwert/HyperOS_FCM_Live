@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Material Symbols "check_box_outline_blank" (fill1, outlined family). Path data verbatim
+<!-- Material Symbols "extension" (fill1, outlined family). Path data verbatim
      from fonts.gstatic.com (Apache-2.0); the source canvas is 960x960 with a
-     -960 y origin, shifted down via the group.
+     -960 y origin, shifted down via the group. Home "LSPosed version" row.
      -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -11,6 +11,6 @@
     <group android:translateY="960">
         <path
             android:fillColor="@android:color/white"
-            android:pathData="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h560v-560H200v560Z" />
+            android:pathData="M200-120q-34 0-57-23t-23-57v-152q48 0 84-30.5t36-77.5q0-46-36-76t-84-32v-152q0-33 23.5-56.5T200-800h122q7-51 46-85.5t92-34.5q52 0 91 34.5t47 85.5h122q33 0 56.5 23.5T800-720v134q36 18 58 52t22 74q0 41-22 75t-58 51v134q0 34-23.5 57T720-120H200Z" />
     </group>
 </vector>

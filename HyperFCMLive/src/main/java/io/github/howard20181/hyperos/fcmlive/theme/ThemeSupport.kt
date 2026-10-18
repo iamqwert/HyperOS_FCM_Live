@@ -35,7 +35,7 @@ object ThemeSupport {
         }
         val config = Configuration(base.resources.configuration)
         config.uiMode = (config.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
-            if (mode == ThemePrefs.MODE_DARK || mode == ThemePrefs.MODE_AMOLED) {
+            if (mode == ThemePrefs.MODE_DARK) {
                 Configuration.UI_MODE_NIGHT_YES
             } else {
                 Configuration.UI_MODE_NIGHT_NO

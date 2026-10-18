@@ -2,34 +2,23 @@ package io.github.howard20181.hyperos.fcmlive
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
-import android.os.Process
-import android.util.Log
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.ComposeView
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport
 import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
-import io.github.howard20181.hyperos.fcmlive.AppLocale
 import io.github.howard20181.hyperos.fcmlive.ui.AboutActions
 import io.github.howard20181.hyperos.fcmlive.ui.AboutScreen
+import io.github.howard20181.hyperos.fcmlive.ui.AboutTabScreen
 import io.github.howard20181.hyperos.fcmlive.ui.PredictiveBackContainer
-import io.github.howard20181.hyperos.fcmlive.ui.UpdateOutcome
 import io.github.howard20181.hyperos.fcmlive.ui.WindowSnapshot
 import io.github.howard20181.hyperos.fcmlive.ui.finishPredictiveBack
 import io.github.howard20181.hyperos.fcmlive.ui.startActivityWithSnapshot
-import java.io.BufferedReader
-import java.io.IOException
-import java.io.InputStreamReader
-import java.io.OutputStream
-import java.nio.charset.StandardCharsets
-import java.nio.file.FileSystems
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,21 +26,30 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Settings: appearance, allowlist backup, links, update check.
+ * Settings: appearance, allowlist backup, links, update check — or, in
+ * about-only mode, just the about page (hero + the three project rows).
  *
- * The whole screen is Compose — [AboutScreen] owns the rows, the menus and the
- * update offer. What stays here is only what a composable cannot do: the SAF
- * contracts need an `ActivityResultRegistry`, the update check is a network
- * call, and the release it offers has to be opened with this Activity's own
- * `startActivity`. The offer itself is screen state, so it is drawn by the same
- * dialog stack as the licences page — rather than a second, framework-owned one
- * the runtime palette could not reach.
+ * The whole screen is Compose. [AboutScreen] owns the full settings page —
+ * the Miuix home's single-page layout; [AboutTabScreen] owns the about-only
+ * mode the M3 home's about card opens. What stays here is only what a
+ * composable cannot do, and both hosts hold an [AboutDelegate] for it: the
+ * SAF contracts, the update check, the release opening, and the theme's
+ * View-side half.
  *
  * The page is wrapped in [PredictiveBackContainer]: the system's predictive
  * back gesture (or the back key) plays the Miuix-style slide-out preview before
  * this Activity finishes.
  */
 class AboutActivity : AppCompatActivity() {
+
+    /**
+     * The extra that picks the page: true renders the about page only (hero +
+     * project rows — the M3 home's destination), absent renders the full
+     * settings page (the Miuix home's destination).
+     */
+    companion object {
+        const val EXTRA_ABOUT_ONLY = "about_only"
+    }
 
     /** The M3 feedback line. Owned here, drawn by [AboutScreen]'s Scaffold. */
     private val snackbarHostState = SnackbarHostState()
@@ -67,36 +65,37 @@ class AboutActivity : AppCompatActivity() {
      */
     private var miuixFeedbackNow = false
 
+    /**
+     * The look this window opened in — every launch of the full settings page
+     * is a Miuix launch (the M3 home's destinations are tabs and the
+     * about-only mode), and the about-only page carries no appearance rows, so
+     * nothing can change the style inside it. The full page compares this
+     * against the live look: a style change made in its appearance rows
+     * finishes the window, handing back to a home already dressed correctly.
+     */
+    private var openedMiuix = false
+
     /** Scope for showing a message; cancelled with the Activity. */
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /**
-     * Where the release the check just offered lives. Held here rather than on
-     * the screen because opening it launches another app, which only this class
-     * can do.
+     * The Activity-bound half of the screen — created before the window is
+     * STARTED, which is when the SAF contracts must register.
      */
-    private var pendingDownloadUrl: String? = null
-
-    /**
-     * SAF export/import via Activity Result API (no startActivityForResult).
-     * The returned URI is externally supplied, so both paths are re-checked
-     * before any stream is opened — see [isGrantedContentUri].
-     */
-    private val createAllowlistDoc =
-        registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-            if (uri != null) {
-                writeAllowlistTo(uri)
-            }
-        }
-    private val openAllowlistDoc =
-        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri != null) {
-                readAllowlistFrom(uri)
-            }
-        }
+    private val delegate = AboutDelegate(this, ::showMessage)
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(ThemeSupport.attach(newBase))
+    }
+
+    // A language pick lands here instead of a recreate (configChanges in the
+    // manifest): the framework re-reads the configuration into this activity's
+    // resources, and the locale bump makes the Compose tree re-resolve its
+    // strings — no window swap, no flash, and the dynamic background keeps its
+    // composition (a recreate would rebuild the mesh from zero — the reload).
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        AppLocale.onLocaleConfigChanged()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -105,39 +104,76 @@ class AboutActivity : AppCompatActivity() {
         // Keep launcher shortcut icons in sync when the settings page opens.
         ShortcutPublisher.publish(this)
 
-        val versionLine = versionLine()
+        val versionLine = delegate.versionLine()
+        val versionTag = delegate.versionTag()
+        val aboutOnly = intent.getBooleanExtra(EXTRA_ABOUT_ONLY, false)
+        openedMiuix = !aboutOnly
         val composeView = ComposeView(this).apply {
             setContent {
                 HyperFCMLiveTheme {
                     // The feedback style follows the shell: Miuix acknowledges
                     // with the system toast (its Scaffold hosts no snackbar),
                     // Material with the page's own bar. Read here, in
-                    // composition — [showMessage] is a plain function and
-                    // cannot read this itself.
-                    miuixFeedbackNow = LocalUiStyle.current == UiStyle.Miuix
+                    // composition — [showMessage] is a plain function and cannot
+                    // read this itself.
+                    miuixFeedbackNow = LocalUiStyle.current.isMiuixBased
+                    // The full settings page owns the appearance rows, so a
+                    // style change made inside this window leaves it a foreign
+                    // shell over a home wearing the other look: finishing hands
+                    // the user back to MainActivity, already dressed correctly.
+                    // The about-only page has no such rows — nothing can change
+                    // the style inside it, so it never self-closes, whatever
+                    // look the home that launched it wears.
+                    if (!aboutOnly && miuixFeedbackNow != openedMiuix) {
+                        LaunchedEffect(Unit) {
+                            finishPredictiveBack(alreadySlidOut = false)
+                        }
+                    }
                     PredictiveBackContainer(
                         // A committed back has already slid the page out, so the
                         // exit transition is suppressed for that path only; a back
                         // press that never moved the page still animates.
                         onBack = { alreadySlidOut -> finishPredictiveBack(alreadySlidOut) },
                         // The page underneath, as it looked when this one was
-                        // opened. MainActivity's window is gone by now, so a
-                        // photograph taken on the way in is the only copy of
-                        // it. Null here just means the strip is flat.
-                        background = { WindowSnapshot.forParent(MainActivity::class.java) }
+                        // opened — whoever launched us (always MainActivity
+                        // today, but read from the record, not assumed).
+                        // Null here just means the strip is flat.
+                        background = { WindowSnapshot.forLaunchingParent(AboutActivity::class.java) }
                     ) {
-                        AboutScreen(
+                        if (aboutOnly) {
+                            AboutTabScreen(
+                                onBack = { finishPredictiveBack(alreadySlidOut = false) },
+                                actions = AboutActions(
+                                    // 「查看源代码」 opens the repository, 「许可证」
+                                    // the GPL-3.0 licence text — the reference
+                                    // about page's own link treatment.
+                                    onViewSource = { delegate.openLink(AboutDelegate.REPO_URL) },
+                                    onLicense = { delegate.openLink(AboutDelegate.GPL3_URL) },
+                                    onLicenses = {
+                                        startActivityWithSnapshot(
+                                            Intent(this@AboutActivity, LicensesActivity::class.java)
+                                        )
+                                    },
+                                    onExperiment = {},
+                                    onExport = {},
+                                    onImport = {},
+                                    onCheckUpdate = {},
+                                    onUpdateOpen = {},
+                                    versionLine = versionLine,
+                                    versionTag = versionTag,
+                                    onAppearanceChange = delegate::applyAppearanceChange
+                                ),
+                                snackbarHostState = snackbarHostState
+                            )
+                        } else {
+                            AboutScreen(
                             onBack = { finishPredictiveBack(alreadySlidOut = false) },
                             actions = AboutActions(
-                                onViewSource = { openLink(REPO_URL) },
+                                onViewSource = { delegate.openLink(AboutDelegate.REPO_URL) },
+                                onLicense = { delegate.openLink(AboutDelegate.GPL3_URL) },
                                 onLicenses = {
                                     startActivityWithSnapshot(
                                         Intent(this@AboutActivity, LicensesActivity::class.java)
-                                    )
-                                },
-                                onPrivacy = {
-                                    startActivityWithSnapshot(
-                                        Intent(this@AboutActivity, PrivacyActivity::class.java)
                                     )
                                 },
                                 onExperiment = {
@@ -145,16 +181,17 @@ class AboutActivity : AppCompatActivity() {
                                         Intent(this@AboutActivity, ExperimentActivity::class.java)
                                     )
                                 },
-                                onExport = ::exportAllowlist,
-                                onImport = ::importAllowlist,
-                                onHelp = { openLink(helpUrl(this@AboutActivity)) },
-                                onCheckUpdate = ::checkForUpdates,
-                                onUpdateOpen = ::openPendingUpdate,
+                                onExport = delegate::exportAllowlist,
+                                onImport = delegate::importAllowlist,
+                                onCheckUpdate = delegate::checkForUpdates,
+                                onUpdateOpen = delegate::openPendingUpdate,
                                 versionLine = versionLine,
-                                onAppearanceChange = ::applyAppearanceChange
+                                versionTag = versionTag,
+                                onAppearanceChange = delegate::applyAppearanceChange
                             ),
                             snackbarHostState = snackbarHostState
                         )
+                        }
                     }
                 }
             }
@@ -162,234 +199,14 @@ class AboutActivity : AppCompatActivity() {
         setContentView(composeView)
     }
 
-    /**
-     * The version line is bound from PackageManager — the same source the
-     * update check compares against — so it cannot drift the way a hard-coded
-     * string did.
-     */
-    private fun versionLine(): String {
-        val info = try {
-            packageManager.getPackageInfo(packageName, 0)
-        } catch (t: Throwable) {
-            Log.w(TAG, "Cannot read own package info", t)
-            null
-        }
-        val name = info?.versionName ?: return ""
-        return getString(R.string.about_sub_check_update, name, info.longVersionCode)
-    }
-
-    /**
-     * Runs the check and hands the answer straight back to the screen, which
-     * decides what it looks like. This side keeps only the two things the
-     * screen cannot hold: the URL to open, and the badge flag that is cleared
-     * when that URL is opened.
-     */
-    private fun checkForUpdates(report: (UpdateOutcome) -> Unit) {
-        UpdateChecker.checkAsync(this, object : UpdateChecker.Callback {
-            override fun onResult(
-                updateAvailable: Boolean,
-                latestVersion: String,
-                downloadUrl: String
-            ) {
-                runOnUiThread {
-                    if (isFinishing || isDestroyed) {
-                        return@runOnUiThread
-                    }
-                    if (!updateAvailable) {
-                        report(UpdateOutcome.None)
-                        return@runOnUiThread
-                    }
-                    pendingDownloadUrl = downloadUrl
-                    report(UpdateOutcome.Available(latestVersion))
-                }
-            }
-
-            override fun onError() {
-                runOnUiThread {
-                    if (isFinishing || isDestroyed) {
-                        return@runOnUiThread
-                    }
-                    report(UpdateOutcome.Error)
-                }
-            }
-        })
-    }
-
-    /** Opens the release the check offered, and drops the badge with it. */
-    private fun openPendingUpdate() {
-        val url = pendingDownloadUrl ?: return
-        pendingDownloadUrl = null
-        UpdateChecker.clearBadge(this)
-        openLink(url)
-    }
-
-    /**
-     * Opens a link, and says so in the page when nothing can take it. The URL
-     * itself is the message: a device with no browser can still be shown where
-     * it was meant to go.
-     */
-    private fun openLink(url: String) {
-        if (!UiUtils.openUrl(this, url)) {
-            showMessage(url)
-        }
-    }
-
-    /**
-     * In-place re-skin. The palette invalidation itself lives in the
-     * [AppearanceState] setters — each appearance write bumps ThemeEngine's
-     * generation counter and the Compose tree follows it — so what is left here
-     * is the View-side half no recomposition reaches: the window chrome repaint
-     * and the back-preview snapshot. The old path was `recreate()` — a
-     * whole-window rebuild that read as a visible jump every time an appearance
-     * menu option was picked.
-     *
-     * The back-preview snapshot is refreshed too. It is a photograph of the
-     * *below* this one — Main — taken on the way in, so it is wearing the old
-     * palette the moment this runs; left alone, returning to Main would reveal
-     * the previous theme. Main is stopped but still alive and still laid out, so
-     * it can be redrawn here even though it is not on screen. See
-     * [WindowSnapshot.refreshForTheme].
-     */
-    private fun applyAppearanceChange() {
-        ThemeSupport.reapplyWindow(this)
-        WindowSnapshot.refreshForTheme()
-    }
-
-    private fun exportAllowlist() {
-        try {
-            createAllowlistDoc.launch("fcmlive-allowlist.txt")
-        } catch (t: Throwable) {
-            showMessage(R.string.allowlist_export_failed)
-        }
-    }
-
-    private fun importAllowlist() {
-        try {
-            openAllowlistDoc.launch(arrayOf("text/plain"))
-        } catch (t: Throwable) {
-            showMessage(R.string.allowlist_import_failed)
-        }
-    }
-
-    private fun currentAllowlist(): Set<String> {
-        val allow = Prefs.readAllowlist(Prefs.remote())
-        return if (allow.isEmpty()) Prefs.readLocalAllowlist(this) else allow
-    }
-
-    private fun writeAllowlistTo(uri: Uri) {
-        val sorted = currentAllowlist().toMutableList()
-        java.util.Collections.sort(sorted)
-
-        // ACTION_CREATE_DOCUMENT returns an externally supplied URI. Require a
-        // content URI and an explicit write grant before resolving it. This
-        // prevents an arbitrary caller/provider URI from being used as a
-        // ContentResolver target.
-        if (!isGrantedContentUri(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION)) {
-            showMessage(R.string.allowlist_export_failed)
-            return
-        }
-        // The authority decides which provider answers; the *path* is what the
-        // provider itself interprets, and a provider is free to mean
-        // "/data/data/<app>/..." by it. Resolving such a URI is what turns a
-        // document picker into a way to overwrite this app's own private files.
-        // Normalising first is what makes the prefix test mean anything:
-        // "/safe/../../data/data/<app>/x" names the /data path it normalises to.
-        if (!isSafeDocumentPath(uri)) {
-            showMessage(R.string.allowlist_export_failed)
-            return
-        }
-
-        try {
-            val out: OutputStream = contentResolver.openOutputStream(uri)
-                ?: throw IOException("null stream")
-            out.use { stream ->
-                val sb = StringBuilder()
-                for (pkg in sorted) {
-                    sb.append(pkg).append('\n')
-                }
-                stream.write(sb.toString().toByteArray(StandardCharsets.UTF_8))
-                showMessage(getString(R.string.allowlist_export_done, sorted.size))
-            }
-        } catch (t: Throwable) {
-            showMessage(R.string.allowlist_export_failed)
-        }
-    }
-
-    private fun readAllowlistFrom(uri: Uri) {
-        val allow = HashSet<String>()
-
-        // Same checks as the export side: the provider interprets the path, so
-        // it is normalised and the private roots are refused before a stream is
-        // opened — otherwise a provider can answer with this app's own files.
-        if (!isGrantedContentUri(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)) {
-            showMessage(R.string.allowlist_import_failed)
-            return
-        }
-        if (!isSafeDocumentPath(uri)) {
-            showMessage(R.string.allowlist_import_failed)
-            return
-        }
-
-        try {
-            val input = contentResolver.openInputStream(uri)
-                ?: throw IOException("null stream")
-            input.use { stream ->
-                BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8)).use { reader ->
-                    var line = reader.readLine()
-                    while (line != null) {
-                        val pkg = line.trim()
-                        if (pkg.isNotEmpty() && !pkg.startsWith("#")) {
-                            allow.add(pkg)
-                        }
-                        line = reader.readLine()
-                    }
-                }
-            }
-        } catch (t: Throwable) {
-            showMessage(R.string.allowlist_import_failed)
-            return
-        }
-        if (allow.isEmpty()) {
-            showMessage(R.string.allowlist_import_empty)
-            return
-        }
-        Prefs.writeAllowlist(this, Prefs.remote(), allow)
-        showMessage(getString(R.string.allowlist_import_done, allow.size))
-    }
-
-    /**
-     * Refuses paths that escape upwards or name a root we must never write to.
-     * A leftover ".." means the path still escapes: `normalize()` keeps it when
-     * there is nothing above it to collapse into.
-     */
-    private fun isSafeDocumentPath(uri: Uri): Boolean {
-        val path = uri.path ?: return false
-        val normalized = FileSystems.getDefault().getPath(path).normalize()
-        if (normalized.startsWith("/data")) {
-            return false
-        }
-        val resolved = normalized.toString()
-        return !resolved.contains("..") &&
-            !resolved.startsWith("/system") &&
-            !resolved.startsWith("/vendor") &&
-            !resolved.startsWith("/proc") &&
-            !resolved.startsWith("/dev")
-    }
-
-    /**
-     * Accept only content:// URIs for which this process currently has the
-     * requested explicit URI permission. The permission check is performed
-     * against this process UID/PID, so an arbitrary URI supplied by another
-     * component cannot be resolved unless Android has actually granted access.
-     */
-    private fun isGrantedContentUri(uri: Uri?, grantFlag: Int): Boolean {
-        if (uri == null || uri.scheme != "content" ||
-            uri.authority.isNullOrEmpty()
-        ) {
-            return false
-        }
-        return checkUriPermission(uri, Process.myPid(), Process.myUid(), grantFlag) ==
-            PackageManager.PERMISSION_GRANTED
+    override fun onResume() {
+        super.onResume()
+        // Same forced redraw as MainActivity's: this page launches the
+        // licences / experiment pages mid-tap too, so its surface
+        // can come back showing a row's press feedback frozen at full bloom —
+        // the tap's last frame, never replaced because nothing invalidates on
+        // return. One draw puts the page back at rest.
+        window.decorView.invalidate()
     }
 
     /**
@@ -397,10 +214,6 @@ class AboutActivity : AppCompatActivity() {
      * drawn by the page it belongs to, in that page's colours, under Material —
      * and the system toast under Miuix, whose Scaffold hosts no snackbar.
      */
-    private fun showMessage(resId: Int) {
-        showMessage(getString(resId))
-    }
-
     private fun showMessage(text: String) {
         if (miuixFeedbackNow) {
             Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
@@ -418,31 +231,5 @@ class AboutActivity : AppCompatActivity() {
         // going to be drawn in.
         uiScope.cancel()
         super.onDestroy()
-    }
-
-    companion object {
-        private const val TAG = "AboutActivity"
-
-        private const val REPO_URL = "https://github.com/iamqwert/HyperOS_FCM_Live"
-
-        /**
-         * Online help, opened in the browser from the top-bar help icon and
-         * from the "help" launcher shortcut (see [ShortcutPublisher]).
-         *
-         * The in-app help page was removed on purpose: its text had to be kept
-         * in sync with `Hooker` by hand, which drifted more than once. Keeping
-         * a single copy in the repository means a wording fix ships without an
-         * APK release. Point this at a URL that renders Markdown.
-         */
-        private const val HELP_URL_ZH = "https://github.com/iamqwert/HyperOS_FCM_Live/blob/main/HELP.md"
-        private const val HELP_URL_EN = "https://github.com/iamqwert/HyperOS_FCM_Live/blob/main/HELP_EN.md"
-
-        /**
-         * The help doc in the app's current display language — the guide is
-         * bilingual, and the entry point must match what the reader is reading
-         * the rest of the UI in.
-         */
-        fun helpUrl(context: Context): String =
-            if (AppLocale.current(context) == AppLocale.INDEX_ENGLISH) HELP_URL_EN else HELP_URL_ZH
     }
 }

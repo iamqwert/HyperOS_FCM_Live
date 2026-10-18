@@ -11,7 +11,7 @@ import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
  * The appearance settings as Compose state, one layer above the screens.
  *
  * [ThemePrefs] stays the source of truth on disk; this object holds the same
- * eight values as [MutableState]s so a composable can read the live value
+ * nine values as [MutableState]s so a composable can read the live value
  * without keeping a `remember`ed copy of its own. That copy was the failure
  * mode this replaces: every row on the appearance page used to mirror its pref
  * into local state, and every writer had to do three things — write the pref,
@@ -36,10 +36,10 @@ import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
  */
 object AppearanceState {
 
-    /** [ThemePrefs.MODE_SYSTEM]..[ThemePrefs.MODE_AMOLED]. */
+    /** [ThemePrefs.MODE_SYSTEM]..[ThemePrefs.MODE_DARK]. */
     val themeMode: MutableIntState = mutableIntStateOf(ThemePrefs.MODE_SYSTEM)
 
-    /** [ThemePrefs.UI_STYLE_MATERIAL] or [ThemePrefs.UI_STYLE_MIUIX]. */
+    /** [ThemePrefs.UI_STYLE_MATERIAL], [ThemePrefs.UI_STYLE_MIUIX] or [ThemePrefs.UI_STYLE_SOFT_GLASS]. */
     val uiStyle: MutableIntState = mutableIntStateOf(ThemePrefs.UI_STYLE_MATERIAL)
 
     /** Whether colors follow the wallpaper; when off, [seedColor] wins. */
@@ -61,6 +61,23 @@ object AppearanceState {
     val miuixAccent: MutableIntState = mutableIntStateOf(0)
 
     /**
+     * The material the Miuix home foot is milled from — [ThemePrefs.BAR_MATERIAL_MIUIX]
+     * or [ThemePrefs.BAR_MATERIAL_SOFT_GLASS]. Held as the value **in force**, not
+     * the stored one: with no pick on disk the style answers for it, so this is
+     * what the appearance row shows and what the home frame builds.
+     */
+    val barMaterial: MutableIntState = mutableIntStateOf(ThemePrefs.BAR_MATERIAL_MIUIX)
+
+    /**
+     * Whether [barMaterial] came from the user's own pick rather than from the
+     * style's default. The distinction only matters on a style switch: an
+     * unpicked bar follows the look onto its default material (choosing 柔光玻璃
+     * as a look must glass the foot without asking for a second decision),
+     * while a picked one is a decision of its own and is left where it was put.
+     */
+    val barMaterialPicked: MutableState<Boolean> = mutableStateOf(false)
+
+    /**
      * Re-read every value from disk. Idempotent and cheap: assigning the value
      * a state already holds does not invalidate anything (structural equality
      * policy), so re-hydrating per Activity costs nothing when nothing moved.
@@ -75,6 +92,8 @@ object AppearanceState {
         colorSpec.intValue = ThemePrefs.specVersion(context)
         miuixMonet.value = ThemePrefs.miuixMonet(context)
         miuixAccent.intValue = ThemePrefs.miuixAccent(context)
+        barMaterialPicked.value = ThemePrefs.barMaterialPicked(context)
+        barMaterial.intValue = ThemePrefs.barMaterial(context)
     }
 
     @JvmStatic
@@ -84,10 +103,19 @@ object AppearanceState {
         ThemeEngine.invalidate()
     }
 
+    /**
+     * Stores the style and, while the bar material has never been picked,
+     * re-derives it from the new look — see [barMaterialPicked]. The two rows are
+     * read together on the appearance page, so leaving the derived one behind on
+     * a switch would show a material the frame is not building.
+     */
     @JvmStatic
     fun setUiStyle(context: Context, style: Int) {
         ThemePrefs.setUiStyle(context, style)
         uiStyle.intValue = style
+        if (!barMaterialPicked.value) {
+            barMaterial.intValue = ThemePrefs.defaultBarMaterial(style)
+        }
         ThemeEngine.invalidate()
     }
 
@@ -118,11 +146,16 @@ object AppearanceState {
         ThemeEngine.invalidate()
     }
 
-    /** Stores the spec request and refreshes [colorSpec] with the resolved one. */
+    /**
+     * Stores the spec request and refreshes [colorSpec] with the resolved one — and [paletteStyle]
+     * with whatever the write-side coupling left on disk: picking 2026 adopts CMF, picking 2021
+     * or 2025 while CMF is active leaves it (see [ThemePrefs.setSpecVersion]).
+     */
     @JvmStatic
     fun setSpecVersion(context: Context, spec: Int) {
         ThemePrefs.setSpecVersion(context, spec)
         colorSpec.intValue = ThemePrefs.specVersion(context)
+        paletteStyle.intValue = ThemePrefs.paletteStyle(context).ordinal
         ThemeEngine.invalidate()
     }
 
@@ -137,6 +170,14 @@ object AppearanceState {
     fun setMiuixAccent(context: Context, color: Int) {
         ThemePrefs.setMiuixAccent(context, color)
         miuixAccent.intValue = color
+        ThemeEngine.invalidate()
+    }
+
+    @JvmStatic
+    fun setBarMaterial(context: Context, material: Int) {
+        ThemePrefs.setBarMaterial(context, material)
+        barMaterial.intValue = material
+        barMaterialPicked.value = true
         ThemeEngine.invalidate()
     }
 }

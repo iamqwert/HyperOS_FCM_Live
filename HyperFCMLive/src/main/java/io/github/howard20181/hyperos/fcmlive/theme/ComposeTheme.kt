@@ -18,7 +18,12 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import io.github.howard20181.hyperos.fcmlive.AppLocale
 import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
+import io.github.howard20181.hyperos.fcmlive.ui.softglass.LocalSoftGlassSpec
+import io.github.howard20181.hyperos.fcmlive.ui.softglass.SoftGlassFineTuning
+import io.github.howard20181.hyperos.fcmlive.ui.softglass.SoftGlassTuning
+import io.github.howard20181.hyperos.fcmlive.ui.softglass.createSoftGlassSpec
 import top.yukonga.miuix.kmp.utils.MiuixIndication
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.Colors
@@ -59,6 +64,13 @@ val LocalMiuixLightPrimary = staticCompositionLocalOf { Color(0xFF3482FF) }
 @Composable
 fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
+    // The language generation, read bare: a pick applied in place
+    // (configChanges — no recreate) bumps [AppLocale.generation], this read
+    // re-subscribes the root scope, and the tree recomposes with every
+    // stringResource re-resolving against the activity's updated resources.
+    // Without it the framework's in-place update would reach the View world
+    // and never this one — Compose reads strings at composition time.
+    AppLocale.generation.intValue
     // Read straight off the pref rather than through remember: the generation
     // read on this line is what subscribes this scope, so a bump re-runs it and
     // the very next line re-reads the style — no cached value sitting between the
@@ -76,7 +88,10 @@ fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
     val styleScope = rememberSaveableStateHolder()
     styleScope.SaveableStateProvider(style) {
         when (style) {
-            UiStyle.Miuix -> MiuixStyleTheme(content)
+            // One renderer for both Miuix-dressed looks, told apart only by the
+            // style it hands down: 柔光玻璃 is the same screens wearing a different
+            // material, so it must not become a second copy of these screens.
+            UiStyle.Miuix, UiStyle.SoftGlass -> MiuixStyleTheme(style, content)
             UiStyle.Material -> MaterialStyleTheme(content)
         }
     }
@@ -172,8 +187,7 @@ private fun MaterialStyleTheme(content: @Composable () -> Unit) {
  *
  * The three-level surface ramp is Miuix's own: `surface` is the page,
  * `surfaceVariant` the cards (white in light, `#242424` in dark), and the top
- * container the popup level. AMOLED keeps Miuix's dark ramp for the cards but
- * drops the page to true black, which is the whole point of that mode.
+ * container the popup level.
  *
  * Miuix also supplies its own press indication and overscroll through its
  * theme. The overscroll factory survives the MaterialTheme wrapper untouched;
@@ -182,14 +196,13 @@ private fun MaterialStyleTheme(content: @Composable () -> Unit) {
  * the construction MiuixTheme itself uses.
  */
 @Composable
-private fun MiuixStyleTheme(content: @Composable () -> Unit) {
+private fun MiuixStyleTheme(style: UiStyle, content: @Composable () -> Unit) {
     val context = LocalContext.current
     // Keyed on the generation the same way the Material branch keys its palette:
     // ThemeEngine.invalidate() bumps it, this re-reads, and the appearance changes
     // in place.
     val generation = ThemeEngine.generation
     val dark = remember(context, generation) { ThemePrefs.isDark(context) }
-    val amoled = remember(context, generation) { ThemePrefs.isAmoled(context) }
     val monet = remember(context, generation) { ThemePrefs.miuixMonet(context) }
     // Read but not offered. The three below are the app's own colour engine's
     // controls and they are hidden in this look, yet they keep feeding it, because
@@ -280,16 +293,16 @@ private fun MiuixStyleTheme(content: @Composable () -> Unit) {
         // only after the screen was reopened. The generation bump (every
         // appearance change invalidates) is what retires the stale mapping.
         val colorScheme = remember(colors, dark, generation) { colors.toMaterialColorScheme(dark) }
-        val appSurfaces = remember(colors, colorScheme, amoled, generation) {
+        val appSurfaces = remember(colors, colorScheme, generation) {
             AppSurfaces(
-                card = if (amoled) colors.surfaceContainerHigh else colors.surfaceVariant,
+                card = colors.surfaceVariant,
                 popup = if (dark) colors.surfaceContainerHighest else colors.surfaceContainer
             )
         }
         val appShapes = remember(expressive) { appShapesFor(expressive) }
         // The window chrome follows, too: it is View-side state no recomposition
         // reaches, and under this look the page colour is Miuix's.
-        val pageArgb = (if (amoled) Color.Black else colors.surface).toArgb()
+        val pageArgb = colors.surface.toArgb()
         val pageDark = dark
         val windowActivity = (context as? android.app.Activity)
         // Guarded, not bare: this block runs after *every* recomposition of
@@ -308,11 +321,7 @@ private fun MiuixStyleTheme(content: @Composable () -> Unit) {
             }
         }
         MaterialTheme(
-            colorScheme = if (amoled) {
-                colorScheme.copy(background = Color.Black, surface = Color.Black)
-            } else {
-                colorScheme
-            },
+            colorScheme = colorScheme,
             typography = HyperFCMLiveTypography,
             shapes = HyperFCMLiveShapes,
             motionScheme = motionSchemeFor(expressive),
@@ -334,13 +343,37 @@ private fun MiuixStyleTheme(content: @Composable () -> Unit) {
                 LocalMiuixLightPrimary provides lightAnchor.lightColors.primary,
                 LocalAppShapes provides appShapes,
                 LocalAppSurfaces provides appSurfaces,
-                LocalUiStyle provides UiStyle.Miuix
+                // The 柔光玻璃 material, resolved once for the whole look. It is
+                // provided to *both* Miuix-dressed styles rather than to 柔光玻璃
+                // alone, because the bar-material row is its own decision: a person
+                // on plain Miuix can still lift the foot onto the glass pill, and
+                // the material would then degrade to its opaque fallback if this
+                // provider had gated on the style. What stops the glass from
+                // appearing on pages that did not ask for it is the call sites —
+                // each one decides for itself whether to wear it, and none of them
+                // runs under Material, which is the only place this provider does
+                // not reach.
+                LocalSoftGlassSpec provides MIUIX_SOFT_GLASS,
+                LocalUiStyle provides style
             ) {
                 content()
             }
         }
     }
 }
+
+/**
+ * The 柔光玻璃 material this look reads: the recipes' own defaults, at the radius
+ * they were tuned around, switched on. One value rather than one per surface —
+ * the material is a fact about the look, and the surfaces that wear it are
+ * expected to agree on it. Only the recipe changes per surface (a pill is not a
+ * dialog), and the recipe is taken at the call site.
+ */
+private val MIUIX_SOFT_GLASS = createSoftGlassSpec(
+    enabled = true,
+    blurRadius = SoftGlassTuning.DefaultBlurRadius,
+    fineTuning = SoftGlassFineTuning.Default,
+)
 
 /**
  * Miuix's palette styles are the same nine Material families the app offers, under
@@ -358,6 +391,9 @@ private fun miuixPaletteStyle(variant: Scheme.Variant): ThemePaletteStyle = when
     Scheme.Variant.MONOCHROME -> ThemePaletteStyle.Monochrome
     Scheme.Variant.FIDELITY -> ThemePaletteStyle.Fidelity
     Scheme.Variant.CONTENT -> ThemePaletteStyle.Content
+    // CMF has no Miuix-side equivalent — the Miuix look always colors through the 2021 spec
+    // (see ThemePrefs.specVersion), so CMF falls back to its nearest neutral-tinted sibling.
+    Scheme.Variant.CMF -> ThemePaletteStyle.TonalSpot
 }
 
 /**
@@ -405,12 +441,11 @@ private fun Colors.toMaterialColorScheme(dark: Boolean): ColorScheme {
 /**
  * Map the runtime [AppPalette] (full [Scheme]) onto Compose Material 3.
  *
- * Every role is mapped verbatim. App-side surface policy — the AMOLED
- * near-black ramp, and the three-level page/card/popup mapping — lives in
- * [AppPalette], so this bridge stays a translation table instead of a second
- * place the palette is decided. The raised container and the popup level travel
- * beside the scheme through [LocalAppSurfaces] (see [AppSurfaces] for why the
- * AMOLED ramp keeps them outside the roles).
+ * Every role is mapped verbatim. App-side surface policy — the three-level
+ * page/card/popup mapping — lives in [AppPalette], so this bridge stays a
+ * translation table instead of a second place the palette is decided. The
+ * raised container and the popup level travel beside the scheme through
+ * [LocalAppSurfaces] (see [AppSurfaces]).
  */
 fun AppPalette.toComposeColorScheme(): ColorScheme {
     val s = scheme

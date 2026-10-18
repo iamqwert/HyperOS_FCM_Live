@@ -1,19 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
-
-    <!-- Needed on Android 11+ (targetSdk >= 30): package visibility filtering
-         otherwise hides most installed user apps from
-         getInstalledPackages()/getInstalledApplications(). -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
-        tools:ignore="QueryAllPackagesPermission" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Update check via GitHub Releases. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- MIUI 13 / HyperOS gates getInstalledPackages() behind this runtime
-         permission on top of QUERY_ALL_PACKAGES (owner: com.lbe.security.miui). -->
-    <uses-permission android:name="com.android.permission.GET_INSTALLED_APPS" />
+    <!-- The app list is built without any permission. On Android 11+ package
+         visibility is granted per matching intent filter, so declaring the
+         push actions below makes exactly the push-capable apps visible — the
+         only apps the allowlist can mean anything for — and nothing else.
+         GMS is listed by name because it is the one package the module
+         exists for and must never be lost to a query quirk (see the scan
+         comment in MainActivity). The MiPush check is a direct component
+         lookup, which works on any already-visible package, so it needs no
+         declaration of its own. -->
+    <queries>
+        <intent>
+            <action android:name="com.google.firebase.MESSAGING_EVENT" />
+        </intent>
+        <intent>
+            <action android:name="com.google.firebase.INSTANCE_ID_EVENT" />
+        </intent>
+        <intent>
+            <action android:name="com.google.android.c2dm.intent.RECEIVE" />
+        </intent>
+        <package android:name="com.google.android.gms" />
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -34,7 +45,9 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustPan">
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustPan"
+            android:configChanges="locale|layoutDirection">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -55,18 +68,22 @@
             </intent-filter>
         </activity>
 
+        <!-- locale|layoutDirection on every activity: a language pick applies
+             in place (onConfigurationChanged, no destroy-recreate). The
+             recreate was the black flash — the old window came down before the
+             new one had drawn, and the task void showed for a frame. -->
         <activity
             android:name=".AboutActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:configChanges="locale|layoutDirection" />
         <activity
             android:name=".ExperimentActivity"
-            android:exported="false" />
-        <activity
-            android:name=".PrivacyActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:configChanges="locale|layoutDirection" />
         <activity
             android:name=".LicensesActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:configChanges="locale|layoutDirection" />
 
         <activity-alias
             android:name=".LauncherAlias"

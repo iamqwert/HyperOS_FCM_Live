@@ -46,12 +46,11 @@ object ThemeEngine {
         val dark = ThemePrefs.isDark(context)
         val variant = ThemePrefs.paletteStyle(context)
         val spec = ThemePrefs.specVersion(context)
-        val amoled = dark && ThemePrefs.isAmoled(context)
         val dynamic = ThemePrefs.dynamicColor(context)
         val seed = seed(context, dynamic)
 
         val key = (if (dark) "d" else "l") + ':' + variant.ordinal + ':' + spec + ':' +
-            (if (amoled) 'a' else 'n') + ':' + (if (dynamic) 'w' else 'c') + ':' + seed
+            (if (dynamic) 'w' else 'c') + ':' + seed
         val cached = sCached
         if (cached != null && key == sCacheKey) {
             return cached
@@ -61,7 +60,7 @@ object ThemeEngine {
         } else {
             Scheme.Spec.SPEC_2021
         }
-        val built = AppPalette(Scheme.create(seed, variant, dark, specEnum), dark, amoled)
+        val built = AppPalette(Scheme.create(seed, variant, dark, specEnum), dark)
         sCached = built
         sCacheKey = key
         return built

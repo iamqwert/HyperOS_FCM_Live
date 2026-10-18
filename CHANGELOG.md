@@ -5,10 +5,12 @@
 ### 简体中文
 
 - 移除 GMS 作用域，GMS 检测手段不断更新，hook GMS 已被证实不可行；从旧版本升级、且曾勾选 GMS 作用域的用户，在升级后请强制停止一次「Google Play 服务」或重启设备，以彻底清除仍驻留在 GMS 进程内的旧钩子。
+- 应用列表不再申请任何权限：移除 `QUERY_ALL_PACKAGES` 与 `GET_INSTALLED_APPS`，改用 Android 11+ 包可见性（清单 `<queries>` 声明推送组件动作），列表仅展示声明了推送组件的应用；「展示支持应用」开关随列表语义并入而移除。
 
 ### English
 
 - Remove the GMS scope. GMS detection methods are constantly being updated, and hooking GMS has been proven infeasible; users upgrading from an older version who previously checked the GMS scope should force-stop "Google Play Services" once or restart the device after upgrading to completely clear old hooks still residing in the GMS process.
+- The app list no longer requests any permission: `QUERY_ALL_PACKAGES` and `GET_INSTALLED_APPS` are removed in favor of Android 11+ package visibility (manifest `<queries>` declaring the push component actions), and the list now shows only apps that declare push components; the "Show supported apps" toggle is removed along with the list's new semantics.
 
 ## 4.1.0 (52)
 

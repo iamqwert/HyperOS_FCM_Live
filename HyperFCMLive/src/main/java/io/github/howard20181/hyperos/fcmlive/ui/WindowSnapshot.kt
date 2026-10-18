@@ -4,8 +4,15 @@ import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.HardwareRenderer
+import android.graphics.PixelFormat
+import android.graphics.RenderNode
+import android.hardware.HardwareBuffer
+import android.media.ImageReader
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.PixelCopy
 import android.view.View
@@ -18,6 +25,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
 import java.lang.ref.WeakReference
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Launches [intent] from [activity], first photographing [activity]'s window so
@@ -30,6 +39,13 @@ import java.lang.ref.WeakReference
  * revealed strip its detail.
  */
 internal fun Activity.startActivityWithSnapshot(intent: Intent) {
+    // Whoever launches a child is that child's "parent" for reveal purposes —
+    // recorded, not guessed: some pages (experiment features) open from more
+    // than one window, and a hardcoded parent list goes stale the moment an
+    // entry point moves.
+    intent.component?.className?.let { child ->
+        WindowSnapshot.recordParent(child, this.javaClass)
+    }
     WindowSnapshot.capture(this) {
         startActivity(intent)
         // The photograph just taken was taken *during* the tap — that is what
@@ -102,6 +118,30 @@ private const val TAG = "WindowSnapshot"
 private const val REVIVE_DELAY_MS = 320L
 
 /**
+ * How long after an appearance change a retaken picture is drawn again to
+ * confirm it settled, in milliseconds.
+ *
+ * Switching the *look* (Miuix ↔ Material) composes a whole new branch inside
+ * the stopped parent window, and the Miuix branch is far heavier to build
+ * (first-time component init in that window) than the Material one. The first
+ * retake at [REVIVE_DELAY_MS] can therefore photograph the swap mid-flight and
+ * stamp a half-dressed picture as current — exactly what a back preview then
+ * reveals. While inside this window, [revive] redraws every retaken entry once
+ * more per pass, so the cache lands on the fully dressed tree a few hundred
+ * milliseconds later. Palette-only changes ride the same passes harmlessly:
+ * redrawing a settled page is idempotent.
+ */
+private const val CONFIRM_WINDOW_MS = 1200L
+
+/**
+ * How long the read-back of an offscreen GPU render may take before the retake
+ * gives up and falls back to the software draw, in milliseconds. The frame is
+ * already queued when the copy starts (the render request waited for present),
+ * so this only bounds a GPU readback, not composition work.
+ */
+private const val COPY_TIMEOUT_MS = 400L
+
+/**
  * How long after a child is launched the parent's photograph is retaken, in
  * milliseconds.
  *
@@ -160,6 +200,36 @@ internal object WindowSnapshot {
     private val cache = HashMap<String, Entry>()
 
     /**
+     * Which Activity last launched which child, child class name → parent
+     * class name. The reveal's "previous page" is whoever actually opened the
+     * current one — recorded at launch time by [startActivityWithSnapshot],
+     * because a page can be reachable from more than one window and no static
+     * parent list survives those entry points moving.
+     */
+    private val parentOfChild = HashMap<String, String>()
+
+    /** Guards [parentOfChild]; the map itself lives on the main thread only. */
+    private val parentOfLock = Any()
+
+    /**
+     * The picture of whoever launched [childClass], taken on the way in — the
+     * layer a predictive back on that child reveals. Null when the child was
+     * not launched through [startActivityWithSnapshot] or nothing is cached.
+     */
+    fun forLaunchingParent(childClass: Class<out Activity>): ImageBitmap? {
+        val parentName = synchronized(parentOfLock) { parentOfChild[childClass.name] }
+            ?: return null
+        val entry = cache[parentName] ?: return null
+        if (entry.generation != ThemeEngine.generation) return null
+        return entry.bitmap
+    }
+
+    /** Records that [parentClass] launched the child named [childClassName]. */
+    fun recordParent(childClassName: String, parentClass: Class<out Activity>) {
+        synchronized(parentOfLock) { parentOfChild[childClassName] = parentClass.name }
+    }
+
+    /**
      * Where the coalesced re-render is posted. Main looper, because the redraw
      * touches a live view tree and must not run on a background thread.
      */
@@ -204,9 +274,20 @@ internal object WindowSnapshot {
          * large title blank yet stamped the entry as current — so a plain
          * generation check would skip it at gesture start and lock the blank in.
          * The flag forces one more, by-then-settled retake exactly when the
-         * picture is about to be revealed. Not part of any identity comparison.
+         * picture is about to be revealed. Also re-set by [rerender]'s failure
+         * paths, so a retake that could not run (unlaid-out window, failed
+         * allocation) is retried at the next gesture start instead of being
+         * locked in as "current". Not part of any identity comparison.
          */
-        var wantsForcedFlush: Boolean = false
+        var wantsForcedFlush: Boolean = false,
+        /**
+         * Set by [revive] while inside the confirmation window after an
+         * appearance change: the pass just redrew this entry, and one more pass
+         * should follow even though the generation check now passes — the first
+         * draw after a look swap can photograph the branch mid-swap (see
+         * [revive]), and only a second, later draw is guaranteed settled.
+         */
+        var wantsConfirmation: Boolean = false
     )
 
     /**
@@ -288,6 +369,7 @@ internal object WindowSnapshot {
             }
         }
         if (!stale) return
+        lastSwitchAt = SystemClock.uptimeMillis()
         handler.removeCallbacks(revive)
         handler.postDelayed(revive, REVIVE_DELAY_MS)
     }
@@ -318,22 +400,80 @@ internal object WindowSnapshot {
     /** [settle]'s target — the entry the pending retake belongs to. */
     private var settleTarget: String? = null
 
+    /**
+     * When the most recent appearance change was marked, in uptime millis.
+     *
+     * [revive] compares this against now to decide whether a retaken picture
+     * still owes a confirmation pass (see [CONFIRM_WINDOW_MS]).
+     */
+    private var lastSwitchAt = 0L
+
     /** The body of [settle]; runs once the tap's motion has finished. */
     private val settleRun = Runnable {
         val name = settleTarget ?: return@Runnable
         settleTarget = null
         val entry = cache[name] ?: return@Runnable
-        rerender(name, entry, dropIfVisible = false)
+        // The tap that launched the child left this page's press feedback
+        // mid-fade, and the window's frame clock is paused while the page is
+        // stopped (see [resumeFrameClock]) — the fade froze at a visible alpha,
+        // which is what the first photograph and the retained window's recorded
+        // display list still hold. Resume the clock so the fade finishes on the
+        // foreground-driven frames, then retake once it has: the re-recorded
+        // display list is what gets photographed here, and what the live window
+        // replays when the user comes back. Same resume-then-wait the appearance
+        // change uses ([refreshForTheme]).
+        val parent = entry.parent.get()
+        if (parent != null) resumeFrameClock(parent)
+        // Push one real frame into the retained surface while the tap's motion
+        // has finished. The buffer the system re-presents on return is the last
+        // frame this window drew — the tap itself, on ROMs that stop drawing a
+        // window the moment a child covers it — so the reveal opened on a press
+        // frozen at full bloom over a mesh phase older than the preview's
+        // photograph: the live page visibly jumping backward for a frame or two
+        // before its first real draw. This invalidation asks the stopped window
+        // for exactly one more frame, now that the press has faded and the mesh
+        // is settled: where the ROM honours it, the retained buffer becomes the
+        // very frame the preview shows and the takeover is seamless; where it
+        // refuses to draw covered windows, this is a no-op and nothing is lost.
+        if (parent != null) {
+            try {
+                parent.window?.decorView?.invalidate()
+            } catch (_: Throwable) {
+            }
+        }
+        handler.postDelayed({ rerender(name, entry, dropIfVisible = false) }, REVIVE_DELAY_MS)
     }
 
-    /** The coalesced body of [refreshForTheme]; runs once input has settled. */
-    private val revive = Runnable {
+    /**
+     * The coalesced body of [refreshForTheme]; runs once input has settled.
+     *
+     * Beyond refreshing stale entries this is also the confirmation pass for a
+     * look switch: swapping the style composes a whole new branch inside the
+     * stopped window, and the branch swapped *into* MIUIX is far heavier to
+     * build than the one swapped into Material (first-time Miuix component
+     * init in that window) — the first retake at [REVIVE_DELAY_MS] can catch
+     * the swap mid-flight and stamp a half-dressed picture as current. While
+     * inside [CONFIRM_WINDOW_MS] of the switch, every retaken entry is drawn
+     * again one pass later, so the cache settles on the fully dressed tree.
+     */
+    private val revive: Runnable = Runnable {
         if (cache.isEmpty()) return@Runnable
         // Snapshot the keys first: a failed re-render removes its own entry.
         for (name in cache.keys.toList()) {
             val entry = cache[name] ?: continue
-            if (entry.generation == ThemeEngine.generation) continue
+            val current = entry.generation == ThemeEngine.generation
+            if (current && !entry.wantsConfirmation) continue
             rerender(name, entry)
+            entry.wantsConfirmation = false
+            if (SystemClock.uptimeMillis() - lastSwitchAt < CONFIRM_WINDOW_MS) {
+                // Within the window the next pass redraws again regardless of
+                // generation, so a mid-swap picture cannot be the last word.
+                entry.wantsConfirmation = true
+            }
+        }
+        if (cache.values.any { it.wantsConfirmation }) {
+            handler.removeCallbacks(revive)
+            handler.postDelayed(revive, REVIVE_DELAY_MS)
         }
     }
 
@@ -375,8 +515,12 @@ internal object WindowSnapshot {
             // retake records it whole. The flag is one-shot.
             val force = entry.wantsForcedFlush
             entry.wantsForcedFlush = false
-            if (!force && entry.generation == ThemeEngine.generation) continue
-            if (force) entry.parent.get()?.let { resumeFrameClock(it) }
+            val current = entry.generation == ThemeEngine.generation
+            if (!force && current && !entry.wantsConfirmation) continue
+            // Whatever the reason for the retake, the stopped page's clock must
+            // run for its composition to be current before the draw below.
+            entry.parent.get()?.let { resumeFrameClock(it) }
+            entry.wantsConfirmation = false
             rerender(name, entry)
         }
     }
@@ -461,7 +605,11 @@ internal object WindowSnapshot {
             // nothing to measure against *yet* and the page is still there, so
             // the picture is kept and stamped as the best available rather than
             // dropped: dropping here is how a preview went missing for good.
+            // The stamp is not a clean bill of health, though — ask for one more
+            // forced retake at the next gesture start, by which time the window
+            // will have been measured at least once.
             entry.generation = ThemeEngine.generation
+            entry.wantsForcedFlush = true
             return false
         }
         // Never redraw a page the user is standing on.
@@ -497,7 +645,10 @@ internal object WindowSnapshot {
             Log.w(TAG, "Cannot allocate snapshot bitmap for retake", t)
             // Keep the picture we have and let the preview use it: a page in last
             // week's colours beats a flat panel, and the next capture replaces it.
+            // Ask for another forced retake at the next gesture start — the
+            // allocation may well succeed there.
             entry.generation = ThemeEngine.generation
+            entry.wantsForcedFlush = true
             return false
         }
         // Guarded end to end. This runs from a main-looper Runnable, and an
@@ -529,6 +680,7 @@ internal object WindowSnapshot {
             if (!redraw(view, bitmap)) {
                 Log.w(TAG, "Retake drew nothing; keeping the previous picture")
                 entry.generation = ThemeEngine.generation
+                entry.wantsForcedFlush = true
                 return false
             }
             entry.bitmap = bitmap.asImageBitmap()
@@ -537,6 +689,7 @@ internal object WindowSnapshot {
         } catch (t: Throwable) {
             Log.w(TAG, "Retake failed; keeping the previous picture", t)
             entry.generation = ThemeEngine.generation
+            entry.wantsForcedFlush = true
             false
         }
     }
@@ -659,8 +812,23 @@ internal object WindowSnapshot {
      * layer a back preview reveals is indistinguishable from "there is no page
      * underneath" — a flat panel. Failure has to leave the previous picture in
      * place instead.
+     *
+     * The primary path is GPU, not software: the view tree is recorded into a
+     * [RenderNode] and replayed by a [HardwareRenderer] into an [ImageReader],
+     * whose RGBA pixels fill [bitmap]. This is not an optimisation — it is the
+     * only path that can draw the app at all. The views run AGSL [android.graphics.RuntimeShader]s
+     * (the title bars' Haze progressive mask, the home glass), and a software
+     * canvas throws `IllegalArgumentException: Software rendering doesn't
+     * support RuntimeShader` the moment one of them is on the recorded branch:
+     * the whole retake failed, the stale picture survived every pass, and a
+     * look switch surfaced the *previous* look in the back preview. Recording
+     * into a RenderNode and replaying on the GPU runs every shader the way the
+     * real window runs it. The software `view.draw` remains as a fallback for
+     * the device classes where the hardware pipeline is unavailable, since a
+     * last-week-colours page still beats a flat panel.
      */
     private fun redraw(view: View, bitmap: Bitmap): Boolean {
+        if (renderHardware(view, bitmap)) return true
         return try {
             view.draw(Canvas(bitmap))
             true
@@ -668,5 +836,93 @@ internal object WindowSnapshot {
             Log.w(TAG, "Redraw fallback failed too", t)
             false
         }
+    }
+
+    /**
+     * The GPU half of [redraw]: record, replay, read back.
+     *
+     * Everything is confined to the calling (main-looper) thread up to the
+     * render; the read back runs through [PixelCopy], which waits the frame
+     * fence itself, converts the pixel format, and fills the software bitmap —
+     * the manual plane-buffer copy this replaced produced garbage on device
+     * (whole-frame noise, success reported). The copy completes on a private
+     * background looper and this thread blocks on the latch, bounded by
+     * [COPY_TIMEOUT_MS]: the frame is already queued (that is what
+     * `setWaitForPresent(true)` on the render request buys), so the copy is a
+     * short GPU readback, not a wait on composition work that needs the main
+     * thread.
+     */
+    private fun renderHardware(view: View, bitmap: Bitmap): Boolean {
+        val width = view.width
+        val height = view.height
+        if (width <= 0 || height <= 0) return false
+        val reader = try {
+            ImageReader.newInstance(
+                width,
+                height,
+                PixelFormat.RGBA_8888,
+                1,
+                HardwareBuffer.USAGE_GPU_COLOR_OUTPUT or HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "Hardware retake: cannot create ImageReader", t)
+            return false
+        }
+        val renderer = HardwareRenderer()
+        return try {
+            // Recording, not drawing: `view.draw(recordingCanvas)` captures the
+            // view's paint ops (shaders included) into the node; the renderer
+            // replays them on the GPU exactly as the window's own pipeline does.
+            val node = RenderNode("WindowSnapshot")
+            node.setPosition(0, 0, width, height)
+            val canvas = node.beginRecording()
+            view.draw(canvas)
+            node.endRecording()
+
+            renderer.setLightSourceAlpha(0f, 0f)
+            renderer.setLightSourceGeometry(0f, 0f, 0f, 0f)
+            renderer.setContentRoot(node)
+            renderer.setSurface(reader.surface)
+            val request = renderer.createRenderRequest()
+            request.setWaitForPresent(true)
+            if (request.syncAndDraw() != HardwareRenderer.SYNC_OK) {
+                Log.w(TAG, "Hardware retake: render did not succeed")
+                return false
+            }
+            // Read the queued frame back through PixelCopy from the reader's
+            // own surface: "the most recently queued buffer", fenced and
+            // converted into the software bitmap by the framework.
+            val latch = CountDownLatch(1)
+            val status = intArrayOf(PixelCopy.ERROR_UNKNOWN)
+            PixelCopy.request(
+                reader.surface,
+                bitmap,
+                { result ->
+                    status[0] = result
+                    latch.countDown()
+                },
+                Handler(copyThread.looper)
+            )
+            if (!latch.await(COPY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                Log.w(TAG, "Hardware retake: pixel copy timed out")
+                return false
+            }
+            if (status[0] != PixelCopy.SUCCESS) {
+                Log.w(TAG, "Hardware retake: pixel copy failed with status=${status[0]}")
+                return false
+            }
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "Hardware retake failed", t)
+            return false
+        } finally {
+            renderer.destroy()
+            reader.close()
+        }
+    }
+
+    /** One idle worker thread for PixelCopy completion callbacks; never quits. */
+    private val copyThread: HandlerThread by lazy {
+        HandlerThread("WindowSnapshotCopy").apply { start() }
     }
 }

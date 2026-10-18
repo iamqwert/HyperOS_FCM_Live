@@ -1,5 +1,8 @@
 plugins {
     id 'com.android.application' version '9.4.1' apply false
+    // Standalone Kotlin 2.4.20 — AGP's built-in Kotlin is stuck at 2.2.10, see
+    // gradle.properties for the POM-verified evidence and the opt-out pair.
+    id 'org.jetbrains.kotlin.android' version '2.4.20' apply false
 }
 
 tasks.register('clean', Delete) {

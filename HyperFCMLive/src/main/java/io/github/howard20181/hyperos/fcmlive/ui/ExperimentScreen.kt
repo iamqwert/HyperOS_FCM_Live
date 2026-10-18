@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -90,18 +91,29 @@ fun ExperimentScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         modifier = modifier
     ) { innerPadding ->
         ExperimentBody(
-            bottomPadding = innerPadding.calculateBottomPadding(),
-            modifier = Modifier.padding(top = innerPadding.calculateTopPadding())
+            // The list spans the full body and takes the bar's height as
+            // contentPadding, so rows scroll UNDER the title bar's glass
+            // instead of stopping at its edge (see PageScaffold).
+            topPadding = innerPadding.calculateTopPadding(),
+            bottomPadding = innerPadding.calculateBottomPadding()
         )
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ExperimentBody(
+    topPadding: Dp,
     bottomPadding: Dp,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    // The theme's motion, the same source AboutScreen's seed grid opens with:
+    // on the 2025 spec these are the springs the library switches flip with,
+    // on 2021 the standard curves. The three reveal chains below used to run
+    // the default tweens and were the only cards on the page that did not
+    // move like the rest of the theme.
+    val motion = MaterialTheme.motionScheme
     // Read once per screen: the hook side owns the live value, and the mirror
     // is only the answer the UI last left behind.
     var wifiWeakSignalRelaxed by remember {
@@ -152,62 +164,78 @@ private fun ExperimentBody(
     LazyColumn(
         modifier = modifier
             .fillMaxWidth()
+            .listScrollEndHaptic()
             .padding(start = inset, end = inset),
         // The signal-floor menu, and every menu added hereafter, must leave the
         // reader where they were. See [rememberPageListState].
         state = rememberPageListState(),
-        // The gesture-hint strip is scroll-through, not a hard stop.
-        contentPadding = PaddingValues(bottom = bottomPadding)
+        // The gesture-hint strip is scroll-through, not a hard stop. The top
+        // inset rides here (not on the modifier) so rows pass under the glass
+        // bar while scrolling.
+        contentPadding = PaddingValues(top = topPadding, bottom = bottomPadding)
     ) {
         item {
             SectionTitle(R.string.experiment_section_network, first = true)
-            SettingsSwitchCard(
-                iconRes = R.drawable.ic_network_manage,
-                title = stringResource(R.string.experiment_wifi_weak_signal_relaxed),
-                description = stringResource(R.string.experiment_wifi_weak_signal_relaxed_desc),
-                checked = wifiWeakSignalRelaxed,
-                onCheckedChange = { checked ->
-                    Prefs.writeWifiWeakSignalSwitchRelaxed(context, Prefs.remote(), checked)
-                    wifiWeakSignalRelaxed = checked
-                },
-                // The floor row below is this row's group partner, so the master
-                // gives up its bottom corners for exactly as long as that row is
-                // on screen.
-                last = !wifiWeakSignalRelaxed
-            )
-            // Master and sub-option, revealed the same way the sleep pair is.
-            // This one narrows rather than widens — scores below the chosen
-            // floor go back to the ROM — so there is nothing to show until the
-            // master says the user wants the wider switch at all.
-            AnimatedVisibility(
-                visible = wifiWeakSignalRelaxed,
-                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
-            ) {
-                Column {
-                    GroupRowGap()
-                    SettingsMenuCard(
-                        iconRes = R.drawable.ic_tune,
-                        title = stringResource(R.string.experiment_wifi_weak_signal_floor),
-                        description = stringResource(
-                            R.string.experiment_wifi_weak_signal_floor_desc
-                        ),
-                        entries = floorLabels,
-                        currentIndex = Prefs.WIFI_WEAK_SIGNAL_FLOORS
-                            .indexOf(wifiWeakSignalFloor)
-                            .coerceAtLeast(0),
-                        onPick = { index ->
-                            val picked = Prefs.WIFI_WEAK_SIGNAL_FLOORS[index]
-                            Prefs.writeWifiWeakSignalFloor(context, Prefs.remote(), picked)
-                            wifiWeakSignalFloor = picked
-                        },
-                        // The entries are bare numbers, so the panel takes the
-                        // numeric floor instead of the two-character one; see
-                        // [MENU_NUMERIC_MIN_WIDTH].
-                        menuMinWidth = MENU_NUMERIC_MIN_WIDTH,
-                        first = false,
-                        last = true
-                    )
+            // Not a [SettingsGroup]: the floor row lives under an
+            // AnimatedVisibility, and spacedBy would hold the seam at full
+            // width while the row below has already shrunk away. The seam sits
+            // inside the animated content instead, so it collapses with the
+            // row it belongs to (see [GroupRowGap]).
+            Column {
+                SettingsSwitchCard(
+                    iconRes = R.drawable.ic_network_manage,
+                    title = stringResource(R.string.experiment_wifi_weak_signal_relaxed),
+                    description = stringResource(R.string.experiment_wifi_weak_signal_relaxed_desc),
+                    checked = wifiWeakSignalRelaxed,
+                    onCheckedChange = { checked ->
+                        Prefs.writeWifiWeakSignalSwitchRelaxed(context, Prefs.remote(), checked)
+                        wifiWeakSignalRelaxed = checked
+                    },
+                    // The floor row below is this row's group partner, so the master
+                    // gives up its bottom corners for exactly as long as that row is
+                    // on screen.
+                    last = !wifiWeakSignalRelaxed
+                )
+                // Master and sub-option, revealed the same way the sleep pair is.
+                // This one narrows rather than widens — scores below the chosen
+                // floor go back to the ROM — so there is nothing to show until the
+                // master says the user wants the wider switch at all.
+                AnimatedVisibility(
+                    visible = wifiWeakSignalRelaxed,
+                    enter = expandVertically(
+                        expandFrom = Alignment.Top,
+                        animationSpec = motion.defaultSpatialSpec()
+                    ) + fadeIn(animationSpec = motion.defaultEffectsSpec()),
+                    exit = shrinkVertically(
+                        shrinkTowards = Alignment.Top,
+                        animationSpec = motion.defaultSpatialSpec()
+                    ) + fadeOut(animationSpec = motion.defaultEffectsSpec())
+                ) {
+                    Column {
+                        GroupRowGap()
+                        SettingsMenuCard(
+                            iconRes = R.drawable.ic_tune,
+                            title = stringResource(R.string.experiment_wifi_weak_signal_floor),
+                            description = stringResource(
+                                R.string.experiment_wifi_weak_signal_floor_desc
+                            ),
+                            entries = floorLabels,
+                            currentIndex = Prefs.WIFI_WEAK_SIGNAL_FLOORS
+                                .indexOf(wifiWeakSignalFloor)
+                                .coerceAtLeast(0),
+                            onPick = { index ->
+                                val picked = Prefs.WIFI_WEAK_SIGNAL_FLOORS[index]
+                                Prefs.writeWifiWeakSignalFloor(context, Prefs.remote(), picked)
+                                wifiWeakSignalFloor = picked
+                            },
+                            // The entries are bare numbers, so the panel takes the
+                            // numeric floor instead of the two-character one; see
+                            // [MENU_NUMERIC_MIN_WIDTH].
+                            menuMinWidth = MENU_NUMERIC_MIN_WIDTH,
+                            first = false,
+                            last = true
+                        )
+                    }
                 }
             }
         }
@@ -231,105 +259,125 @@ private fun ExperimentBody(
             // own autostart management, where the state the ops are in is both
             // visible and user-controlled.
             SectionTitle(R.string.experiment_section_autostart)
-            SettingsSwitchCard(
-                iconRes = R.drawable.ic_autostart_release,
-                title = stringResource(R.string.experiment_autostart_gate_release),
-                description = stringResource(R.string.experiment_autostart_gate_release_desc),
-                checked = autostartGateRelease,
-                onCheckedChange = { checked ->
-                    Prefs.writeAutostartGateRelease(context, Prefs.remote(), checked)
-                    autostartGateRelease = checked
-                },
-                stateLine = emptyAllowlistHint,
-                stateLineOff = emptyAllowlistHint,
-                first = true,
-                // The manager entry below is always on screen, so the master is
-                // never the visible group's last row.
-                last = false
-            )
-            AnimatedVisibility(
-                visible = autostartGateRelease,
-                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
-            ) {
-                Column {
-                    GroupRowGap()
-                    SettingsSwitchCard(
-                        iconRes = R.drawable.ic_restart_release,
-                        title = stringResource(R.string.experiment_autostart_restart_release),
-                        description = stringResource(
-                            R.string.experiment_autostart_restart_release_desc
-                        ),
-                        checked = autostartRestartRelease,
-                        onCheckedChange = { checked ->
-                            Prefs.writeAutostartRestartRelease(
-                                context, Prefs.remote(), checked
-                            )
-                            autostartRestartRelease = checked
-                        },
-                        stateLine = emptyAllowlistHint,
-                        stateLineOff = emptyAllowlistHint,
-                        first = false,
-                        // The root rung chains behind this one, so it is on
-                        // screen right below when it shows at all.
-                        last = false
-                    )
-                    AnimatedVisibility(
-                        visible = autostartRestartRelease,
-                        enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                        exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
-                    ) {
-                        Column {
-                            GroupRowGap()
-                            SettingsSwitchCard(
-                                iconRes = R.drawable.ic_root_release,
-                                title = stringResource(R.string.experiment_autostart_root_release),
-                                description = stringResource(
-                                    R.string.experiment_autostart_root_release_desc
-                                ),
-                                checked = autostartRootRelease,
-                                onCheckedChange = { checked ->
-                                    Prefs.writeAutostartRootRelease(
-                                        context, Prefs.remote(), checked
-                                    )
-                                    autostartRootRelease = checked
-                                },
-                                stateLine = emptyAllowlistHint,
-                                stateLineOff = emptyAllowlistHint,
-                                first = false,
-                                // The manager entry below is always on screen,
-                                // so this row is never the visible group's
-                                // last either.
-                                last = false
-                            )
+            // Same animated-seam layout as the network section above, one rung
+            // deeper: seams between two always-visible rows stay outside
+            // (master ↔ manager), seams that belong to a collapsible rung sit
+            // inside its AnimatedVisibility so they shrink with it.
+            Column {
+                SettingsSwitchCard(
+                    iconRes = R.drawable.ic_autostart_release,
+                    title = stringResource(R.string.experiment_autostart_gate_release),
+                    description = stringResource(R.string.experiment_autostart_gate_release_desc),
+                    checked = autostartGateRelease,
+                    onCheckedChange = { checked ->
+                        Prefs.writeAutostartGateRelease(context, Prefs.remote(), checked)
+                        autostartGateRelease = checked
+                    },
+                    stateLine = emptyAllowlistHint,
+                    stateLineOff = emptyAllowlistHint,
+                    first = true,
+                    // The manager entry below is always on screen, so the master is
+                    // never the visible group's last row.
+                    last = false
+                )
+                GroupRowGap()
+                AnimatedVisibility(
+                    visible = autostartGateRelease,
+                    enter = expandVertically(
+                        expandFrom = Alignment.Top,
+                        animationSpec = motion.defaultSpatialSpec()
+                    ) + fadeIn(animationSpec = motion.defaultEffectsSpec()),
+                    exit = shrinkVertically(
+                        shrinkTowards = Alignment.Top,
+                        animationSpec = motion.defaultSpatialSpec()
+                    ) + fadeOut(animationSpec = motion.defaultEffectsSpec())
+                ) {
+                    Column {
+                        SettingsSwitchCard(
+                            iconRes = R.drawable.ic_restart_release,
+                            title = stringResource(R.string.experiment_autostart_restart_release),
+                            description = stringResource(
+                                R.string.experiment_autostart_restart_release_desc
+                            ),
+                            checked = autostartRestartRelease,
+                            onCheckedChange = { checked ->
+                                Prefs.writeAutostartRestartRelease(
+                                    context, Prefs.remote(), checked
+                                )
+                                autostartRestartRelease = checked
+                            },
+                            stateLine = emptyAllowlistHint,
+                            stateLineOff = emptyAllowlistHint,
+                            first = false,
+                            // The root rung chains behind this one, so it is on
+                            // screen right below when it shows at all.
+                            last = false
+                        )
+                        AnimatedVisibility(
+                            visible = autostartRestartRelease,
+                            enter = expandVertically(
+                                expandFrom = Alignment.Top,
+                                animationSpec = motion.defaultSpatialSpec()
+                            ) + fadeIn(animationSpec = motion.defaultEffectsSpec()),
+                            exit = shrinkVertically(
+                                shrinkTowards = Alignment.Top,
+                                animationSpec = motion.defaultSpatialSpec()
+                            ) + fadeOut(animationSpec = motion.defaultEffectsSpec())
+                        ) {
+                            Column {
+                                GroupRowGap()
+                                SettingsSwitchCard(
+                                    iconRes = R.drawable.ic_root_release,
+                                    title = stringResource(
+                                        R.string.experiment_autostart_root_release
+                                    ),
+                                    description = stringResource(
+                                        R.string.experiment_autostart_root_release_desc
+                                    ),
+                                    checked = autostartRootRelease,
+                                    onCheckedChange = { checked ->
+                                        Prefs.writeAutostartRootRelease(
+                                            context, Prefs.remote(), checked
+                                        )
+                                        autostartRootRelease = checked
+                                    },
+                                    stateLine = emptyAllowlistHint,
+                                    stateLineOff = emptyAllowlistHint,
+                                    first = false,
+                                    // The manager entry below is always on screen,
+                                    // so this row is never the visible group's
+                                    // last either.
+                                    last = false
+                                )
+                            }
                         }
+                        GroupRowGap()
                     }
                 }
-            }
-            GroupRowGap()
-            NavCard(
-                iconRes = R.drawable.ic_autostart_manage,
-                title = stringResource(R.string.experiment_wake_autostart_write),
-                subtitle = stringResource(R.string.experiment_wake_autostart_write_desc),
-                onClick = {
-                    try {
-                        context.startActivity(
-                            Intent().setClassName(
-                                "com.miui.securitycenter",
-                                "com.miui.permcenter.autostart.AutoStartManagementActivity"
+                NavCard(
+                    iconRes = R.drawable.ic_autostart_manage,
+                    title = stringResource(R.string.experiment_wake_autostart_write),
+                    subtitle = stringResource(R.string.experiment_wake_autostart_write_desc),
+                    onClick = {
+                        try {
+                            context.startActivity(
+                                Intent().setClassName(
+                                    "com.miui.securitycenter",
+                                    "com.miui.permcenter.autostart.AutoStartManagementActivity"
+                                )
                             )
-                        )
-                    } catch (ignored: ActivityNotFoundException) {
-                        Toast.makeText(
-                            context,
-                            R.string.experiment_autostart_entry_missing,
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                },
-                first = false,
-                last = true
-            )
+                        } catch (ignored: ActivityNotFoundException) {
+                            Toast.makeText(
+                                context,
+                                R.string.experiment_autostart_entry_missing,
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
+                    first = false,
+                    last = true
+                )
+            }
         }
         item {
             // A section of its own: this row answers the freeze-time network

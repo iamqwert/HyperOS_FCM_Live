@@ -71,3 +71,13 @@ desktop.ini
 java_pid*.hprof
 
 /miuix-0.9.1/
+/tmp/
+
+# 本地工作区与取证残留：IDE 工作区文档、依赖源码解包、截图/日志/agent 交接稿，
+# 都只在开发机上有意义，不入库。
+/.trae/
+/.miuix094tmp/
+/AGENT_HANDOFF.md
+/screen*.png
+/switch_log.txt
+/ui.xml

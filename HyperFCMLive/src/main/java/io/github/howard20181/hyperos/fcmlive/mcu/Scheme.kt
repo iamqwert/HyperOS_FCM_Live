@@ -48,7 +48,14 @@ class Scheme private constructor(
         FIDELITY,
         CONTENT,
         RAINBOW,
-        FRUIT_SALAD;
+        FRUIT_SALAD,
+
+        /**
+         * The CMF scheme — two-source dynamic color as shipped by CMF devices. Appended last
+         * on purpose: [ThemePrefs.paletteStyle] stores styles by ordinal, and a style inserted
+         * ahead of an existing one would silently re-label every saved pick.
+         */
+        CMF;
 
         /**
          * Whether the Expressive (2025) spec publishes rules for this style.
@@ -68,7 +75,8 @@ class Scheme private constructor(
     /** Material Design 3 color spec versions. */
     enum class Spec {
         SPEC_2021,
-        SPEC_2025
+        SPEC_2025,
+        SPEC_2026
     }
 
     @JvmField

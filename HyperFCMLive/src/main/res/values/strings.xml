@@ -17,138 +17,134 @@
     <string name="back">Back</string>
     <string name="help">Help</string>
     <!-- 设置页「其他」区的行名：与顶栏入口/快捷方式的「帮助」区分开，行名说明点开看到的是使用说明 -->
-    <string name="help_guide">User guide</string>
+    <string name="help_guide">User Guide</string>
     <string name="xposed_description">Removes HyperOS restrictions on broadcasts related to Google push connections. Battery use may increase with the module enabled</string>
     <string name="settings_title">FCM Wake-up Allowlist</string>
-    <string name="select_all">Select all</string>
-    <string name="deselect_all">Deselect all</string>
+    <string name="select_all">Select All</string>
+    <string name="deselect_all">Deselect All</string>
     <string name="search_hint">Search…</string>
     <string name="tooltip_search">Search</string>
-    <string name="exit_search">Exit search</string>
-    <string name="exit_multi_select">Exit multi-select</string>
-    <string name="batch_ops">Batch actions</string>
+    <string name="exit_search">Exit Search</string>
+    <string name="exit_multi_select">Exit Multi-Select</string>
+    <string name="batch_ops">Batch Actions</string>
     <string name="selected_count">%1$d selected</string>
     <string name="batch_added">Allowlist updated</string>
     <string name="batch_save">Save</string>
+    <string name="batch_exit">Exit Selection</string>
     <string name="multi_select_tip">Long-press an app card to manage several apps at once</string>
-    <string name="multi_select_tip_miuix">Tap \"Batch actions\" in the top bar to manage several apps at once</string>
-    <string name="installed_apps_permission_denied">The app list may be incomplete without permission</string>
-    <string name="show_system_apps">Show system apps</string>
-    <string name="show_fcm_supported_apps">Show supported apps</string>
-    <string name="exclude_mipush_apps">Exclude MiPush apps</string>
+    <string name="multi_select_tip_miuix">Tap \"Batch Actions\" in the top bar to manage several apps at once</string>
+    <string name="show_system_apps">Show System Apps</string>
+    <string name="exclude_mipush_apps">Exclude MiPush Apps</string>
     <string name="mipush_badge">MiPush</string>
-    <string name="no_fcm_apps_found">No FCM-capable apps found</string>
     <!-- 列表为空且原因是筛选（而非扫描失败）时的提示。 -->
     <string name="no_apps_found">No apps match the current filters</string>
     <string name="settings">Settings</string>
     <string name="about_section_display">Display</string>
     <string name="about_section_theme">Theme</string>
     <string name="about_section_backup">Data</string>
-    <string name="about_section_battery">Battery optimization</string>
-    <string name="about_battery_aosp_usage">AOSP app battery usage</string>
+    <string name="about_section_battery">Battery Optimization</string>
+    <string name="about_battery_aosp_usage">AOSP App Battery Usage</string>
     <string name="about_battery_aosp_usage_desc">Manage how apps use battery in the background</string>
     <string name="about_battery_aosp_usage_missing">Couldn\'t open the battery usage page; this system may not support it</string>
-    <string name="about_section_experiment_debug">Experiments &amp; debugging</string>
+    <string name="about_section_experiment_debug">Experiments &amp; Debugging</string>
     <string name="about_sub_experiment">Experimental toggles, off by default</string>
-    <string name="about_section_privacy">Privacy &amp; permissions</string>
     <string name="about_section_project">About</string>
     <string name="about_section_other">Other</string>
     <string name="about_sub_help">Read the online user guide</string>
-    <string name="privacy_perm_query_all">Read the app list</string>
-    <string name="privacy_perm_query_all_desc">android.permission.QUERY_ALL_PACKAGES: reads installed apps locally</string>
-    <string name="privacy_perm_get_installed">Get installed apps</string>
-    <string name="privacy_perm_get_installed_desc">com.android.permission.GET_INSTALLED_APPS: needed for a full app list on HyperOS; without it the list may be incomplete</string>
-    <string name="privacy_perm_internet">Network access</string>
-    <string name="privacy_perm_internet_desc">android.permission.INTERNET: used only to check for updates on GitHub</string>
-    <string name="privacy_commitment_desc">No personal data is collected or uploaded; the allowlist and settings stay on this device; no analytics, ads or tracking SDKs; the code is open source and auditable</string>
     <string name="about_sub_hide_icon_on">Hidden — open the app from LSPosed</string>
     <string name="about_sub_hide_icon_off">Visible — tap to hide</string>
     <string name="about_sub_check_update">Current version %1$s (%2$d)</string>
     <string name="about_sub_export">Back up the allowlist to a text file</string>
     <string name="about_sub_import">Restore the allowlist from a text file</string>
-    <string name="about_sub_source">Released under the GNU GPL-3.0 license</string>
-    <string name="about_sub_privacy">What each permission is for, and our privacy promise</string>
-    <string name="about_sub_licenses">Open-source components used by this app</string>
-    <string name="privacy_section_perms">App permissions</string>
-    <string name="privacy_section_commitment">Privacy commitment</string>
-    <string name="view_source_code">View source</string>
+    <string name="view_source_code">View Source</string>
+    <string name="about_license">License</string>
     <string name="dialog_close">Close</string>
-    <string name="check_for_updates">Check for updates</string>
+    <string name="check_for_updates">Check for Updates</string>
+    <string name="check_for_updates_sub">Check online for a newer release</string>
     <string name="update_checking">Checking for updates…</string>
     <string name="update_none">Already up to date</string>
     <string name="update_error">Couldn\'t check for updates. Check your connection and try again</string>
-    <string name="export_allowlist">Back up settings</string>
-    <string name="import_allowlist">Restore settings</string>
+    <string name="export_allowlist">Back Up Settings</string>
+    <string name="import_allowlist">Restore Settings</string>
     <string name="allowlist_export_failed">Backup failed</string>
     <string name="allowlist_import_failed">Restore failed</string>
     <string name="allowlist_import_empty">No valid package names in the file</string>
     <string name="allowlist_import_done">Imported %1$d apps</string>
     <string name="allowlist_export_done">Exported %1$d apps</string>
     <string name="update_found">New version available: %1$s</string>
-    <string name="update_found_title">Update available</string>
+    <string name="update_found_title">Update Available</string>
     <string name="update_open">Download</string>
-    <string name="open_source_licenses">Open-source licenses</string>
-    <string name="licenses_title">Open-source licenses</string>
+    <string name="open_source_licenses">Open-Source Licenses</string>
+    <string name="licenses_title">Open-Source Licenses</string>
     <string name="licenses_section_deps">Dependencies</string>
-    <string name="licenses_section_refs">Reference projects</string>
+    <string name="licenses_section_refs">Reference Projects</string>
     <string name="licenses_section_licenses">Licenses</string>
     <string name="license_view_full_text">Tap to view the full text</string>
     <string name="license_apache_2">Apache License 2.0</string>
     <string name="license_gpl_3">GPL-3.0</string>
     <string name="license_mit">MIT License</string>
-    <string name="hide_launcher_icon">Hide launcher icon</string>
-    <string name="theme_mode">Theme mode</string>
-    <string name="palette_style">Palette style</string>
-    <string name="ui_style">UI style</string>
-    <string name="miuix_monet">Monet colors</string>
-    <string name="miuix_accent">Accent color</string>
-    <string name="color_spec">Color spec</string>
+    <string name="hide_launcher_icon">Hide Launcher Icon</string>
+    <string name="theme_mode">Theme Mode</string>
+    <string name="palette_style">Palette Style</string>
+    <string name="ui_style">UI Style</string>
+    <string name="miuix_monet">Monet Colors</string>
+    <string name="miuix_accent">Accent Color</string>
+    <string name="miuix_floating_bar">Floating Bottom Bar</string>
+    <string name="color_spec">Color Spec</string>
     <string name="about_sub_theme_mode">Choose the app\'s theme mode</string>
     <string name="about_sub_ui_style">Choose the app\'s UI style</string>
     <string name="about_sub_miuix_monet">Pick colors from your wallpaper</string>
     <string name="about_sub_miuix_accent">Pick the accent color for the Monet palette</string>
+    <string name="about_sub_miuix_floating_bar">The docked pane, or the floating glass pill</string>
     <string name="about_sub_palette_style">Choose a dynamic color style</string>
     <string name="about_sub_color_spec">Choose the Material color spec</string>
     <string name="language">Language</string>
     <string name="about_sub_language">Choose the app\'s display language</string>
-    <string name="dynamic_color">Dynamic color</string>
+    <string name="dynamic_color">Dynamic Color</string>
     <string name="about_sub_dynamic_color_on">Following your wallpaper\'s colors</string>
     <string name="about_sub_dynamic_color_off">Off — using your chosen theme colors</string>
     <string-array name="theme_mode_entries">
-        <item>Follow system</item>
+        <item>Follow System</item>
         <item>Light</item>
         <item>Dark</item>
-        <item>AMOLED</item>
     </string-array>
-    <!-- 与 ThemePrefs.UI_STYLE_* 的顺序一致。两个都是设计语言的名字，保留原文。 -->
+    <!-- 与 ThemePrefs.UI_STYLE_* 的顺序一致。风格名保留原文，柔光玻璃是本项目自己的命名。 -->
     <string-array name="ui_style_entries">
         <item>Material 3</item>
         <item>Miuix</item>
+        <item>Soft glass</item>
     </string-array>
-    <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格），选项保留英文原文。 -->
+    <!-- Order matches ThemePrefs.BAR_MATERIAL_*; the index is the value. -->
+    <string-array name="bar_material_entries">
+        <item>Miuix</item>
+        <item>Soft glass</item>
+    </string-array>
+    <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格 + 末位 CMF），选项保留英文原文。 -->
     <string-array name="palette_style_entries">
         <item>Monochrome</item>
         <item>Neutral</item>
-        <item>Tonal spot</item>
+        <item>Tonal Spot</item>
         <item>Vibrant</item>
         <item>Expressive</item>
         <item>Fidelity</item>
         <item>Content</item>
         <item>Rainbow</item>
-        <item>Fruit salad</item>
+        <item>Fruit Salad</item>
+        <item>CMF</item>
     </string-array>
     <string-array name="color_spec_entries">
-        <item>Material You (2021)</item>
-        <item>Expressive (2025)</item>
+        <item>Spec 2021</item>
+        <item>Spec 2025</item>
+        <item>Spec 2026</item>
     </string-array>
     <!-- 强调色菜单：第 0 项是「未选择」（存储值 0，跟随壁纸），其余与
          MIUIX_ACCENT_OPTIONS 的顺序一一对应（KernelSU 同款 Material 500 档 + 樱粉）。 -->
     <string-array name="miuix_accent_entries">
-        <item>Follow wallpaper</item>
+        <item>Follow Wallpaper</item>
         <item>Red</item>
         <item>Pink</item>
         <item>Purple</item>
-        <item>Deep purple</item>
+        <item>Deep Purple</item>
         <item>Indigo</item>
         <item>Blue</item>
         <item>Cyan</item>
@@ -158,8 +154,8 @@
         <item>Amber</item>
         <item>Orange</item>
         <item>Brown</item>
-        <item>Blue grey</item>
-        <item>Sakura pink</item>
+        <item>Blue Grey</item>
+        <item>Sakura Pink</item>
     </string-array>
     <!-- 语言下拉：选项用各自的原生名，不翻译（仅 values/ 定义一份）。 -->
     <string-array name="language_entries">
@@ -168,62 +164,77 @@
     </string-array>
     <string name="hide_icon_toast">Launcher icon hidden. Open the module from LSPosed to change its settings</string>
     <string name="show_icon_toast">Launcher icon restored</string>
-    <string name="more_menu">More options</string>
-    <string name="fcm_diagnostics">FCM diagnostics</string>
+    <string name="more_menu">More Options</string>
+    <string name="fcm_diagnostics">FCM Diagnostics</string>
     <string name="fcm_diagnostics_not_found">FCM diagnostics isn\'t available on this device</string>
     <string name="shortcut_settings">Settings</string>
-    <string name="shortcut_settings_long">Open module settings</string>
-    <string name="shortcut_help_long">Read the user guide in your browser</string>
-    <string name="shortcut_fcm_diagnostics_long">View FCM diagnostics</string>
+    <string name="shortcut_settings_long">Open Module Settings</string>
+    <string name="shortcut_help_long">Read the User Guide in Your Browser</string>
+    <string name="shortcut_fcm_diagnostics_long">View FCM Diagnostics</string>
+
+    <!-- 底部导航（仅 Material 3 风格）：「设置」标签复用 settings -->
+    <string name="nav_modules">Home</string>
+    <string name="nav_apps">Apps</string>
+    <string name="nav_about">About</string>
+
+    <!-- 模块状态页（底部导航「主页」tab，仅 Material 3 风格） -->
+    <string name="status_activated">Active</string>
+    <string name="status_not_activated">Not active</string>
+    <string name="status_version_line">Version %1$s (%2$d)</string>
+    <string name="status_device_name">Device Model</string>
+    <string name="status_os_version">System Version</string>
+    <string name="status_android_version">Android Version</string>
+    <string name="status_manager_version">LSPosed Version</string>
+    <string name="status_manager_missing">Not detected</string>
 
     <!-- 帮助内容已迁出应用：唯一来源是仓库根目录的 HELP.md（在线文档）。
          帮助图标与「帮助」快捷方式都用浏览器打开 AboutActivity.HELP_URL。
          动了 Hooker 的行为时同步改 HELP.md，不要在这里补回帮助文案。 -->
 
     <!-- 实验功能页：危险开关集中在此，主界面只留入口 -->
-    <string name="experiment">Experimental features</string>
-    <string name="experiment_wechat_doze_keepout">Keep WeChat out of battery optimization</string>
+    <string name="experiment">Experimental Features</string>
+    <string name="experiment_wechat_doze_keepout">Keep WeChat Out of Battery Optimization</string>
     <string name="experiment_wechat_doze_keepout_desc">You\'ll need to set WeChat to \"Not optimized\" yourself</string>
 
     <string name="experiment_section_network">Network</string>
-    <string name="experiment_wifi_weak_signal_relaxed">Stay connected on weak Wi-Fi</string>
+    <string name="experiment_wifi_weak_signal_relaxed">Stay Connected on Weak Wi-Fi</string>
     <string name="experiment_wifi_weak_signal_relaxed_desc">Reduces frequent switching between Wi-Fi and mobile data; this doesn\'t improve Wi-Fi quality itself</string>
-    <string name="experiment_wifi_weak_signal_floor">Adjust the weak Wi-Fi threshold</string>
+    <string name="experiment_wifi_weak_signal_floor">Adjust the Weak Wi-Fi Threshold</string>
     <string name="experiment_wifi_weak_signal_floor_desc">When the Wi-Fi quality score drops below the chosen value, the system still switches networks under its default policy</string>
     <string name="experiment_wifi_weak_signal_floor_item">%1$d</string>
 
-    <string name="experiment_section_sleep">Sleep mode</string>
-    <string name="experiment_sleep_keepalive">Keep Wi-Fi connected</string>
+    <string name="experiment_section_sleep">Sleep Mode</string>
+    <string name="experiment_sleep_keepalive">Keep Wi-Fi Connected</string>
     <string name="experiment_sleep_keepalive_desc">Keeps Wi-Fi on so push notifications keep coming through</string>
-    <string name="experiment_sleep_keepalive_data">Keep mobile data connected</string>
+    <string name="experiment_sleep_keepalive_data">Keep Mobile Data Connected</string>
     <string name="experiment_sleep_keepalive_data_desc">Keeps mobile data on so push notifications keep coming through</string>
 
     <!-- 自启动单列一节：主开关在运行时放行，副档逐层扩大覆盖面，末行为管家自启动管理入口，默认全关 -->
     <string name="experiment_section_autostart">Autostart</string>
-    <string name="experiment_autostart_gate_release">Allow apps to be started</string>
+    <string name="experiment_autostart_gate_release">Allow Apps to Be Started</string>
     <string name="experiment_autostart_gate_release_desc">Allows the app\'s services and processes to start</string>
-    <string name="experiment_autostart_restart_release">Turn off app freezing</string>
+    <string name="experiment_autostart_restart_release">Turn Off App Freezing</string>
     <string name="experiment_autostart_restart_release_desc">Lets apps restart normally after their process ends</string>
-    <string name="experiment_autostart_root_release">Allow all autostart checks</string>
+    <string name="experiment_autostart_root_release">Allow All Autostart Checks</string>
     <string name="experiment_autostart_root_release_desc">Every autostart check in the system is answered with \"allowed\"</string>
-    <string name="experiment_wake_autostart_write">Autostart manager</string>
+    <string name="experiment_wake_autostart_write">Autostart Manager</string>
     <string name="experiment_wake_autostart_write_desc">Review and adjust each app\'s autostart switch</string>
     <string name="experiment_autostart_empty_list">The allowlist is empty. These switches only affect the apps you\'ve selected — set up the allowlist first</string>
     <string name="experiment_autostart_entry_missing">Couldn\'t open the autostart manager; this system may not support it</string>
 
     <!-- 后台网络单列一节：冻结期网络放宽，默认关 -->
-    <string name="experiment_section_background_net">Background network</string>
-    <string name="experiment_greeze_net_release">Keep network access while frozen</string>
+    <string name="experiment_section_background_net">Background Network</string>
+    <string name="experiment_greeze_net_release">Keep Network Access While Frozen</string>
     <string name="experiment_greeze_net_release_desc">Network stays available while an app is frozen in the background. This doesn\'t improve FCM push — it protects the app\'s own persistent connections</string>
 
     <!-- Smart Power 单列一节：OS3 世代实验功能。OS4 已移除 SmartPower 的拦截
          决策（真机 services.jar/miui-services.jar 验证），整节只在 OS3 上渲染 -->
     <string name="experiment_section_smart_power">Smart Power</string>
-    <string name="experiment_smart_power_release">Bypass Smart Power blocking</string>
+    <string name="experiment_smart_power_release">Bypass Smart Power Blocking</string>
     <string name="experiment_smart_power_release_desc">Allows the app\'s FCM broadcasts and messaging service to start</string>
 
     <!-- 「显示调试日志」在设置页的「实验与调试」区（about_section_experiment_debug） -->
-    <string name="experiment_debug_log">Debug logging</string>
+    <string name="experiment_debug_log">Debug Logging</string>
     <string name="experiment_debug_log_desc">Writes debug logs; turn on when troubleshooting</string>
 
     <!-- 模块状态页 -->
@@ -240,5 +251,4 @@
     <string name="row_selected">Selected</string>
     <string name="row_unselected">Not selected</string>
     <!-- 不可勾选的行：GMS 恒生效。小字即其无障碍描述，故不再单列 a11y_* 副本 -->
-    <string name="gms_row_note">Always in effect — no need to enable</string>
 </resources>

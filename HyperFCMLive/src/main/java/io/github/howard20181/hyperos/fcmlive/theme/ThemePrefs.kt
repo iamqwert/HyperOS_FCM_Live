@@ -6,9 +6,8 @@ import android.content.res.Configuration
 import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
 
 /**
- * Appearance settings: theme mode (including the AMOLED pure-black variant),
- * dynamic color with a custom seed, Material palette style, and color spec.
- * UI-only prefs — they never reach system_server.
+ * Appearance settings: theme mode, dynamic color with a custom seed, Material
+ * palette style, and color spec. UI-only prefs — they never reach system_server.
  *
  * Writes use `apply()` on the main thread; in-memory reads see them immediately.
  */
@@ -19,16 +18,27 @@ object ThemePrefs {
     const val MODE_SYSTEM = 0
     const val MODE_LIGHT = 1
     const val MODE_DARK = 2
-    /** Pure-black dark variant for OLED panels. */
-    const val MODE_AMOLED = 3
+    /** Retired: the AMOLED pure-black variant, deleted with its ramp. */
+    private const val MODE_AMOLED_RETIRED = 3
 
     const val SPEC_2021 = 0
     const val SPEC_2025 = 1
+    /** The 2026 spec — only ever in force under the CMF style; see [specVersion]. */
+    const val SPEC_2026 = 2
 
     /** Which look the app is dressed in. See [UiStyle]. */
     const val UI_STYLE_MATERIAL = 0
     /** Miuix: HyperOS row language — no leading icons, text to the margin. */
     const val UI_STYLE_MIUIX = 1
+    /** Miuix's own screens, milled from the 柔光玻璃 material. See [UiStyle.SoftGlass]. */
+    const val UI_STYLE_SOFT_GLASS = 2
+
+    /** The library's docked pane — the standard HyperOS foot. See [KEY_BAR_MATERIAL]. */
+    const val BAR_MATERIAL_MIUIX = 0
+    /** The floating 柔光玻璃 pill, hovered over the list. See [KEY_BAR_MATERIAL]. */
+    const val BAR_MATERIAL_SOFT_GLASS = 1
+    /** [barMaterialPick]'s "the user has never chosen" answer, which nothing stores. */
+    private const val BAR_MATERIAL_NONE = -1
 
     private const val KEY_UI_STYLE = "ui_style"
     /** Updating installs within this window of their first install read as fresh. */
@@ -42,14 +52,28 @@ object ThemePrefs {
      * [KEY_MIUIX_MONET] is on.
      */
     private const val KEY_MIUIX_ACCENT = "miuix_accent"
+    /**
+     * Which material the Miuix home foot is milled from: [BAR_MATERIAL_MIUIX]
+     * (the library's docked pane) or [BAR_MATERIAL_SOFT_GLASS] (the floating
+     * 柔光玻璃 pill). A stored pick wins; with none stored the style's own
+     * default answers ([defaultBarMaterial]), so a fresh install follows the
+     * look it chose instead of needing a second decision to stay consistent.
+     */
+    private const val KEY_BAR_MATERIAL = "miuix_bar_material"
+    /**
+     * Retired: the floating-bar switch this row replaced. Its two states are
+     * the two materials now, so the first read migrates it (on → 柔光玻璃,
+     * off → Miuix) and writes the pick down; see [barMaterialPick].
+     */
+    private const val KEY_FLOATING_BAR = "miuix_floating_bar"
+    /** Retired: the liquid refraction sub-switch, deleted with the Example alignment. */
+    private const val KEY_LIQUID_GLASS = "miuix_liquid_glass"
 
     private const val KEY_THEME_MODE = "theme_mode"
     private const val KEY_PALETTE_STYLE = "palette_style"
     private const val KEY_SPEC = "color_spec"
     private const val KEY_DYNAMIC_COLOR = "dynamic_color"
     private const val KEY_SEED_COLOR = "seed_color"
-    /** Legacy flag from when AMOLED was a separate switch; migrated on read. */
-    private const val KEY_AMOLED = "amoled"
 
     /** Default style matches what Android's own Monet engine generates. */
     private val DEFAULT_STYLE = Scheme.Variant.TONAL_SPOT.ordinal
@@ -63,11 +87,14 @@ object ThemePrefs {
     fun themeMode(context: Context): Int {
         val p = prefs(context)
         var mode = p.getInt(KEY_THEME_MODE, MODE_SYSTEM)
-        if (mode == MODE_DARK && p.getBoolean(KEY_AMOLED, false)) {
-            mode = MODE_AMOLED
-            p.edit().putInt(KEY_THEME_MODE, MODE_AMOLED).remove(KEY_AMOLED).apply()
+        // A build before the AMOLED retirement may have stored the pure-black
+        // variant; demote it to the ordinary dark mode rather than letting the
+        // range check below fall back to 跟随系统.
+        if (mode == MODE_AMOLED_RETIRED) {
+            mode = MODE_DARK
+            p.edit().putInt(KEY_THEME_MODE, MODE_DARK).apply()
         }
-        return if (mode in MODE_SYSTEM..MODE_AMOLED) mode else MODE_SYSTEM
+        return if (mode in MODE_SYSTEM..MODE_DARK) mode else MODE_SYSTEM
     }
 
     @JvmStatic
@@ -97,7 +124,11 @@ object ThemePrefs {
             return decided
         }
         val stored = p.getInt(KEY_UI_STYLE, UI_STYLE_MATERIAL)
-        return if (stored == UI_STYLE_MIUIX) UI_STYLE_MIUIX else UI_STYLE_MATERIAL
+        return when (stored) {
+            UI_STYLE_MIUIX -> UI_STYLE_MIUIX
+            UI_STYLE_SOFT_GLASS -> UI_STYLE_SOFT_GLASS
+            else -> UI_STYLE_MATERIAL
+        }
     }
 
     /**
@@ -170,6 +201,75 @@ object ThemePrefs {
     }
 
     /**
+     * The material stored for the Miuix home foot, or [BAR_MATERIAL_NONE] when
+     * the user has never picked one.
+     *
+     * The first read on an install that predates this row migrates the retired
+     * floating-bar switch it replaces — that switch's two states *were* these two
+     * materials, and a user who had moved the pill into place must not be handed
+     * the docked pane back — and writes the migrated value down, because the
+     * switch was itself a decision. Installs with neither key are left unset, so
+     * the style they chose answers for them ([defaultBarMaterial]) instead of
+     * having a default written over it that they never asked for.
+     */
+    private fun barMaterialPick(context: Context): Int {
+        val p = prefs(context)
+        if (p.contains(KEY_BAR_MATERIAL)) {
+            return if (p.getInt(KEY_BAR_MATERIAL, BAR_MATERIAL_MIUIX) == BAR_MATERIAL_SOFT_GLASS) {
+                BAR_MATERIAL_SOFT_GLASS
+            } else {
+                BAR_MATERIAL_MIUIX
+            }
+        }
+        if (p.contains(KEY_FLOATING_BAR)) {
+            val migrated =
+                if (p.getBoolean(KEY_FLOATING_BAR, false)) {
+                    BAR_MATERIAL_SOFT_GLASS
+                } else {
+                    BAR_MATERIAL_MIUIX
+                }
+            p.edit().putInt(KEY_BAR_MATERIAL, migrated).apply()
+            return migrated
+        }
+        return BAR_MATERIAL_NONE
+    }
+
+    /**
+     * Whether the user has picked a bar material themselves. False means the
+     * value on screen is the style's own default, which is what the appearance
+     * page needs to know before it shows a row as chosen rather than derived.
+     */
+    @JvmStatic
+    fun barMaterialPicked(context: Context): Boolean = barMaterialPick(context) != BAR_MATERIAL_NONE
+
+    /**
+     * The material in force for the Miuix home foot: the stored pick, else the
+     * style's default. Read only by looks that are [UiStyle.isMiuixBased] — the
+     * Material look always keeps its own docked bar, so the value is ignored
+     * there rather than cleared on a style switch.
+     */
+    @JvmStatic
+    fun barMaterial(context: Context): Int {
+        val picked = barMaterialPick(context)
+        return if (picked != BAR_MATERIAL_NONE) picked else defaultBarMaterial(uiStyle(context))
+    }
+
+    /** The material a style implies while nothing has been picked. */
+    @JvmStatic
+    fun defaultBarMaterial(style: Int): Int {
+        return if (style == UI_STYLE_SOFT_GLASS) {
+            BAR_MATERIAL_SOFT_GLASS
+        } else {
+            BAR_MATERIAL_MIUIX
+        }
+    }
+
+    @JvmStatic
+    fun setBarMaterial(context: Context, material: Int) {
+        prefs(context).edit().putInt(KEY_BAR_MATERIAL, material).apply()
+    }
+
+    /**
      * The palette style in effect. Any style is valid on its own — what it can
      * *pair* with is the spec's business, see [specVersion].
      */
@@ -180,6 +280,12 @@ object ThemePrefs {
         return if (ordinal in values.indices) values[ordinal] else values[DEFAULT_STYLE]
     }
 
+    /**
+     * Stores the palette style. The spec menu is this row's superior — the spec
+     * migrates the style (see [setSpecVersion]), never the other way around —
+     * and under Spec 2026 the row is locked in the UI, so the CMF adopted there
+     * is written by [setSpecVersion] alone.
+     */
     @JvmStatic
     fun setPaletteStyle(context: Context, variant: Scheme.Variant) {
         prefs(context).edit().putInt(KEY_PALETTE_STYLE, variant.ordinal).apply()
@@ -208,17 +314,44 @@ object ThemePrefs {
     @JvmStatic
     fun specVersion(context: Context): Int {
         val stored = prefs(context).getInt(KEY_SPEC, DEFAULT_SPEC)
-        val requested = if (stored == SPEC_2021 || stored == SPEC_2025) stored else DEFAULT_SPEC
-        return if (requested == SPEC_2025 && !paletteStyle(context).supportsExpressive2025) {
-            SPEC_2021
-        } else {
-            requested
+        val requested = if (stored in SPEC_2021..SPEC_2026) stored else DEFAULT_SPEC
+        val style = paletteStyle(context)
+        return when {
+            // CMF publishes rules only under the 2026 spec (upstream SchemeCmf requires it).
+            style == Scheme.Variant.CMF -> SPEC_2026
+            // The 2026 spec's tone rules only resolve for CMF; every other style
+            // runs what it can: the expressive four get 2025, the rest 2021.
+            requested == SPEC_2026 && style.supportsExpressive2025 -> SPEC_2025
+            requested == SPEC_2026 -> SPEC_2021
+            requested == SPEC_2025 && !style.supportsExpressive2025 -> SPEC_2021
+            else -> requested
         }
     }
 
+    /**
+     * Stores the spec request and keeps the style row consistent on disk — the
+     * spec is the primary setting, the style follows it:
+     *  - 2026 adopts CMF outright (the only style it has rules for), and the
+     *    palette row displays that pair locked (the read side hides nothing:
+     *    every spec stays listed, because the spec menu is the way *out*).
+     *  - 2025 needs one of the expressive styles; anything else on the style
+     *    row moves to Tonal Spot so the choice takes effect instead of
+     *    silently resolving down to 2021.
+     *  - 2021 runs every style; a stranded CMF (cannot happen through the UI,
+     *    but a hand-edited export can) falls to Tonal Spot.
+     */
     @JvmStatic
     fun setSpecVersion(context: Context, spec: Int) {
-        prefs(context).edit().putInt(KEY_SPEC, spec).apply()
+        val p = prefs(context)
+        p.edit().putInt(KEY_SPEC, spec).apply()
+        val style = paletteStyle(context)
+        val migrated = when {
+            spec == SPEC_2026 -> Scheme.Variant.CMF
+            spec == SPEC_2025 && !style.supportsExpressive2025 -> Scheme.Variant.TONAL_SPOT
+            style == Scheme.Variant.CMF -> Scheme.Variant.TONAL_SPOT
+            else -> null
+        }
+        migrated?.let { p.edit().putInt(KEY_PALETTE_STYLE, it.ordinal).apply() }
     }
 
     /** Whether colors follow the wallpaper; when off, [seedColor] wins. */
@@ -243,18 +376,26 @@ object ThemePrefs {
         prefs(context).edit().putInt(KEY_SEED_COLOR, color).apply()
     }
 
-    @JvmStatic
-    fun isAmoled(context: Context): Boolean = themeMode(context) == MODE_AMOLED
-
     /** Resolved dark/light for the current mode (MODE_SYSTEM reads the device). */
     @JvmStatic
     fun isDark(context: Context): Boolean {
         return when (themeMode(context)) {
             MODE_LIGHT -> false
-            MODE_DARK, MODE_AMOLED -> true
+            MODE_DARK -> true
             else -> {
-                val mask = context.resources.configuration.uiMode and
-                    Configuration.UI_MODE_NIGHT_MASK
+                // The APPLICATION context, deliberately not the caller's:
+                // an activity attached while the user had 深色/浅色 forced
+                // carries that pinned night flag in its resources for its
+                // whole life ([ThemeSupport.attach] wraps the base context
+                // once, at creation). After switching the mode back to
+                // 跟随系统, its configuration still answers "dark"/"light"
+                // from the pinned flag — the theme then never reverted, which
+                // is exactly the report this fixed. The application context is
+                // never wrapped, so its configuration is the system's own,
+                // kept current by the framework's onConfigurationChanged
+                // propagation while the app is open.
+                val config = context.applicationContext.resources.configuration
+                val mask = config.uiMode and Configuration.UI_MODE_NIGHT_MASK
                 mask == Configuration.UI_MODE_NIGHT_YES
             }
         }
