@@ -355,8 +355,15 @@ fun MainScreen(
                 val bar: @Composable () -> Unit = {
                     // The bar's controls and its capsule read the page's own
                     // layer; the provider wraps the bar alone, because the list
-                    // below is the recorded node and reads nothing.
-                    CompositionLocalProvider(LocalSoftGlassBackdrop provides pageBackdrop) {
+                    // below is the recorded node and reads nothing. The reveal
+                    // beside it is the look's bare-at-the-top rule: the plates
+                    // appear once the list has scrolled under the bar.
+                    CompositionLocalProvider(
+                        LocalSoftGlassBackdrop provides pageBackdrop,
+                        LocalSoftGlassBarReveal provides softGlassReveal(
+                            scrollBehavior.state.collapsedFraction
+                        )
+                    ) {
                     // The reference's own cross-fade: the resting bar (title +
                     // fake capsule) fades out while the pager's surface fades
                     // in, so the expanding bar never overlaps a standing fake.
@@ -1042,7 +1049,10 @@ fun TopBarIconButton(
  * A home-bar icon control, in whichever material the bar's own look is milled
  * from: the library's bare button on both plain looks, the 柔光玻璃 plate under
  * [UiStyle.SoftGlass] — the same material, sizes, glyph ink and press language
- * everywhere else in that look, so a bar cannot end up half dressed.
+ * everywhere else in that look, so a bar cannot end up half dressed. The plate
+ * is chrome for a bar with content under it, so it appears only once the page
+ * has moved off its top ([LocalSoftGlassBarReveal]); at rest the button stays
+ * bare like its peers.
  *
  * The plates sample the PAGE's own layer, carried here by [MainScreen] and
  * [PageScaffold] (see [rememberPageLayerBackdrop]) rather than read off the
@@ -1055,7 +1065,7 @@ private fun BarIconButton(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    if (softGlassChrome()) {
+    if (softGlassChrome() && LocalSoftGlassBarReveal.current) {
         SoftGlassIconButton(onClick = onClick, modifier = modifier, content = content)
     } else {
         MiuixIconButton(onClick = onClick, modifier = modifier, content = content)

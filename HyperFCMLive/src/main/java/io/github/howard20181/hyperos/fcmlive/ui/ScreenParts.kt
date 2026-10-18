@@ -367,6 +367,23 @@ val LocalMiuixGlassBackdrop = compositionLocalOf<LayerBackdrop?> { null }
 val LocalFloatingBarClearance = compositionLocalOf { 0.dp }
 
 /**
+ * Whether the 柔光玻璃 look's floating bar controls — the back disc, the batch
+ * and overflow plates — are revealed. The look's rule: bare at the very top of
+ * a page (nothing has scrolled under the bar yet, so a plate would frost
+ * nothing), glass the moment the page moves. The scaffolds provide their
+ * bar-collapse fraction here; the default keeps today's always-glass behaviour
+ * for any control composed outside a scaffold's bar.
+ */
+val LocalSoftGlassBarReveal = compositionLocalOf { true }
+
+/**
+ * The reveal read for the fraction a Miuix scroll state reports: top of the
+ * page — including the pre-measure NaN the fraction holds before the scroll
+ * range exists (see [HazeGlassBar]) — reads as bare, anything past it as glass.
+ */
+internal fun softGlassReveal(fraction: Float): Boolean = !fraction.isNaN() && fraction > 0f
+
+/**
  * The glass tints' dark read. The app's own palette owns darkness — it can force
  * a look the system does not — so this asks the page background rather than the
  * system night flag, exactly as the backdrop's own dark read does.
@@ -1575,7 +1592,9 @@ internal fun rememberPageLayerBackdrop(): LayerBackdrop {
  * The glass is 柔光玻璃's: the same 44dp plate the rest of that look's chrome
  * wears ([SoftGlassIconButton]), which the bar carries as its sibling of the
  * page's recorded layer — see [rememberPageLayerBackdrop] for why that has to be
- * the page's own layer rather than the shell's.
+ * the page's own layer rather than the shell's. The plate is the look's chrome
+ * for a bar with content under it, so it appears only once the page has moved
+ * off its top ([LocalSoftGlassBarReveal]); at rest the control stays bare.
  *
  * The glyph keeps the bare control's ink and size in both, so the material is the
  * only difference between the two.
@@ -1594,7 +1613,7 @@ private fun MiuixBackControl(
             modifier = Modifier.size(24.dp)
         )
     }
-    if (glass) {
+    if (glass && LocalSoftGlassBarReveal.current) {
         SoftGlassIconButton(
             onClick = onClick,
             recipe = SoftGlassRecipes.floatingNavigation(LocalSoftGlassSpec.current.fineTuning),
@@ -1701,8 +1720,15 @@ fun PageScaffold(
                 val bar: @Composable () -> Unit = {
                     // The controls on the bar read the page's OWN layer. The
                     // provider wraps only the bar, because only the bar reads it
-                    // — the page body is the recorded node and does not.
-                    CompositionLocalProvider(LocalSoftGlassBackdrop provides pageBackdrop) {
+                    // — the page body is the recorded node and does not. The
+                    // reveal beside it is the look's bare-at-the-top rule: the
+                    // plates appear once the page has scrolled under the bar.
+                    CompositionLocalProvider(
+                        LocalSoftGlassBackdrop provides pageBackdrop,
+                        LocalSoftGlassBarReveal provides softGlassReveal(
+                            barScrollProgress ?: scrollBehavior.state.collapsedFraction
+                        )
+                    ) {
                     val travel = barScrollProgress
                     if (travel == null) {
                         MiuixTopAppBar(
