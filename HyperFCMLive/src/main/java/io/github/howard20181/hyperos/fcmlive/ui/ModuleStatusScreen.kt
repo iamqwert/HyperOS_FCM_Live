@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
@@ -30,10 +29,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -92,6 +87,10 @@ fun ModuleStatusScreen(
         modifier = modifier
     ) { innerPadding ->
         val inset = pageHorizontalInset()
+        // Card spacing: the reference runs its list on spacedBy(12.dp) end to
+        // end, so the Miuix-based looks breathe that air between every block;
+        // the M3 cut keeps its own 16dp rhythm.
+        val pageGap = if (LocalUiStyle.current.isMiuixBased) 12.dp else 16.dp
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
@@ -127,7 +126,7 @@ fun ModuleStatusScreen(
             item {
                 // No section title here — the home reads as one page, not a
                 // settings form; a full gap separates hero from rows.
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(pageGap))
                 SettingsGroup {
                     InfoRow(
                         iconRes = R.drawable.ic_smartphone,
@@ -168,7 +167,7 @@ fun ModuleStatusScreen(
             // so neither reads as a row of the other's container. A full gap
             // (not the 2dp row seam) keeps each card clear of its neighbour.
             item {
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(pageGap))
                 SettingsGroup {
                     NavCard(
                         iconRes = R.drawable.ic_fcm_diagnostics,
@@ -179,7 +178,7 @@ fun ModuleStatusScreen(
                         last = true
                     )
                 }
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(pageGap))
                 SettingsGroup {
                     NavCard(
                         iconRes = R.drawable.ic_info,
@@ -312,11 +311,11 @@ private fun StatusHero(
  *
  * Two fidelity points the first cut got wrong:
  *  - every glyph and line is drawn or typeset by THIS look — the watermark is
- *    stroked by hand on a [Canvas] (ring + round-capped tick, the reference's
- *    geometry; the library's icon set has a bare tick and no circled one), and
- *    every text is the library's [MiuixText], which carries this look's font —
- *    a material3 Text here rendered the Material theme's family and the wrong
- *    weights.
+ *    the reference's own circled-tick mark (androidx Rounded.CheckCircleOutline,
+ *    painted through tint; the library's icon set has a bare tick and no
+ *    circled one), and every text is the library's [MiuixText], which carries
+ *    this look's font — a material3 Text here rendered the Material theme's
+ *    family and the wrong weights.
  *  - Inactive keeps the same geometry but the card's default surface and a
  *    muted watermark, and the card answers a tap with the re-check — the same
  *    retry contract the M3 hero runs on the M3 branch above.
@@ -365,33 +364,16 @@ private fun MiuixStatusHero(
                         .offset(27.dp, 31.dp),
                     contentAlignment = Alignment.BottomEnd
                 ) {
-                    // Ring + tick as strokes, the reference's outlined mark.
-                    // Stroke width reads off the box so the mark scales whole.
-                    Canvas(modifier = Modifier.size(110.dp)) {
-                        val stroke = Stroke(
-                            width = size.minDimension * 0.075f,
-                            cap = StrokeCap.Round
-                        )
-                        drawCircle(
-                            color = watermarkTint,
-                            radius = (size.minDimension - stroke.width) / 2f,
-                            style = stroke
-                        )
-                        val tick = Path().apply {
-                            moveTo(size.width * 0.29f, size.height * 0.53f)
-                            lineTo(size.width * 0.44f, size.height * 0.67f)
-                            lineTo(size.width * 0.71f, size.height * 0.36f)
-                        }
-                        drawPath(
-                            tick,
-                            color = watermarkTint,
-                            style = Stroke(
-                                width = stroke.width,
-                                cap = StrokeCap.Round,
-                                join = StrokeJoin.Round
-                            )
-                        )
-                    }
+                    // The circled tick as a drawable — the reference's own
+                    // mark (androidx Rounded.CheckCircleOutline) — tinted, not
+                    // hand-stroked: the fill geometry is Google's, so the
+                    // mark reads exactly as the reference's does.
+                    Icon(
+                        painter = painterResource(R.drawable.ic_check_circle_outline),
+                        contentDescription = null,
+                        tint = watermarkTint,
+                        modifier = Modifier.size(110.dp)
+                    )
                 }
                 // The text block, the reference's own split: verdict and
                 // version anchored to the card's top-start inside one
