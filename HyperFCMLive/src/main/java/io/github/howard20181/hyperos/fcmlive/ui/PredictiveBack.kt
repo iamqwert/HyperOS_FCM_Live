@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -236,8 +237,10 @@ fun PredictiveBackContainer(
     // it, and whether a commit's settle is still running. A plain object rather
     // than composition state on purpose — the library's gesture and this file's
     // pointer handlers read and write it per event, and a snapshot write per
-    // event would recompose the page at pointer rate. The one flag composition
-    // does read, whether the platform is driving, is `platformGesture` above.
+    // event would recompose the page at pointer rate. Composition reads only
+    // threshold-level values here: whether the platform is driving
+    // (`platformGesture` above) and whether the page is off rest
+    // (`transitionActive` below).
     //
     // The picture is borrowed on the first live follow event rather than at the
     // decide stage: the library reports only once it has claimed the sequence,
@@ -250,14 +253,28 @@ fun PredictiveBackContainer(
     }
     val swipe = remember { SwipeRun() }
 
-    // True from the moment a back gesture/key claims the page until a cancel
-    // settle has landed — both sources claim it: the platform's `onBackStarted`,
-    // and the library's gesture on the first frame it has moved the depth.
-    // Drives the two transition-time treatments miuix-nav applies through its
-    // depth buckets — the leading squircle clip and the input blackout — exactly
-    // while the page is off its rest position (at rest the sheet is full-bleed
-    // and interactive, as there).
-    var transitionActive by remember { mutableStateOf(false) }
+    // Whether the page is off its rest position on the depth axis — the whole of
+    // what "a transition owns the page" means, and the gate for the two
+    // transition-time treatments miuix-nav applies through its depth buckets: the
+    // leading squircle clip and the input blackout. Bucketed into one Boolean by a
+    // `derivedStateOf`, exactly as NavDisplay packs its own depth buckets: the raw
+    // float is wired to every visual through the deferred reads below, and
+    // composition must not subscribe to it. Subscribing here is what recomposed
+    // this page on the recomposition clock — one whole-page pass per frame of the
+    // gesture, `content()` included, where the travel belongs on the layer clock
+    // it is drawn with. This derived read is the only composition consumer of the
+    // depth, and it flips at the two ends of a transition rather than per frame.
+    // The window is NavDisplay's own `shouldClipCornersAt` for
+    // `NavCornerClipMode.Leading` — strictly between the rest index and one step
+    // down — which over this range is also its `shouldBlockInputAt`: at rest the
+    // sheet is full-bleed and interactive, as there. Both ends land exactly on the
+    // bound: a finished settle leaves the Animatable on its target, not near it.
+    val transitionActive by remember {
+        derivedStateOf {
+            val d = depth.value
+            d > EXIT_DEPTH && d < TOP_INDEX.toFloat()
+        }
+    }
 
     // Corner radius of the sheet while it is displaced, as a fraction of the
     // screen width — the **Material** look's treatment, measured off KernelSU,
@@ -355,7 +372,6 @@ fun PredictiveBackContainer(
             lastProgress = 0f
             lastTimeMillis = 0L
             progressVelocity = 0f
-            transitionActive = true
             // The picture underneath may be one palette behind, or still
             // carrying the press that left the page: an appearance change and a
             // launch both defer their retake so the tap that caused them does
@@ -487,7 +503,6 @@ fun PredictiveBackContainer(
                     } finally {
                         depth.updateBounds(lowerBound = null, upperBound = null)
                     }
-                    transitionActive = false
                 } else {
                     // Spring back to rest from wherever the finger left it. The
                     // system reports no release velocity for a cancelled gesture,
@@ -593,32 +608,31 @@ fun PredictiveBackContainer(
                 },
                 onCancel = {
                     // Fired once, after the library's cancel spring is back at
-                    // rest — the mirror of the platform path's cancel: the
-                    // transition-time treatments come off and the axis is
-                    // released to the platform again.
+                    // rest — the mirror of the platform path's cancel: the axis is
+                    // released to the platform again. The transition-time
+                    // treatments need no clearing here: they read the depth, and
+                    // the same spring that fires this left the axis at rest.
                     swipe.owns = false
                     swipe.pictureTaken = false
                     swipe.settling = false
-                    transitionActive = false
                 },
                 onGesture = { gesture ->
                     if (gesture != null) {
                         // A live follow event: this finger is moving this page, so
-                        // the platform's stream stands down and the transition-time
-                        // treatments are owed. The parent picture is borrowed here,
-                        // once per gesture, rather than at the decide stage — the
-                        // library reports only after it has claimed the sequence,
-                        // so a gesture a pager or a list wins never pays for a
-                        // snapshot retake. `flushForPreview` before the read: an
-                        // appearance change defers its retake, and this is the last
-                        // moment the picture can be fixed before it is shown.
+                        // the platform's stream stands down. The parent picture is
+                        // borrowed here, once per gesture, rather than at the
+                        // decide stage — the library reports only after it has
+                        // claimed the sequence, so a gesture a pager or a list wins
+                        // never pays for a snapshot retake. `flushForPreview`
+                        // before the read: an appearance change defers its retake,
+                        // and this is the last moment the picture can be fixed
+                        // before it is shown.
                         if (!swipe.pictureTaken) {
                             WindowSnapshot.flushForPreview()
                             gestureBackground = background()
                             swipe.pictureTaken = true
                         }
                         swipe.owns = true
-                        transitionActive = true
                     } else {
                         // The library's sequence has fully resolved. The commit
                         // branch resolves through the settle above, so this is a
@@ -631,17 +645,17 @@ fun PredictiveBackContainer(
             .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
             .then(blockInputModifier)
     ) {
-        // One frame's worth of the depth axis, read once and shared by every
-        // layer below: `step` is the fraction of a full pop travelled — 0 at
-        // rest, 1 with the resigning page clear of the edge — `progress` the
-        // same value clamped, which is what the alphas and the shadow are keyed
-        // on, and `offset` the unclamped displacement in pixels, the value these
-        // layers have always skated on, left unclamped so a settle may still
-        // round the edge with it. Read here rather than inside the layers
-        // because the layers must agree on one frame's number.
-        val step = TOP_INDEX - depth.value
-        val progress = step.coerceIn(0f, 1f)
-        val offset = step * widthPx
+        // The depth axis is NOT read here. Each layer below reads it inside its
+        // own deferred scope — the `graphicsLayer` / `drawWithContent` blocks,
+        // which run on the layer clock, after composition — so a frame of the
+        // travel invalidates those layers and nothing else. A read here is what
+        // recomposed this whole page, `content()` included, once per frame of
+        // every gesture; miuix-nav reads its `animatedTop` the same deferred way,
+        // inside the transition's own `graphicsLayer`. Each layer then derives the
+        // numbers it draws from, in the frame it draws them: the fraction of a full
+        // pop travelled (0f at rest, 1f with the resigning page clear of the edge),
+        // clamped to `progress` for the alphas and the shadow, unclamped to
+        // `offset` in pixels so a settle may still round the edge with it.
 
         // The parent — 上一层页面, the page being returned to.
         //
@@ -675,10 +689,15 @@ fun PredictiveBackContainer(
                 .fillMaxSize()
                 .background(backdropColor)
                 .graphicsLayer {
+                    // Deferred read — this block runs in the layer's own update,
+                    // never in composition, so the per-frame float costs one
+                    // layer invalidation instead of a whole-page recomposition.
+                    val progress = (TOP_INDEX - depth.value).coerceIn(0f, 1f)
                     translationX = -forward * PARALLAX_FRACTION * (1f - progress) * widthPx
                     alpha = 1f - COVER_ALPHA_FALLOFF * (1f - progress)
                 }
                 .drawWithContent {
+                    val progress = (TOP_INDEX - depth.value).coerceIn(0f, 1f)
                     drawContent()
                     // `progress > 0f` guards rest: at rest the layer is hidden
                     // behind the page, and without the guard a wash at its
@@ -725,6 +744,9 @@ fun PredictiveBackContainer(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
+                    // Deferred read, as above — the sheet's own travel, off the
+                    // composition clock.
+                    val offset = (TOP_INDEX - depth.value) * widthPx
                     translationX = if (isMiuix) {
                         offset.fastRoundToInt().toFloat() * forward
                     } else {
