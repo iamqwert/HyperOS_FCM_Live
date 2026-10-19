@@ -210,9 +210,10 @@ fun SectionTitle(res: Int, modifier: Modifier = Modifier, first: Boolean = false
  * Every page body in the app is a `LazyColumn`, and every one of them owes its
  * position to this rather than to `LazyColumn`'s default so the rule is named in
  * one place: the position has to outlive the composition, not just the
- * recomposition — [WindowSnapshot] repaints a stopped page by detaching and
- * re-attaching its view tree, which disposes the composition wholesale, and only
- * a saveable state comes back from that.
+ * recomposition — a rotation rebuilds the whole tree from saved state, and only
+ * a saveable comes back from that. (A page pushed over another no longer disposes
+ * anything: both are entries of one NavDisplay, and the covered one stays
+ * composed.)
  *
  * Deliberately positional (no custom saveable key): upstream deprecated keyed
  * `rememberSaveable` — a name bypasses positional scoping and can share or lose

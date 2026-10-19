@@ -1,13 +1,16 @@
 package io.github.howard20181.hyperos.fcmlive
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.ui.Modifier
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.unit.dp
 import androidx.appcompat.app.AppCompatActivity
 import android.content.ComponentName
 import android.content.Context
@@ -27,6 +30,9 @@ import android.view.View
 import android.view.WindowManager
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
+import io.github.howard20181.hyperos.fcmlive.nav.MaterialNavTransition
+import io.github.howard20181.hyperos.fcmlive.nav.Navigator
+import io.github.howard20181.hyperos.fcmlive.nav.Route
 import io.github.howard20181.hyperos.fcmlive.theme.AppPalette
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
@@ -36,17 +42,18 @@ import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport
 import io.github.howard20181.hyperos.fcmlive.ui.AboutActions
 import io.github.howard20181.hyperos.fcmlive.ui.AboutScreen
+import io.github.howard20181.hyperos.fcmlive.ui.AboutTabScreen
 import io.github.howard20181.hyperos.fcmlive.ui.AppListStore
+import io.github.howard20181.hyperos.fcmlive.ui.ExperimentScreen
 import io.github.howard20181.hyperos.fcmlive.ui.HomeShell
 import io.github.howard20181.hyperos.fcmlive.ui.HomeTab
+import io.github.howard20181.hyperos.fcmlive.ui.LicensesScreen
 import io.github.howard20181.hyperos.fcmlive.ui.MiuixHomeShell
 import io.github.howard20181.hyperos.fcmlive.ui.MainActions
 import io.github.howard20181.hyperos.fcmlive.ui.MainScreen
 import io.github.howard20181.hyperos.fcmlive.ui.MainTopBarState
 import io.github.howard20181.hyperos.fcmlive.ui.ModuleStatusScreen
 import io.github.howard20181.hyperos.fcmlive.ui.OverflowState
-import io.github.howard20181.hyperos.fcmlive.ui.WindowSnapshot
-import io.github.howard20181.hyperos.fcmlive.ui.startActivityWithSnapshot
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
 import java.util.Locale
@@ -56,6 +63,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.nav.core.NavCornerClipMode
+import top.yukonga.miuix.kmp.nav.core.NavDisplay
+import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
+import top.yukonga.miuix.kmp.nav.core.rememberNavBackStack
+import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
+import top.yukonga.miuix.kmp.nav.transition.NavTransitions
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * Settings screen: pick which apps FCM may wake / auto-launch.
@@ -217,11 +231,20 @@ class MainActivity : AppCompatActivity() {
     /**
      * The settings tab's feedback line and its Activity-bound capabilities —
      * the SAF contracts, the update check, the release opening — in one
-     * [AboutDelegate], the same object [AboutActivity] holds. Created in
-     * [onCreate]: the SAF contracts must register before the window is STARTED.
+     * [AboutDelegate]. Created in [onCreate]: the SAF contracts must register
+     * before the window is STARTED.
      */
     private val settingsSnackbarHostState = SnackbarHostState()
     private lateinit var aboutDelegate: AboutDelegate
+
+    /**
+     * The live page stack, for the one path that is not composition: a launcher
+     * shortcut relaunch names a home tab, so a sub-page left over from last time
+     * has to be dropped before the tab is switched. Written from composition
+     * (see [AppPages]), where the stack is remembered and therefore saved — which
+     * is also why it cannot simply be built here.
+     */
+    private var navigator: Navigator? = null
 
     /** The module's own version, for the status tab's hero card. */
     private var moduleVersionName = ""
@@ -369,8 +392,68 @@ class MainActivity : AppCompatActivity() {
                 // with the page's own bar. Read here, in composition —
                 // [showMessage] is a plain function and cannot read this itself.
                 miuixFeedbackNow = LocalUiStyle.current.isMiuixBased
-                HomeRoot()
+                AppPages()
             }
+        }
+    }
+
+    /**
+     * Every page of the app, in one stack, at one composition location.
+     *
+     * The home and whatever is open on top of it are entries in the same
+     * [NavDisplay], so the page underneath stays composed and drawn instead of
+     * being a stopped window — which is exactly what the back gesture and the
+     * settle after its release move. One *location* matters as much as one stack:
+     * the appearance switches what is composed around this, and rebuilding the
+     * display there would drop the page the user is on.
+     *
+     * The effects and the transition are the only per-look difference. Miuix takes
+     * the library's own defaults — its reference app's feel: the slide, the corner
+     * clip taken from the device's screen corner, the 0.5 dim scrim, and input
+     * closed for the duration of a transition. All four are on unconditionally,
+     * with no setting exposed for them, which is how the reference ships them.
+     * Material keeps its own transition (see [MaterialNavTransition]) and with it
+     * no corner-clip effect: that look masks the sliding page with its own
+     * rectangle, and a second mask on the same layer would fight it. Input stays
+     * open under Material, as it always was.
+     */
+    @Composable
+    private fun AppPages() {
+        val backStack = rememberNavBackStack<Route>(Route.Main)
+        val pages = remember { Navigator(backStack) }
+        SideEffect { navigator = pages }
+
+        val miuix = LocalUiStyle.current.isMiuixBased
+        // What fills the strip the covered page's parallax vacates — the colour
+        // the system's own window transition would have shown through. Miuix
+        // paints the revealed layer in the theme's surface, which is what the
+        // Example hands `NavDisplay` as `backdropColor`; the Material look keeps
+        // its own background role, as its back preview did. Both are read off the
+        // surrounding theme, which is this display's parent.
+        val backdrop =
+            if (miuix) MiuixTheme.colorScheme.surface else MaterialTheme.colorScheme.background
+        // Read off the window insets, like the library's own effect does. Unused
+        // under Material — its rounding is the transition's own rectangle.
+        val systemCorner = rememberNavSystemCornerRadius()
+        NavDisplay(
+            backStack = backStack,
+            onBack = { pages.pop() },
+            transition = if (miuix) NavTransitions.MiuixDefault else MaterialNavTransition,
+            effects = NavDisplayEffects(
+                enableCornerClip = miuix,
+                cornerClipRadius = if (miuix) systemCorner else 0.dp,
+                cornerClipMode = NavCornerClipMode.Leading,
+                // 0.5 for both: the default that library ships, and the depth the
+                // Material back preview washed its covered page with.
+                dimAmount = 0.5f,
+                blockInputDuringTransition = miuix,
+                backdropColor = backdrop,
+            ),
+        ) {
+            entry<Route.Main> { HomeRoot(pages) }
+            entry<Route.About> { AboutPage(pages) }
+            entry<Route.Licenses> { LicensesScreen(onBack = { pages.pop() }) }
+            entry<Route.Experiment> { ExperimentScreen(onBack = { pages.pop() }) }
         }
     }
 
@@ -382,7 +465,7 @@ class MainActivity : AppCompatActivity() {
      * switch re-skins in place.
      */
     @Composable
-    private fun HomeRoot() {
+    private fun HomeRoot(pages: Navigator) {
         val tabContent: @Composable (HomeTab) -> Unit = { tab ->
             when (tab) {
                 HomeTab.Modules -> ModuleStatusScreen(
@@ -399,20 +482,15 @@ class MainActivity : AppCompatActivity() {
                         UiUtils.openUrl(this, AboutDelegate.helpUrl(this))
                     },
                     onAbout = {
-                        // A real sub-page, like licences: the same window
-                        // transition slides it in from the right, and the
-                        // snapshot gives its predictive back the layer to
-                        // reveal. AboutActivity renders its about-only mode —
-                        // the hero and the three project rows — off this extra.
-                        startActivityWithSnapshot(
-                            Intent(this, AboutActivity::class.java)
-                                .putExtra(AboutActivity.EXTRA_ABOUT_ONLY, true)
-                        )
+                        // A real page, like licences: it slides in over the home
+                        // and the home stays underneath it, so its predictive back
+                        // reveals the page itself rather than a picture of one.
+                        pages.push(Route.About)
                     },
                     onRecheck = { recheckModuleActive() }
                 )
                 HomeTab.Apps -> AppListTab()
-                HomeTab.Settings -> SettingsTab()
+                HomeTab.Settings -> SettingsTab(pages)
             }
         }
         if (LocalUiStyle.current.isMiuixBased) {
@@ -473,30 +551,26 @@ class MainActivity : AppCompatActivity() {
      * section, which on this home is the「关于」tab's whole page.
      */
     @Composable
-    private fun SettingsTab() {
+    private fun SettingsTab(pages: Navigator) {
         AboutScreen(
             onBack = {},
             showBack = false,
             showProjectSection = false,
-            actions = aboutActions(),
+            actions = aboutActions(pages),
             snackbarHostState = settingsSnackbarHostState
         )
     }
 
     /**
-     * The [AboutActions] both settings tabs share: the callbacks need the
-     * [AboutDelegate] and this Activity, and the two tabs open the same pages
-     * — only where the「关于」card lives differs.
+     * The [AboutActions] both settings pages share: the callbacks need the
+     * [AboutDelegate] and this Activity, and the two pages open the same
+     * destinations — only where the「关于」card lives differs.
      */
-    private fun aboutActions(): AboutActions = AboutActions(
+    private fun aboutActions(pages: Navigator): AboutActions = AboutActions(
         onViewSource = { aboutDelegate.openLink(AboutDelegate.REPO_URL) },
         onLicense = { aboutDelegate.openLink(AboutDelegate.GPL3_URL) },
-        onLicenses = {
-            startActivityWithSnapshot(Intent(this, LicensesActivity::class.java))
-        },
-        onExperiment = {
-            startActivityWithSnapshot(Intent(this, ExperimentActivity::class.java))
-        },
+        onLicenses = { pages.push(Route.Licenses) },
+        onExperiment = { pages.push(Route.Experiment) },
         onExport = aboutDelegate::exportAllowlist,
         onImport = aboutDelegate::importAllowlist,
         onCheckUpdate = aboutDelegate::checkForUpdates,
@@ -505,6 +579,36 @@ class MainActivity : AppCompatActivity() {
         versionTag = settingsVersionTag,
         onAppearanceChange = aboutDelegate::applyAppearanceChange
     )
+
+    /**
+     * [Route.About]: the page the home's「关于」row opens, which is [AboutScreen]
+     * cut down to the hero and the project rows — the appearance rows and the
+     * backup / update rows only exist on the settings tab itself.
+     *
+     * Its feedback line is the settings tab's, not one of its own: the messages
+     * this page can raise come from [aboutDelegate], which writes to that state,
+     * and the page hosting it is what puts them on screen.
+     */
+    @Composable
+    private fun AboutPage(pages: Navigator) {
+        AboutTabScreen(
+            onBack = { pages.pop() },
+            actions = AboutActions(
+                onViewSource = { aboutDelegate.openLink(AboutDelegate.REPO_URL) },
+                onLicense = { aboutDelegate.openLink(AboutDelegate.GPL3_URL) },
+                onLicenses = { pages.push(Route.Licenses) },
+                onExperiment = {},
+                onExport = {},
+                onImport = {},
+                onCheckUpdate = {},
+                onUpdateOpen = {},
+                versionLine = settingsVersionLine,
+                versionTag = settingsVersionTag,
+                onAppearanceChange = aboutDelegate::applyAppearanceChange
+            ),
+            snackbarHostState = settingsSnackbarHostState
+        )
+    }
 
     /**
      * One transient line of feedback, in whichever shell the app is wearing.
@@ -722,22 +826,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Returning from a sub-page launched mid-tap: the tap's press feedback
-        // (MiuixIndication's fade-out spring) never got its frames — the window
-        // stops within milliseconds of the tap and ON_STOP pauses the frame
-        // clock, freezing the animation mid-fade. That frozen alpha is baked
-        // into the window's recorded display list, and a plain invalidate()
-        // only replays that list, so on its own it cannot clear the ripple.
-        // The real fix lives in WindowSnapshot.settle: it resumes the clock and
-        // retakes the page before the user can come back. The two draws here
-        // cover the fast return (settle hasn't run yet): the first forces a
-        // pass right at resume, the second lands on the frame after ON_START
-        // has resumed the clock and the fade has finally completed, so the
-        // re-recorded list is the page at rest.
-        window.decorView.invalidate()
-        window.decorView.postOnAnimation { window.decorView.invalidate() }
-        // Appearance settings may have changed while the settings screen was
-        // on top (palette style, theme mode, seed color...). The Compose tree
+        // Appearance settings may have changed while the settings page was on
+        // top (palette style, theme mode, seed color...). The Compose tree
         // follows ThemeEngine's generation counter and re-skins on its own;
         // what recomposes nowhere is the View-side window chrome. Repaint that
         // here instead of rebuilding the whole activity — the old `recreate()`
@@ -835,10 +925,8 @@ class MainActivity : AppCompatActivity() {
         store?.shutdown()
         if (isFinishing) {
             // Leaving for real rather than being rebuilt: drop the scan cache so
-            // the icons it pins are released with the screen, and drop the
-            // snapshot the sub-pages reveal — nothing will open from here again.
+            // the icons it pins are released with the screen.
             sAppScanCache = null
-            WindowSnapshot.clear(MainActivity::class.java)
         }
         backInvokedCallback?.let {
             try {
@@ -1132,6 +1220,10 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // A shortcut relaunch names a home tab, and a tab is only reachable from
+        // the home — so a sub-page left open from last time goes first, rather
+        // than burying the tab the shortcut asked for.
+        navigator?.popToMain()
         handleShortcutIntent(intent)
     }
 

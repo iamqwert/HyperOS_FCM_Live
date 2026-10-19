@@ -233,10 +233,7 @@ fun MainScreen(
     // meant to achieve. So it stays internal, but through
     // [rememberPageListState]: the saveable registry lives on the view, not the
     // composition, so the position is restored even when the composition is
-    // disposed wholesale — which is what
-    // [io.github.howard20181.hyperos.fcmlive.ui.WindowSnapshot] used to do to this
-    // window to refresh the predictive-back preview picture, and what it still
-    // does to any page that is stopped at the time.
+    // disposed wholesale — which is what a rotation does to it.
     lazyListState: LazyListState = rememberPageListState(),
     // The M3 feedback surface. Owned by the caller, because that is where the
     // messages originate; hosted here, because this is the tree on screen.

@@ -8,7 +8,7 @@
   2. 钩子返回值是 ROM 的读取值，不是「请求」；值 = 1 表示 ROM 内建的「需保持可达」。
   3. 睡眠相关一律写「进入或退出」睡眠模式，不要只写「进入」。
   4. 实验性开关默认全部关闭，且只描述功能，不附加「已开启／已关闭」这类状态描述。
-  5. 危险开关只放在 ExperimentActivity。
+  5. 危险开关只放在实验性功能页（ExperimentScreen）。
   6. 英文要求地道、符合母语者习惯，禁止逐字硬翻；UI 术语以 Android 官方表述为准。
 -->
 <resources>
@@ -191,7 +191,7 @@
     <string name="status_manager_missing">Not detected</string>
 
     <!-- 帮助内容已迁出应用：唯一来源是仓库根目录的 HELP.md（在线文档）。
-         帮助图标与「帮助」快捷方式都用浏览器打开 AboutActivity.HELP_URL。
+         帮助图标与「帮助」快捷方式都用浏览器打开 AboutDelegate.helpUrl。
          动了 Hooker 的行为时同步改 HELP.md，不要在这里补回帮助文案。 -->
 
     <!-- 实验功能页：危险开关集中在此，主界面只留入口 -->

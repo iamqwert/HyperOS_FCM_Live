@@ -41,7 +41,12 @@
         <!-- Settings UI. No LAUNCHER category here: the desktop icon is the
              alias below, so we can hide the icon without disabling this activity
              (LSPosed can still open the module via MODULE_SETTINGS /
-             LAUNCH_MODULE when the alias is disabled). -->
+             LAUNCH_MODULE when the alias is disabled).
+
+             locale|layoutDirection: a language pick applies in place
+             (onConfigurationChanged, no destroy-recreate). The recreate was the
+             black flash — the old window came down before the new one had drawn,
+             and the task void showed for a frame. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -68,22 +73,13 @@
             </intent-filter>
         </activity>
 
-        <!-- locale|layoutDirection on every activity: a language pick applies
-             in place (onConfigurationChanged, no destroy-recreate). The
-             recreate was the black flash — the old window came down before the
-             new one had drawn, and the task void showed for a frame. -->
-        <activity
-            android:name=".AboutActivity"
-            android:exported="false"
-            android:configChanges="locale|layoutDirection" />
-        <activity
-            android:name=".ExperimentActivity"
-            android:exported="false"
-            android:configChanges="locale|layoutDirection" />
-        <activity
-            android:name=".LicensesActivity"
-            android:exported="false"
-            android:configChanges="locale|layoutDirection" />
+        <!-- `.MainActivity` is the whole app now: every page — the three home
+             tabs and what they open (about, licences, experiment) — is an entry
+             in its one NavDisplay back stack. The sub-pages used to be
+             Activities of their own, and a covered Activity is stopped, so the
+             page underneath had to be rebuilt from nothing when the user came
+             back to it. Rebuilt is also what it *looked* like: that cost is
+             where the jank after a back gesture's release came from. -->
 
         <activity-alias
             android:name=".LauncherAlias"

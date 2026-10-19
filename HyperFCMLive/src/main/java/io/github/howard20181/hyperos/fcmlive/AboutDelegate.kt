@@ -9,7 +9,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import io.github.howard20181.hyperos.fcmlive.ui.UpdateOutcome
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport
-import io.github.howard20181.hyperos.fcmlive.ui.WindowSnapshot
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
@@ -25,13 +24,12 @@ import java.nio.file.FileSystems
  * the SAF import/export contracts need an `ActivityResultRegistry`, the update
  * check is a network call whose release it offers must open with `startActivity`,
  * and a theme change has a View-side half no recomposition reaches. That half
- * used to live only in [AboutActivity]; the M3 home now hosts the same screen
- * as a bottom-nav tab ([MainActivity]), so the capability moved here and both
- * hosts hold one instance.
+ * used to live in an Activity of its own; the settings page is now a tab of
+ * [MainActivity] (and a page pushed over it), so the capability lives here and
+ * the host holds one instance.
  *
  * Feedback routes through the [showMessage] lambda: each host acknowledges in
- * its own shell — AboutActivity toasts under Miuix and snackbar-hosts under
- * Material; the main page's tab carries its own bar.
+ * its own shell — the Miuix look toasts and the Material look snackbar-hosts.
  */
 class AboutDelegate(
     private val activity: ComponentActivity,
@@ -151,21 +149,12 @@ class AboutDelegate(
      * In-place re-skin. The palette invalidation itself lives in the
      * [AppearanceState] setters — each appearance write bumps ThemeEngine's
      * generation counter and the Compose tree follows it — so what is left here
-     * is the View-side half no recomposition reaches: the window chrome repaint
-     * and the back-preview snapshot. The old path was `recreate()` — a
-     * whole-window rebuild that read as a visible jump every time an appearance
-     * menu option was picked.
-     *
-     * The back-preview snapshot is refreshed too. It is a photograph of the
-     * window *below* this one taken on the way in, so it is wearing the old
-     * palette the moment this runs; left alone, returning would reveal the
-     * previous theme. The pages below are stopped but still alive and still
-     * laid out, so they can be redrawn here even though they are not on
-     * screen. See [WindowSnapshot.refreshForTheme].
+     * is the View-side half no recomposition reaches: the window chrome repaint.
+     * The old path was `recreate()` — a whole-window rebuild that read as a
+     * visible jump every time an appearance menu option was picked.
      */
     fun applyAppearanceChange() {
         ThemeSupport.reapplyWindow(activity)
-        WindowSnapshot.refreshForTheme()
     }
 
     fun exportAllowlist() {

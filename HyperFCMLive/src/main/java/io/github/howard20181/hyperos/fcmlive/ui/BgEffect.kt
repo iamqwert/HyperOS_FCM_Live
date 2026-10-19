@@ -540,37 +540,33 @@ fun MiuixBgEffectBackground(
     val painter = remember { BgEffectPainter() }
     val preset = remember(isDark) { BgEffectConfig.get(isDark) }
 
-    // The mesh holds while this window is covered. A stopped window's own
-    // frame clock pauses, but the snapshot machinery resumes it
-    // ([WindowSnapshot]'s retakes run the clock so a frozen press fade can
-    // finish before it is photographed) — and on those resumed, foreground-
-    // driven frames an uncovered mesh would keep drifting while invisible.
-    // The page would then come back wearing colours that never matched the
-    // picture its back preview just showed: the jump on returning from the
-    // licences page. Frozen with the window, the live mesh and its photograph
-    // are one and the same frame, and the reveal continues the mesh exactly
-    // where the preview left it.
+    // The mesh holds while this page is not the one on screen. Every page is an
+    // entry of one NavDisplay (see MainActivity's AppPages), and a covered
+    // entry's lifecycle is capped at STARTED — so "resumed" is the honest test
+    // for "the user is looking at this": a buried mesh that kept drifting would
+    // burn frames nobody sees, and would be mid-turn when the page came back.
+    // Frozen, it is the same frame it was left at, and the reveal continues the
+    // mesh from there.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val lifecycleState by lifecycle.currentStateFlow.collectAsState(lifecycle.currentState)
-    val started = lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+    val started = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
 
     // The colour stage steps its spring by hand, on the same clamped frame
     // deltas the mesh's own drift runs on ([BgEffectDrawer.startAnimation]'s
-    // loop). `Animatable.animateTo` would read the frame clock directly, and
-    // the clock stops while this window is covered — the licences and privacy
-    // pages are separate windows on top of it. On return it hands back ONE
-    // delta spanning the whole visit; an Animatable integrates that in a
-    // single step, the spring teleports through it, and the colours land on an
-    // arrangement they were never seen leaving — the flash the page used to
-    // end on when coming back from the licences page. Stepped by hand, the
-    // re-entry costs the spring one clamped tick and the blend resumes exactly
-    // where the window left it.
+    // loop). `Animatable.animateTo` would read the frame clock directly, and no
+    // frame clock hands back a well-formed delta across a gap: a backgrounded app
+    // gets ONE delta spanning the whole absence on the first frame of its return.
+    // An Animatable integrates that in a single step, the spring teleports
+    // through it, and the colours land on an arrangement they were never seen
+    // leaving — the flash the page used to end on when coming back to it.
+    // Stepped by hand, the re-entry costs the spring one clamped tick and the
+    // blend resumes exactly where it was left.
     //
     // The spring's state is [BgEffectClock]'s, not this composition's: this
-    // composable can be rebuilt while its window sits stopped under a child
-    // page, and a composition-owned spring would restart the blend from stage
-    // zero — the wallpaper reload. From the clock, a rebuilt page picks up the
-    // blend mid-flight, at the same phase the back preview's snapshot shows.
+    // composable is rebuilt by an appearance switch (both shells host this page),
+    // and a composition-owned spring would restart the blend from stage zero —
+    // the wallpaper reload. From the clock, a rebuilt page picks up the blend
+    // mid-flight.
     LaunchedEffect(preset) {
         // The same spring Animatable ran (dampingRatio 0.9, stiffness 35),
         // integrated analytically over each clamped delta; the stage target
@@ -586,13 +582,12 @@ fun MiuixBgEffectBackground(
             val now = withFrameNanos { it }
             val deltaNanos = (now - last).coerceIn(0L, MAX_FRAME_STEP_NANOS)
             last = now
-            // Covered (the clock may have been resumed under us by a retake):
-            // hold everything — spring, target switch, velocity — so the
-            // colours stay the ones the window is frozen at. `last` keeps up
-            // above, so the real resume hands back no giant delta. Read
-            // through the state delegate, so the loop observes the lifecycle
-            // flipping back without a recomposition of its own.
-            if (!lifecycleState.isAtLeast(Lifecycle.State.STARTED)) continue
+            // Not resumed: hold everything — spring, target switch, velocity —
+            // so the colours stay the ones the page was left at. `last` keeps up
+            // above, so the return hands back no giant delta. Read through the
+            // state delegate, so the loop observes the lifecycle flipping back
+            // without a recomposition of its own.
+            if (!lifecycleState.isAtLeast(Lifecycle.State.RESUMED)) continue
             BgEffectClock.sinceSwitch += deltaNanos
             if (BgEffectClock.sinceSwitch >= switchNanos) {
                 BgEffectClock.sinceSwitch = 0L
@@ -634,7 +629,7 @@ fun MiuixBgEffectBackground(
                 isDarkTheme = isDark,
                 surface = surface,
                 playing = started,
-                started = { lifecycleState.isAtLeast(Lifecycle.State.STARTED) },
+                started = { lifecycleState.isAtLeast(Lifecycle.State.RESUMED) },
                 colorStage = { BgEffectClock.colorStage.floatValue },
                 alpha = alpha,
             ),

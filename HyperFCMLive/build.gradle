@@ -27,6 +27,8 @@ plugins {
     // Standalone KGP 2.4.20 — AGP's built-in Kotlin is opted out, see
     // gradle.properties for the POM-verified reason.
     id 'org.jetbrains.kotlin.android'
+    // nav/Route.kt's keys: the back stack is saved by serializing it.
+    id 'org.jetbrains.kotlin.plugin.serialization'
     // Compose compiler: must match the KGP version exactly, so it moves with it.
     id 'org.jetbrains.kotlin.plugin.compose' version '2.4.20'
 }
@@ -144,7 +146,7 @@ dependencies {
     // Theme.AppCompat.*. No source file references it directly.
     implementation 'androidx.appcompat:appcompat:1.8.0'
     // Declared for the ActivityResultContracts imports: CreateDocument and
-    // OpenDocument in AboutActivity (allowlist export / import) and
+    // OpenDocument in AboutDelegate (allowlist export / import) and
     // RequestPermission in MainActivity (the diagnostics log).
     //
     // 1.13.0, not 1.8.2, and that is a hard floor now: Miuix's overlay popups
@@ -161,15 +163,16 @@ dependencies {
     // versioned together, and declaring the pair keeps Dependabot moving them as
     // one.
     implementation 'androidx.activity:activity-compose:1.13.0'
-    // What Miuix's popups register their back handlers through, and the stream
-    // ui/PredictiveBack.kt consumes. Declared so Dependabot sees it: miuix 0.9.4
-    // — the version this module and KernelSU's manager both run — asks for the
-    // 1.1.x line, resolved here at 1.2.0.
+    // What Miuix's popups register their back handlers through, and the channel
+    // NavDisplay reads the system's back gesture from. Declared so Dependabot
+    // sees it: miuix 0.9.4 — the version this module and KernelSU's manager both
+    // run — asks for the 1.1.x line, resolved here at 1.2.0.
     implementation 'androidx.navigationevent:navigationevent-compose:1.2.0'
-    // Lifecycle: the only direct consumer is ui/WindowSnapshot.kt
-    // (LifecycleOwner.lifecycle.currentState, to tell whether a host window is
-    // STARTED). It used to arrive transitively at 2.10.0 behind activity and
-    // compose; pinned at 2.11.0 here so the resolved version is declared rather
+    // Lifecycle: the direct consumer is ui/BgEffect.kt — `Lifecycle.currentStateFlow`,
+    // read to hold the background mesh unless the page it belongs to is RESUMED
+    // (every page is an entry of one NavDisplay, and a covered entry's lifecycle is
+    // capped at STARTED). It used to arrive transitively at 2.10.0 behind activity
+    // and compose; pinned at 2.11.0 here so the resolved version is declared rather
     // than inherited. 2.11.0 needs Compose UI 1.7.0+ for LocalLifecycleOwner
     // (comfortably satisfied — the BOM alone pins 1.12.1) and is built against
     // compileSdk 37 (AGP 9.2.0+ floor — we have 9.4.1).
@@ -249,11 +252,24 @@ dependencies {
     // RenderEffect paths need API 31; this module is minSdk 35.
     implementation 'dev.chrisbanes.haze:haze:2.0.1'
     implementation 'dev.chrisbanes.haze:haze-blur:2.0.1'
-    // No miuix-nav artifact: the module briefly took `miuix-nav-android` for
-    // `Modifier.navSwipeDismiss` (an app-level swipe-back gesture layered over
-    // the platform's own edge swipe) and dropped it again — the platform's
-    // predictive-back stream drives the whole back motion on its own, which is
-    // what the example app's back gesture amounts to as well.
+    // The navigation runtime the pages now run through: one Activity holding one
+    // `NavDisplay`, every page an entry in its back stack.
+    //
+    // The module dropped this artifact once, when the only thing it offered was
+    // `Modifier.navSwipeDismiss` — an app-level swipe gesture layered over the
+    // platform's own edge swipe, which the platform's predictive-back stream
+    // already drives on its own. The pages are still driven by that stream alone
+    // (no route here declares a `swipeDismiss` direction); what brings the
+    // artifact back is the rest of it. Sub-pages used to be separate Activities,
+    // and a covered Activity is STOPPED: returning to it cost a whole first
+    // frame, and the reveal showed a photograph of it rather than the page.
+    // NavDisplay keeps every layer below the top composed, laid out and drawn, so
+    // the gesture and the settle after it move what is already there.
+    implementation 'top.yukonga.miuix.kmp:miuix-nav-android:0.9.4'
+    // `@Serializable` route keys, and `rememberNavBackStack`'s saver, which is
+    // the library's own line for it. The compiler plugin is declared in the root
+    // build and applied above; this is the runtime half.
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
     // Compile-time hidden-API signatures (not packaged in the APK).
