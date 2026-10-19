@@ -104,7 +104,7 @@ object ThemePrefs {
      * key missing, and then written down: an install that has been *updated* onto
      * a MIUIX-capable build keeps [UI_STYLE_MATERIAL] — the look its user chose
      * by never being offered another — while a fresh install starts on
-     * [UI_STYLE_MIUIX]. From then on the stored value alone decides, so either
+     * [UI_STYLE_SOFT_GLASS]. From then on the stored value alone decides, so either
      * side's own change persists the ordinary way.
      */
     @JvmStatic
@@ -112,7 +112,7 @@ object ThemePrefs {
         val p = prefs(context)
         if (!p.contains(KEY_UI_STYLE)) {
             val decided =
-                if (isUpgradeFromPreMiuixBuild(context)) UI_STYLE_MATERIAL else UI_STYLE_MIUIX
+                if (isUpgradeFromPreMiuixBuild(context)) UI_STYLE_MATERIAL else UI_STYLE_SOFT_GLASS
             p.edit().putInt(KEY_UI_STYLE, decided).apply()
             return decided
         }

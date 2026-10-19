@@ -24,11 +24,12 @@
     <string name="select_all">全选</string>
     <string name="deselect_all">取消全选</string>
     <string name="search_hint">搜索…</string>
-    <string name="tooltip_search">搜索</string>
     <string name="exit_search">退出搜索</string>
-    <string name="exit_multi_select">退出多选</string>
     <string name="batch_ops">批量操作</string>
-    <string name="selected_count">已选择 %1$d 项</string>
+    <plurals name="selected_count">
+        <item quantity="one">已选择 %1$d 项</item>
+        <item quantity="other">已选择 %1$d 项</item>
+    </plurals>
     <string name="batch_added">白名单已更新</string>
     <string name="batch_save">保存</string>
     <string name="batch_exit">退出选择</string>
@@ -49,9 +50,6 @@
     <string name="about_battery_aosp_usage_missing">未找到应用电池使用情况页面，当前系统可能不适用</string>
     <string name="about_section_experiment_debug">实验与调试</string>
     <string name="about_sub_experiment">实验性开关入口，默认不启用</string>
-    <string name="about_section_project">关于</string>
-    <string name="about_section_other">其他</string>
-    <string name="about_sub_help">查看在线使用说明</string>
     <string name="about_sub_hide_icon_on">已隐藏，可从 LSPosed 打开</string>
     <string name="about_sub_hide_icon_off">已显示，点击后隐藏</string>
     <string name="about_sub_check_update">当前版本 %1$s (%2$d)</string>
@@ -70,8 +68,14 @@
     <string name="allowlist_export_failed">备份失败</string>
     <string name="allowlist_import_failed">恢复失败</string>
     <string name="allowlist_import_empty">文件中没有有效的包名</string>
-    <string name="allowlist_import_done">已导入 %1$d 个应用</string>
-    <string name="allowlist_export_done">已导出 %1$d 个应用</string>
+    <plurals name="allowlist_import_done">
+        <item quantity="one">已导入 %1$d 个应用</item>
+        <item quantity="other">已导入 %1$d 个应用</item>
+    </plurals>
+    <plurals name="allowlist_export_done">
+        <item quantity="one">已导出 %1$d 个应用</item>
+        <item quantity="other">已导出 %1$d 个应用</item>
+    </plurals>
     <string name="update_found">发现新版本 %1$s</string>
     <string name="update_found_title">发现新版本</string>
     <string name="update_open">前往下载</string>

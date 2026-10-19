@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -25,6 +27,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
+import top.yukonga.miuix.kmp.basic.VerticalScrollBar
+import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+import top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.CardDefaults as MiuixCardDefaults
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
@@ -69,6 +74,7 @@ import kotlinx.coroutines.launch
  * TextView. The rows keep the connected-group shape, now from
  * [LocalAppShapes] rather than a `GradientDrawable` built per row.
  */
+@OptIn(ExperimentalScrollBarApi::class)
 @Composable
 fun LicensesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     var openSheet by remember { mutableStateOf<LicenseSheet?>(null) }
@@ -102,15 +108,33 @@ fun LicensesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         modifier = modifier,
         snackbarHostState = snackbarHostState
     ) { innerPadding ->
+        val listState = rememberPageListState()
         LicensesBody(
             // The list spans the full body and takes the bar's height as
             // contentPadding, so rows scroll UNDER the title bar's glass
             // instead of stopping at its edge (see PageScaffold).
             topPadding = innerPadding.calculateTopPadding(),
             bottomPadding = innerPadding.calculateBottomPadding(),
+            listState = listState,
             onOpenSheet = { openSheet = it },
             onOpenUrl = openUrl
         )
+        // The reference's scroll indicator beside the list — every list page
+        // in the reference ships one (LicensePage hangs its scrollbar as a
+        // sibling of the list through the same scaffold scope), and the state
+        // is hoisted here for it the way AboutPage hoists its own.
+        if (LocalUiStyle.current.isMiuixBased) {
+            VerticalScrollBar(
+                adapter = rememberScrollBarAdapter(listState),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight(),
+                trackPadding = PaddingValues(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = innerPadding.calculateBottomPadding()
+                )
+            )
+        }
         // Inside the scaffold's subtree, deliberately: the Miuix licence sheet
         // is an OverlayDialog, and those render through the enclosing
         // MiuixScaffold's popup host — composed outside it (where this sat
@@ -134,6 +158,7 @@ private data class LicenseSheet(val title: String, val rawRes: Int, val url: Str
 private fun LicensesBody(
     topPadding: Dp,
     bottomPadding: Dp,
+    listState: LazyListState,
     onOpenSheet: (LicenseSheet) -> Unit,
     onOpenUrl: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -160,7 +185,7 @@ private fun LicensesBody(
             .fillMaxWidth()
             .listScrollEndHaptic()
             .padding(start = inset, end = inset),
-        state = rememberPageListState(),
+        state = listState,
         // The gesture-hint strip is scroll-through, not a hard stop. The top
         // inset rides here (not on the modifier) so rows pass under the glass
         // bar while scrolling.
@@ -496,15 +521,35 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  * - Kotlin Stdlib: 2.2.20 → **2.4.20**
  * - Lifecycle Common / Runtime: 2.10.0 → **2.11.0**
  *
+ * The 2026-10-19 pass re-audited the resolved graph plus the classes surviving
+ * in that day's `mapping/release/mapping.txt`. Five versions had drifted and
+ * one row changed sides:
+ * - AndroidX Annotation: 1.9.1 → **1.10.0**
+ * - AndroidX Collection: 1.5.0 → **1.6.0**
+ * - AndroidX Compose UI / Compose Foundation: 1.13.0-alpha01 → **1.12.1** —
+ *   material3's promotion to 1.5.0-beta01 stopped dragging the 1.13.0-alpha
+ *   line forward, so the compose-bom's 1.12.1 wins again (the BOM row stays
+ *   off for the same reason as before: the number a reader wants is the one
+ *   that wins, and the BOM is not it).
+ * - AndroidX Core: 1.16.0 → **1.19.1**
+ * - Material Kolor Color Utilities: 4.1.1 → **5.0.1**, and it moved
+ *   coordinates: JitPack's `com.github.jordond.materialkolor` is gone, the
+ *   artifact now publishes as `com.materialkolor:material-color-utilities`.
+ * - **Kotlinx Serialization** joins as a real row: the `@Serializable` route
+ *   keys (nav/Route.kt) made the runtime load-bearing, and 127
+ *   kotlinx.serialization classes survive in mapping.txt — the 2026-10-09
+ *   "R8 removes all of it" note below no longer holds.
+ *
  * No rows were added or removed in the 2026-10-09 pass. Several families that
  * do ship classes (androidx.graphics, androidx.savedstate, androidx.window,
  * androidx.emoji2, androidx.fragment, androidx.recyclerview, androidx.transition
  * and the rest) are transitive, exactly like the ~39 families the policy note
  * above already covers — they arrive behind material3/appcompat and get one row
  * only when this app is *built on* them, not when it merely inherits them.
- * `kotlinx.serialization` stays for the same reason `JUnit` does: it resolves
- * onto the classpath but R8 removes all of it (225 classes in usage.txt, 0 in
- * mapping.txt), so it ships nothing and is a licence statement only.
+ * `kotlinx.serialization` was left off back then for the same reason `JUnit`
+ * was kept: it resolved onto the classpath but R8 removed all of it (225
+ * classes in usage.txt, 0 in mapping.txt). That verdict stood until the
+ * serialization-based navigation landed; see the 2026-10-19 pass above.
  *
  * The 2026-10-05 pass added the two rows that were missing:
  * - **AndroidX ConstraintLayout** is the one AndroidX family here that is *not*
@@ -518,13 +563,13 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  */
 private val DEPS = arrayOf(
     arrayOf("AndroidX Activity", "1.13.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Annotation", "1.9.1", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Annotation", "1.10.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX AppCompat", "1.8.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Arch Core", "2.2.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Collection", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose Foundation", "1.13.0-alpha01", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Collection", "1.6.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose Foundation", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Compose Material3", "1.5.0-beta01", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose UI", "1.13.0-alpha01", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose UI", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
     // Separate repository, so ANDROIDX_URL does not cover it. Only on the
     // classpath behind Material Components, but its code does survive R8.
     arrayOf(
@@ -533,10 +578,10 @@ private val DEPS = arrayOf(
         "Apache License 2.0",
         "https://github.com/androidx/constraintlayout"
     ),
-    arrayOf("AndroidX Core", "1.16.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Core", "1.19.1", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Interpolator", "1.0.0", "Apache License 2.0", ANDROIDX_URL),
     // Miuix's responsive-layout chain (material3-window-size-class): real code
-    // in the APK, 11 classes of it, verified against the R8 mapping.
+    // in the APK, 10 classes of it, verified against the R8 mapping.
     arrayOf("AndroidX Window", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
     // Build-only stubs vendored under hiddenapi/stubs; kept for attribution.
     arrayOf("AOSP Framework Annotations", "", "Apache License 2.0", AOSP_URL),
@@ -562,6 +607,16 @@ private val DEPS = arrayOf(
         "Apache License 2.0",
         "https://github.com/Kotlin/kotlinx.coroutines"
     ),
+    // Route keys are @Serializable (nav/Route.kt) and the back stack is persisted
+    // by serializing them, so the runtime is load-bearing: 127 kotlinx.serialization
+    // classes survive in mapping/release/mapping.txt (the 2026-10-09 "R8 removes
+    // all of it" note below no longer holds).
+    arrayOf(
+        "Kotlinx Serialization",
+        "1.11.0",
+        "Apache License 2.0",
+        "https://github.com/Kotlin/kotlinx.serialization"
+    ),
     arrayOf("libxposed API", "102.0.0", "Apache License 2.0", "https://github.com/libxposed/api"),
     arrayOf("libxposed Interface", "102.0.0", "Apache License 2.0", "https://github.com/libxposed"),
     arrayOf("libxposed Service", "102.0.0", "Apache License 2.0", "https://github.com/libxposed/service"),
@@ -580,15 +635,16 @@ private val DEPS = arrayOf(
     // the APK and each dresses a different half of the UI.
     arrayOf(
         "Material Kolor Color Utilities",
-        "4.1.1",
+        "5.0.1",
         "Apache License 2.0",
         "https://github.com/jordond/materialkolor"
     ),
     // The Miuix look (界面风格 = Miuix). Bumped 0.9.1 → 0.9.4 on 2026-10-15, once
     // the standalone KGP 2.4.20 lift removed the 0.9.1 metadata ceiling — the
     // toolchain comment in build.gradle has the audit. One row for the project,
-    // though it ships as miuix-ui, miuix-core, miuix-preference and miuix-icons
-    // (its miuix-blur was dropped when the title-bar glass moved to Haze).
+    // though it ships as miuix-ui, miuix-core, miuix-preference, miuix-icons,
+    // miuix-blur (back since the floating bottom bar — the title-bar glass stayed
+    // on Haze) and miuix-nav (the navigation runtime the pages run through).
     arrayOf(
         "Miuix",
         "0.9.4",
@@ -607,6 +663,8 @@ private val REFERENCES = arrayOf(
     // follows this app's design.
     arrayOf("1812z/HyperIsland", "MIT License", "https://github.com/1812z/HyperIsland"),
     arrayOf("250king/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/250king/HyperOS_FCM_Live"),
+    // Same MIUIX / soft-glass family — the row links to its releases page.
+    arrayOf("AritxOnly/F1Info", "GPL-3.0", "https://github.com/AritxOnly/F1Info/releases"),
     arrayOf("billtv/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/billtv/HyperOS_FCM_Live"),
     arrayOf("dingwen07/hyperos-fcm-fix", "GPL-3.0", "https://github.com/dingwen07/hyperos-fcm-fix"),
     arrayOf(

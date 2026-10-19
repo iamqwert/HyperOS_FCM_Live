@@ -21,14 +21,18 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListState
@@ -46,6 +50,7 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.ripple
@@ -114,6 +119,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 
 import top.yukonga.miuix.kmp.basic.PullToRefresh as MiuixPullToRefresh
+import top.yukonga.miuix.kmp.basic.VerticalScrollBar
+import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+import top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.DropdownImpl
@@ -208,7 +216,11 @@ data class MainActions(
  * to ask a `LazyListState` whether the list was already scrolled, because the
  * nested-scroll handshake answers that by itself.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalMaterial3ExpressiveApi::class,
+    ExperimentalScrollBarApi::class
+)
 @Composable
 fun MainScreen(
     topBarState: MainTopBarState,
@@ -221,10 +233,10 @@ fun MainScreen(
     onRowClick: (AppListStore.AppEntry) -> Unit,
     onRowLongClick: (AppListStore.AppEntry) -> Unit,
     loadIcon: (AppListStore.AppEntry) -> Unit,
+    modifier: Modifier = Modifier,
     icons: Map<String, Drawable?> = emptyMap(),
     refreshing: Boolean,
     onRefresh: () -> Unit,
-    modifier: Modifier = Modifier,
     // Remembered *saveably*, inside the composition, under a name: the position
     // has to survive both a rotation and the composition being torn down and
     // rebuilt. The Activity used to build the state itself and hand it in, which
@@ -459,6 +471,20 @@ fun MainScreen(
                             LocalFloatingBarClearance.current,
                         modifier = Modifier.fillMaxSize()
                     )
+                    // The reference's scroll indicator, riding the same list —
+                    // every list page in the reference hangs one beside its
+                    // list (MainPage's does), through the same body scope.
+                    VerticalScrollBar(
+                        adapter = rememberScrollBarAdapter(lazyListState),
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight(),
+                        trackPadding = PaddingValues(
+                            top = 4.dp + innerPadding.calculateTopPadding(),
+                            bottom = innerPadding.calculateBottomPadding() +
+                                LocalFloatingBarClearance.current
+                        )
+                    )
                 }
             }
         }
@@ -509,6 +535,13 @@ fun MainScreen(
             // The bar reads the list's scroll through this connection; the
             // pull-to-refresh box below passes scrolls through.
             .nestedScroll(scrollBehavior.nestedScrollConnection),
+        // ime joins the default system bars: the window is adjustResize
+        // (AndroidManifest), and with the keyboard up the list's bottom
+        // padding rides the ime inset — the last row stays reachable above
+        // the keyboard instead of sitting behind it. Keyboard down, the
+        // inset is zero and the layout is unchanged.
+        contentWindowInsets = ScaffoldDefaults.contentWindowInsets
+            .union(WindowInsets.ime),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         // `background`, not `surface`: it is the mapped `pageBg`, and it is
         // also what the Activity paints the window with, so the strip under
@@ -542,9 +575,12 @@ fun MainScreen(
                         // bar, where a pull only swells it in place. Dropped
                         // below the bar (the Miuix branch anchors its refresh
                         // header the same way), a pull shows it at once.
-                        .offset(y = innerPadding.calculateTopPadding()),
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                        .offset(y = innerPadding.calculateTopPadding())
+                    // Stock indicator dress: the neutral container colour
+                    // LoadingIndicator ships with. A primaryContainer skin
+                    // used to be painted over it — legal, but every other
+                    // indicator in the toolkit is neutral and there is no
+                    // pairing rule this one needs to bend for.
                 )
             },
             content = {
@@ -894,7 +930,11 @@ fun MainTopBar(
                 // the strip below the card — rows vanish at the card's outer
                 // bounds, and the capsule never reads as cut off at its foot.
                 .background(MaterialTheme.colorScheme.background)
-                .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
+                .padding(
+                    start = pageHorizontalInset(),
+                    end = pageHorizontalInset(),
+                    bottom = 12.dp
+                )
         )
     }
 }
@@ -912,6 +952,7 @@ private fun InlineSearchCard(
     modifier: Modifier = Modifier
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
+    val searchHint = stringResource(R.string.search_hint)
     Surface(
         // One tone deeper than the bar's High fill: the field reads as a
         // pressed-in control against the page, not a washed-out chip.
@@ -939,7 +980,16 @@ private fun InlineSearchCard(
                 BasicTextField(
                     value = query,
                     onValueChange = onQueryChange,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // The bare field announces itself to a screen reader
+                        // as just 「可编辑文本框」 — the hint is a sibling
+                        // text node, not a label. Naming the field after the
+                        // hint is the accessibility fix for a decorated
+                        // BasicTextField (developer.android.com/develop/ui/
+                        // compose/accessibility); the placeholder below is
+                        // silenced so the hint is spoken once, by the field.
+                        .semantics { contentDescription = searchHint },
                     singleLine = true,
                     textStyle = LocalTextStyle.current.copy(
                         color = MaterialTheme.colorScheme.onSurface
@@ -951,7 +1001,11 @@ private fun InlineSearchCard(
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (query.isEmpty()) {
                                 Text(
-                                    text = stringResource(R.string.search_hint),
+                                    text = searchHint,
+                                    // Decorative duplicate of the field's own
+                                    // contentDescription — hidden from the
+                                    // accessibility tree, visible to the eye.
+                                    modifier = Modifier.clearAndSetSemantics { },
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = MaterialTheme.typography.bodyLarge
                                 )
@@ -1395,10 +1449,10 @@ fun AppListPane(
     onRowClick: (AppListStore.AppEntry) -> Unit,
     onRowLongClick: (AppListStore.AppEntry) -> Unit,
     loadIcon: (AppListStore.AppEntry) -> Unit,
+    modifier: Modifier = Modifier,
     icons: Map<String, Drawable?> = emptyMap(),
     topPadding: Dp = 0.dp,
-    bottomPadding: Dp,
-    modifier: Modifier = Modifier
+    bottomPadding: Dp
 ) {
     LazyColumn(
         modifier = modifier
@@ -1412,7 +1466,8 @@ fun AppListPane(
         // on the Miuix look (the glass bar's height): rows scroll UNDER the
         // bar's blur instead of stopping at its edge.
         contentPadding = PaddingValues(
-            start = 12.dp, top = 4.dp + topPadding, end = 12.dp, bottom = bottomPadding
+            start = pageHorizontalInset(), top = 4.dp + topPadding,
+            end = pageHorizontalInset(), bottom = bottomPadding
         ),
         // 12dp between cards under Miuix, the spacing the reference apps leave
         // between their section cards; 8dp is the Material ramp's own choice.
@@ -1586,7 +1641,10 @@ private fun LazyItemScope.AppRow(
                         },
                         onLongClick = onLongClick,
                         onClick = {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            // CONTEXT_CLICK — the same list-item tap tick the
+                            // shared GroupRow fires; one list language for
+                            // both looks.
+                            view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                             onClick()
                         }
                     )
@@ -1666,7 +1724,9 @@ private fun LazyItemScope.AppRow(
                     MiuixCheckbox(
                         state = if (rowSelected) ToggleableState.On else ToggleableState.Off,
                         onClick = {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            // Stages like tapping the row, so it carries the
+                            // row's CONTEXT_CLICK tick, not a keypress.
+                            view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                             onClick()
                         },
                         modifier = Modifier.clearAndSetSemantics {}

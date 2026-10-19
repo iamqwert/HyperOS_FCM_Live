@@ -79,7 +79,7 @@ class AboutDelegate(
 
     /**
      * The hero's release tag in the reference about page's format:
-     * "v4.1.1 (53)" — version name plus the version code in parentheses.
+     * "v4.2.0 (54)" — version name plus the version code in parentheses.
      */
     fun versionTag(): String = try {
         val info = activity.packageManager.getPackageInfo(activity.packageName, 0)
@@ -210,7 +210,12 @@ class AboutDelegate(
                     sb.append(pkg).append('\n')
                 }
                 stream.write(sb.toString().toByteArray(StandardCharsets.UTF_8))
-                showMessage(activity.getString(R.string.allowlist_export_done, sorted.size))
+                // getQuantityString: first count picks the CLDR plural rule,
+                // the same count formats the %1$d slot — English splits on
+                // 1 app / N apps, Chinese reuses one wording for both.
+                showMessage(activity.resources.getQuantityString(
+                    R.plurals.allowlist_export_done, sorted.size, sorted.size
+                ))
             }
         } catch (t: Throwable) {
             showMessage(activity.getString(R.string.allowlist_export_failed))
@@ -256,7 +261,9 @@ class AboutDelegate(
             return
         }
         Prefs.writeAllowlist(activity, Prefs.remote(), allow)
-        showMessage(activity.getString(R.string.allowlist_import_done, allow.size))
+        showMessage(activity.resources.getQuantityString(
+            R.plurals.allowlist_import_done, allow.size, allow.size
+        ))
     }
 
     /**

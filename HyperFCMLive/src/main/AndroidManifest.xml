@@ -47,11 +47,17 @@
              (onConfigurationChanged, no destroy-recreate). The recreate was the
              black flash — the old window came down before the new one had drawn,
              and the task void showed for a frame. -->
+        <!-- adjustResize, not adjustPan: the app is edge-to-edge (minSdk 35),
+             and the insets guide (developer.android.com/develop/ui/compose/
+             layouts/insets#ime) pairs that with a resizing window. The list
+             consumes the ime inset itself (MainScreen's Scaffold), so the last
+             row stays reachable above the keyboard; the Miuix look's search is
+             a full-screen layer that rides the same resized window. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:windowSoftInputMode="adjustPan"
+            android:windowSoftInputMode="adjustResize"
             android:configChanges="locale|layoutDirection">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -132,8 +132,13 @@ private fun MaterialStyleTheme(content: @Composable () -> Unit) {
     // rather than a second preference: "Material You (2021)" and "Expressive
     // (2025)" differ in motion and shape as much as in colour, and letting them
     // disagree is what makes one generation feel like a skin over the other.
+    // The 2026 spec counts as Expressive too — it is the CMF colour layer ON
+    // TOP of the 2025 rules (ColorSpec2026 extends ColorSpec2025), so its
+    // shape and motion stay the Expressive set; equating it with 2021 is what
+    // made the card corners snap back from 20dp to 12dp on a Spec 2026 pick.
     val expressive = remember(palette) {
-        palette?.scheme?.spec == Scheme.Spec.SPEC_2025
+        val spec = palette?.scheme?.spec
+        spec == Scheme.Spec.SPEC_2025 || spec == Scheme.Spec.SPEC_2026
     }
     val motionScheme = remember(expressive) { motionSchemeFor(expressive) }
     val appShapes = remember(expressive) { appShapesFor(expressive) }

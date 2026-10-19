@@ -1,8 +1,6 @@
 package io.github.howard20181.hyperos.fcmlive.ui
 
 import android.graphics.RuntimeShader
-import android.os.Build
-import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -171,7 +169,6 @@ private const val OS3_BG_FRAG = """
     }
 """
 
-@RequiresApi(Build.VERSION_CODES.TIRAMISU)
 internal class BgEffectPainter {
 
     val runtimeShader by lazy {
@@ -303,7 +300,6 @@ internal class BgEffectPainter {
 }
 
 /** The shader as a compose brush — the shader's own uniforms carry the size. */
-@RequiresApi(Build.VERSION_CODES.TIRAMISU)
 private class PainterBrush(private val shader: RuntimeShader) : ShaderBrush() {
     override fun createShader(size: androidx.compose.ui.geometry.Size): Shader = shader
 }
@@ -503,10 +499,28 @@ private class BgEffectNode(
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     override fun ContentDrawScope.draw() {
         drawRect(surface)
         val alphaValue = alpha()
+        // The Example's own stillness gate (component/effect/BgEffectModifier's
+        // draw): a fully faded mesh cancels its frame loop, and rising alpha
+        // restarts it from the next draw. Without the cancel, the loop keeps
+        // invalidateDraw()ing at 60fps while the mesh it serves is invisible —
+        // every redraw re-records the page's glass backdrop and re-runs the
+        // title-bar and card blurs for zero visible change. The About page
+        // scrolled to its bottom is then a window that repaints itself forever,
+        // and the back transition's corner/dim/scale animation has to fight
+        // that redraw storm for the GPU: dropped frames read as stutter, and
+        // late frames flipping against the transition's captured image read as
+        // flicker. Gated, the fully-scrolled page is truly still — the same
+        // stillness the Example's page has when its mesh is faded out — and
+        // the transition runs against a window that draws nothing.
+        if (alphaValue <= 0f) {
+            animationJob?.cancel()
+            animationJob = null
+        } else if (playing && animationJob == null) {
+            startAnimation()
+        }
         if (alphaValue > 0f) {
             val drawHeight = size.height * 0.8f
 
@@ -534,7 +548,6 @@ fun MiuixBgEffectBackground(
     modifier: Modifier = Modifier,
     alpha: () -> Float = { 1f },
 ) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val surface = MiuixTheme.colorScheme.surface
     val painter = remember { BgEffectPainter() }
@@ -548,7 +561,11 @@ fun MiuixBgEffectBackground(
     // Frozen, it is the same frame it was left at, and the reveal continues the
     // mesh from there.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val lifecycleState by lifecycle.currentStateFlow.collectAsState(lifecycle.currentState)
+    // StateFlow's parameterless collectAsState: the initial value IS the
+    // flow's current value, so the composition never reads the lifecycle's
+    // plain getter — the read lint flagged (LifecycleCurrentStateInComposition).
+    // Recomposition still fires on every state change the flow emits.
+    val lifecycleState by lifecycle.currentStateFlow.collectAsState()
     val started = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
 
     // The colour stage steps its spring by hand, on the same clamped frame

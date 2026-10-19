@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,6 +44,9 @@ import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
+import top.yukonga.miuix.kmp.basic.VerticalScrollBar
+import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+import top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
@@ -58,6 +63,7 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  * Material look alone. The Miuix home keeps the single-page layout with
  * AboutActivity carrying the settings, so no Miuix branch is written here.
  */
+@OptIn(ExperimentalScrollBarApi::class)
 @Composable
 fun ModuleStatusScreen(
     /** True once the libxposed service has bound — LSPosed active + module enabled. */
@@ -93,6 +99,7 @@ fun ModuleStatusScreen(
         // end, so the Miuix-based looks breathe that air between every block;
         // the M3 cut keeps its own 16dp rhythm.
         val pageGap = if (LocalUiStyle.current.isMiuixBased) 12.dp else 16.dp
+        val listState = rememberPageListState()
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
@@ -101,7 +108,7 @@ fun ModuleStatusScreen(
             // A tab switch re-skins nothing, but the saveable registry still
             // keeps the scroll position across window re-creations — the same
             // rule every page in this app runs on (see [rememberPageListState]).
-            state = rememberPageListState(),
+            state = listState,
             contentPadding = PaddingValues(
                 top = innerPadding.calculateTopPadding(),
                 bottom = innerPadding.calculateBottomPadding()
@@ -200,6 +207,21 @@ fun ModuleStatusScreen(
                 }
             }
         }
+        // The reference's scroll indicator beside the list — every list page
+        // in the reference ships one (MainPage's does), hung as a sibling of
+        // the list through the scaffold's body scope. M3 keeps its own chrome.
+        if (LocalUiStyle.current.isMiuixBased) {
+            VerticalScrollBar(
+                adapter = rememberScrollBarAdapter(listState),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight(),
+                trackPadding = PaddingValues(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = innerPadding.calculateBottomPadding()
+                )
+            )
+        }
     }
 }
 
@@ -253,7 +275,12 @@ private fun StatusHero(
             // so the card stays inert.
             .then(
                 if (!active) {
-                    Modifier.clickable(onClick = onRecheck)
+                    // Explicit Role.Button: the default Clickable role is
+                    // already Button, so this is documentation, not a fix —
+                    // the re-check card reads as a button to TalkBack either
+                    // way. Stated so the contract survives a refactor to
+                    // another gesture modifier that might not set a role.
+                    Modifier.clickable(role = Role.Button, onClick = onRecheck)
                 } else {
                     Modifier
                 }
@@ -287,7 +314,13 @@ private fun StatusHero(
                     text = stringResource(
                         R.string.status_version_line, versionName, versionCode
                     ),
-                    color = ink.copy(alpha = 0.8f),
+                    // Full ink, no alpha cut: the sub-line's hierarchy comes
+                    // from bodySmall itself. The 0.8f wash measured fine on
+                    // common palettes but is an unpaired foreground — composited
+                    // over the container it can slip under the 4.5:1 body-text
+                    // floor on some seed/style combos (the same trap the red
+                    // lines call out), while the paired role never does.
+                    color = ink,
                     style = MaterialTheme.typography.bodySmall
                 )
             }

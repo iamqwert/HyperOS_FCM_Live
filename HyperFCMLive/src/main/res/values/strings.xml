@@ -17,17 +17,18 @@
     <string name="back">Back</string>
     <string name="help">Help</string>
     <!-- 设置页「其他」区的行名：与顶栏入口/快捷方式的「帮助」区分开，行名说明点开看到的是使用说明 -->
-    <string name="help_guide">User Guide</string>
+    <string name="help_guide">Help</string>
     <string name="xposed_description">Removes HyperOS restrictions on broadcasts related to Google push connections. Battery use may increase with the module enabled</string>
-    <string name="settings_title">FCM Wake-up Allowlist</string>
+    <string name="settings_title">Apps</string>
     <string name="select_all">Select All</string>
     <string name="deselect_all">Deselect All</string>
     <string name="search_hint">Search…</string>
-    <string name="tooltip_search">Search</string>
     <string name="exit_search">Exit Search</string>
-    <string name="exit_multi_select">Exit Multi-Select</string>
     <string name="batch_ops">Batch Actions</string>
-    <string name="selected_count">%1$d selected</string>
+    <plurals name="selected_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
     <string name="batch_added">Allowlist updated</string>
     <string name="batch_save">Save</string>
     <string name="batch_exit">Exit Selection</string>
@@ -48,9 +49,6 @@
     <string name="about_battery_aosp_usage_missing">Couldn\'t open the battery usage page; this system may not support it</string>
     <string name="about_section_experiment_debug">Experiments &amp; Debugging</string>
     <string name="about_sub_experiment">Experimental toggles, off by default</string>
-    <string name="about_section_project">About</string>
-    <string name="about_section_other">Other</string>
-    <string name="about_sub_help">Read the online user guide</string>
     <string name="about_sub_hide_icon_on">Hidden — open the app from LSPosed</string>
     <string name="about_sub_hide_icon_off">Visible — tap to hide</string>
     <string name="about_sub_check_update">Current version %1$s (%2$d)</string>
@@ -64,13 +62,19 @@
     <string name="update_checking">Checking for updates…</string>
     <string name="update_none">Already up to date</string>
     <string name="update_error">Couldn\'t check for updates. Check your connection and try again</string>
-    <string name="export_allowlist">Back Up Settings</string>
-    <string name="import_allowlist">Restore Settings</string>
+    <string name="export_allowlist">Backup</string>
+    <string name="import_allowlist">Restore</string>
     <string name="allowlist_export_failed">Backup failed</string>
     <string name="allowlist_import_failed">Restore failed</string>
     <string name="allowlist_import_empty">No valid package names in the file</string>
-    <string name="allowlist_import_done">Imported %1$d apps</string>
-    <string name="allowlist_export_done">Exported %1$d apps</string>
+    <plurals name="allowlist_import_done">
+        <item quantity="one">Imported %1$d app</item>
+        <item quantity="other">Imported %1$d apps</item>
+    </plurals>
+    <plurals name="allowlist_export_done">
+        <item quantity="one">Exported %1$d app</item>
+        <item quantity="other">Exported %1$d apps</item>
+    </plurals>
     <string name="update_found">New version available: %1$s</string>
     <string name="update_found_title">Update Available</string>
     <string name="update_open">Download</string>
@@ -84,12 +88,12 @@
     <string name="license_gpl_3">GPL-3.0</string>
     <string name="license_mit">MIT License</string>
     <string name="hide_launcher_icon">Hide Launcher Icon</string>
-    <string name="theme_mode">Theme Mode</string>
+    <string name="theme_mode">Theme</string>
     <string name="palette_style">Palette Style</string>
     <string name="ui_style">UI Style</string>
     <string name="miuix_monet">Monet Colors</string>
     <string name="miuix_accent">Accent Color</string>
-    <string name="miuix_floating_bar">Floating Bottom Bar</string>
+    <string name="miuix_floating_bar">Floating Navigation Bar</string>
     <string name="color_spec">Color Spec</string>
     <string name="about_sub_theme_mode">Choose the app\'s theme mode</string>
     <string name="about_sub_ui_style">Choose the app\'s UI style</string>
@@ -112,7 +116,7 @@
     <string-array name="ui_style_entries">
         <item>Material 3</item>
         <item>Miuix</item>
-        <item>Soft glass</item>
+        <item>Soft Light Glass</item>
     </string-array>
     <!-- The floating-bar switch as a two-option row: index 0 is off (docked), 1 is on (floating). -->
     <string-array name="floating_bar_entries">
@@ -169,7 +173,7 @@
     <string name="fcm_diagnostics_not_found">FCM diagnostics isn\'t available on this device</string>
     <string name="shortcut_settings">Settings</string>
     <string name="shortcut_settings_long">Open Module Settings</string>
-    <string name="shortcut_help_long">Read the User Guide in Your Browser</string>
+    <string name="shortcut_help_long">Getting help in Your Browser</string>
     <string name="shortcut_fcm_diagnostics_long">View FCM Diagnostics</string>
 
     <!-- 底部导航（仅 Material 3 风格）：「设置」标签复用 settings -->
@@ -179,7 +183,7 @@
 
     <!-- 模块状态页（底部导航「主页」tab，仅 Material 3 风格） -->
     <string name="status_activated">Active</string>
-    <string name="status_not_activated">Not active</string>
+    <string name="status_not_activated">Inactive</string>
     <string name="status_version_line">Version %1$s (%2$d)</string>
     <!-- The status card's version line under the Miuix look — the prefixed
          form the reference status card prints. Half-width colon in English. -->

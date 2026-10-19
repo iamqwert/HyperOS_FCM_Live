@@ -661,15 +661,20 @@ fun GroupRow(
 // Metrics of the popup menus. DropdownMenu's own content column carries a
 // built-in 8dp vertical padding (DropdownMenuVerticalPadding in Menu.kt) — the
 // panel edge the eye measures against. Everything else is tuned to that: rows
-// get NO vertical padding of their own, so the ripple spans the full 40dp row
+// get NO vertical padding of their own, so the ripple spans the full 48dp row
 // and sits the built-in 8dp from the panel's top/bottom edges; [MENU_ITEM_GAP]
 // spacers between rows keep the same 8dp inside the panel, and rows take an
 // 8dp horizontal padding so the ripple is equidistant from all four edges.
+//
+// The 48dp floor is the M3 menus spec's own item height and the minimum
+// touch target, not a reading of the reference build: at 40dp a row was
+// both below the component token and short of the 48x48dp accessibility
+// floor (m3.material.io/components/menus/spec, accessible-design basics).
 val MENU_ANCHOR_GAP = 4.dp
 val MENU_OUTER_PAD = 8.dp
 val MENU_ITEM_GAP = 8.dp
 val MENU_ITEM_PAD_H = 10.dp
-val MENU_ITEM_HEIGHT = 40.dp
+val MENU_ITEM_HEIGHT = 48.dp
 /** How far the panel sits back from the anchor's right edge. */
 val MENU_EDGE_INSET = 12.dp
 /** Floor so a two-character label still gets a menu, not a chip. */
@@ -1201,7 +1206,10 @@ fun SettingsMenuCard(
                     // See [MenuItemRow]: the clip has to come before the click.
                     .clip(shape)
                     .clickable(role = Role.Button) {
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        // The opening tap of a value menu — the same light
+                        // confirm the overflow buttons fire (KEYBOARD_TAP),
+                        // so every menu in the app opens with one tick.
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         expanded = true
                     }
                     .padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 14.dp),
@@ -1697,8 +1705,11 @@ fun PageScaffold(
      * [MiuixScrollBehavior] flat the moment a `SmallTopAppBar` attaches; hence
      * the page measures its own hero and hands the number in.
      */
-    barScrollProgress: Float? = null,
-    content: @Composable (PaddingValues) -> Unit
+    barScrollProgress: (() -> Float)? = null,
+    // A BoxScope receiver, because the body Box below is where the content is
+    // mounted (both branches) — the Example's pages lean on the same scope to
+    // hang a VerticalScrollBar beside their list without wrapping it.
+    content: @Composable BoxScope.(PaddingValues) -> Unit
 ) {
     if (LocalUiStyle.current.isMiuixBased) {
         val title = stringResource(titleRes)
@@ -1758,10 +1769,10 @@ fun PageScaffold(
                     CompositionLocalProvider(
                         LocalSoftGlassBackdrop provides pageBackdrop,
                         LocalSoftGlassBarReveal provides softGlassBarMaterialProgress(
-                            barScrollProgress ?: scrollBehavior.state.collapsedFraction
+                            barScrollProgress?.invoke() ?: scrollBehavior.state.collapsedFraction
                         )
                     ) {
-                    val travel = barScrollProgress
+                    val travel = barScrollProgress?.invoke()
                     if (travel == null) {
                         MiuixTopAppBar(
                             title = title,
@@ -1801,7 +1812,7 @@ fun PageScaffold(
                         // compact hero page hands in its hero's travel instead
                         // (the compact bar is pinned flat — see
                         // [barScrollProgress]).
-                        progress = barScrollProgress ?: scrollBehavior.state.collapsedFraction,
+                        progress = barScrollProgress?.invoke() ?: scrollBehavior.state.collapsedFraction,
                         // The pane never goes away in this look; the glass is
                         // always full.
                         frost = 1f,
@@ -2034,8 +2045,9 @@ fun AppDialog(
     dismissLabel: String? = null,
     onDismiss: () -> Unit = {},
     // An optional third action for the Material branch's bottom row (the
-    // licence sheet's 查看源代码): it renders where a dismiss button would,
-    // leading of the confirm. The Miuix branch ignores it — Miuix dialogs
+    // licence sheet's 查看源代码): it renders inside the confirm slot,
+    // leading the confirm, so the primary action keeps the row's trailing
+    // end. The Miuix branch ignores it — Miuix dialogs
     // that need an extra action lay their own foot row (MiuixLicenseDialog).
     neutralButton: (@Composable () -> Unit)? = null,
     content: (@Composable () -> Unit)? = null
@@ -2129,22 +2141,27 @@ fun AppDialog(
         // onConfirm/onDismiss leaves the dialog on screen (only the system
         // back gesture could close it).
         confirmButton = {
-            if (confirmLabel != null) {
-                TextButton(onClick = {
-                    onConfirm()
-                    onDismissRequest()
-                }) { Text(confirmLabel) }
+            // The neutral action lives in the confirm slot, leading it: the
+            // M3 dialog keeps the primary action at the row's trailing end,
+            // so a third action belongs to its left — parking the neutral in
+            // the dismiss slot instead put it PAST the confirm at the far
+            // edge, and the licence sheet's 查看源代码 outranked 关闭.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                neutralButton?.invoke()
+                if (confirmLabel != null) {
+                    TextButton(onClick = {
+                        onConfirm()
+                        onDismissRequest()
+                    }) { Text(confirmLabel) }
+                }
             }
         },
         dismissButton = {
-            when {
-                dismissLabel != null -> TextButton(onClick = {
+            if (dismissLabel != null) {
+                TextButton(onClick = {
                     onDismiss()
                     onDismissRequest()
                 }) { Text(dismissLabel) }
-                // No dismiss, but a neutral action was handed in: the slot is
-                // just layout, so the neutral button leads the row instead.
-                neutralButton != null -> neutralButton()
             }
         }
     )

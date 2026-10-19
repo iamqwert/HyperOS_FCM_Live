@@ -352,8 +352,9 @@ class AppShapes(
          * | menu     | 16 | large       | menus and grouped cards share one radius  |
          * |          |    |             | so they read as one surface (app choice,  |
          * |          |    |             | kept over the spec's extraLarge 28)       |
-         * | menuItem | 8  | —           | tighter than large: a 40dp row needs a    |
-         * |          |    |             | corner that reads, not one that curves    |
+         * | menuItem | 8  | —           | tighter than large: the ruled 48dp row    |
+         * |          |    |             | keeps its quiet 8dp corner — bigger       |
+         * |          |    |             | curves would swallow the row              |
          * | tooltip  | 4  | extraSmall  | tooltips stay small in both specs         |
          * | fab      | 16 | large       | matches the card it floats above          |
          *

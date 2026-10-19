@@ -250,7 +250,7 @@ class MainActivity : AppCompatActivity() {
     /** The settings tab's update-row subtitle, computed once at creation. */
     private var settingsVersionLine = ""
 
-    /** The about page hero's release tag ("v4.1.1 (53)"), computed once. */
+    /** The about page hero's release tag ("v4.2.0 (54)"), computed once. */
     private var settingsVersionTag = ""
 
     /** Palette this activity was painted with; a mismatch on resume = repaint. */
@@ -656,7 +656,9 @@ class MainActivity : AppCompatActivity() {
         selectedUi = HashSet(selectedPkgs)
         topBarState = MainTopBarState(
             title = if (multiSelectMode) {
-                getString(R.string.selected_count, selectedPkgs.size)
+                resources.getQuantityString(
+                    R.plurals.selected_count, selectedPkgs.size, selectedPkgs.size
+                )
             } else {
                 getString(R.string.settings_title)
             },

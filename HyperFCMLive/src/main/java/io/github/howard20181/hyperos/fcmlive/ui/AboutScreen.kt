@@ -158,7 +158,7 @@ data class AboutActions(
     val versionLine: String,
     /**
      * The hero's release tag, read from PackageManager in the reference about
-     * page's format ("v4.1.1 (53)").
+     * page's format ("v4.2.0 (54)").
      */
     val versionTag: String,
     /**
@@ -322,7 +322,15 @@ fun AboutTabScreen(
             },
             // Miuix only, and only because the hero above IS this page's title:
             // the compact bar, its title walking in as the hero walks out.
-            barScrollProgress = if (miuix) scrollProgress else null
+            // A provider, not a value: the Example hands its hero travel to the
+            // bar as `scrollProgressProvider` for the same reason — reading the
+            // frame-rate number here would recompose this whole page body every
+            // frame of scroll, where the bar's slot alone is the right scope.
+            barScrollProgress = if (miuix) {
+                { scrollProgress }
+            } else {
+                null
+            }
         ) { innerPadding ->
             val barTop = innerPadding.calculateTopPadding()
             Box(modifier = Modifier.fillMaxSize()) {
@@ -549,7 +557,7 @@ private fun AboutHeroMiuix(
             fontSize = 35.sp,
             textAlign = TextAlign.Center
         )
-        // "v4.1.1 (53)" — the release tag, not a sentence about versions.
+        // "v4.2.0 (54)" — the release tag, not a sentence about versions.
         // First of the three stages to leave, through its ink like the
         // wordmark above: no deferred layer on the node.
         //
@@ -687,7 +695,10 @@ private fun AboutHeroMaterial(versionTag: String) {
             contentDescription = null,
             modifier = Modifier
                 .size(80.dp)
-                .clip(RoundedCornerShape(16.dp))
+                // The shape system, not a call-site literal: 16dp under the
+                // 2021 spec, 20dp under Expressive — the hero plate keeps the
+                // same radius language as every card on the page.
+                .clip(LocalAppShapes.current.card)
         )
         Text(
             modifier = Modifier.padding(top = 12.dp),

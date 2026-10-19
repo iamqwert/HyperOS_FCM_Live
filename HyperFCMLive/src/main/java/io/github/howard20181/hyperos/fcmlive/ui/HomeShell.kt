@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
@@ -173,55 +172,36 @@ fun HomeShell(
                 )
             }
         }
-        // The bar. The default 80dp spends its extra height on the gesture
-        // inset it pads INSIDE the bar, which squeezed a 64dp bar to ~46dp of
-        // actual content and clipped the labels. Here the inset space lives
-        // OUTSIDE the bar (painted the bar's own container colour so the bar
-        // visually reaches the screen edge), and the bar's 74dp belong
-        // entirely to icon + label — nothing clipped, shorter than the
-        // default. The tab row itself sits only `bottomPad` off the screen
-        // edge: the full gesture strip is NOT reserved under the buttons —
-        // a chunk of it is given back so the tabs ride visibly lower — but a
-        // floor and the 3-button case keep it tappable.
-        val density = LocalDensity.current
-        val insetDp = with(density) {
-            WindowInsets.navigationBars.getBottom(this).toDp()
-        }
-        // Gesture strips are thin (~16-24dp): hand back 10dp of it. The
-        // 3-button bar is ~48dp and must stay whole, or the buttons land
-        // under the system keys — hence the full inset whenever it reads tall.
-        val bottomPad = if (insetDp > 32.dp) insetDp else (insetDp - 10.dp).coerceAtLeast(4.dp)
-        Box(
-            modifier = Modifier
-                .background(NavigationBarDefaults.containerColor)
-                .padding(bottom = bottomPad)
-        ) {
-            NavigationBar(
-                modifier = Modifier.height(74.dp),
-                windowInsets = WindowInsets(0.dp)
-            ) {
-                HomeTab.entries.forEach { tab ->
-                    NavigationBarItem(
-                        selected = tab == selected,
-                        onClick = {
-                            // Deliberately silent: a tab swap is not a press on
-                            // content, and HyperOS's own tab bars do not tick.
-                            onSelect(tab)
-                        },
-                        icon = {
-                            // fill=0 at rest, fill=1 selected — the symbol's two
-                            // cuts swap on selection, so the glyph itself marks
-                            // the tab as much as the pill under it does.
-                            Icon(
-                                painter = painterResource(
-                                    if (tab == selected) tab.iconFilledRes else tab.iconRes
-                                ),
-                                contentDescription = null
-                            )
-                        },
-                        label = { Text(stringResource(tab.titleRes)) }
-                    )
-                }
+        // The bar, back on the toolkit default: the ruled 80dp NavigationBar
+        // pads the gesture inset INSIDE itself, the way stock M3 bottom bars
+        // do — the custom 72/74dp cuts (2026-10-19 trials) measured shorter
+        // but lost to the default on balance, so the bar reads stock M3
+        // again. The content box above consumes the navigation-bar inset
+        // (see its consumeWindowInsets), so pages still stop at the bar's
+        // top edge; at large font scales the bar grows the same way the
+        // default always did.
+        NavigationBar {
+            HomeTab.entries.forEach { tab ->
+                NavigationBarItem(
+                    selected = tab == selected,
+                    onClick = {
+                        // Deliberately silent: a tab swap is not a press on
+                        // content, and HyperOS's own tab bars do not tick.
+                        onSelect(tab)
+                    },
+                    icon = {
+                        // fill=0 at rest, fill=1 selected — the symbol's two
+                        // cuts swap on selection, so the glyph itself marks
+                        // the tab as much as the pill under it does.
+                        Icon(
+                            painter = painterResource(
+                                if (tab == selected) tab.iconFilledRes else tab.iconRes
+                            ),
+                            contentDescription = null
+                        )
+                    },
+                    label = { Text(stringResource(tab.titleRes)) }
+                )
             }
         }
     }

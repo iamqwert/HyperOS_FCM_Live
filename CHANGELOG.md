@@ -1,15 +1,71 @@
 # Changelog
 
+## 4.2.0 (54)
+
+### 简体中文
+
+#### 新增
+
+- 底部导航栏
+
+- 「柔光玻璃」界面风格：启用后使用悬浮柔光玻璃底栏（Tab 文字实现参考 [YuKongA/Mishka](https://github.com/YuKongA/Mishka)），标题栏使用渐进模糊（应用页除外，使用高斯模糊）。风格参考 [AritxOnly/F1Info](https://github.com/AritxOnly/F1Info/releases)。
+
+- Miuix 风格下可选择关闭或启用 MIUIX 悬浮底栏，标题栏模糊使用高斯模糊
+
+- 「关于」页迁移至主页；全新设计的「关于」页（参考 [tiann/KernelSU](https://github.com/tiann/KernelSU) 与 [Miuix for Compose](https://github.com/compose-miuix-ui/miuix)）
+
+- Material 风格新增颜色规格 Spec 2026，目前其调色风格仅有 CMF
+
+#### 变更
+
+- 应用行仅显示 FCM 应用
+
+- 适配 Android 11+ 的包可见性，废弃「读取所有应用」权限
+
+- 「查看 FCM 诊断」入口从应用页的 FAB 迁移为主页卡片
+
+#### 移除
+
+- 删除「隐私与权限」页：模块除不影响隐私披露的 Signature 级权限外，仅声明联网权限（用于检查应用更新）
+
+### English
+
+#### Added
+
+- Bottom navigation bar.
+
+- The "Soft Glass" look: a floating soft-glass tab bar (tab text implementation based on [YuKongA/Mishka](https://github.com/YuKongA/Mishka)) with progressive blur on the title bar — except the apps page, which uses Gaussian blur. The look takes its cues from [AritxOnly/F1Info](https://github.com/AritxOnly/F1Info/releases).
+
+- The Miuix look gains a switch to dock or float its bottom bar, and uses Gaussian blur on the title bar.
+
+- The "About" page moves to the Home tab, redesigned from the ground up (references: [tiann/KernelSU](https://github.com/tiann/KernelSU) and [Miuix for Compose](https://github.com/compose-miuix-ui/miuix)).
+
+- The Material look gains the Spec 2026 colour spec, whose palette styles currently ship only CMF.
+
+#### Changed
+
+- App rows now list FCM apps only.
+
+- Android 11+ package visibility is adopted; the "read all apps" permission is retired.
+
+- "View FCM Diagnostics" moves from the apps page's FAB to a card on the Home tab.
+
+#### Removed
+
+- The "Privacy & Permissions" page is gone: besides Signature-level permissions that do not affect privacy disclosure, the module declares only the Internet permission (used to check for app updates).
+
 ## 4.1.1 (53)
 
 ### 简体中文
 
 - 移除 GMS 作用域，GMS 检测手段不断更新，hook GMS 已被证实不可行；从旧版本升级、且曾勾选 GMS 作用域的用户，在升级后请强制停止一次「Google Play 服务」或重启设备，以彻底清除仍驻留在 GMS 进程内的旧钩子。
+
 - 应用列表不再申请任何权限：移除 `QUERY_ALL_PACKAGES` 与 `GET_INSTALLED_APPS`，改用 Android 11+ 包可见性（清单 `<queries>` 声明推送组件动作），列表仅展示声明了推送组件的应用；「展示支持应用」开关随列表语义并入而移除。
 
 ### English
 
 - Remove the GMS scope. GMS detection methods are constantly being updated, and hooking GMS has been proven infeasible; users upgrading from an older version who previously checked the GMS scope should force-stop "Google Play Services" once or restart the device after upgrading to completely clear old hooks still residing in the GMS process.
+
 - The app list no longer requests any permission: `QUERY_ALL_PACKAGES` and `GET_INSTALLED_APPS` are removed in favor of Android 11+ package visibility (manifest `<queries>` declaring the push component actions), and the list now shows only apps that declare push components; the "Show supported apps" toggle is removed along with the list's new semantics.
 
 ## 4.1.0 (52)
