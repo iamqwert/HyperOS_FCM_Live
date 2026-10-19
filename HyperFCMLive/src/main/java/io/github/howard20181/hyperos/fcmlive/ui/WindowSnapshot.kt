@@ -463,12 +463,21 @@ internal object WindowSnapshot {
             val entry = cache[name] ?: continue
             val current = entry.generation == ThemeEngine.generation
             if (current && !entry.wantsConfirmation) continue
-            rerender(name, entry)
+            val retaken = rerender(name, entry)
             entry.wantsConfirmation = false
             if (SystemClock.uptimeMillis() - lastSwitchAt < CONFIRM_WINDOW_MS) {
                 // Within the window the next pass redraws again regardless of
                 // generation, so a mid-swap picture cannot be the last word.
                 entry.wantsConfirmation = true
+            } else if (retaken) {
+                // A settled pass, past the window in which the swap could have
+                // been caught mid-flight: this picture is already the one
+                // [flushForPreview]'s forced pass exists to produce, so the next
+                // gesture no longer owes it. Leaving the flag set here cost a
+                // full-screen render on the gesture's first frame — one that
+                // reproduced, pixel for pixel, a picture this pass had just made.
+                // A failed retake keeps the flag, which is the retry it is for.
+                entry.wantsForcedFlush = false
             }
         }
         if (cache.values.any { it.wantsConfirmation }) {
@@ -498,6 +507,12 @@ internal object WindowSnapshot {
      * at most four entries.
      */
     fun flushForPreview() {
+        val startedAt = SystemClock.uptimeMillis()
+        // A pass still on its timer is run here rather than left to it, because it
+        // is the batched form of the retakes the loop below would otherwise do one
+        // entry at a time — running it first is what keeps an entry from being
+        // drawn twice for one gesture.
+        val drained = handler.hasCallbacks(revive) || handler.hasCallbacks(settleRun)
         if (handler.hasCallbacks(revive)) {
             handler.removeCallbacks(revive)
             revive.run()
@@ -506,6 +521,7 @@ internal object WindowSnapshot {
             handler.removeCallbacks(settleRun)
             settleRun.run()
         }
+        var retaken = 0
         for (name in cache.keys.toList()) {
             val entry = cache[name] ?: continue
             // A picture invalidated by an appearance pick is re-taken here even
@@ -521,7 +537,20 @@ internal object WindowSnapshot {
             // run for its composition to be current before the draw below.
             entry.parent.get()?.let { resumeFrameClock(it) }
             entry.wantsConfirmation = false
-            rerender(name, entry)
+            if (rerender(name, entry)) retaken++
+        }
+        // Everything retaken here is a full-screen render — a GPU record, a read
+        // back and a double measure/layout — run synchronously inside the gesture
+        // callback, before the page has moved a pixel. This one line is how that
+        // cost is told apart from the travel itself: silent means the gesture's
+        // first frame was free, and the numbers say how much it paid when not.
+        if (retaken > 0 || drained) {
+            Log.i(
+                TAG,
+                "Gesture-start flush retook $retaken picture(s) in ${
+                    SystemClock.uptimeMillis() - startedAt
+                } ms (drained pass: $drained)"
+            )
         }
     }
 
