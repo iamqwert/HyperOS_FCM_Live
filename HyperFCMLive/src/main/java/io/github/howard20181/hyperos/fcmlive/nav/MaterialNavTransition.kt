@@ -1,18 +1,57 @@
 package io.github.howard20181.hyperos.fcmlive.nav
 
-import androidx.compose.animation.core.FiniteAnimationSpec
-import androidx.compose.animation.core.SpringSpec
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MotionScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.LayoutDirection
 import top.yukonga.miuix.kmp.nav.transition.NavMotion
 import top.yukonga.miuix.kmp.nav.transition.NavSettleSpec
 import top.yukonga.miuix.kmp.nav.transition.NavTransition
 import top.yukonga.miuix.kmp.nav.transition.navGraphicsTransition
+
+/**
+ * The M3 look's settle, in each phase the driver can be released into.
+ *
+ * Declared above the transition that reads it: top-level properties initialize in
+ * file order.
+ *
+ * ### Programmatic — [PROGRAMMATIC_MS] = M3's own figure
+ *
+ * A push or a pop that starts from rest is a transition between two screens
+ * *both* of which are on screen while it runs, and that is a row M3 answers
+ * directly: 300 ms under the standard easing set, 500 ms under the emphasized
+ * one. The 220 ms this used to run was the platform's *exit-only* figure
+ * (Emphasized accelerate, 200 ms) — the cost of a page leaving, applied to both
+ * directions of a step that mostly consists of a page arriving. That is what made
+ * a tap on a row read as clipped. 300 ms is the standard-set row; it is the
+ * faster of M3's two and the one that keeps this look as tight as it was, with
+ * the curve unchanged.
+ *
+ * ### Commit — [COMMIT_MS] stays short, because a finger is already moving
+ *
+ * A gesture release is not the same event: the depth is travelling when the
+ * finger lifts, and M3's table has no row for it because it is not a from-rest
+ * transition. Measured against the old behaviour, 220 ms is the settled figure
+ * for a released swipe, so it stays.
+ *
+ * ### Cancel — critically damped, and it has to be
+ *
+ * A cancel is the one phase that *must not overshoot*: it returns to the state
+ * the user was looking at, and the layer below is watching depth 0 as its rest
+ * position — an underdamped cancel swings a page past its own resting place and
+ * back, which is motion nobody asked for. Damping ratio 1 and medium-low
+ * stiffness, exactly as this module's M3 preview always fell back.
+ *
+ * None of the three is a theme motion-scheme spec. The scheme's spatial specs are
+ * springs, and its expressive member is underdamped by design: on a full-bleed
+ * page slide that undershoot is not a flourish, it is the whole screen swinging.
+ * A fixed-duration tween says what it does and stops when it says it will.
+ */
+private val MaterialMotion: NavMotion = NavMotion(
+    commit = NavSettleSpec.Tween(durationMillis = COMMIT_MS, easing = FastOutSlowInEasing),
+    cancel = NavSettleSpec.Spring(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow),
+    programmatic = NavSettleSpec.Tween(durationMillis = PROGRAMMATIC_MS, easing = FastOutSlowInEasing),
+)
 
 /**
  * The Material look's page transition.
@@ -45,97 +84,48 @@ import top.yukonga.miuix.kmp.nav.transition.navGraphicsTransition
  * depth-linear default is the curve M3 had) — the same treatment, and therefore
  * the same setting, that both looks pass to `NavDisplay`.
  *
- * Everything the *timing* does comes from the theme's own motion scheme (see
- * [materialMotion]) rather than from a number written here. Built per
- * composition because of that: the scheme is a theme value, and it has to be the
- * live one.
+ * The timing is fixed-duration and takes the curves this module's M3 look has
+ * always run on — see [MaterialMotion] for why each of the three phases is what
+ * it is, and why a spring is the wrong instrument for two of them.
  */
-@Composable
-internal fun rememberMaterialNavTransition(): NavTransition {
-    val motionScheme = MaterialTheme.motionScheme
-    return remember(motionScheme) {
-        navGraphicsTransition(opaqueDepth = 1f, motion = materialMotion(motionScheme)) { scope ->
-            val width = scope.layoutSize.width.toFloat()
-            val depth = scope.relativeDepth
-            val rtl = scope.layoutDirection == LayoutDirection.Rtl
-            if (depth <= 0f) {
-                // Crossing the front edge: either arriving from the trailing edge
-                // or leaving toward it, which is the same motion read in opposite
-                // directions.
-                val offset = (-depth).coerceIn(0f, 1f) * width
-                translationX = if (rtl) -offset else offset
-                if (offset > 0f) {
-                    clip = true
-                    // Rounded from a pixel width through the host's own density, so
-                    // the radius is the same fraction of the screen on every device.
-                    shape =
-                        RoundedCornerShape(with(scope.density) { (width * CARD_CORNER_FRACTION).toDp() })
-                }
-            } else {
-                // Covered: a quarter width toward the leading edge, fading a tenth
-                // while fully buried and sliding home as it is revealed.
-                val cover = depth.coerceIn(0f, 1f)
-                translationX = (if (rtl) 1f else -1f) * cover * width * PARALLAX_FRACTION
-                alpha = 1f - COVER_ALPHA_FALLOFF * cover
-            }
+internal val MaterialNavTransition: NavTransition = navGraphicsTransition(
+    opaqueDepth = 1f,
+    motion = MaterialMotion,
+) { scope ->
+    val width = scope.layoutSize.width.toFloat()
+    val depth = scope.relativeDepth
+    val rtl = scope.layoutDirection == LayoutDirection.Rtl
+    if (depth <= 0f) {
+        // Crossing the front edge: either arriving from the trailing edge or
+        // leaving toward it, which is the same motion read in opposite directions.
+        val offset = (-depth).coerceIn(0f, 1f) * width
+        translationX = if (rtl) -offset else offset
+        if (offset > 0f) {
+            clip = true
+            // Rounded from a pixel width through the host's own density, so the
+            // radius is the same fraction of the screen on every device.
+            shape = RoundedCornerShape(with(scope.density) { (width * CARD_CORNER_FRACTION).toDp() })
         }
+    } else {
+        // Covered: a quarter width toward the leading edge, fading a tenth while
+        // fully buried and sliding home as it is revealed.
+        val cover = depth.coerceIn(0f, 1f)
+        translationX = (if (rtl) 1f else -1f) * cover * width * PARALLAX_FRACTION
+        alpha = 1f - COVER_ALPHA_FALLOFF * cover
     }
 }
 
 /**
- * The M3 settle, in every phase the driver can be released into: the theme's own
- * motion scheme, carried over as-is.
- *
- * The scheme is the right token source here, and the reason is on the M3 side
- * rather than this module's: a page slide changes the layer's *bounds*, which is
- * exactly the case the scheme's spatial specs are for, and M3's expressive
- * update moved spatial motion onto the physics system these specs are built
- * from. The theme already carries both — `MotionScheme.standard()` for the 2021
- * colour spec and `MotionScheme.expressive()` for the 2025 one (see
- * `theme/ComposeTokens.kt`) — so the two looks of this app move the way their
- * own generation moves, instead of one hand-picked duration serving both.
- *
- * The scheme's specs are springs, and a spring is what a *release* wants: a
- * gesture ends with the depth already moving, and only a spring can be seeded
- * with that velocity — a tween restarts from zero, which is a visible stop at
- * the exact moment the finger lets go (the runtime says as much on
- * [NavSettleSpec.Tween]).
- *
- * All three phases take the default spatial spec, one feel for a whole step:
- * - commit and cancel are the same release read twice, so they cannot disagree;
- * - programmatic push/pop is a full step from rest, which the scheme's default
- *   settles in a few hundred milliseconds — the order of M3's own row for a
- *   transition that begins and ends on screen (300 ms standard, 500 ms
- *   emphasized), rather than the exit-only figure this used to run both
- *   directions on — and, under the expressive scheme, with its overshoot.
+ * Duration of a `programmatic` step — a tap on a row, or on a back arrow.
+ * M3's standard-set figure for a transition that begins and ends on screen.
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-private fun materialMotion(scheme: MotionScheme): NavMotion {
-    val spatial = scheme.defaultSpatialSpec<Float>().asDepthSettle()
-    return NavMotion(commit = spatial, cancel = spatial, programmatic = spatial)
-}
+private const val PROGRAMMATIC_MS = 300
 
 /**
- * Carries a theme spec across to the depth axis, tokens intact.
- *
- * The damping ratio is what decides whether the bounce has to be acknowledged:
- * an expressive spatial spec is underdamped on purpose, and the runtime refuses
- * that unless the caller says so — the undershoot past rest *is* the M3
- * Expressive feel, not an accident to be clamped away.
- *
- * Anything that is not a spring (no scheme ships one today) falls back to the
- * library's own navigation feel — critically damped, about half a second for a
- * full step — because a spec the runtime cannot seed or measure would otherwise
- * have to be guessed at from here.
+ * Duration of a `commit` — a released swipe. The figure this transition has
+ * always settled at, kept: the finger has already paid for most of the distance.
  */
-private fun FiniteAnimationSpec<Float>.asDepthSettle(): NavSettleSpec = when (this) {
-    is SpringSpec -> NavSettleSpec.Spring(
-        dampingRatio = dampingRatio,
-        stiffness = stiffness,
-        clampOvershoot = dampingRatio >= 1f,
-    )
-    else -> NavSettleSpec.Spring()
-}
+private const val COMMIT_MS = 220
 
 /**
  * Corner radius of the sliding page, as a fraction of the host width — the
