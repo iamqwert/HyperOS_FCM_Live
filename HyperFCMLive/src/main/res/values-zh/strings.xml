@@ -97,8 +97,6 @@
     <string name="about_sub_miuix_monet">跟随壁纸为界面取色</string>
     <string name="about_sub_miuix_accent">挑选莫奈配色的主色调</string>
     <string name="about_sub_miuix_floating_bar">关闭为停靠式面板，开启为悬浮玻璃胶囊</string>
-    <string name="swipe_back">横移返回手势</string>
-    <string name="about_sub_swipe_back">在页面上横滑即可返回；方向随布局方向</string>
     <string name="about_sub_palette_style">选择动态取色风格</string>
     <string name="about_sub_color_spec">选择 Material 颜色规范</string>
     <string name="language">语言</string>

@@ -48,7 +48,6 @@ import androidx.navigationevent.NavigationEvent
 import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.NavigationEventHandler
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
-import io.github.howard20181.hyperos.fcmlive.theme.AppearanceState
 import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import kotlin.math.PI
@@ -216,19 +215,18 @@ fun PredictiveBackContainer(
     val depth = remember { Animatable(TOP_INDEX.toFloat()) }
     var widthPx by remember { mutableFloatStateOf(0f) }
 
-    // The app-level swipe, as the reference reads it: a switch, and — given it is
-    // on — the edge the swipe must start from, chosen by layout direction: the
-    // same `when` the Example and KernelSU run before handing the value to every
-    // entry. Read as observable state, so flipping the row re-arms the containers
-    // already on screen.
-    val swipeBack by AppearanceState.swipeBack
+    // The app-level swipe, as the references resolve it: the edge the swipe must
+    // start from, chosen by layout direction — the same `when` the Example and
+    // KernelSU run before handing the value to every entry. It is always on: the
+    // two of them carry it as an appearance-page switch, this app carries it as a
+    // behaviour, with nothing left to switch.
     // True while the platform carries a progress-bearing gesture of its own —
     // the system's edge swipe, which competes for the pointer and is driving this
     // axis already. State because the direction gate below reads it in
     // composition; the library's gesture stands down for as long as it holds.
     var platformGesture by remember { mutableStateOf(false) }
     val swipeDirection = when {
-        !swipeBack || platformGesture -> NavSwipeDirection.None
+        platformGesture -> NavSwipeDirection.None
         layoutDirection == LayoutDirection.Rtl -> NavSwipeDirection.RightToLeft
         else -> NavSwipeDirection.LeftToRight
     }

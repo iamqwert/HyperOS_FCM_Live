@@ -11,7 +11,7 @@ import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
  * The appearance settings as Compose state, one layer above the screens.
  *
  * [ThemePrefs] stays the source of truth on disk; this object holds the same
- * ten values as [MutableState]s so a composable can read the live value
+ * nine values as [MutableState]s so a composable can read the live value
  * without keeping a `remember`ed copy of its own. That copy was the failure
  * mode this replaces: every row on the appearance page used to mirror its pref
  * into local state, and every writer had to do three things — write the pref,
@@ -68,14 +68,6 @@ object AppearanceState {
     val floatingBar: MutableState<Boolean> = mutableStateOf(false)
 
     /**
-     * Mirror of [ThemePrefs.swipeBack] — the app-level swipe-back switch. Read
-     * as state rather than read-through because the containers that honour it
-     * are `Activity`-scoped and live long: flipping the row must re-arm the
-     * page already on screen, not only the next one.
-     */
-    val swipeBack: MutableState<Boolean> = mutableStateOf(false)
-
-    /**
      * Re-read every value from disk. Idempotent and cheap: assigning the value
      * a state already holds does not invalidate anything (structural equality
      * policy), so re-hydrating per Activity costs nothing when nothing moved.
@@ -91,7 +83,6 @@ object AppearanceState {
         miuixMonet.value = ThemePrefs.miuixMonet(context)
         miuixAccent.intValue = ThemePrefs.miuixAccent(context)
         floatingBar.value = ThemePrefs.floatingBar(context)
-        swipeBack.value = ThemePrefs.swipeBack(context)
     }
 
     @JvmStatic
@@ -168,8 +159,4 @@ object AppearanceState {
         floatingBar.value = enabled
         ThemeEngine.invalidate()
     }
-
-    /** Writes [swipeBack] through and mirrors it — see [ThemePrefs.setSwipeBack]. */
-    @JvmStatic
-    fun setSwipeBack(context: Context, enabled: Boolean) { ThemePrefs.setSwipeBack(context, enabled); swipeBack.value = enabled }
 }

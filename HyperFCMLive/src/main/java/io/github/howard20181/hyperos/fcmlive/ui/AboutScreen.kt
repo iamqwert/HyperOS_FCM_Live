@@ -941,7 +941,6 @@ private fun AboutBody(
     val miuixMonet by AppearanceState.miuixMonet
     val miuixAccent by AppearanceState.miuixAccent
     val floatingBar by AppearanceState.floatingBar
-    val swipeBack by AppearanceState.swipeBack
     val paletteStyle by AppearanceState.paletteStyle
     val colorSpec by AppearanceState.colorSpec
     // The whole theme section is scoped by this: 动态颜色 / 调色风格 / 颜色规格 are
@@ -1106,8 +1105,6 @@ private fun AboutBody(
                     // The floating-bar row belongs to the Miuix look alone: the
                     // SoftGlass look always floats its own glass tab bar, so the
                     // switch would name a choice the home frame is not offering.
-                    // Its absence does not close the group any more: the swipe-back
-                    // row below always follows these.
                     val barRowVisible = uiStyle == ThemePrefs.UI_STYLE_MIUIX
                     SettingsSwitchCard(
                         iconRes = R.drawable.ic_dynamic_color,
@@ -1119,10 +1116,10 @@ private fun AboutBody(
                             actions.onAppearanceChange()
                         },
                         first = false,
-                        // Never closes the group: the group's final row — the
-                        // swipe-back switch — now always follows this one, under
-                        // every style, so nothing here ends the group any more.
-                        last = false
+                        // Closes the group when the SoftGlass look hides the floating-bar
+                        // row and nothing follows; with Monet on, the accent row takes the
+                        // foot instead.
+                        last = !barRowVisible && !miuixMonet
                     )
                     // The key colour the Monet derivation starts from, offered as the
                     // reference manager (KernelSU's colour palette) offers its own:
@@ -1141,7 +1138,7 @@ private fun AboutBody(
                             currentIndex = accentValues.indexOf(miuixAccent)
                                 .takeIf { it >= 0 } ?: 0,
                             first = false,
-                            last = false,
+                            last = !barRowVisible,
                             onPick = { index ->
                                 AppearanceState.setMiuixAccent(context, accentValues[index])
                                 actions.onAppearanceChange()
@@ -1166,7 +1163,7 @@ private fun AboutBody(
                             entries = floatingBarEntries.toList(),
                             currentIndex = if (floatingBar) 1 else 0,
                             first = false,
-                            last = false,
+                            last = true,
                             onPick = { index ->
                                 AppearanceState.setFloatingBar(context, index == 1)
                                 actions.onAppearanceChange()
@@ -1227,29 +1224,13 @@ private fun AboutBody(
                         entries = specValues.map { specEntries[it] },
                         currentIndex = specValues.indexOf(colorSpec),
                         first = false,
-                        last = false,
+                        last = true,
                         onPick = { index ->
                             AppearanceState.setSpecVersion(context, specValues[index])
                             actions.onAppearanceChange()
                         }
                     )
                 }
-                // The app-level swipe, last in the group — the row the Example and
-                // KernelSU both keep in their appearance page ("Enable Swipe Back" /
-                // 横移返回手势), off by default there as here. What it arms lives in
-                // ui/PredictiveBack.kt, which reads this very state; nothing it
-                // touches is a colour, so no repaint callback is owed.
-                SettingsSwitchCard(
-                    iconRes = R.drawable.ic_swipe_right,
-                    title = stringResource(R.string.swipe_back),
-                    description = stringResource(R.string.about_sub_swipe_back),
-                    checked = swipeBack,
-                    onCheckedChange = { checked ->
-                        AppearanceState.setSwipeBack(context, checked)
-                    },
-                    first = false,
-                    last = true
-                )
             }
         }
 
