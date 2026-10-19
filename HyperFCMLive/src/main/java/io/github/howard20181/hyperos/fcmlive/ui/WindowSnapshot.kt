@@ -726,15 +726,20 @@ internal object WindowSnapshot {
     /**
      * True while [activity] is the page the user is looking at.
      *
-     * `STARTED` is the visible state: an activity that a child has covered has
-     * gone back to `CREATED`, which is exactly the one this file is allowed to
-     * repaint. A host this cannot classify (no `LifecycleOwner`, which only a
-     * non-ComponentActivity would be) counts as *not* on screen, so the ordinary
-     * redraw still happens for it rather than silently losing the strip.
+     * `RESUMED`, not `STARTED`: the sub-page windows are translucent
+     * (Theme.HyperFCMLive.Translucent), so a parent under a child page is
+     * visible to the window manager and sits at `STARTED` — but it is not the
+     * page in use, and a parent under a child is exactly the one this file is
+     * allowed to repaint. Before those windows were translucent the covered
+     * parent dropped to `CREATED`, which is the state this check used to name.
+     * A host this cannot classify (no `LifecycleOwner`, which only a
+     * non-ComponentActivity would be) counts as *not* on screen, so the
+     * ordinary redraw still happens for it rather than silently losing the
+     * strip.
      */
     private fun isOnScreen(activity: Activity): Boolean {
         val state = (activity as? LifecycleOwner)?.lifecycle?.currentState ?: return false
-        return state.isAtLeast(Lifecycle.State.STARTED)
+        return state.isAtLeast(Lifecycle.State.RESUMED)
     }
 
     // No force-recompose step here any more. An earlier version detached and

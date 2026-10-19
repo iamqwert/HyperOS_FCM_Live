@@ -199,16 +199,6 @@ class AboutActivity : AppCompatActivity() {
         setContentView(composeView)
     }
 
-    override fun onResume() {
-        super.onResume()
-        // Same forced redraw as MainActivity's: this page launches the
-        // licences / experiment pages mid-tap too, so its surface
-        // can come back showing a row's press feedback frozen at full bloom —
-        // the tap's last frame, never replaced because nothing invalidates on
-        // return. One draw puts the page back at rest.
-        window.decorView.invalidate()
-    }
-
     /**
      * One line of feedback, in whichever shell the app is wearing: a snackbar
      * drawn by the page it belongs to, in that page's colours, under Material —

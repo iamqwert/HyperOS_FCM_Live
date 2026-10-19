@@ -468,31 +468,27 @@ private class BgEffectNode(
             val minDeltaNanos = 1_000_000_000L / 60L
             // The phase is accumulated from the frame clock's own deltas, one
             // frame at a time, instead of being read off an absolute clock. That
-            // is not a style choice: the frame clock stops while this window is
-            // covered — the licences and privacy pages are separate windows on
-            // top of it — and hands back ONE delta spanning the whole visit when
-            // the window returns. Read absolutely, that delta teleports the mesh
-            // to wherever it would have drifted to, and the page comes back
-            // showing a colour arrangement that was never on screen: the flash
-            // this page used to end on. Clamped, the clock's re-entry costs the
-            // mesh nothing and it resumes mid-drift, exactly as it left.
+            // is not a style choice: the frame clock stops when the window is
+            // stopped — the app leaves the foreground — and hands back ONE
+            // delta spanning the whole absence when it returns. Read
+            // absolutely, that delta teleports the mesh to wherever it would
+            // have drifted to, and the page comes back showing a colour
+            // arrangement that was never on screen: the flash this page used to
+            // end on. Clamped, the clock's re-entry costs the mesh nothing and
+            // it resumes mid-drift, exactly as it left.
             var last = withFrameNanos { it }
             var sinceDraw = 0L
             while (isActive) {
                 val now = withFrameNanos { it }
                 val delta = (now - last).coerceIn(0L, MAX_FRAME_STEP_NANOS)
                 last = now
-                // Covered — hold. Cancellation alone cannot be trusted to stop
-                // this loop while the window sits under a child page: the
-                // playing=false update travels through a recomposition, and a
-                // stopped window's paused frame clock does not run one until a
-                // retake resumes the clock — at which point the loop would eat
-                // clamped drift on the retake's own frames, invisible. The
-                // photograph the retake takes would then be a phase the user
-                // never saw, and the reveal would jump. Read through the state
-                // delegate — same trick as the colour spring — so the gate
-                // engages the moment the lifecycle writes, no recomposition
-                // needed.
+                // Off the foreground — hold. Cancellation alone cannot be
+                // trusted to stop this loop while the window sits under a child
+                // page: the playing=false update travels through a
+                // recomposition, and the reveal would then photograph a phase
+                // the user never saw. Read through the state delegate — same
+                // trick as the colour spring — so the gate engages the moment
+                // the lifecycle writes, no recomposition needed.
                 if (!started()) continue
                 sinceDraw += delta
                 BgEffectClock.animTime.floatValue += delta / 1_000_000_000f
@@ -540,19 +536,19 @@ fun MiuixBgEffectBackground(
     val painter = remember { BgEffectPainter() }
     val preset = remember(isDark) { BgEffectConfig.get(isDark) }
 
-    // The mesh holds while this window is covered. A stopped window's own
-    // frame clock pauses, but the snapshot machinery resumes it
-    // ([WindowSnapshot]'s retakes run the clock so a frozen press fade can
-    // finish before it is photographed) — and on those resumed, foreground-
-    // driven frames an uncovered mesh would keep drifting while invisible.
-    // The page would then come back wearing colours that never matched the
-    // picture its back preview just showed: the jump on returning from the
-    // licences page. Frozen with the window, the live mesh and its photograph
-    // are one and the same frame, and the reveal continues the mesh exactly
-    // where the preview left it.
+    // The mesh holds whenever this window is not the one the user is in front
+    // of. `RESUMED`, not `STARTED`, is what that means now: the sub-page windows
+    // are translucent (Theme.HyperFCMLive.Translucent), so a child page on top
+    // leaves this one PAUSED — still STARTED, still holding its surface, its
+    // recorded display list and its frame clock. Gated on STARTED, an uncovered
+    // mesh would keep drifting behind that child: a full-screen shader render
+    // per frame over a window the compositor holds but nobody can see. Frozen
+    // for as long as the window is off the foreground, the live mesh and the
+    // photograph the back preview reveals are one and the same frame, and the
+    // reveal continues the mesh exactly where the preview left it.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val lifecycleState by lifecycle.currentStateFlow.collectAsState(lifecycle.currentState)
-    val started = lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+    val foreground = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
 
     // The colour stage steps its spring by hand, on the same clamped frame
     // deltas the mesh's own drift runs on ([BgEffectDrawer.startAnimation]'s
@@ -586,13 +582,12 @@ fun MiuixBgEffectBackground(
             val now = withFrameNanos { it }
             val deltaNanos = (now - last).coerceIn(0L, MAX_FRAME_STEP_NANOS)
             last = now
-            // Covered (the clock may have been resumed under us by a retake):
-            // hold everything — spring, target switch, velocity — so the
-            // colours stay the ones the window is frozen at. `last` keeps up
-            // above, so the real resume hands back no giant delta. Read
-            // through the state delegate, so the loop observes the lifecycle
-            // flipping back without a recomposition of its own.
-            if (!lifecycleState.isAtLeast(Lifecycle.State.STARTED)) continue
+            // Off the foreground: hold everything — spring, target switch,
+            // velocity — so the colours stay the ones the window is frozen at.
+            // `last` keeps up above, so the real resume hands back no giant
+            // delta. Read through the state delegate, so the loop observes the
+            // lifecycle flipping back without a recomposition of its own.
+            if (!lifecycleState.isAtLeast(Lifecycle.State.RESUMED)) continue
             BgEffectClock.sinceSwitch += deltaNanos
             if (BgEffectClock.sinceSwitch >= switchNanos) {
                 BgEffectClock.sinceSwitch = 0L
@@ -633,8 +628,8 @@ fun MiuixBgEffectBackground(
                 preset = preset,
                 isDarkTheme = isDark,
                 surface = surface,
-                playing = started,
-                started = { lifecycleState.isAtLeast(Lifecycle.State.STARTED) },
+                playing = foreground,
+                started = { lifecycleState.isAtLeast(Lifecycle.State.RESUMED) },
                 colorStage = { BgEffectClock.colorStage.floatValue },
                 alpha = alpha,
             ),

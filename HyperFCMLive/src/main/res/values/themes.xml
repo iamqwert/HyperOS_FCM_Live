@@ -62,4 +62,32 @@
         <item name="android:textColorPrimary">@color/md_on_surface</item>
         <item name="android:textColorSecondary">@color/md_on_surface_variant</item>
     </style>
+
+    <!--
+      Worn by the three sub-page windows (About, Experiment, Licenses) ON TOP of
+      the theme above — its parent resolves to the night bag when the app is
+      dark, so one definition covers both modes.
+
+      An OPAQUE window stops every window under it: `onStop`, and with it the
+      window's surface, its recorded display list and the Compose frame clock.
+      That is exactly what a committed predictive back then had to pay for —
+      the page being returned to had to be created, laid out and drawn from
+      nothing, on the same frames the hand-drawn slide lands on, which is the
+      stutter felt at the release of the gesture. A TRANSLUCENT window never
+      occludes, so the page below is only paused: still composed, still
+      recorded, its buffer still held by the compositor, and the reveal has
+      nothing to rebuild.
+
+      Nothing visible moves with it: the window background is still the page
+      colour (ThemeSupport.applyWindow paints it at runtime), the page content
+      still covers the window, and the platform's own enter animation is left
+      alone. `backgroundDimEnabled` is nailed shut because Material's themes
+      carry a dim amount for dialogs, and a ROM that inserts that scrim behind a
+      translucent window would darken the very page being revealed.
+    -->
+    <style name="Theme.HyperFCMLive.Translucent" parent="Theme.HyperFCMLive">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 </resources>

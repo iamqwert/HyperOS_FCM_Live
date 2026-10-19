@@ -71,18 +71,28 @@
         <!-- locale|layoutDirection on every activity: a language pick applies
              in place (onConfigurationChanged, no destroy-recreate). The
              recreate was the black flash — the old window came down before the
-             new one had drawn, and the task void showed for a frame. -->
+             new one had drawn, and the task void showed for a frame.
+
+             Every sub-page also wears Theme.HyperFCMLive.Translucent. Their
+             windows are opaque otherwise, and an opaque window stops the page
+             below it — the page a committed predictive back returns to — leaving
+             that page's window to be created and drawn from nothing on the very
+             frames the slide lands on. Translucent, the page below stays paused
+             instead of stopped, and the reveal has nothing to build. -->
         <activity
             android:name=".AboutActivity"
             android:exported="false"
+            android:theme="@style/Theme.HyperFCMLive.Translucent"
             android:configChanges="locale|layoutDirection" />
         <activity
             android:name=".ExperimentActivity"
             android:exported="false"
+            android:theme="@style/Theme.HyperFCMLive.Translucent"
             android:configChanges="locale|layoutDirection" />
         <activity
             android:name=".LicensesActivity"
             android:exported="false"
+            android:theme="@style/Theme.HyperFCMLive.Translucent"
             android:configChanges="locale|layoutDirection" />
 
         <activity-alias

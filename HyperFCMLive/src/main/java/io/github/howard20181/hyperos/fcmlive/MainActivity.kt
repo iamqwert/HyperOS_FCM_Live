@@ -722,20 +722,19 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Returning from a sub-page launched mid-tap: the tap's press feedback
-        // (MiuixIndication's fade-out spring) never got its frames — the window
-        // stops within milliseconds of the tap and ON_STOP pauses the frame
-        // clock, freezing the animation mid-fade. That frozen alpha is baked
-        // into the window's recorded display list, and a plain invalidate()
-        // only replays that list, so on its own it cannot clear the ripple.
-        // The real fix lives in WindowSnapshot.settle: it resumes the clock and
-        // retakes the page before the user can come back. The two draws here
-        // cover the fast return (settle hasn't run yet): the first forces a
-        // pass right at resume, the second lands on the frame after ON_START
-        // has resumed the clock and the fade has finally completed, so the
-        // re-recorded list is the page at rest.
-        window.decorView.invalidate()
-        window.decorView.postOnAnimation { window.decorView.invalidate() }
+        // No forced redraw of the decor here any more. The two draws that used
+        // to be posted existed because launching a sub-page stopped this
+        // window within milliseconds of the tap: ON_STOP paused the frame
+        // clock, the row's press feedback (MiuixIndication's fade-out spring)
+        // never got its frames, and the frozen alpha was baked into the
+        // window's recorded display list — which a plain invalidate() only
+        // replays, hence the second draw landing after the clock had resumed.
+        // The sub-pages are translucent windows now
+        // (Theme.HyperFCMLive.Translucent): this window is paused while one is
+        // open, never stopped, so the fade runs its frames and the tree stays
+        // recorded. There is nothing frozen to clear — and, more to the point,
+        // re-drawing this whole window here is exactly the cost a returning
+        // predictive back must not pay on the frames its slide is landing on.
         // Appearance settings may have changed while the settings screen was
         // on top (palette style, theme mode, seed color...). The Compose tree
         // follows ThemeEngine's generation counter and re-skins on its own;
