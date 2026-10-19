@@ -10,7 +10,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.unit.dp
 import androidx.appcompat.app.AppCompatActivity
 import android.content.ComponentName
 import android.content.Context
@@ -30,7 +29,6 @@ import android.view.View
 import android.view.WindowManager
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
-import io.github.howard20181.hyperos.fcmlive.nav.MaterialNavTransition
 import io.github.howard20181.hyperos.fcmlive.nav.Navigator
 import io.github.howard20181.hyperos.fcmlive.nav.Route
 import io.github.howard20181.hyperos.fcmlive.theme.AppPalette
@@ -63,7 +61,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import top.yukonga.miuix.kmp.nav.core.NavCornerClipMode
 import top.yukonga.miuix.kmp.nav.core.NavDisplay
 import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
 import top.yukonga.miuix.kmp.nav.core.rememberNavBackStack
@@ -407,15 +404,17 @@ class MainActivity : AppCompatActivity() {
      * the appearance switches what is composed around this, and rebuilding the
      * display there would drop the page the user is on.
      *
-     * The effects and the transition are the only per-look difference. Miuix takes
-     * the library's own defaults — its reference app's feel: the slide, the corner
-     * clip taken from the device's screen corner, the 0.5 dim scrim, and input
-     * closed for the duration of a transition. All four are on unconditionally,
-     * with no setting exposed for them, which is how the reference ships them.
-     * Material keeps its own transition (see [MaterialNavTransition]) and with it
-     * no corner-clip effect: that look masks the sliding page with its own
-     * rectangle, and a second mask on the same layer would fight it. Input stays
-     * open under Material, as it always was.
+     * The transition is the library's own preset in both looks — the slide, the
+     * quarter-width parallax and the settle the library ships — and the effects
+     * are the ones KernelSU's manager passes with it (the clip radius read off the
+     * device's screen corner, everything else at the library's defaults). KernelSU
+     * is the reference for this: its manager hands `NavDisplay` no transition at
+     * all and takes the default in *both* of its looks, so the look this display
+     * wears no longer changes how a page moves.
+     *
+     * The two knobs that do still differ are not the motion: the colour behind the
+     * layers is the surface of whichever theme is in force, and input is closed for
+     * the duration of a transition under Miuix only.
      */
     @Composable
     private fun AppPages() {
@@ -425,27 +424,24 @@ class MainActivity : AppCompatActivity() {
 
         val miuix = LocalUiStyle.current.isMiuixBased
         // What fills the strip the covered page's parallax vacates — the colour
-        // the system's own window transition would have shown through. Miuix
-        // paints the revealed layer in the theme's surface, which is what the
-        // Example hands `NavDisplay` as `backdropColor`; the Material look keeps
-        // its own background role, as its back preview did. Both are read off the
-        // surrounding theme, which is this display's parent.
+        // the system's own window transition would have shown through, read off
+        // the surrounding theme, which is this display's parent.
         val backdrop =
             if (miuix) MiuixTheme.colorScheme.surface else MaterialTheme.colorScheme.background
-        // Read off the window insets, like the library's own effect does. Unused
-        // under Material — its rounding is the transition's own rectangle.
+        // Read off the window insets, like the library's own effect does.
         val systemCorner = rememberNavSystemCornerRadius()
         NavDisplay(
             backStack = backStack,
             onBack = { pages.pop() },
-            transition = if (miuix) NavTransitions.MiuixDefault else MaterialNavTransition,
+            // The library's default preset — the same one KernelSU's manager runs,
+            // and in both of its looks; nothing here overrides it.
+            transition = NavTransitions.MiuixDefault,
             effects = NavDisplayEffects(
-                enableCornerClip = miuix,
-                cornerClipRadius = if (miuix) systemCorner else 0.dp,
-                cornerClipMode = NavCornerClipMode.Leading,
-                // 0.5 for both: the default that library ships, and the depth the
-                // Material back preview washed its covered page with.
-                dimAmount = 0.5f,
+                // KernelSU passes exactly this: the leading-edge clip at the
+                // device's own screen corner. The remaining switches stay at the
+                // library defaults — clip on, leading edge, 0.5 dim — except the
+                // two noted below.
+                cornerClipRadius = systemCorner,
                 blockInputDuringTransition = miuix,
                 backdropColor = backdrop,
             ),
