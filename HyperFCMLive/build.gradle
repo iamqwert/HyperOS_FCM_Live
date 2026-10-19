@@ -249,17 +249,11 @@ dependencies {
     // RenderEffect paths need API 31; this module is minSdk 35.
     implementation 'dev.chrisbanes.haze:haze:2.0.1'
     implementation 'dev.chrisbanes.haze:haze-blur:2.0.1'
-    // Miuix's navigation package, taken for ONE thing: `Modifier.navSwipeDismiss`
-    // — the library's own app-level swipe-back gesture (two-phase pointer
-    // arbitration so a pager or list keeps the finger it owns, a finger-following
-    // depth driver that can be grabbed mid-transition, velocity-first commit).
-    // The example app and KernelSU hand it to every `entry(swipeDismiss = …)`
-    // of a NavDisplay; this app has no navigation graph (separate Activities,
-    // see ui/PredictiveBack.kt), so the gesture is attached to that driver
-    // instead — the library's own code, without the graph. Same version line as
-    // the artifacts above; it asks for navigationevent 1.1.x, already satisfied
-    // by the 1.2.0 declared further up.
-    implementation 'top.yukonga.miuix.kmp:miuix-nav-android:0.9.4'
+    // No miuix-nav artifact: the module briefly took `miuix-nav-android` for
+    // `Modifier.navSwipeDismiss` (an app-level swipe-back gesture layered over
+    // the platform's own edge swipe) and dropped it again — the platform's
+    // predictive-back stream drives the whole back motion on its own, which is
+    // what the example app's back gesture amounts to as well.
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
     // Compile-time hidden-API signatures (not packaged in the APK).

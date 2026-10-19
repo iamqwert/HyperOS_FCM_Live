@@ -17,7 +17,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -25,7 +24,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
@@ -57,8 +55,6 @@ import kotlin.math.exp
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlinx.coroutines.launch
-import top.yukonga.miuix.kmp.nav.gesture.navSwipeDismiss
-import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
 import top.yukonga.miuix.kmp.squircle.absoluteSquircleClip
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -104,29 +100,19 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * full-corner rounded-rectangle clip at 14.33% of the panel width, no input
  * blocking.
  *
- * Two input sources drive that one motion.
+ * One input source drives that one motion.
  *
  * `androidx.navigationevent` bridges the platform's predictive-back stream (edge
  * swipe on gesture navigation, a discrete back key otherwise) into the callbacks
  * below, and `enableOnBackInvokedCallback` in the manifest opts the process in.
- *
- * On top of it sits `miuix-nav`'s own app-level swipe-back gesture — the one the
- * Example and KernelSU hand to every `entry(swipeDismiss = …)`. This app has no
- * `NavDisplay` to attach it to (separate `Activity`s, no navigation graph), so
- * the library's `Modifier.navSwipeDismiss` is attached straight to this
- * container and drives the same depth axis through its own two-phase pointer
- * arbitration: a gesture starting on a pager, a list or any other child that
- * claims the finger is left to that child. It is taken as the library's own code
- * rather than re-created around `detectHorizontalDragGestures` — that approach
- * loses to a nested horizontal consumer and cancels mid-way, which is exactly
- * what the arbitration exists to avoid.
- *
- * The two sources are told about each other. While the library's gesture owns
- * the pointer, the platform's progress stream is ignored (`SwipeRun.owns`); the
- * library stands down — cancelling its live sequence without a settle, as it does
- * upstream when the ownership flag turns — while the platform is carrying a
- * progress-bearing gesture of its own (`platformGesture`). One axis, one writer
- * per sequence, in both directions.
+ * That single stream is the app's whole back gesture, exactly as the Example app
+ * runs it. `miuix-nav` additionally exposes an app-level swipe gesture of its own
+ * (`Modifier.navSwipeDismiss`, the one the Example and KernelSU hand to every
+ * `entry(swipeDismiss = …)`) which this file used to attach to the container as a
+ * second writer on the same axis; it was removed: it is a pointer consumer layered
+ * over the platform's own edge swipe, and carrying two arbitration paths for one
+ * motion cost frames without buying anything the platform gesture does not
+ * already do.
  *
  * What is **not** portable from `miuix-nav` is the layer underneath. There, a
  * `NavDisplay` keeps the previous entry composed and the reveal shows a live
@@ -206,52 +192,13 @@ fun PredictiveBackContainer(
 
     // The page's depth on miuix-nav's axis: `topIndex` — 1 for every host of this
     // container, each is a single pushed page — at rest, one less once the page
-    // has fully left. It IS the Animatable `Modifier.navSwipeDismiss` drives, and
-    // the three layers below derive their pixel displacement from it, so the
-    // library's gesture and the platform's progress stream move one single value:
-    // no second motion to reconcile, no jump where one source hands the page to
-    // the other. Every constant translated in this file is in depth units
-    // already — the pixel axis this file worked in before was the same motion
-    // with the width and the sign factored out.
+    // has fully left. The three layers below derive their pixel displacement from
+    // it, so the platform's progress stream moves one single value. Every constant
+    // translated in this file is in depth units already — the pixel axis this file
+    // worked in before was the same motion with the width and the sign factored
+    // out.
     val depth = remember { Animatable(TOP_INDEX.toFloat()) }
     var widthPx by remember { mutableFloatStateOf(0f) }
-
-    // The app-level swipe, as the references resolve it: the edge the swipe must
-    // start from, chosen by layout direction — the same `when` the Example and
-    // KernelSU run before handing the value to every entry. It is always on: the
-    // two of them carry it as an appearance-page switch, this app carries it as a
-    // behaviour, with nothing left to switch.
-    // True while the platform carries a progress-bearing gesture of its own —
-    // the system's edge swipe, which competes for the pointer and is driving this
-    // axis already. State because the direction gate below reads it in
-    // composition; the library's gesture stands down for as long as it holds.
-    var platformGesture by remember { mutableStateOf(false) }
-    val swipeDirection = when {
-        platformGesture -> NavSwipeDirection.None
-        layoutDirection == LayoutDirection.Rtl -> NavSwipeDirection.RightToLeft
-        else -> NavSwipeDirection.LeftToRight
-    }
-
-    // The app-level swipe's own run state: whether the library's gesture owns the
-    // pointer for this sequence, whether the parent picture has been borrowed for
-    // it, and whether a commit's settle is still running. A plain object rather
-    // than composition state on purpose — the library's gesture and this file's
-    // pointer handlers read and write it per event, and a snapshot write per
-    // event would recompose the page at pointer rate. Composition reads only
-    // threshold-level values here: whether the platform is driving
-    // (`platformGesture` above) and whether the page is off rest
-    // (`transitionActive` below).
-    //
-    // The picture is borrowed on the first live follow event rather than at the
-    // decide stage: the library reports only once it has claimed the sequence,
-    // and a claim that ends with a child keeping the finger never gets here, so
-    // no gesture that a pager or a list wins pays for a snapshot retake.
-    class SwipeRun {
-        var owns = false
-        var pictureTaken = false
-        var settling = false
-    }
-    val swipe = remember { SwipeRun() }
 
     // Whether the page is off its rest position on the depth axis — the whole of
     // what "a transition owns the page" means, and the gate for the two
@@ -324,12 +271,11 @@ fun PredictiveBackContainer(
     // starts at a down, so a consumed down is what "blocked" means for all of
     // them.
     //
-    // Only downs, deliberately — not the moves that follow. The library's swipe
-    // arbiter judges a candidate sequence by the `isConsumed` flag of its
-    // non-zero position changes, and two consumed moves in a row make it yield
-    // the finger to "child content". A sink that ate moves would therefore talk
-    // a swipe started during a settle out of its own gesture, and the library
-    // supports grabbing exactly that settling page.
+    // Only downs, deliberately — not the moves that follow. The move-consuming
+    // sink that used to be here existed to keep the app-level swipe's arbiter from
+    // yielding the finger to child content; with the swipe gone a sink that ate
+    // moves would block the page's own scrollables for no gain, so the blackout
+    // stays at the down, which is what "blocked" means for every child gesture.
     val blockInputModifier = if (isMiuix && transitionActive) {
         Modifier.pointerInput(BLOCK_INPUT_KEY) {
             awaitPointerEventScope {
@@ -348,9 +294,7 @@ fun PredictiveBackContainer(
     // One driver per page (rebuilt on a style switch). `settled` makes a commit
     // terminal: the settle animation then owns the value, and a second back
     // event arriving during it (the key can repeat faster than the settle
-    // finishes) must not re-enter. `swipe.owns` is its mirror for the other
-    // source: the container's swipe gesture raises it for as long as it carries
-    // the pointer, and the platform's stream is ignored while it holds.
+    // finishes) must not re-enter.
     class Driver : NavigationEventHandler<NavigationEventInfo>(
         initialInfo = NavigationEventInfo.None,
         isBackEnabled = true
@@ -388,12 +332,8 @@ fun PredictiveBackContainer(
 
         override fun onBackProgressed(event: NavigationEvent) {
             // A progress event is only ever delivered for a gesture the platform
-            // is animating itself, which makes this the first moment the platform
-            // is known to be driving the axis. The container's own swipe stands
-            // down for as long as it does — the gate reads this through
-            // `platformGesture` in composition, so the library cancels a live
-            // sequence of its own rather than the two sources trading writes.
-            platformGesture = true
+            // is animating itself, which makes this the moment the finger is known
+            // to be driving the axis.
             sawProgress = true
             onGesture(event)
         }
@@ -468,11 +408,8 @@ fun PredictiveBackContainer(
 
         override fun onBackCancelled() {
             if (settled) return
-            // The platform's gesture is over — whatever drove it, the finger or
-            // the key. The gate may open again for the container's own swipe from
-            // here, including over the cancel settle below, which is exactly the
-            // settling page the library is built to be grabbed on.
-            platformGesture = false
+            // The platform's gesture is over, whatever drove it — the finger or
+            // the key.
             cancelBack()
         }
 
@@ -521,14 +458,6 @@ fun PredictiveBackContainer(
 
         private fun onGesture(event: NavigationEvent) {
             if (settled) return
-            // The container's own swipe gesture is carrying this page: the
-            // platform's events are another writer on the same axis, so they are
-            // dropped for as long as the library owns the finger. They arrive on
-            // the main thread, `swipe.owns` is written there, and this whole
-            // path is main-thread bookkeeping already. Model — none upstream:
-            // NavDisplay never runs both of its progress sources at once, it
-            // turns the platform branch off while the gesture path is live.
-            if (swipe.owns) return
             val extent = widthPx
             if (extent <= 0f) return
             // Release-velocity estimation, verbatim from NavDisplay's event
@@ -569,79 +498,9 @@ fun PredictiveBackContainer(
         onDispose { driver.remove() }
     }
 
-    // The library's commit settles the axis itself and reports the classification
-    // at the release, not at rest; the pop is owed when the axis has actually got
-    // there, which is also the order the platform path runs in — settle the slide
-    // out, then hand the host the finished result, so the host can suppress its
-    // own exit transition (`alreadySlidOut = true`). A platform-driven commit is
-    // untouched by this: it dispatches from its own handler and never sets
-    // `settling`.
-    LaunchedEffect(depth) {
-        snapshotFlow { depth.value }.collect { value ->
-            if (swipe.settling && value <= EXIT_DEPTH + MIUIX_DEPTH_VISIBILITY_THRESHOLD) {
-                swipe.settling = false
-                swipe.owns = false
-                onBack(true)
-            }
-        }
-    }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
-            // The app-level swipe, outermost so it reads the raw stream: the
-            // container's own transition-time blackout consumes after it, and a
-            // child that owns the finger is decided by the library's arbitration,
-            // not by modifier order. `enabled` and `direction` both close when the
-            // platform is driving — the gate above — and the direction is read from
-            // the layout at the moment of the swipe, as the references do.
-            .navSwipeDismiss(
-                enabled = swipeDirection != NavSwipeDirection.None,
-                direction = swipeDirection,
-                animatedTop = depth,
-                topIndex = TOP_INDEX,
-                onCommit = {
-                    // Synchronous with the release. The library's spring is the
-                    // settle from here, so the pop waits for the axis (see the
-                    // watcher above) instead of racing it.
-                    swipe.settling = true
-                },
-                onCancel = {
-                    // Fired once, after the library's cancel spring is back at
-                    // rest — the mirror of the platform path's cancel: the axis is
-                    // released to the platform again. The transition-time
-                    // treatments need no clearing here: they read the depth, and
-                    // the same spring that fires this left the axis at rest.
-                    swipe.owns = false
-                    swipe.pictureTaken = false
-                    swipe.settling = false
-                },
-                onGesture = { gesture ->
-                    if (gesture != null) {
-                        // A live follow event: this finger is moving this page, so
-                        // the platform's stream stands down. The parent picture is
-                        // borrowed here, once per gesture, rather than at the
-                        // decide stage — the library reports only after it has
-                        // claimed the sequence, so a gesture a pager or a list wins
-                        // never pays for a snapshot retake. `flushForPreview`
-                        // before the read: an appearance change defers its retake,
-                        // and this is the last moment the picture can be fixed
-                        // before it is shown.
-                        if (!swipe.pictureTaken) {
-                            WindowSnapshot.flushForPreview()
-                            gestureBackground = background()
-                            swipe.pictureTaken = true
-                        }
-                        swipe.owns = true
-                    } else {
-                        // The library's sequence has fully resolved. The commit
-                        // branch resolves through the settle above, so this is a
-                        // cancel or a claim that never moved; either way the axis
-                        // is the platform's again.
-                        swipe.owns = false
-                    }
-                }
-            )
             .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
             .then(blockInputModifier)
     ) {
@@ -732,8 +591,8 @@ fun PredictiveBackContainer(
             }
         }
         // The page on top — the one the user is looking at. It slides out full
-        // width with the depth axis — the system's progress or the swipe
-        // gesture, whichever is driving this sequence — and that is ALL it does.
+        // width with the depth axis the platform's progress stream drives, and
+        // that is ALL it does.
         //
         // No wash, no gradient, no elevation shadow on this layer. The shadow
         // belongs to the card below, and it is drawn there. Under the Miuix look
@@ -805,8 +664,9 @@ private const val CARD_CORNER_FRACTION = 0.1433f
 /**
  * Depth of every host of this container on miuix-nav's axis: `topIndex`, the
  * index of a single pushed page. This file works in that unit rather than in
- * pixels, because it is the unit the library's own swipe gesture drives — the
- * `Animatable` the settle physics animates is the same one the gesture snaps.
+ * pixels because it is the unit the library's physics is written in — the settled
+ * constants below are its own, and the axis the platform's progress stream snaps
+ * is the same `Animatable` those physics animate.
  */
 private const val TOP_INDEX = 1
 
