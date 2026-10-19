@@ -1,19 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
-
-    <!-- Needed on Android 11+ (targetSdk >= 30): package visibility filtering
-         otherwise hides most installed user apps from
-         getInstalledPackages()/getInstalledApplications(). -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
-        tools:ignore="QueryAllPackagesPermission" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Update check via GitHub Releases. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- MIUI 13 / HyperOS gates getInstalledPackages() behind this runtime
-         permission on top of QUERY_ALL_PACKAGES (owner: com.lbe.security.miui). -->
-    <uses-permission android:name="com.android.permission.GET_INSTALLED_APPS" />
+    <!-- The app list is built without any permission. On Android 11+ package
+         visibility is granted per matching intent filter, so declaring the
+         push actions below makes exactly the push-capable apps visible — the
+         only apps the allowlist can mean anything for — and nothing else.
+         GMS is listed by name because it is the one package the module
+         exists for and must never be lost to a query quirk (see the scan
+         comment in MainActivity). The MiPush check is a direct component
+         lookup, which works on any already-visible package, so it needs no
+         declaration of its own. -->
+    <queries>
+        <intent>
+            <action android:name="com.google.firebase.MESSAGING_EVENT" />
+        </intent>
+        <intent>
+            <action android:name="com.google.firebase.INSTANCE_ID_EVENT" />
+        </intent>
+        <intent>
+            <action android:name="com.google.android.c2dm.intent.RECEIVE" />
+        </intent>
+        <package android:name="com.google.android.gms" />
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -30,11 +41,24 @@
         <!-- Settings UI. No LAUNCHER category here: the desktop icon is the
              alias below, so we can hide the icon without disabling this activity
              (LSPosed can still open the module via MODULE_SETTINGS /
-             LAUNCH_MODULE when the alias is disabled). -->
+             LAUNCH_MODULE when the alias is disabled).
+
+             locale|layoutDirection: a language pick applies in place
+             (onConfigurationChanged, no destroy-recreate). The recreate was the
+             black flash — the old window came down before the new one had drawn,
+             and the task void showed for a frame. -->
+        <!-- adjustResize, not adjustPan: the app is edge-to-edge (minSdk 35),
+             and the insets guide (developer.android.com/develop/ui/compose/
+             layouts/insets#ime) pairs that with a resizing window. The list
+             consumes the ime inset itself (MainScreen's Scaffold), so the last
+             row stays reachable above the keyboard; the Miuix look's search is
+             a full-screen layer that rides the same resized window. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustPan">
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="locale|layoutDirection">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -55,18 +79,13 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".AboutActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ExperimentActivity"
-            android:exported="false" />
-        <activity
-            android:name=".PrivacyActivity"
-            android:exported="false" />
-        <activity
-            android:name=".LicensesActivity"
-            android:exported="false" />
+        <!-- `.MainActivity` is the whole app now: every page — the three home
+             tabs and what they open (about, licences, experiment) — is an entry
+             in its one NavDisplay back stack. The sub-pages used to be
+             Activities of their own, and a covered Activity is stopped, so the
+             page underneath had to be rebuilt from nothing when the user came
+             back to it. Rebuilt is also what it *looked* like: that cost is
+             where the jank after a back gesture's release came from. -->
 
         <activity-alias
             android:name=".LauncherAlias"

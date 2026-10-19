@@ -17,6 +17,7 @@ internal object HookerSupport {
 
     const val ACTION_REMOTE_INTENT = "com.google.android.c2dm.intent.RECEIVE"
     const val ACTION_MESSAGING_EVENT = "com.google.firebase.MESSAGING_EVENT"
+    const val ACTION_INSTANCE_ID_EVENT = "com.google.firebase.INSTANCE_ID_EVENT"
     const val FCM_MESSAGING_SERVICE_CLASS =
         "com.google.firebase.messaging.FirebaseMessagingService"
     const val FCM_IID_RECEIVER_CLASS =

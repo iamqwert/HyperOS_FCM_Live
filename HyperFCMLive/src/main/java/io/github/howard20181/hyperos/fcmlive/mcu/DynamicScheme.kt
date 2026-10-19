@@ -97,16 +97,22 @@ internal class DynamicScheme(
         /**
          * Returns the spec version to use for the given variant.
          *
-         * Upstream also downgrades a requested 2026 to 2025 for the four expressive variants; this
-         * port publishes 2021 and 2025 only, so the rule reduces to "the four expressive variants
-         * keep the requested version, everything else is 2021".
+         * CMF publishes rules only under the 2026 spec — upstream `SchemeCmf` rejects every other
+         * version outright, and this port's 2026 tone rules only resolve for CMF — so a CMF scheme
+         * always reports 2026 regardless of what was requested. The expressive variants cap at
+         * 2025 (upstream downgrades a requested 2026 to 2025 for them), and everything else runs
+         * the 2021 rules.
          */
         fun maybeFallbackSpecVersion(
             specVersion: Scheme.Spec,
             variant: Scheme.Variant
         ): Scheme.Spec {
+            if (variant == Scheme.Variant.CMF) {
+                return Scheme.Spec.SPEC_2026
+            }
+            val capped = if (specVersion == Scheme.Spec.SPEC_2026) Scheme.Spec.SPEC_2025 else specVersion
             if (variant.supportsExpressive2025) {
-                return specVersion
+                return capped
             }
             return Scheme.Spec.SPEC_2021
         }

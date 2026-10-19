@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -25,6 +27,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
+import top.yukonga.miuix.kmp.basic.VerticalScrollBar
+import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+import top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.CardDefaults as MiuixCardDefaults
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
@@ -69,6 +74,7 @@ import kotlinx.coroutines.launch
  * TextView. The rows keep the connected-group shape, now from
  * [LocalAppShapes] rather than a `GradientDrawable` built per row.
  */
+@OptIn(ExperimentalScrollBarApi::class)
 @Composable
 fun LicensesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     var openSheet by remember { mutableStateOf<LicenseSheet?>(null) }
@@ -77,7 +83,7 @@ fun LicensesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     // Read here, in composition — LocalUiStyle.current is a @Composable read
     // and the dialog's callback below is a plain lambda.
-    val miuixNow = LocalUiStyle.current == UiStyle.Miuix
+    val miuixNow = LocalUiStyle.current.isMiuixBased
 
     // Opens a repository, with the page's fallback when nothing can take the
     // URL: a system toast under Miuix, a snackbar under Material. It backs both
@@ -102,12 +108,33 @@ fun LicensesScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         modifier = modifier,
         snackbarHostState = snackbarHostState
     ) { innerPadding ->
+        val listState = rememberPageListState()
         LicensesBody(
+            // The list spans the full body and takes the bar's height as
+            // contentPadding, so rows scroll UNDER the title bar's glass
+            // instead of stopping at its edge (see PageScaffold).
+            topPadding = innerPadding.calculateTopPadding(),
             bottomPadding = innerPadding.calculateBottomPadding(),
+            listState = listState,
             onOpenSheet = { openSheet = it },
-            onOpenUrl = openUrl,
-            modifier = Modifier.padding(top = innerPadding.calculateTopPadding())
+            onOpenUrl = openUrl
         )
+        // The reference's scroll indicator beside the list — every list page
+        // in the reference ships one (LicensePage hangs its scrollbar as a
+        // sibling of the list through the same scaffold scope), and the state
+        // is hoisted here for it the way AboutPage hoists its own.
+        if (LocalUiStyle.current.isMiuixBased) {
+            VerticalScrollBar(
+                adapter = rememberScrollBarAdapter(listState),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight(),
+                trackPadding = PaddingValues(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = innerPadding.calculateBottomPadding()
+                )
+            )
+        }
         // Inside the scaffold's subtree, deliberately: the Miuix licence sheet
         // is an OverlayDialog, and those render through the enclosing
         // MiuixScaffold's popup host — composed outside it (where this sat
@@ -129,7 +156,9 @@ private data class LicenseSheet(val title: String, val rawRes: Int, val url: Str
 
 @Composable
 private fun LicensesBody(
+    topPadding: Dp,
     bottomPadding: Dp,
+    listState: LazyListState,
     onOpenSheet: (LicenseSheet) -> Unit,
     onOpenUrl: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -139,7 +168,11 @@ private fun LicensesBody(
     // or a repository — with the library's own chevron, the way its
     // ArrowPreference does. The plain licence texts open a sheet like any dep
     // row does, so they wear the mark too.
-    val miuixRows = LocalUiStyle.current == UiStyle.Miuix
+    val miuixRows = LocalUiStyle.current.isMiuixBased
+    // The summary line's gap under the row title. M3's two-line row is 72dp —
+    // 24 + 4 + 16 of type against 28dp of padding — so Material rows take the
+    // 4dp; Miuix rows space their own lines and must not grow.
+    val summaryGap = if (miuixRows) 0.dp else 4.dp
     val plainLicenses = listOf(
         stringResource(R.string.license_apache_2) to R.raw.license_apache2,
         stringResource(R.string.license_gpl_3) to R.raw.license_gpl3,
@@ -150,135 +183,143 @@ private fun LicensesBody(
     LazyColumn(
         modifier = modifier
             .fillMaxWidth()
+            .listScrollEndHaptic()
             .padding(start = inset, end = inset),
-        state = rememberPageListState(),
-        // The gesture-hint strip is scroll-through, not a hard stop.
-        contentPadding = PaddingValues(bottom = bottomPadding)
+        state = listState,
+        // The gesture-hint strip is scroll-through, not a hard stop. The top
+        // inset rides here (not on the modifier) so rows pass under the glass
+        // bar while scrolling.
+        contentPadding = PaddingValues(top = topPadding, bottom = bottomPadding)
     ) {
         item {
             SectionTitle(R.string.licenses_section_licenses, first = true)
-            plainLicenses.forEachIndexed { index, (name, rawRes) ->
-                val first = index == 0
-                val last = index == plainLicenses.lastIndex
-                GroupRow(first = first, last = last, onClick = {
-                    onOpenSheet(LicenseSheet(name, rawRes, url = null))
-                }) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = name,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                style = pageBodyStyle()
-                            )
-                            Text(
-                                text = hint,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = pageSecondaryStyle()
-                            )
-                        }
-                        if (miuixRows) {
-                            MiuixChevron()
+            SettingsGroup {
+                plainLicenses.forEachIndexed { index, (name, rawRes) ->
+                    val first = index == 0
+                    val last = index == plainLicenses.lastIndex
+                    GroupRow(first = first, last = last, onClick = {
+                        onOpenSheet(LicenseSheet(name, rawRes, url = null))
+                    }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                AppText(
+                                    text = name,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    style = pageBodyStyle()
+                                )
+                                AppText(
+                                    modifier = Modifier.padding(top = summaryGap),
+                                    text = hint,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = pageSecondaryStyle()
+                                )
+                            }
+                            if (miuixRows) {
+                                MiuixChevron()
+                            }
                         }
                     }
                 }
-                if (!last) GroupRowGap()
             }
         }
 
         item {
             SectionTitle(R.string.licenses_section_deps)
-            DEPS.forEachIndexed { index, dep ->
-                val name = dep[0]
-                val version = dep[1]
-                val license = dep[2]
-                val url = dep[3]
-                val first = index == 0
-                val last = index == DEPS.lastIndex
-                GroupRow(first = first, last = last, onClick = {
-                    onOpenSheet(LicenseSheet(name, licenseRawFor(name, license), url))
-                }) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            // A name that would crowd the version truncates instead of
-                            // wrapping; the version sits on its own line, flush under
-                            // the name, with the license following.
-                            Text(
-                                text = name,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                style = pageBodyStyle(),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Row {
-                                if (version.isNotEmpty()) {
-                                    Text(
-                                        text = version,
+            SettingsGroup {
+                DEPS.forEachIndexed { index, dep ->
+                    val name = dep[0]
+                    val version = dep[1]
+                    val license = dep[2]
+                    val url = dep[3]
+                    val first = index == 0
+                    val last = index == DEPS.lastIndex
+                    GroupRow(first = first, last = last, onClick = {
+                        onOpenSheet(LicenseSheet(name, licenseRawFor(name, license), url))
+                    }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                // A name that would crowd the version truncates instead of
+                                // wrapping; the version sits on its own line, flush under
+                                // the name, with the license following.
+                                AppText(
+                                    text = name,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    style = pageBodyStyle(),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Row(modifier = Modifier.padding(top = summaryGap)) {
+                                    if (version.isNotEmpty()) {
+                                        AppText(
+                                            text = version,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = pageSecondaryStyle()
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+                                    AppText(
+                                        text = license,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         style = pageSecondaryStyle()
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
                                 }
-                                Text(
-                                    text = license,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    style = pageSecondaryStyle()
-                                )
                             }
-                        }
-                        if (miuixRows) {
-                            MiuixChevron()
+                            if (miuixRows) {
+                                MiuixChevron()
+                            }
                         }
                     }
                 }
-                if (!last) GroupRowGap()
             }
         }
 
         item {
             SectionTitle(R.string.licenses_section_refs)
-            REFERENCES.forEachIndexed { index, ref ->
-                val name = ref[0]
-                val license = ref[1]
-                val url = ref[2]
-                val first = index == 0
-                val last = index == REFERENCES.lastIndex
-                // 「—」 marks a repository that ships no LICENSE file, so there
-                // is no text to open a sheet for. Such a row is inert only when
-                // it also has no link; if it carries a URL (onijiang0/fcmfix)
-                // the tap opens that repository directly, same as a 查看源代码.
-                val noLicense = license == "—"
-                val hasUrl = url.isNotEmpty()
-                val click: () -> Unit = when {
-                    noLicense && hasUrl -> ({ onOpenUrl(url) })
-                    noLicense -> ({})
-                    else -> ({
-                        onOpenSheet(LicenseSheet(name, licenseRawFor(name, license), url))
-                    })
-                }
-                GroupRow(first = first, last = last, onClick = click) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = name,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                style = pageBodyStyle()
-                            )
-                            Text(
-                                text = license,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = pageSecondaryStyle()
-                            )
-                        }
-                        // The door mark shows whenever the tap leads somewhere —
-                        // a licence sheet, or the repository link on a
-                        // no-licence row. A truly inert (no link, no licence)
-                        // row wears none.
-                        if (miuixRows && (!noLicense || hasUrl)) {
-                            MiuixChevron()
+            SettingsGroup {
+                REFERENCES.forEachIndexed { index, ref ->
+                    val name = ref[0]
+                    val license = ref[1]
+                    val url = ref[2]
+                    val first = index == 0
+                    val last = index == REFERENCES.lastIndex
+                    // 「—」 marks a repository that ships no LICENSE file, so there
+                    // is no text to open a sheet for. Such a row is inert only when
+                    // it also has no link; if it carries a URL (onijiang0/fcmfix)
+                    // the tap opens that repository directly, same as a 查看源代码.
+                    val noLicense = license == "—"
+                    val hasUrl = url.isNotEmpty()
+                    val click: () -> Unit = when {
+                        noLicense && hasUrl -> ({ onOpenUrl(url) })
+                        noLicense -> ({})
+                        else -> ({
+                            onOpenSheet(LicenseSheet(name, licenseRawFor(name, license), url))
+                        })
+                    }
+                    GroupRow(first = first, last = last, onClick = click) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                AppText(
+                                    text = name,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    style = pageBodyStyle()
+                                )
+                                AppText(
+                                    modifier = Modifier.padding(top = summaryGap),
+                                    text = license,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = pageSecondaryStyle()
+                                )
+                            }
+                            // The door mark shows whenever the tap leads somewhere —
+                            // a licence sheet, or the repository link on a
+                            // no-licence row. A truly inert (no link, no licence)
+                            // row wears none.
+                            if (miuixRows && (!noLicense || hasUrl)) {
+                                MiuixChevron()
+                            }
                         }
                     }
                 }
-                if (!last) GroupRowGap()
             }
         }
 
@@ -306,7 +347,7 @@ private fun LicenseDialog(
     // text rides in a card on the dialog's raised container, scrolls inside it
     // with Miuix's own overscroll, and the actions are two full-width Miuix
     // buttons at the foot. Under Material it stays the M3 dialog it always was.
-    if (LocalUiStyle.current == UiStyle.Miuix) {
+    if (LocalUiStyle.current.isMiuixBased) {
         MiuixLicenseDialog(
             sheet = sheet,
             body = body,
@@ -351,7 +392,7 @@ private fun LicenseDialog(
                 if (px <= 0) Dp.Infinity else (px * 0.55f).toDp()
             }
             SelectionContainer {
-                Text(
+                AppText(
                     modifier = Modifier
                         .heightIn(max = bodyHeight)
                         .verticalScroll(rememberScrollState()),
@@ -473,15 +514,42 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  *   row: UpdateChecker's network check now runs through an explicitly declared
  *   `kotlinx-coroutines-android` dependency, so its classes ship in the APK.
  *
+ * The 2026-10-15 pass moved the toolchain and pinned one library that used to
+ * be inherited: Kotlin now compiles through the standalone KGP 2.4.20 (AGP's
+ * built-in Kotlin is opted out — it is pinned at 2.2.10, see build.gradle and
+ * gradle.properties) and Lifecycle is declared explicitly at 2.11.0:
+ * - Kotlin Stdlib: 2.2.20 → **2.4.20**
+ * - Lifecycle Common / Runtime: 2.10.0 → **2.11.0**
+ *
+ * The 2026-10-19 pass re-audited the resolved graph plus the classes surviving
+ * in that day's `mapping/release/mapping.txt`. Five versions had drifted and
+ * one row changed sides:
+ * - AndroidX Annotation: 1.9.1 → **1.10.0**
+ * - AndroidX Collection: 1.5.0 → **1.6.0**
+ * - AndroidX Compose UI / Compose Foundation: 1.13.0-alpha01 → **1.12.1** —
+ *   material3's promotion to 1.5.0-beta01 stopped dragging the 1.13.0-alpha
+ *   line forward, so the compose-bom's 1.12.1 wins again (the BOM row stays
+ *   off for the same reason as before: the number a reader wants is the one
+ *   that wins, and the BOM is not it).
+ * - AndroidX Core: 1.16.0 → **1.19.1**
+ * - Material Kolor Color Utilities: 4.1.1 → **5.0.1**, and it moved
+ *   coordinates: JitPack's `com.github.jordond.materialkolor` is gone, the
+ *   artifact now publishes as `com.materialkolor:material-color-utilities`.
+ * - **Kotlinx Serialization** joins as a real row: the `@Serializable` route
+ *   keys (nav/Route.kt) made the runtime load-bearing, and 127
+ *   kotlinx.serialization classes survive in mapping.txt — the 2026-10-09
+ *   "R8 removes all of it" note below no longer holds.
+ *
  * No rows were added or removed in the 2026-10-09 pass. Several families that
  * do ship classes (androidx.graphics, androidx.savedstate, androidx.window,
  * androidx.emoji2, androidx.fragment, androidx.recyclerview, androidx.transition
  * and the rest) are transitive, exactly like the ~39 families the policy note
  * above already covers — they arrive behind material3/appcompat and get one row
  * only when this app is *built on* them, not when it merely inherits them.
- * `kotlinx.serialization` stays for the same reason `JUnit` does: it resolves
- * onto the classpath but R8 removes all of it (225 classes in usage.txt, 0 in
- * mapping.txt), so it ships nothing and is a licence statement only.
+ * `kotlinx.serialization` was left off back then for the same reason `JUnit`
+ * was kept: it resolved onto the classpath but R8 removed all of it (225
+ * classes in usage.txt, 0 in mapping.txt). That verdict stood until the
+ * serialization-based navigation landed; see the 2026-10-19 pass above.
  *
  * The 2026-10-05 pass added the two rows that were missing:
  * - **AndroidX ConstraintLayout** is the one AndroidX family here that is *not*
@@ -495,13 +563,13 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  */
 private val DEPS = arrayOf(
     arrayOf("AndroidX Activity", "1.13.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Annotation", "1.9.1", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Annotation", "1.10.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX AppCompat", "1.8.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Arch Core", "2.2.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Collection", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose Foundation", "1.13.0-alpha01", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose Material3", "1.5.0-alpha29", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose UI", "1.13.0-alpha01", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Collection", "1.6.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose Foundation", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose Material3", "1.5.0-beta01", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose UI", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
     // Separate repository, so ANDROIDX_URL does not cover it. Only on the
     // classpath behind Material Components, but its code does survive R8.
     arrayOf(
@@ -510,61 +578,81 @@ private val DEPS = arrayOf(
         "Apache License 2.0",
         "https://github.com/androidx/constraintlayout"
     ),
-    arrayOf("AndroidX Core", "1.16.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Core", "1.19.1", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Interpolator", "1.0.0", "Apache License 2.0", ANDROIDX_URL),
+    // Miuix's responsive-layout chain (material3-window-size-class): real code
+    // in the APK, 10 classes of it, verified against the R8 mapping.
+    arrayOf("AndroidX Window", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
     // Build-only stubs vendored under hiddenapi/stubs; kept for attribution.
     arrayOf("AOSP Framework Annotations", "", "Apache License 2.0", AOSP_URL),
+    // The title-bar glass's blur engine (the constant-radius, alpha-masked
+    // treatment the stain reports drove us to) — haze + haze-blur.
+    arrayOf(
+        "Haze",
+        "2.0.1",
+        "Apache License 2.0",
+        "https://github.com/chrisbanes/haze"
+    ),
     // Test scope only — nothing from it is in any APK. Listed for the same
     // reason as the annotation-only rows: it is a third-party project in the
     // build with its own licence. EPL-1.0 (see licenseRawFor).
     arrayOf("JUnit", "4.13.2", "Eclipse Public License 1.0", "https://github.com/junit-team/junit4"),
-    arrayOf("Kotlin Stdlib", "2.2.20", "Apache License 2.0", "https://github.com/JetBrains/kotlin"),
+    arrayOf("Kotlin Stdlib", "2.4.20", "Apache License 2.0", "https://github.com/JetBrains/kotlin"),
     // Declared explicitly in build.gradle since UpdateChecker's network check
     // moved onto Dispatchers.IO: real runtime code in the APK now, not a
     // licence statement for a transitive leftover.
     arrayOf(
         "Kotlinx Coroutines",
-        "1.10.2",
+        "1.11.0",
         "Apache License 2.0",
         "https://github.com/Kotlin/kotlinx.coroutines"
+    ),
+    // Route keys are @Serializable (nav/Route.kt) and the back stack is persisted
+    // by serializing them, so the runtime is load-bearing: 127 kotlinx.serialization
+    // classes survive in mapping/release/mapping.txt (the 2026-10-09 "R8 removes
+    // all of it" note below no longer holds).
+    arrayOf(
+        "Kotlinx Serialization",
+        "1.11.0",
+        "Apache License 2.0",
+        "https://github.com/Kotlin/kotlinx.serialization"
     ),
     arrayOf("libxposed API", "102.0.0", "Apache License 2.0", "https://github.com/libxposed/api"),
     arrayOf("libxposed Interface", "102.0.0", "Apache License 2.0", "https://github.com/libxposed"),
     arrayOf("libxposed Service", "102.0.0", "Apache License 2.0", "https://github.com/libxposed/service"),
-    arrayOf("Lifecycle Common", "2.10.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("Lifecycle Runtime", "2.10.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("Lifecycle Common", "2.11.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("Lifecycle Runtime", "2.11.0", "Apache License 2.0", ANDROIDX_URL),
+    // Vendored source under mcu/ (no Gradle artifact) — listed for attribution.
+    arrayOf("Material Color Utilities", "", "Apache License 2.0", MCU_URL),
     arrayOf(
         "Material Components",
         "1.14.0",
         "Apache License 2.0",
         "https://github.com/material-components/material-components-android"
     ),
-    // Vendored source under mcu/ (no Gradle artifact) — listed for attribution.
-    arrayOf("Material Color Utilities", "", "Apache License 2.0", MCU_URL),
-    // The Miuix look (界面风格 = Miuix). 0.9.1 is the last release this module's
-    // Kotlin can read at all; the reason is written out by the dependency in
-    // build.gradle. One row for the project, though it ships as miuix-ui,
-    // miuix-core, miuix-preference and miuix-icons.
-    arrayOf(
-        "Miuix",
-        "0.9.1",
-        "Apache License 2.0",
-        "https://github.com/compose-miuix-ui/miuix"
-    ),
     // What Miuix derives its Monet schemes from (莫奈颜色). Same upstream colour
     // utilities as the vendored copy above, published as an artifact; both are in
     // the APK and each dresses a different half of the UI.
     arrayOf(
         "Material Kolor Color Utilities",
-        "4.1.1",
+        "5.0.1",
         "Apache License 2.0",
         "https://github.com/jordond/materialkolor"
     ),
+    // The Miuix look (界面风格 = Miuix). Bumped 0.9.1 → 0.9.4 on 2026-10-15, once
+    // the standalone KGP 2.4.20 lift removed the 0.9.1 metadata ceiling — the
+    // toolchain comment in build.gradle has the audit. One row for the project,
+    // though it ships as miuix-ui, miuix-core, miuix-preference, miuix-icons,
+    // miuix-blur (back since the floating bottom bar — the title-bar glass stayed
+    // on Haze) and miuix-nav (the navigation runtime the pages run through).
+    arrayOf(
+        "Miuix",
+        "0.9.4",
+        "Apache License 2.0",
+        "https://github.com/compose-miuix-ui/miuix"
+    ),
     // What Miuix hooks predictive back through on Android.
-    arrayOf("NavigationEvent", "1.1.1", "Apache License 2.0", ANDROIDX_URL),
-    // Miuix's responsive-layout chain (material3-window-size-class): real code
-    // in the APK, 11 classes of it, verified against the R8 mapping.
-    arrayOf("AndroidX Window", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("NavigationEvent", "1.2.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("VersionedParcelable", "1.1.1", "Apache License 2.0", ANDROIDX_URL),
 )
 
@@ -575,6 +663,8 @@ private val REFERENCES = arrayOf(
     // follows this app's design.
     arrayOf("1812z/HyperIsland", "MIT License", "https://github.com/1812z/HyperIsland"),
     arrayOf("250king/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/250king/HyperOS_FCM_Live"),
+    // Same MIUIX / soft-glass family — the row links to its releases page.
+    arrayOf("AritxOnly/F1Info", "GPL-3.0", "https://github.com/AritxOnly/F1Info/releases"),
     arrayOf("billtv/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/billtv/HyperOS_FCM_Live"),
     arrayOf("dingwen07/hyperos-fcm-fix", "GPL-3.0", "https://github.com/dingwen07/hyperos-fcm-fix"),
     arrayOf(
@@ -592,6 +682,10 @@ private val REFERENCES = arrayOf(
     // repository — shown as 「—」, the row links to the project like the other
     // unlicensed ones.
     arrayOf("kooritea/fcmfix", "—", "https://github.com/kooritea/fcmfix"),
+    // The title-bar glass both looks wear ([HazeGlassBar]) is this app's app
+    // bar blur construction: the list underlaps the bar, and that underlap is
+    // what the blur samples.
+    arrayOf("LibChecker/LibChecker", "GPL-3.0", "https://github.com/LibChecker/LibChecker"),
     arrayOf("tiann/KernelSU", "GPL-3.0", "https://github.com/tiann/KernelSU"),
     // No LICENSE file in the repository — shown as 「—」. There is no text to
     // open a sheet for, but the row links to the project, so a tap opens that
@@ -602,6 +696,13 @@ private val REFERENCES = arrayOf(
     // from this manager's own leading-edge placement.
     arrayOf("Replica0110/Lyrico", "Apache License 2.0", "https://github.com/Replica0110/Lyrico"),
     arrayOf("wxxsfxyzm/InstallerX-Revived", "GPL-3.0", "https://github.com/wxxsfxyzm/InstallerX-Revived"),
+    // The home shell's bottom-bar tab typography — the icon-and-label pill the
+    // Miuix docked bar wears — is this client's PillTabItem recipe, ported.
+    arrayOf("YuKongA/Mishka", "GPL-3.0", "https://github.com/YuKongA/Mishka"),
+    // A sibling repair in the same family: FCM tuned for ColorOS 17. No
+    // LICENSE file in the repository — shown as 「—」, the row links to the
+    // project like the other unlicensed ones.
+    arrayOf("zopulus/fcmfix-coloros17", "—", "https://github.com/zopulus/fcmfix-coloros17"),
     arrayOf("zuohl/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/zuohl/HyperOS_FCM_Live"),
 )
 
@@ -665,7 +766,7 @@ private fun MiuixLicenseDialog(
                     color = MiuixTheme.colorScheme.surfaceContainerHighest
                 )
             ) {
-                Text(
+                AppText(
                     modifier = Modifier
                         .verticalScroll(rememberScrollState())
                         .padding(16.dp),

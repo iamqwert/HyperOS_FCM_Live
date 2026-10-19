@@ -29,7 +29,7 @@ It does **not** keep FCM apps alive, does **not** stop the system from reclaimin
 | Push fix | Lets c2dm delivery and reconnect broadcasts through, re-adds `FLAG_INCLUDE_STOPPED_PACKAGES`, passes the greeze autostart and freeze gates, ~2 s battery exemption on delivery |
 | GMS protection | Adds GMS to the no-restrict list, forces its power-saving profile to "Unrestricted", skips fast freezing, turns off network restrictions; whether the network is cut during sleep mode is left to the system by default |
 | Allowlist | The module's only narrowing mechanism: decides which apps get the "woken by push" privileges; multi-select batch add/remove, search, select all |
-| List filters | Show FCM-capable apps, exclude MiPush apps (on by default), show system apps |
+| List filters | Only apps that declare push components (Android 11+ package visibility, no permission needed), exclude MiPush apps (on by default), show system apps |
 | Tools | Opens GMS's built-in diagnostics screen, allowlist export/import, update check |
 | Display & appearance | Language (Simplified Chinese / English), theme mode, dynamic color, palette style, color spec, hide launcher icon |
 | Experimental | Three-tier chained autostart release, weak-signal switching relief, network while frozen, Smart Power (OS3 only); WeChat battery optimization and sleep keep-alive live on the Settings page |
@@ -121,7 +121,7 @@ This project is a fork; thanks to these projects and contributors:
 - [Kr328/HyperOSFCMFix](https://github.com/Kr328/HyperOSFCMFix)
 - [ReedGAOOO/FCMGuard-HyperOS](https://github.com/ReedGAOOO/FCMGuard-HyperOS)
 - [zuohl/HyperOS_FCM_Live](https://github.com/zuohl/HyperOS_FCM_Live)
-- The idea for requesting the `GET_INSTALLED_APPS` runtime permission came from 250king's [PR #1](https://github.com/250king/HyperOS_FCM_Live/pull/1)
+- The original idea for requesting the `GET_INSTALLED_APPS` runtime permission came from 250king's [PR #1](https://github.com/250king/HyperOS_FCM_Live/pull/1); that permission has since been removed when the app list moved to the package-visibility approach
 
 ---
 

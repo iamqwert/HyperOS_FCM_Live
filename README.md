@@ -29,7 +29,7 @@
 | 推送修复 | 放行 c2dm 投递与重连广播、补 `FLAG_INCLUDE_STOPPED_PACKAGES`、过 greeze 自启动与冻结门、投递时约 2 秒省电豁免 |
 | GMS 保护 | 写入不限制名单、省电场景改为「无限制」、跳过快速冻结、关闭网络限制；睡眠模式期间是否断网由系统决定，默认不介入 |
 | 白名单 | 唯一的收窄手段：决定哪些应用拿到「被推送唤醒」与放行特权；支持多选批量加入/移出、搜索、全选 |
-| 列表过滤 | 展示支持 FCM 的应用、排除 MiPush 应用（默认开启）、显示系统应用 |
+| 列表过滤 | 仅展示声明了推送组件的应用（Android 11+ 包可见性，无需任何权限）、排除 MiPush 应用（默认开启）、显示系统应用 |
 | 工具 | 打开 GMS 自带诊断界面、白名单导出/导入、检查更新 |
 | 显示与外观 | 语言（简体中文 / English）、主题模式、动态颜色、调色风格、颜色规格、隐藏桌面图标 |
 | 实验功能 | 自启动三档放行（链式）、弱信号切换放宽、冻结期联网、Smart Power（仅 OS3）；微信电池优化与睡眠保活在设置页 |
@@ -120,7 +120,7 @@ GMS 侧的四项保护：
 - [Kr328/HyperOSFCMFix](https://github.com/Kr328/HyperOSFCMFix)
 - [ReedGAOOO/FCMGuard-HyperOS](https://github.com/ReedGAOOO/FCMGuard-HyperOS)
 - [zuohl/HyperOS_FCM_Live](https://github.com/zuohl/HyperOS_FCM_Live)
-- `GET_INSTALLED_APPS` 运行时权限申请思路参考自 250king 的 [PR #1](https://github.com/250king/HyperOS_FCM_Live/pull/1)
+- `GET_INSTALLED_APPS` 运行时权限的最初申请思路参考自 250king 的 [PR #1](https://github.com/250king/HyperOS_FCM_Live/pull/1)；该权限现已随应用列表改为包可见性方案而移除
 
 ---
 

@@ -12,10 +12,14 @@
         android:icon="@drawable/ic_shortcut_settings"
         android:shortcutShortLabel="@string/shortcut_settings"
         android:shortcutLongLabel="@string/shortcut_settings_long">
+        <!-- The home's settings TAB, not the standalone about page: the
+             shortcut must land where the bottom bar's 设置 lands — same shell,
+             same look. MainActivity picks the tab up from the action (see
+             [MainActivity.handleShortcutIntent]). -->
         <intent
-            android:action="android.intent.action.VIEW"
+            android:action="io.github.howard20181.hyperos.fcmlive.OPEN_SETTINGS"
             android:targetPackage="io.github.howard20181.hyperos.fcmlive"
-            android:targetClass="io.github.howard20181.hyperos.fcmlive.AboutActivity" />
+            android:targetClass="io.github.howard20181.hyperos.fcmlive.MainActivity" />
     </shortcut>
 
     <shortcut

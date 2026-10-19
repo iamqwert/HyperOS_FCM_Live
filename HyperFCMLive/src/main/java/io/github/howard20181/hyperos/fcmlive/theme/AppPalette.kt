@@ -13,8 +13,7 @@ class AppPalette internal constructor(
     /** Full Material roles; Compose theme bridge maps these to `ColorScheme`. */
     @JvmField
     val scheme: Scheme,
-    dark: Boolean,
-    amoled: Boolean
+    dark: Boolean
 ) {
 
     /** Raw Material roles, kept for callers that need the full set. */
@@ -73,7 +72,6 @@ class AppPalette internal constructor(
         //
         //   light : popup 94  =  page 94   <  card 98
         //   dark  : popup 12  =  page 12   <  card 24
-        //   AMOLED:           page 0   <  card 6   <  popup 12
         //
         // Light and dark read the scheme's own roles and nothing else: the page
         // is `surfaceContainer`, the raised container is `surfaceBright`, and
@@ -101,35 +99,15 @@ class AppPalette internal constructor(
         // What the panel still has to do is differ from the card it lands on,
         // and it does that by tone: see [AppSurfaces] and `ComposeTokens.kt`
         // for why that is a role choice and never a border.
-        //
-        // AMOLED is the one deliberate exception: the same three levels crushed
-        // onto a near-black ramp (0 / 6 / 12) so an OLED page costs nothing to
-        // light. The hue stays out of that ramp on purpose — it exists to save
-        // power, and a tint would put the seed back into the black — and its
-        // steps are the ones the dark ramp itself takes, which keeps an AMOLED
-        // appearance reading like an ordinary dark one. Written in tones,
-        // because a hex step is not a perceptual step: #000000 next to #0A0A0A
-        // is a L* step of 0.8 — invisible, and the card melts into the page —
-        // while #000000 next to #141414 is 6.0, the same step the dark ramp
-        // takes between its own page and card.
-        val amoledRamp = amoled && dark
+        surface = scheme.surface
+        surfaceContainerLowest = scheme.surfaceContainerLowest
+        surfaceContainerLow = scheme.surfaceContainerLow
+        surfaceContainerHigh = scheme.surfaceContainerHigh
+        surfaceContainerHighest = scheme.surfaceContainerHighest
 
-        // Raw roles, mapped verbatim into `ColorScheme` by ComposeTheme. AMOLED
-        // repaints them onto its own ramp too, so anything that reads a
-        // `surface*` token still stays inside the near-black volume.
-        surface = if (amoledRamp) 0xFF000000.toInt() else scheme.surface
-        surfaceContainerLowest =
-            if (amoledRamp) 0xFF000000.toInt() else scheme.surfaceContainerLowest
-        surfaceContainerLow =
-            if (amoledRamp) 0xFF141414.toInt() else scheme.surfaceContainerLow
-        surfaceContainerHigh =
-            if (amoledRamp) 0xFF202020.toInt() else scheme.surfaceContainerHigh
-        surfaceContainerHighest =
-            if (amoledRamp) 0xFF262626.toInt() else scheme.surfaceContainerHighest
-
-        pageBg = if (amoledRamp) 0xFF000000.toInt() else scheme.surfaceContainer
-        cardBg = if (amoledRamp) 0xFF141414.toInt() else scheme.surfaceBright
-        popupBg = if (amoledRamp) 0xFF202020.toInt() else scheme.surfaceContainer
+        pageBg = scheme.surfaceContainer
+        cardBg = scheme.surfaceBright
+        popupBg = scheme.surfaceContainer
 
         // No tooltip colours here, and no `hint` either. Both used to be
         // hand-picked pairs from the View era (`#1C1B1F`/`#E6E0E5` and their

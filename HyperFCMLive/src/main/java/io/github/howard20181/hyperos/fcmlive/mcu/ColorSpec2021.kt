@@ -1014,6 +1014,10 @@ internal open class ColorSpec2021 {
                 MathUtils.sanitizeDegreesDouble(sourceColorHct.hue + 240.0), 40.0
             )
         Scheme.Variant.VIBRANT -> TonalPalette.fromHueAndChroma(sourceColorHct.hue, 200.0)
+        // Unreachable through this spec: a CMF scheme always resolves via the 2026 spec, whose
+        // palette overrides take over. Kept total for exhaustiveness, carrying the CMF primary's
+        // own definition.
+        Scheme.Variant.CMF -> TonalPalette.fromHueAndChroma(sourceColorHct.hue, sourceColorHct.chroma)
     }
 
     open fun getSecondaryPalette(
@@ -1036,6 +1040,8 @@ internal open class ColorSpec2021 {
         Scheme.Variant.NEUTRAL -> TonalPalette.fromHueAndChroma(sourceColorHct.hue, 8.0)
         Scheme.Variant.RAINBOW -> TonalPalette.fromHueAndChroma(sourceColorHct.hue, 16.0)
         Scheme.Variant.TONAL_SPOT -> TonalPalette.fromHueAndChroma(sourceColorHct.hue, 16.0)
+        // See getPrimaryPalette: CMF resolves via the 2026 spec; this is its secondary's formula.
+        Scheme.Variant.CMF -> TonalPalette.fromHueAndChroma(sourceColorHct.hue, sourceColorHct.chroma * 0.5)
         Scheme.Variant.EXPRESSIVE ->
             TonalPalette.fromHueAndChroma(
                 DynamicScheme.getRotatedHue(
@@ -1098,6 +1104,8 @@ internal open class ColorSpec2021 {
                 ),
                 32.0
             )
+        // See getPrimaryPalette: CMF resolves via the 2026 spec; this is its tertiary's formula.
+        Scheme.Variant.CMF -> TonalPalette.fromHueAndChroma(sourceColorHct.hue, sourceColorHct.chroma * 0.75)
     }
 
     open fun getNeutralPalette(
@@ -1119,6 +1127,8 @@ internal open class ColorSpec2021 {
                 MathUtils.sanitizeDegreesDouble(sourceColorHct.hue + 15.0), 8.0
             )
         Scheme.Variant.VIBRANT -> TonalPalette.fromHueAndChroma(sourceColorHct.hue, 10.0)
+        // See getPrimaryPalette: CMF resolves via the 2026 spec; this is its neutral's formula.
+        Scheme.Variant.CMF -> TonalPalette.fromHueAndChroma(sourceColorHct.hue, sourceColorHct.chroma * 0.2)
     }
 
     open fun getNeutralVariantPalette(
@@ -1140,6 +1150,8 @@ internal open class ColorSpec2021 {
                 MathUtils.sanitizeDegreesDouble(sourceColorHct.hue + 15.0), 12.0
             )
         Scheme.Variant.VIBRANT -> TonalPalette.fromHueAndChroma(sourceColorHct.hue, 12.0)
+        // See getPrimaryPalette: CMF resolves via the 2026 spec; this is its neutral-variant formula.
+        Scheme.Variant.CMF -> TonalPalette.fromHueAndChroma(sourceColorHct.hue, sourceColorHct.chroma * 0.2)
     }
 
     /**
@@ -1161,6 +1173,8 @@ internal open class ColorSpec2021 {
         Scheme.Variant.RAINBOW,
         Scheme.Variant.TONAL_SPOT,
         Scheme.Variant.EXPRESSIVE,
-        Scheme.Variant.VIBRANT -> null
+        Scheme.Variant.VIBRANT,
+        // CMF builds its own error palette under the 2026 spec (see ColorSpec2026).
+        Scheme.Variant.CMF -> null
     }
 }

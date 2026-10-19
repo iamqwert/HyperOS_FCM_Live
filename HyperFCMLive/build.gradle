@@ -24,8 +24,21 @@
 
 plugins {
     id 'com.android.application'
-    // Compose compiler for Kotlin 2.2.10 (matches the stdlib already on the classpath).
-    id 'org.jetbrains.kotlin.plugin.compose' version '2.2.10'
+    // Standalone KGP 2.4.20 — AGP's built-in Kotlin is opted out, see
+    // gradle.properties for the POM-verified reason.
+    id 'org.jetbrains.kotlin.android'
+    // nav/Route.kt's keys: the back stack is saved by serializing it.
+    id 'org.jetbrains.kotlin.plugin.serialization'
+    // Compose compiler: must match the KGP version exactly, so it moves with it.
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.4.20'
+}
+
+kotlin {
+    compilerOptions {
+        // Built-in Kotlin used to inherit this from android.compileOptions; the
+        // standalone KGP defaults jvmTarget to 1.8, so pin the module's level.
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+    }
 }
 
 // Signing keys live outside the repository (local.properties is gitignored).
@@ -48,8 +61,8 @@ android {
         targetSdkVersion 37
         // Fixed (bumped by hand each release) so LSPosed update checks never treat
         // this fork as older than upstream builds that inherit a low jgit commitCount.
-        versionCode 53
-        versionName "4.1.1"
+        versionCode 54
+        versionName "4.2.0"
 
         // HyperOS modules ship arm64 only; drop armv7a / x86 / x86_64 natives.
         ndk {
@@ -133,7 +146,7 @@ dependencies {
     // Theme.AppCompat.*. No source file references it directly.
     implementation 'androidx.appcompat:appcompat:1.8.0'
     // Declared for the ActivityResultContracts imports: CreateDocument and
-    // OpenDocument in AboutActivity (allowlist export / import) and
+    // OpenDocument in AboutDelegate (allowlist export / import) and
     // RequestPermission in MainActivity (the diagnostics log).
     //
     // 1.13.0, not 1.8.2, and that is a hard floor now: Miuix's overlay popups
@@ -145,14 +158,25 @@ dependencies {
     // — verified on device, and verified against 1.13.0's own sources, where
     // ComponentActivity.onCreate does window.decorView.setViewTree...(this).
     implementation 'androidx.activity:activity:1.13.0'
-    // BackHandler for ui/SwipeBack.kt. Same version line as `activity` above:
-    // the Compose integration and the core artifact are versioned together, and
-    // declaring the pair keeps Dependabot moving them as one.
+    // Compose entry points for the Activities (setContent). Same version line as
+    // `activity` above: the Compose integration and the core artifact are
+    // versioned together, and declaring the pair keeps Dependabot moving them as
+    // one.
     implementation 'androidx.activity:activity-compose:1.13.0'
-    // What Miuix's popups register their back handlers through. Comes in at 1.1.1
-    // with miuix 0.9.1; declared so Dependabot sees it, pinned to what miuix asks
-    // for rather than the 1.1.2 KernelSU uses with its newer miuix.
+    // What Miuix's popups register their back handlers through, and the channel
+    // NavDisplay reads the system's back gesture from. Declared so Dependabot
+    // sees it: miuix 0.9.4 — the version this module and KernelSU's manager both
+    // run — asks for the 1.1.x line, resolved here at 1.2.0.
     implementation 'androidx.navigationevent:navigationevent-compose:1.2.0'
+    // Lifecycle: the direct consumer is ui/BgEffect.kt — `Lifecycle.currentStateFlow`,
+    // read to hold the background mesh unless the page it belongs to is RESUMED
+    // (every page is an entry of one NavDisplay, and a covered entry's lifecycle is
+    // capped at STARTED). It used to arrive transitively at 2.10.0 behind activity
+    // and compose; pinned at 2.11.0 here so the resolved version is declared rather
+    // than inherited. 2.11.0 needs Compose UI 1.7.0+ for LocalLifecycleOwner
+    // (comfortably satisfied — the BOM alone pins 1.12.1) and is built against
+    // compileSdk 37 (AGP 9.2.0+ floor — we have 9.4.1).
+    implementation 'androidx.lifecycle:lifecycle-runtime-android:2.11.0'
     // Material Views: two real consumers keep this here — the
     // `Theme.Material3.DayNight.NoActionBar` parent the app theme inherits from,
     // and DynamicColors (wallpaper accent) in theme/ThemeSupport.kt. The
@@ -180,36 +204,72 @@ dependencies {
     debugImplementation 'androidx.compose.ui:ui-tooling'
     // Miuix (compose-miuix-ui) — the theme behind 界面风格 = Miuix.
     //
-    // The ceiling here is not Miuix's, it is our compiler's: AGP 9.4.1 drives
-    // Kotlin through its built-in support at a **2.2.0** compiler, which reads
-    // binary metadata up to **2.3.0**. Verified by compiling, including the two
-    // ways of trying to raise it — applying org.jetbrains.kotlin.android fails
-    // ("no longer required since AGP 9.0"), and android.builtInKotlin=false then
-    // dies on an ApplicationExtension cast. Putting the 2.4.20 Gradle plugins on
-    // the classpath does not move the compiler either: 0.9.4 fails with
-    // "Class 'kotlin.Unit' was compiled with an incompatible version of Kotlin".
-    // The newest stable AGP is 9.4.1 (9.5.0 exists only as alpha09).
+    // 0.9.1 was a hard ceiling for toolchain reasons alone: AGP's built-in
+    // Kotlin (2.2.10) read binary metadata only up to 2.3.0 and Miuix moved to
+    // Kotlin 2.4.0 at 0.9.2. Since 2026-10-15 the module compiles with the
+    // standalone KGP 2.4.20 (see gradle.properties for why the built-in/DSL
+    // opt-out pair stays until AGP's built-in Kotlin reaches 2.4), which lifts
+    // the ceiling; 0.9.4 builds with Kotlin 2.4.20 / Compose Multiplatform
+    // 1.12.0 — both match this module exactly.
     //
-    // Miuix moved to Kotlin 2.4.0 at its 0.9.2 (its own release notes say so), so
-    // **0.9.1 is the last release this module can compile against** — and it is a
-    // good stopping point rather than a bad one: the module split (miuix-ui +
-    // miuix-preference) happened at 0.9.0, so 0.9.1 already carries the preference
-    // rows. Between 0.9.1 and 0.9.4 the preference package is the same files plus
-    // Slider/RangeSlider, so the docs at compose-miuix-ui.github.io still describe
-    // what is on the classpath. Note for the next step: 0.9.1 publishes the leaf
-    // rows (SwitchPreference, ArrowPreference, Checkbox/RadioButtonPreference,
-    // Overlay*/Window* dropdown + spinner) but no public base Preference container,
-    // so a row that is neither a switch nor an arrow still has to be composed from
-    // Miuix's basic parts.
+    // 0.9.2 → 0.9.4 breaking changes audited against our usage surface, none
+    // hit: `miuix-navigation3-ui` removal (never used), RadioButtonPreference
+    // color-signature consolidation (not used), NavigationRail overload split
+    // (not used), miuix-blur minSdk 33 / miuix-shader extraction (miuix-blur is
+    // used now — the floating bottom bar, see ui/MiuixFloatingBar.kt),
+    // shared minSdk 23 → 24 (this module is minSdk 35 — HyperOS 3/4 only).
+    // Additive bits we get for free: dialog `maxWidth`/`largeScreen`/
+    // `cornerRadius` (note: centered dialogs now default to a FIXED 32dp
+    // corner instead of inheriting the screen corner — a look change to
+    // verify on device), Slider/RangeSliderPreference, TopAppBar refactored
+    // onto the androidx-main base.
     //
-    // Raise this the moment AGP's built-in Kotlin reaches 2.4: same coordinates,
-    // just newer versions, and the rows can move onto Miuix's own preference
-    // components for real.
-    implementation 'top.yukonga.miuix.kmp:miuix-ui-android:0.9.1'
-    implementation 'top.yukonga.miuix.kmp:miuix-preference-android:0.9.1'
+    // The preference package is the same files as 0.9.1 plus the sliders, so
+    // the docs at compose-miuix-ui.github.io still describe the classpath. As
+    // before, 0.9.4 publishes the leaf rows but no public base Preference
+    // container — a row that is neither a switch nor an arrow is still
+    // composed from Miuix's basic parts.
+    implementation 'top.yukonga.miuix.kmp:miuix-ui-android:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-preference-android:0.9.4'
     // The library's own icon set, used for the overflow glyph so the bar speaks
     // one icon language per look. Independent of miuix-ui, same version line.
-    implementation 'top.yukonga.miuix.kmp:miuix-icons-android:0.9.1'
+    implementation 'top.yukonga.miuix.kmp:miuix-icons-android:0.9.4'
+    // The liquid glass behind the Miuix look's floating bottom bar (an opt-in
+    // variant, off by default — see ui/MiuixFloatingBar.kt). Pulls miuix-shader
+    // for the SDF lens shader. RenderEffect paths need API 31; this module is
+    // minSdk 35.
+    implementation 'top.yukonga.miuix.kmp:miuix-blur-android:0.9.4'
+    // The blurred title-bar glass. Haze over miuix-blur, after four device
+    // rounds: miuix-blur's progressive blur ramps the RADIUS from full to zero,
+    // and that ramp necessarily crosses the mid range (10-30dp) that smears
+    // dark glyphs into grey pills (the "stain" reports), while its kernel also
+    // samples past the bar's bottom edge (the light strip under the search
+    // capsule, the pull-refresh indicator smeared into a column). Haze blurs
+    // at a CONSTANT radius and fades with an alpha mask (HazeProgressive), so
+    // a half-masked region shows the already-homogenized wash at partial alpha
+    // over sharp content — no half-blurred state exists to read as dirt, and
+    // the mask covers the tints too, so the scrim fades on the same ramp.
+    // RenderEffect paths need API 31; this module is minSdk 35.
+    implementation 'dev.chrisbanes.haze:haze:2.0.1'
+    implementation 'dev.chrisbanes.haze:haze-blur:2.0.1'
+    // The navigation runtime the pages now run through: one Activity holding one
+    // `NavDisplay`, every page an entry in its back stack.
+    //
+    // The module dropped this artifact once, when the only thing it offered was
+    // `Modifier.navSwipeDismiss` — an app-level swipe gesture layered over the
+    // platform's own edge swipe, which the platform's predictive-back stream
+    // already drives on its own. The pages are still driven by that stream alone
+    // (no route here declares a `swipeDismiss` direction); what brings the
+    // artifact back is the rest of it. Sub-pages used to be separate Activities,
+    // and a covered Activity is STOPPED: returning to it cost a whole first
+    // frame, and the reveal showed a photograph of it rather than the page.
+    // NavDisplay keeps every layer below the top composed, laid out and drawn, so
+    // the gesture and the settle after it move what is already there.
+    implementation 'top.yukonga.miuix.kmp:miuix-nav-android:0.9.4'
+    // `@Serializable` route keys, and `rememberNavBackStack`'s saver, which is
+    // the library's own line for it. The compiler plugin is declared in the root
+    // build and applied above; this is the runtime half.
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
     // Compile-time hidden-API signatures (not packaged in the APK).

@@ -11,7 +11,7 @@ import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
  * The appearance settings as Compose state, one layer above the screens.
  *
  * [ThemePrefs] stays the source of truth on disk; this object holds the same
- * eight values as [MutableState]s so a composable can read the live value
+ * nine values as [MutableState]s so a composable can read the live value
  * without keeping a `remember`ed copy of its own. That copy was the failure
  * mode this replaces: every row on the appearance page used to mirror its pref
  * into local state, and every writer had to do three things — write the pref,
@@ -36,10 +36,10 @@ import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
  */
 object AppearanceState {
 
-    /** [ThemePrefs.MODE_SYSTEM]..[ThemePrefs.MODE_AMOLED]. */
+    /** [ThemePrefs.MODE_SYSTEM]..[ThemePrefs.MODE_DARK]. */
     val themeMode: MutableIntState = mutableIntStateOf(ThemePrefs.MODE_SYSTEM)
 
-    /** [ThemePrefs.UI_STYLE_MATERIAL] or [ThemePrefs.UI_STYLE_MIUIX]. */
+    /** [ThemePrefs.UI_STYLE_MATERIAL], [ThemePrefs.UI_STYLE_MIUIX] or [ThemePrefs.UI_STYLE_SOFT_GLASS]. */
     val uiStyle: MutableIntState = mutableIntStateOf(ThemePrefs.UI_STYLE_MATERIAL)
 
     /** Whether colors follow the wallpaper; when off, [seedColor] wins. */
@@ -61,6 +61,13 @@ object AppearanceState {
     val miuixAccent: MutableIntState = mutableIntStateOf(0)
 
     /**
+     * Whether the Miuix home foot floats — off is the docked pane, on is the
+     * texture-blur glass capsule. Only the Miuix look reads this; the SoftGlass
+     * look always floats its own glass tab bar and never consults the switch.
+     */
+    val floatingBar: MutableState<Boolean> = mutableStateOf(false)
+
+    /**
      * Re-read every value from disk. Idempotent and cheap: assigning the value
      * a state already holds does not invalidate anything (structural equality
      * policy), so re-hydrating per Activity costs nothing when nothing moved.
@@ -75,6 +82,7 @@ object AppearanceState {
         colorSpec.intValue = ThemePrefs.specVersion(context)
         miuixMonet.value = ThemePrefs.miuixMonet(context)
         miuixAccent.intValue = ThemePrefs.miuixAccent(context)
+        floatingBar.value = ThemePrefs.floatingBar(context)
     }
 
     @JvmStatic
@@ -118,11 +126,16 @@ object AppearanceState {
         ThemeEngine.invalidate()
     }
 
-    /** Stores the spec request and refreshes [colorSpec] with the resolved one. */
+    /**
+     * Stores the spec request and refreshes [colorSpec] with the resolved one — and [paletteStyle]
+     * with whatever the write-side coupling left on disk: picking 2026 adopts CMF, picking 2021
+     * or 2025 while CMF is active leaves it (see [ThemePrefs.setSpecVersion]).
+     */
     @JvmStatic
     fun setSpecVersion(context: Context, spec: Int) {
         ThemePrefs.setSpecVersion(context, spec)
         colorSpec.intValue = ThemePrefs.specVersion(context)
+        paletteStyle.intValue = ThemePrefs.paletteStyle(context).ordinal
         ThemeEngine.invalidate()
     }
 
@@ -137,6 +150,13 @@ object AppearanceState {
     fun setMiuixAccent(context: Context, color: Int) {
         ThemePrefs.setMiuixAccent(context, color)
         miuixAccent.intValue = color
+        ThemeEngine.invalidate()
+    }
+
+    @JvmStatic
+    fun setFloatingBar(context: Context, enabled: Boolean) {
+        ThemePrefs.setFloatingBar(context, enabled)
+        floatingBar.value = enabled
         ThemeEngine.invalidate()
     }
 }

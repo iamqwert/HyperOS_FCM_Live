@@ -35,7 +35,7 @@ object ThemeSupport {
         }
         val config = Configuration(base.resources.configuration)
         config.uiMode = (config.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
-            if (mode == ThemePrefs.MODE_DARK || mode == ThemePrefs.MODE_AMOLED) {
+            if (mode == ThemePrefs.MODE_DARK) {
                 Configuration.UI_MODE_NIGHT_YES
             } else {
                 Configuration.UI_MODE_NIGHT_NO
@@ -149,6 +149,18 @@ object ThemeSupport {
      */
     @JvmStatic
     fun reapplyWindow(activity: Activity) {
+        // Under a Miuix-dressed look the window background belongs to
+        // MiuixStyleTheme's side effect, which paints Miuix's OWN surface —
+        // this overload paints the M3 engine's page colour (a pink-tinted
+        // white under the stock palette), and the side effect's last-painted
+        // guard then never restores Miuix's grey, because from its side
+        // nothing changed. The mismatch is invisible while every page covers
+        // the window, but the home pager's overscroll at the outer tabs pulls
+        // the pages aside and the pink band shows through. Defer to the theme
+        // path instead: any appearance change under this look bumps
+        // ThemeEngine's generation, recomposes the theme, and the side effect
+        // repaints with Miuix's colours.
+        if (UiStyle.of(ThemePrefs.uiStyle(activity)).isMiuixBased) return
         val palette = try {
             ThemeEngine.palette(activity)
         } catch (ignored: Throwable) {

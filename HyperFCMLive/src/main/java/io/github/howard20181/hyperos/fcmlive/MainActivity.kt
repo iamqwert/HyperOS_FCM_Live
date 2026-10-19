@@ -1,13 +1,16 @@
 package io.github.howard20181.hyperos.fcmlive
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.activity.result.contract.ActivityResultContracts
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -26,6 +29,8 @@ import android.view.View
 import android.view.WindowManager
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
+import io.github.howard20181.hyperos.fcmlive.nav.Navigator
+import io.github.howard20181.hyperos.fcmlive.nav.Route
 import io.github.howard20181.hyperos.fcmlive.theme.AppPalette
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
@@ -33,13 +38,20 @@ import io.github.howard20181.hyperos.fcmlive.theme.ThemePrefs
 import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeSupport
+import io.github.howard20181.hyperos.fcmlive.ui.AboutActions
+import io.github.howard20181.hyperos.fcmlive.ui.AboutScreen
+import io.github.howard20181.hyperos.fcmlive.ui.AboutTabScreen
 import io.github.howard20181.hyperos.fcmlive.ui.AppListStore
+import io.github.howard20181.hyperos.fcmlive.ui.ExperimentScreen
+import io.github.howard20181.hyperos.fcmlive.ui.HomeShell
+import io.github.howard20181.hyperos.fcmlive.ui.HomeTab
+import io.github.howard20181.hyperos.fcmlive.ui.LicensesScreen
+import io.github.howard20181.hyperos.fcmlive.ui.MiuixHomeShell
 import io.github.howard20181.hyperos.fcmlive.ui.MainActions
 import io.github.howard20181.hyperos.fcmlive.ui.MainScreen
 import io.github.howard20181.hyperos.fcmlive.ui.MainTopBarState
+import io.github.howard20181.hyperos.fcmlive.ui.ModuleStatusScreen
 import io.github.howard20181.hyperos.fcmlive.ui.OverflowState
-import io.github.howard20181.hyperos.fcmlive.ui.WindowSnapshot
-import io.github.howard20181.hyperos.fcmlive.ui.startActivityWithSnapshot
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
 import java.util.Locale
@@ -49,6 +61,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.nav.core.NavDisplay
+import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
+import top.yukonga.miuix.kmp.nav.core.rememberNavBackStack
+import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
+import top.yukonga.miuix.kmp.nav.transition.NavTransitions
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * Settings screen: pick which apps FCM may wake / auto-launch.
@@ -143,27 +161,98 @@ class MainActivity : AppCompatActivity() {
         emptyListMessagePosted = false
         if (!packagesReady || currentQuery.isNotEmpty()) return@Runnable
         if (filteredApps.isNotEmpty() || allApps.isEmpty()) return@Runnable
-        if (!showFcmSupportedOnly && !excludeMiPushApps) return@Runnable
-        if (!isAppListReadable()) return@Runnable
-        showMessage(
-            getString(
-                if (showFcmSupportedOnly) R.string.no_fcm_apps_found else R.string.no_apps_found
-            )
-        )
+        if (!excludeMiPushApps) return@Runnable
+        showMessage(getString(R.string.no_apps_found))
     }
     private var emptyListMessagePosted = false
 
-    /** Overflow: when true, list only apps whose Manifest has FCM-style receivers. */
-    private var showFcmSupportedOnly = false
-
-    /**
-     * Overflow: when true, apps that carry MiPush are left out of the list.
-     * Purely a filter, like [showFcmSupportedOnly] — it decides what is
-     * offered, never what the module does with an app the user already checked.
-     */
+    /** Overflow: when true, apps that carry MiPush are left out of the list. */
     private var excludeMiPushApps = false
 
-    private var xposedService: XposedService? = null
+    private val xposedService: XposedService?
+        get() = boundService
+
+    /**
+     * The M3 bottom-nav verdict on the module: true once the libxposed service
+     * has bound. LSPosed hands the service to an enabled module in scope and
+     * to nothing else, so the binding *is* the activation signal — the same
+     * answer the module-status tab shows.
+     *
+     * Reads the process-level cache: the libxposed helper hands its binder to a
+     * listener exactly once and never re-delivers it, so an Activity recreated
+     * by a configuration change (dark-mode toggle) that only re-registered its
+     * own listener would wait forever and show 未激活. The cache restores the
+     * verdict the instant the new instance composes.
+     */
+    private var moduleActive by mutableStateOf(boundService != null)
+
+    /**
+     * The libxposed service's API level once bound, zero before. The status
+     * tab wears it as a badge; zero keeps the badge off — a pill with nothing
+     * behind it is decoration, not information.
+     */
+    private var moduleApiVersion by mutableStateOf(boundService?.apiVersion ?: 0)
+
+    /**
+     * "x.y.z (build)" as the bound service reports its framework, or empty
+     * while no service is bound. The home shows it in the device rows.
+     */
+    private var moduleManagerVersion by mutableStateOf(boundService.let { service ->
+        if (service == null) "" else runCatching {
+            "${service.frameworkVersion} (${service.frameworkVersionCode})"
+        }.getOrDefault("")
+    })
+
+    /**
+     * The bottom-nav selection, shared by both looks. The tab survives every
+     * way the system can rebuild this screen while the user is still "in" the
+     * app: an in-place rebuild (language switch) reads the process-level
+     * [retainedTab], and a process death while backgrounded reads the saved
+     * instance state — returning to a backgrounded app is not an entry, and
+     * resetting the tab on it read as the app having lost the user's place.
+     * Only a genuine cold start — or a swipe-away from Recents, which discards
+     * both channels — lands on the home tab.
+     */
+    private var homeTab by mutableStateOf(HomeTab.Modules)
+
+    /**
+     * The one write path for [homeTab]: the property AND the process-level
+     * [retainedTab] holder, so a system-driven recreation in-place (language
+     * switch) can re-enter on the tab the user was reading.
+     */
+    private fun selectTab(tab: HomeTab) {
+        homeTab = tab
+        retainedTab = tab
+    }
+
+    /**
+     * The settings tab's feedback line and its Activity-bound capabilities —
+     * the SAF contracts, the update check, the release opening — in one
+     * [AboutDelegate]. Created in [onCreate]: the SAF contracts must register
+     * before the window is STARTED.
+     */
+    private val settingsSnackbarHostState = SnackbarHostState()
+    private lateinit var aboutDelegate: AboutDelegate
+
+    /**
+     * The live page stack, for the one path that is not composition: a launcher
+     * shortcut relaunch names a home tab, so a sub-page left over from last time
+     * has to be dropped before the tab is switched. Written from composition
+     * (see [AppPages]), where the stack is remembered and therefore saved — which
+     * is also why it cannot simply be built here.
+     */
+    private var navigator: Navigator? = null
+
+    /** The module's own version, for the status tab's hero card. */
+    private var moduleVersionName = ""
+    private var moduleVersionCode = 0L
+
+    /** The settings tab's update-row subtitle, computed once at creation. */
+    private var settingsVersionLine = ""
+
+    /** The about page hero's release tag ("v4.2.0 (54)"), computed once. */
+    private var settingsVersionTag = ""
+
     /** Palette this activity was painted with; a mismatch on resume = repaint. */
     private var appliedPalette: AppPalette? = null
 
@@ -182,27 +271,44 @@ class MainActivity : AppCompatActivity() {
      */
     private val appScanGeneration = AtomicInteger()
 
-    /**
-     * GET_INSTALLED_APPS (MIUI/HyperOS). Result is handled inline — the scan
-     * always restarts after the dialog, granted or not, so a partial list is
-     * still usable and the screen never blocks on the answer.
-     */
-    private val requestInstalledAppsLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (!granted) {
-                showMessage(getString(R.string.installed_apps_permission_denied))
-            }
-            loadApps()
-        }
-
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(ThemeSupport.attach(newBase))
+    }
+
+    // A language pick lands here instead of a recreate (configChanges in the
+    // manifest): the framework re-reads the configuration into this activity's
+    // resources, and the locale bump makes the Compose tree re-resolve its
+    // strings — no window swap, no flash.
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        AppLocale.onLocaleConfigChanged()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ThemeSupport.onCreate(this)
         appliedPalette = ThemeEngine.palette(this)
+        // Land back on the tab the user was reading (see [homeTab]): the
+        // saved instance state — what a backgrounded process death hands
+        // back — is authoritative; without a bundle, the process-level
+        // [retainedTab] covers an in-place rebuild. A cold start reads null
+        // from both and keeps the default.
+        val savedTab = savedInstanceState?.getString(KEY_STATE_TAB)
+            ?.let { name -> HomeTab.entries.firstOrNull { it.name == name } }
+        (savedTab ?: retainedTab)?.let { homeTab = it }
+
+        // The settings tab's Activity-bound half (SAF contracts, update check,
+        // links). Must exist before the window is STARTED.
+        aboutDelegate = AboutDelegate(this, ::showSettingsMessage)
+        try {
+            val info = packageManager.getPackageInfo(packageName, 0)
+            moduleVersionName = info.versionName ?: ""
+            moduleVersionCode = info.longVersionCode
+        } catch (t: Throwable) {
+            Log.w(TAG_UI, "Cannot read own package info", t)
+        }
+        settingsVersionLine = aboutDelegate.versionLine()
+        settingsVersionTag = aboutDelegate.versionTag()
         // Row icons are loaded off-thread by the store; each coalesced batch
         // lands in the per-package map, recomposing only the rows that got one.
         store = AppListStore(this) { batch ->
@@ -213,10 +319,9 @@ class MainActivity : AppCompatActivity() {
         // immediately, before libxposed remote prefs bind.
         allowlist = Prefs.readLocalAllowlist(this)
 
-        // First launch: show FCM-supported apps by default. After the user
-        // toggles the overflow option, their stored preference wins.
-        showFcmSupportedOnly = getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
-            .getBoolean(Prefs.KEY_SHOW_FCM_ONLY, true)
+        // First launch: the list only ever holds push-capable apps (the scan
+        // queries the manifest-declared push actions), so the former
+        // "show supported apps" filter lost its object and is gone.
         // On by default: an app that carries MiPush is already reachable through
         // the vendor channel, so offering it for the FCM wake list by default
         // would push the user toward work the module does not need to do. The
@@ -253,11 +358,8 @@ class MainActivity : AppCompatActivity() {
         // text and an in-progress batch selection — before the list is built.
         restoreUiState(savedInstanceState)
 
-        // Wait for HyperOS app-list grant when needed; other ROMs load immediately.
-        if (!requestInstalledAppsPermissionIfNeeded()) {
-            if (!restoreAppListFromCache()) {
-                loadApps()
-            }
+        if (!restoreAppListFromCache()) {
+            loadApps()
         }
         startUpdateCheck()
     }
@@ -286,42 +388,222 @@ class MainActivity : AppCompatActivity() {
                 // the system toast (its Scaffold hosts no snackbar), Material
                 // with the page's own bar. Read here, in composition —
                 // [showMessage] is a plain function and cannot read this itself.
-                miuixFeedbackNow = LocalUiStyle.current == UiStyle.Miuix
-                MainScreen(
-                    topBarState = topBarState,
-                    actions = MainActions(
-                        onBack = { if (multiSelectMode) exitMultiSelect() else exitSearch() },
-                        onSearch = { enterSearch() },
-                        onStartMultiSelect = { enterMultiSelect(null) },
-                        // Reconcile model: checkboxes show final membership, one
-                        // save applies the add/remove diff.
-                        onBatchSave = { saveBatchAllowlist() },
-                        onSelectAll = { toggleSelectAllVisible() },
-                        onAbout = { startActivityWithSnapshot(Intent(this, AboutActivity::class.java)) },
-                        onToggleShowSystemApps = { toggleOverflowShowSystemApps() },
-                        onToggleShowFcmOnly = { toggleOverflowShowFcmOnly() },
-                        onToggleExcludeMiPush = { toggleOverflowExcludeMiPush() }
-                    ),
-                    // The field reads the query from this state, so no view
-                    // hand-off is needed: whatever currentQuery holds when the
-                    // bar composes (including a restore across a rotation) is
-                    // what it shows.
-                    query = currentQuery,
-                    onQueryChange = { onQueryTextChange(it) },
-                    apps = filteredApps,
-                    multiSelect = multiSelectUi,
-                    selected = selectedUi,
-                    onRowClick = { handleRowTap(it) },
-                    onRowLongClick = { handleRowLongPress(it) },
-                    loadIcon = { store?.loadIcon(it) },
-                    icons = iconsByPkg,
-                    refreshing = refreshing,
-                    onRefresh = { refreshing = true; loadApps() },
-                    onDiagnostics = { openFcmDiagnostics() },
-                    snackbarHostState = snackbarHostState
-                )
+                miuixFeedbackNow = LocalUiStyle.current.isMiuixBased
+                AppPages()
             }
         }
+    }
+
+    /**
+     * Every page of the app, in one stack, at one composition location.
+     *
+     * The home and whatever is open on top of it are entries in the same
+     * [NavDisplay], so the page underneath stays composed and drawn instead of
+     * being a stopped window — which is exactly what the back gesture and the
+     * settle after its release move. One *location* matters as much as one stack:
+     * the appearance switches what is composed around this, and rebuilding the
+     * display there would drop the page the user is on.
+     *
+     * The transition is the library's own preset in both looks — the slide, the
+     * quarter-width parallax and the settle the library ships — and the effects
+     * are the ones KernelSU's manager passes with it (the clip radius read off the
+     * device's screen corner, everything else at the library's defaults). KernelSU
+     * is the reference for this: its manager hands `NavDisplay` no transition at
+     * all and takes the default in *both* of its looks, so the look this display
+     * wears no longer changes how a page moves.
+     *
+     * The two knobs that do still differ are not the motion: the colour behind the
+     * layers is the surface of whichever theme is in force, and input is closed for
+     * the duration of a transition under Miuix only.
+     */
+    @Composable
+    private fun AppPages() {
+        val backStack = rememberNavBackStack<Route>(Route.Main)
+        val pages = remember { Navigator(backStack) }
+        SideEffect { navigator = pages }
+
+        val miuix = LocalUiStyle.current.isMiuixBased
+        // What fills the strip the covered page's parallax vacates — the colour
+        // the system's own window transition would have shown through, read off
+        // the surrounding theme, which is this display's parent.
+        val backdrop =
+            if (miuix) MiuixTheme.colorScheme.surface else MaterialTheme.colorScheme.background
+        // Read off the window insets, like the library's own effect does.
+        val systemCorner = rememberNavSystemCornerRadius()
+        NavDisplay(
+            backStack = backStack,
+            onBack = { pages.pop() },
+            // The library's default preset — the same one KernelSU's manager runs,
+            // and in both of its looks; nothing here overrides it.
+            transition = NavTransitions.MiuixDefault,
+            effects = NavDisplayEffects(
+                // KernelSU passes exactly this: the leading-edge clip at the
+                // device's own screen corner. The remaining switches stay at the
+                // library defaults — clip on, leading edge, 0.5 dim — except the
+                // two noted below.
+                cornerClipRadius = systemCorner,
+                blockInputDuringTransition = miuix,
+                backdropColor = backdrop,
+            ),
+        ) {
+            entry<Route.Main> { HomeRoot(pages) }
+            entry<Route.About> { AboutPage(pages) }
+            entry<Route.Licenses> { LicensesScreen(onBack = { pages.pop() }) }
+            entry<Route.Experiment> { ExperimentScreen(onBack = { pages.pop() }) }
+        }
+    }
+
+    /**
+     * The whole home, in whichever shape the current look wears: the bottom
+     * navigation with its three tabs, on the library's own bar under the Miuix
+     * look and on the M3 Expressive bar under the Material one. The tab
+     * content is shared — both shells host the same three pages, and a style
+     * switch re-skins in place.
+     */
+    @Composable
+    private fun HomeRoot(pages: Navigator) {
+        val tabContent: @Composable (HomeTab) -> Unit = { tab ->
+            when (tab) {
+                HomeTab.Modules -> ModuleStatusScreen(
+                    active = moduleActive,
+                    apiVersion = moduleApiVersion,
+                    managerVersion = moduleManagerVersion,
+                    versionName = moduleVersionName,
+                    versionCode = moduleVersionCode,
+                    onDiagnostics = { openFcmDiagnostics() },
+                    onHelp = {
+                        // The guide lives on GitHub, in the app's own locale —
+                        // the same URL the shortcut and the about page's help
+                        // row open.
+                        UiUtils.openUrl(this, AboutDelegate.helpUrl(this))
+                    },
+                    onAbout = {
+                        // A real page, like licences: it slides in over the home
+                        // and the home stays underneath it, so its predictive back
+                        // reveals the page itself rather than a picture of one.
+                        pages.push(Route.About)
+                    },
+                    onRecheck = { recheckModuleActive() }
+                )
+                HomeTab.Apps -> AppListTab()
+                HomeTab.Settings -> SettingsTab(pages)
+            }
+        }
+        if (LocalUiStyle.current.isMiuixBased) {
+            MiuixHomeShell(
+                selected = homeTab,
+                onSelect = { selectTab(it) },
+                content = tabContent
+            )
+            return
+        }
+        HomeShell(
+            selected = homeTab,
+            onSelect = { selectTab(it) },
+            content = tabContent
+        )
+    }
+
+    /** The allowlist page — the home's「应用」tab under either look. */
+    @Composable
+    private fun AppListTab() {
+        MainScreen(
+            topBarState = topBarState,
+            actions = MainActions(
+                onBack = { if (multiSelectMode) exitMultiSelect() else exitSearch() },
+                onSearch = { enterSearch() },
+                onStartMultiSelect = { enterMultiSelect(null) },
+                onExitMultiSelect = { exitMultiSelect() },
+                // Reconcile model: checkboxes show final membership, one
+                // save applies the add/remove diff.
+                onBatchSave = { saveBatchAllowlist() },
+                onSelectAll = { toggleSelectAllVisible() },
+                onToggleShowSystemApps = { toggleOverflowShowSystemApps() },
+                onToggleExcludeMiPush = { toggleOverflowExcludeMiPush() }
+            ),
+            // The field reads the query from this state, so no view
+            // hand-off is needed: whatever currentQuery holds when the
+            // bar composes (including a restore across a rotation) is
+            // what it shows.
+            query = currentQuery,
+            onQueryChange = { onQueryTextChange(it) },
+            apps = filteredApps,
+            multiSelect = multiSelectUi,
+            selected = selectedUi,
+            onRowClick = { handleRowTap(it) },
+            onRowLongClick = { handleRowLongPress(it) },
+            loadIcon = { store?.loadIcon(it) },
+            icons = iconsByPkg,
+            refreshing = refreshing,
+            onRefresh = { refreshing = true; loadApps() },
+            snackbarHostState = snackbarHostState
+        )
+    }
+
+    /**
+     * The settings page as the home's「设置」tab: [AboutScreen] without the
+     * back control — a tab is a top-level destination, not a page to leave —
+     * and minus the「关于」
+     * section, which on this home is the「关于」tab's whole page.
+     */
+    @Composable
+    private fun SettingsTab(pages: Navigator) {
+        AboutScreen(
+            onBack = {},
+            showBack = false,
+            showProjectSection = false,
+            actions = aboutActions(pages),
+            snackbarHostState = settingsSnackbarHostState
+        )
+    }
+
+    /**
+     * The [AboutActions] both settings pages share: the callbacks need the
+     * [AboutDelegate] and this Activity, and the two pages open the same
+     * destinations — only where the「关于」card lives differs.
+     */
+    private fun aboutActions(pages: Navigator): AboutActions = AboutActions(
+        onViewSource = { aboutDelegate.openLink(AboutDelegate.REPO_URL) },
+        onLicense = { aboutDelegate.openLink(AboutDelegate.GPL3_URL) },
+        onLicenses = { pages.push(Route.Licenses) },
+        onExperiment = { pages.push(Route.Experiment) },
+        onExport = aboutDelegate::exportAllowlist,
+        onImport = aboutDelegate::importAllowlist,
+        onCheckUpdate = aboutDelegate::checkForUpdates,
+        onUpdateOpen = aboutDelegate::openPendingUpdate,
+        versionLine = settingsVersionLine,
+        versionTag = settingsVersionTag,
+        onAppearanceChange = aboutDelegate::applyAppearanceChange
+    )
+
+    /**
+     * [Route.About]: the page the home's「关于」row opens, which is [AboutScreen]
+     * cut down to the hero and the project rows — the appearance rows and the
+     * backup / update rows only exist on the settings tab itself.
+     *
+     * Its feedback line is the settings tab's, not one of its own: the messages
+     * this page can raise come from [aboutDelegate], which writes to that state,
+     * and the page hosting it is what puts them on screen.
+     */
+    @Composable
+    private fun AboutPage(pages: Navigator) {
+        AboutTabScreen(
+            onBack = { pages.pop() },
+            actions = AboutActions(
+                onViewSource = { aboutDelegate.openLink(AboutDelegate.REPO_URL) },
+                onLicense = { aboutDelegate.openLink(AboutDelegate.GPL3_URL) },
+                onLicenses = { pages.push(Route.Licenses) },
+                onExperiment = {},
+                onExport = {},
+                onImport = {},
+                onCheckUpdate = {},
+                onUpdateOpen = {},
+                versionLine = settingsVersionLine,
+                versionTag = settingsVersionTag,
+                onAppearanceChange = aboutDelegate::applyAppearanceChange
+            ),
+            snackbarHostState = settingsSnackbarHostState
+        )
     }
 
     /**
@@ -347,6 +629,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * The settings tab's feedback line — the [AboutDelegate] for the home
+     * lands its SAF/export and update messages here, drawn by the tab's own
+     * host. Under Miuix this delegate is never driven (the settings page lives
+     * in AboutActivity there), but the style can flip while a SAF result is in
+     * flight, so the toast branch stands anyway.
+     */
+    private fun showSettingsMessage(text: String) {
+        if (miuixFeedbackNow) {
+            Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+            return
+        }
+        uiScope.launch {
+            settingsSnackbarHostState.currentSnackbarData?.dismiss()
+            settingsSnackbarHostState.showSnackbar(text)
+        }
+    }
+
+    /**
      * Publish everything the Compose half reads, after every change to the flags
      * below. Replaces what used to be per-View visibility calls: one state
      * object now decides what the bar looks like.
@@ -356,7 +656,9 @@ class MainActivity : AppCompatActivity() {
         selectedUi = HashSet(selectedPkgs)
         topBarState = MainTopBarState(
             title = if (multiSelectMode) {
-                getString(R.string.selected_count, selectedPkgs.size)
+                resources.getQuantityString(
+                    R.plurals.selected_count, selectedPkgs.size, selectedPkgs.size
+                )
             } else {
                 getString(R.string.settings_title)
             },
@@ -364,7 +666,7 @@ class MainActivity : AppCompatActivity() {
             multiSelect = multiSelectMode,
             allVisibleSelected = isAllVisibleSelected(),
             overflow = OverflowState(
-                showSystemApps, showFcmSupportedOnly, excludeMiPushApps
+                showSystemApps, excludeMiPushApps
             )
         )
     }
@@ -450,16 +752,6 @@ class MainActivity : AppCompatActivity() {
         loadApps()
     }
 
-    private fun toggleOverflowShowFcmOnly() {
-        showFcmSupportedOnly = !showFcmSupportedOnly
-        getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
-            .edit()
-            .putBoolean(Prefs.KEY_SHOW_FCM_ONLY, showFcmSupportedOnly)
-            .apply()
-        // Filter only — keep package scan; toggle just hides non-FCM rows.
-        filterApps(currentQuery)
-    }
-
     private fun toggleOverflowExcludeMiPush() {
         excludeMiPushApps = !excludeMiPushApps
         getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
@@ -487,51 +779,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
-    }
-
-    /**
-     * MIUI 13 / HyperOS only: request GET_INSTALLED_APPS when the permission
-     * exists and is owned by Xiaomi's security center. Returns true when a
-     * runtime request was launched and loading should wait for the result.
-     */
-    private fun requestInstalledAppsPermissionIfNeeded(): Boolean {
-        if (!hasAppListGate()) {
-            return false
-        }
-        if (checkSelfPermission(GET_INSTALLED_APPS_PERMISSION) == PackageManager.PERMISSION_GRANTED) {
-            return false
-        }
-        requestInstalledAppsLauncher.launch(GET_INSTALLED_APPS_PERMISSION)
-        return true
-    }
-
-    /**
-     * Whether this ROM gates the package list behind a runtime permission.
-     * MIUI 13 / HyperOS declare `GET_INSTALLED_APPS`, owned by the
-     * security centre; AOSP and every other ROM do not.
-     */
-    private fun hasAppListGate(): Boolean {
-        return try {
-            val info = packageManager.getPermissionInfo(GET_INSTALLED_APPS_PERMISSION, 0)
-            info != null && MIUI_SECURITY_PACKAGE == info.packageName
-        } catch (ignored: PackageManager.NameNotFoundException) {
-            false
-        }
-    }
-
-    /**
-     * Whether `getInstalledPackages()` may be trusted to return the whole
-     * list. Until the app-list permission is granted the query comes back nearly
-     * empty, which is indistinguishable from a device that genuinely has no FCM
-     * app — so anything that reacts to an empty scan has to ask this first.
-     *
-     * This is deliberately a live check rather than a flag set from the
-     * permission callback: the Xposed service can bind and kick
-     * off a scan before the user has even answered the dialog.
-     */
-    private fun isAppListReadable(): Boolean {
-        return !hasAppListGate() ||
-            checkSelfPermission(GET_INSTALLED_APPS_PERMISSION) == PackageManager.PERMISSION_GRANTED
     }
 
     /**
@@ -577,8 +824,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Appearance settings may have changed while the settings screen was
-        // on top (palette style, theme mode, seed color...). The Compose tree
+        // Appearance settings may have changed while the settings page was on
+        // top (palette style, theme mode, seed color...). The Compose tree
         // follows ThemeEngine's generation counter and re-skins on its own;
         // what recomposes nowhere is the View-side window chrome. Repaint that
         // here instead of rebuilding the whole activity — the old `recreate()`
@@ -595,6 +842,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        outState.putString(KEY_STATE_TAB, homeTab.name)
         outState.putString(KEY_STATE_QUERY, currentQuery)
         outState.putBoolean(KEY_STATE_SEARCHING, searching)
         outState.putBoolean(KEY_STATE_MULTI_SELECT, multiSelectMode)
@@ -636,9 +884,9 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Reuse the previous package scan after a configuration change instead of
-     * querying PackageManager for every installed package again. Returns false
-     * when there is nothing to reuse (first open, or the system-app filter
-     * changed since the scan), which is when a real scan runs.
+     * re-running the push queries. Returns false when there is nothing to reuse
+     * (first open, or the system-app filter changed since the scan), which is
+     * when a real scan runs.
      */
     private fun restoreAppListFromCache(): Boolean {
         val cached = sAppScanCache ?: return false
@@ -675,10 +923,8 @@ class MainActivity : AppCompatActivity() {
         store?.shutdown()
         if (isFinishing) {
             // Leaving for real rather than being rebuilt: drop the scan cache so
-            // the icons it pins are released with the screen, and drop the
-            // snapshot the sub-pages reveal — nothing will open from here again.
+            // the icons it pins are released with the screen.
             sAppScanCache = null
-            WindowSnapshot.clear(MainActivity::class.java)
         }
         backInvokedCallback?.let {
             try {
@@ -732,7 +978,7 @@ class MainActivity : AppCompatActivity() {
             // Where batch mode is entered differs by look: long-press under
             // Material, the top-bar 批量操作 icon under Miuix, so the hint names
             // the door that actually exists.
-            val tipRes = if (UiStyle.of(ThemePrefs.uiStyle(this)) == UiStyle.Miuix) {
+            val tipRes = if (UiStyle.of(ThemePrefs.uiStyle(this)).isMiuixBased) {
                 R.string.multi_select_tip_miuix
             } else {
                 R.string.multi_select_tip
@@ -882,12 +1128,8 @@ class MainActivity : AppCompatActivity() {
         // Locale.ROOT: the default locale would fold "I" to "ı" under a Turkish
         // locale and silently stop matching package names that contain it.
         val lower = if (!query.isNullOrEmpty()) query.lowercase(Locale.ROOT) else null
-        val fcmOnly = showFcmSupportedOnly
         val dropMiPush = excludeMiPushApps
         for (app in allApps) {
-            if (fcmOnly && !app.supportFcm) {
-                continue
-            }
             // Already checked apps stay: dropping them would hide a choice the
             // user has already made — it would remain in the allowlist, still
             // costing what the filter is meant to save, with no row left to undo
@@ -908,12 +1150,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Empty list after a full package scan (no search query), where one of the
-     * two overflow filters is what emptied it.
+     * Empty list after a full package scan (no search query), where the MiPush
+     * filter is what emptied it.
      *
-     * The toast is delayed: a permission grant mid-scan can finish an empty
-     * query first, and saying "no FCM apps" then would fire before the real
-     * list lands. Cancelled when a later snapshot fills the list.
+     * The toast is delayed: a rescan finishing an empty query first would say
+     * "no apps" before the real list lands. Cancelled when a later snapshot
+     * fills the list.
      */
     private fun maybeShowNoFcmApps() {
         cancelEmptyListMessage()
@@ -926,12 +1168,9 @@ class MainActivity : AppCompatActivity() {
         if (filteredApps.isNotEmpty() || allApps.isEmpty()) {
             return
         }
-        // With both filters off an empty list means the scan found nothing, and
-        // blaming a filter for that would be wrong.
-        if (!showFcmSupportedOnly && !excludeMiPushApps) {
-            return
-        }
-        if (!isAppListReadable()) {
+        // With the filter off an empty list means the scan found nothing, and
+        // blaming the filter for that would be wrong.
+        if (!excludeMiPushApps) {
             return
         }
         emptyListMessagePosted = true
@@ -965,14 +1204,24 @@ class MainActivity : AppCompatActivity() {
 
     /** Launcher shortcut entry: open GMS diagnostics immediately when asked. */
     private fun handleShortcutIntent(intent: Intent?) {
-        if (intent?.action == ACTION_FCM_DIAGNOSTICS) {
-            openFcmDiagnostics()
+        when (intent?.action) {
+            ACTION_FCM_DIAGNOSTICS -> openFcmDiagnostics()
+            // The settings shortcut lands on the home's 设置 tab — the full
+            // shell (bottom bar, this look's chrome), never a bare page.
+            // Covers both entries: cold start (onCreate's call, after the
+            // saved tab would have won) and a relaunch over the live task
+            // (onNewIntent — singleTask routes the second launch here).
+            ACTION_OPEN_SETTINGS -> selectTab(HomeTab.Settings)
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // A shortcut relaunch names a home tab, and a tab is only reachable from
+        // the home — so a sub-page left open from last time goes first, rather
+        // than burying the tab the shortcut asked for.
+        navigator?.popToMain()
         handleShortcutIntent(intent)
     }
 
@@ -1000,9 +1249,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun initXposedService() {
         try {
-            XposedServiceHelper.registerListener(object : XposedServiceHelper.OnServiceListener {
+            val listener = object : XposedServiceHelper.OnServiceListener {
                 override fun onServiceBind(service: XposedService) {
-                    xposedService = service
+                    boundService = service
+                    moduleActive = true
+                    moduleApiVersion = service.apiVersion
+                    moduleManagerVersion = runCatching {
+                        // Version alone: the row is already titled "LSPosed", the
+                        // framework name would say it twice.
+                        "${service.frameworkVersion} (${service.frameworkVersionCode})"
+                    }.getOrDefault("")
                     runOnUiThreadSafe {
                         // Publish for other screens (About import/export).
                         Prefs.setRemote(remotePrefs())
@@ -1013,14 +1269,30 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 override fun onServiceDied(service: XposedService) {
-                    if (xposedService === service) {
-                        xposedService = null
+                    if (boundService === service) {
+                        boundService = null
+                        moduleActive = false
+                        moduleApiVersion = 0
+                        moduleManagerVersion = ""
                         Prefs.setRemote(null)
                     }
                 }
-            })
+            }
+            XposedServiceHelper.registerListener(listener)
         } catch (ignored: Throwable) {
         }
+    }
+
+    /**
+     * The status card's tap-to-recheck: registers the listener again, which
+     * makes the helper re-run its bind handshake — the same path a fresh
+     * process takes. The helper has no unregister, so the old listener stays
+     * on the list; both fire on the next bind, and their side effects
+     * (publish prefs, reload the list) are idempotent, so the only cost is
+     * one redundant reload on the success path.
+     */
+    fun recheckModuleActive() {
+        initXposedService()
     }
 
     private fun remotePrefs(): SharedPreferences? {
@@ -1166,8 +1438,6 @@ class MainActivity : AppCompatActivity() {
         val showSys = showSystemApps
         val allow = HashSet(allowlist)
         val emptyUi = allApps.isEmpty()
-        // Read on this thread: it gates whether the scan may be cached below.
-        val readable = isAppListReadable()
         val generation = appScanGeneration.incrementAndGet()
         Thread {
             val pm = packageManager
@@ -1177,6 +1447,9 @@ class MainActivity : AppCompatActivity() {
                     val ai = try {
                         pm.getApplicationInfo(pkg, 0)
                     } catch (e: PackageManager.NameNotFoundException) {
+                        // Not visible under the declared queries — an allowlist
+                        // entry that declares no push component. It stays in the
+                        // allowlist and keeps working; it just has no row.
                         continue
                     }
                     val entry = AppListStore.AppEntry(pkg, ai.loadLabel(pm).toString())
@@ -1189,82 +1462,44 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThreadSafe { applyAppSnapshot(selected, false) }
                 }
 
-                // No GET_RECEIVERS / GET_SERVICES: the FCM question is answered
-                // by two device-wide queries plus a per-package class lookup
-                // below, and without those flags the scan marshals a lot less.
-                val installed = pm.getInstalledPackages(0)
-                val scannedPackages = ArrayList<String>(installed.size)
-                for (pi in installed) {
-                    scannedPackages.add(pi.packageName)
-                }
-                val support = scanPushSupport(pm, scannedPackages)
+                // No permission anywhere: the manifest declares the push actions
+                // and visibility filtering returns exactly the apps that declare
+                // them — the only apps an FCM wake allowlist can mean anything
+                // for. See the <queries> block in AndroidManifest.xml.
+                val support = scanPushSupport(pm)
                 // A newer scan started while this one was querying; its answer
                 // is already on the way, so abandon the rest of the work.
                 if (!isLatestScan(generation)) {
                     return@Thread
                 }
                 val result = ArrayList<AppListStore.AppEntry>()
-                for (pi in installed) {
-                    val ai = pi.applicationInfo
-                    if (ai == null || ai.packageName == packageName) {
+                for (pkg in support.fcm) {
+                    val ai = try {
+                        pm.getApplicationInfo(pkg, 0)
+                    } catch (e: PackageManager.NameNotFoundException) {
+                        // Resolved by the query but not by name: query quirk,
+                        // drop the row rather than guess at its label.
+                        continue
+                    }
+                    if (ai.packageName == packageName) {
                         continue
                     }
                     if (!showSys && isSystemApp(ai)) {
                         continue
                     }
                     val entry = AppListStore.AppEntry(ai.packageName, ai.loadLabel(pm).toString())
-                    entry.supportFcm = support.fcm.contains(ai.packageName)
                     entry.supportMiPush = support.miPush.contains(ai.packageName)
-                    when {
-                        EXEMPT_PACKAGES.contains(ai.packageName) -> {
-                            entry.exempt = true
-                            entry.exemptNote = R.string.gms_row_note
-                        }
+                    if (EXEMPT_PACKAGES.contains(ai.packageName)) {
+                        entry.exempt = true
                     }
                     result.add(entry)
-                }
-                // GMS is added here rather than trusted to the loop above.
-                //
-                // `getInstalledPackages(0)` is not guaranteed to return it: on
-                // HyperOS the query can come back without preinstalled system
-                // packages, so GMS is simply absent from `installed` — which is
-                // why turning "show system apps" on did not make it appear, and
-                // why no FCM rule could ever have found it. Asking for the one
-                // package directly is what puts the row beyond the reach of that
-                // whole class of query behaviour.
-                //
-                // It obeys the system-app toggle like any other system package:
-                // hidden while the toggle is off, shown when it is on. The point
-                // is that it can no longer be lost by a query that omits it.
-                if (!result.any { it.packageName == GMS_PACKAGE_NAME }) {
-                    val gms = try {
-                        pm.getApplicationInfo(GMS_PACKAGE_NAME, 0)
-                    } catch (e: PackageManager.NameNotFoundException) {
-                        // Genuinely not installed on this device: nothing to add.
-                        null
-                    }
-                    if (gms != null && (showSys || !isSystemApp(gms))) {
-                        val entry =
-                            AppListStore.AppEntry(
-                                gms.packageName,
-                                gms.loadLabel(pm).toString()
-                            )
-                        entry.supportFcm = support.fcm.contains(gms.packageName)
-                        entry.supportMiPush = support.miPush.contains(gms.packageName)
-                        entry.exempt = true
-                        entry.exemptNote = R.string.gms_row_note
-                        result.add(entry)
-                    }
                 }
                 for (app in result) {
                     app.checked = allow.contains(app.packageName)
                 }
                 result.sortWith { a, b -> compareEntries(a, b) }
-                // Remember the scan for a configuration change. Only a readable
-                // scan counts: on HyperOS the first query runs before the
-                // app-list permission is answered and returns almost nothing, and
-                // caching that would make a rotation show an empty list forever.
-                if (readable && result.isNotEmpty() && isLatestScan(generation)) {
+                // Remember the scan for a configuration change.
+                if (result.isNotEmpty() && isLatestScan(generation)) {
                     sAppScanCache = ArrayList(result)
                     sAppScanCacheShowSystemApps = showSys
                 }
@@ -1278,11 +1513,10 @@ class MainActivity : AppCompatActivity() {
                     reloadAllowlist()
                 }
             } catch (t: Throwable) {
-                // The package query is a binder call on the whole installed set;
-                // it can fail (a very large package list is one documented
-                // cause). Swallowed here would leave the refresh spinner running
-                // forever with no list and no way back but killing the app, so
-                // the failure is logged and the spinner is stopped below.
+                // The queries are binder calls; they can fail. Swallowed here
+                // would leave the refresh spinner running forever with no list
+                // and no way back but killing the app, so the failure is logged
+                // and the spinner is stopped below.
                 Log.w(TAG_UI, "Failed to load the app list", t)
             } finally {
                 runOnUiThreadSafe {
@@ -1339,12 +1573,33 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG_UI = "HyperFCMLive"
 
+        /**
+         * The bound libxposed service, at process level: the helper delivers its
+         * binder to a listener exactly once and never re-delivers, so the answer
+         * must outlive the Activity that happened to receive it — an instance
+         * recreated by a dark-mode toggle reads it back in the property
+         * initialisers and keeps showing 已激活 instead of waiting for a bind
+         * callback that can never come again.
+         */
+        private var boundService: XposedService? = null
+
+        /**
+         * The tab the current process was last showing, read back when the
+         * SYSTEM rebuilds this Activity inside the SAME process — the per-app
+         * language switch does exactly that (LocaleManager recreates the
+         * activity, process untouched). Without it the rebuild reset the tab to
+         * the default and the screen visibly jumped to 主页 mid-switch; dark
+         * mode never showed this because its path re-skins without recreating.
+         * Process death clears it by nature — a task rebuilt from storage still
+         * lands on the default, which is the policy this holder preserves.
+         */
+        private var retainedTab: HomeTab? = null
+
         /** Launcher shortcut: open GMS FCM diagnostics. */
         const val ACTION_FCM_DIAGNOSTICS = "io.github.howard20181.hyperos.fcmlive.FCM_DIAGNOSTICS"
-        /** MIUI 13 / HyperOS runtime gate on top of QUERY_ALL_PACKAGES. */
-        private const val GET_INSTALLED_APPS_PERMISSION =
-            "com.android.permission.GET_INSTALLED_APPS"
-        private const val MIUI_SECURITY_PACKAGE = "com.lbe.security.miui"
+
+        /** The settings shortcut's action: open the home on the 设置 tab. */
+        const val ACTION_OPEN_SETTINGS = "io.github.howard20181.hyperos.fcmlive.OPEN_SETTINGS"
 
         /**
          * Google Play services. Spelled out once here because the UI needs the
@@ -1376,6 +1631,7 @@ class MainActivity : AppCompatActivity() {
         private const val RAPID_CHECK_WINDOW_MS = 12000L
         private const val RAPID_CHECK_HINT_AT = 4
 
+        private const val KEY_STATE_TAB = "state_tab"
         private const val KEY_STATE_QUERY = "state_query"
         private const val KEY_STATE_SEARCHING = "state_searching"
         private const val KEY_STATE_MULTI_SELECT = "state_multi_select"
@@ -1419,80 +1675,69 @@ class MainActivity : AppCompatActivity() {
          * Packages that look FCM-capable, scored by four independent Manifest
          * markers and then judged by one rule — with GMS carved out in front.
          *
-         * 1. `com.google.firebase.messaging.FirebaseMessagingService` — a
-         *    declared service (class name).
-         * 2. `com.google.firebase.iid.FirebaseInstanceIdReceiver` — a
-         *    declared receiver (class name).
+         * Every marker is a device-wide intent query; the manifest declares
+         * these actions and visibility filtering returns exactly the apps that
+         * answer to them, so the candidate set is the union of the query
+         * results and no permission is involved anywhere.
+         *
+         * 2. `com.google.firebase.iid.FirebaseInstanceIdReceiver` — an
+         *    intent-filter action (`INSTANCE_ID_EVENT`) on the receiver.
          * 3. `com.google.firebase.MESSAGING_EVENT` — an intent-filter
          *    action, normally on the messaging service.
          * 4. `com.google.android.c2dm.intent.RECEIVE` — an intent-filter
          *    action, normally on the instance-id receiver.
+         * 5. — tracked alongside ④ — the RECEIVE receiver resolving to
+         *    Google's notifications-platform PushReceiver.
+         *
+         * The former marker 1 (the `FirebaseMessagingService` *class*, asked
+         * per package) is gone with the permission-free rework: it never
+         * participated in the rule below — ② alone and ③ alone are accepted,
+         * so any package that ① would have pushed over the line already
+         * qualifies without it — and a class shipped without any of the
+         * declared actions produces no query hit, leaving nothing to ask.
          *
          * **GMS is included unconditionally, before and independently of the
          * rule.** It is the one package the screen exists for, and a list of
          * "apps that support push" with no Google Play services in it reads as a
-         * broken module rather than as a strict filter. On-device it was missing
-         * for two separate reasons, neither of which the rule could have fixed:
-         * the SDK lets an app point `RECEIVE` at a receiver of its own, so a
-         * client need not declare the components the rule looks for; and
-         * `getInstalledPackages()` on HyperOS can omit preinstalled system
-         * packages altogether, so GMS never reached this function's input.
+         * broken module rather than as a strict filter. The SDK lets an app
+         * point `RECEIVE` at a receiver of its own, so a client need not
+         * declare the components the rule looks for, and on-device GMS did not
+         * turn up through them; the `<queries>` entry naming the package makes
+         * the row resolvable regardless.
          *
          * **The rule, for everything else: any two of ②③④ is enough; ② or ③
-         * alone is also enough; ① alone, ④ alone, and nothing at all are out.**
+         * alone is also enough; ④ alone, and nothing at all, are out.**
          *
          * Why ② is not required: the SDK's public receiver expects a *custom*
          * receiver class to hand the message to, so an app can receive `RECEIVE`
          * without ever declaring `FirebaseInstanceIdReceiver`. Tying acceptance
          * to ② would drop such clients.
          *
-         * Why ① alone is out: `FirebaseMessagingService` is a public base class
-         * any app that merely links the SDK inherits, with no promise that a push
-         * was ever wired up, so it is the noisiest marker of the four. ④ alone is
-         * out for the older reason — the pre-Firebase c2dm era left bare
-         * `RECEIVE` actions behind on components that have nothing to do with
-         * messaging (`framework-res` still carries one on its factory-reset
-         * receiver, a remote-wipe leftover). ② alone and ③ alone stay in because
-         * an app that ships one of the SDK's own components is a client whether
-         * or not anything else in its Manifest corroborates it.
+         * Why ④ alone is out: the pre-Firebase c2dm era left bare `RECEIVE`
+         * actions behind on components that have nothing to do with messaging
+         * (`framework-res` still carries one on its factory-reset receiver, a
+         * remote-wipe leftover). ② alone and ③ alone stay in because an app
+         * that ships one of the SDK's own components is a client whether or not
+         * anything else in its Manifest corroborates it.
          *
-         * The names are `HookerSupport`'s constants, and the module asks the same
-         * questions in system_server (`ProcessCleanerHooks#declaresFcmComponent`) —
-         * asking it the same way is the point. GMS is the one deliberate divergence there
-         * too: the hook exempts it before asking any of this (see
-         * `AllowlistGate.moduleAppliesTo`), so it never depends on the answer.
-         *
-         * Markers 3/4 arrive as device-wide queries and 1/2 from a per-package
-         * lookup, so both sources feed the *same* per-package score here rather
-         * than being unioned into the result: a package gets in only after the
-         * one rule is applied to everything known about it.
+         * The actions are `HookerSupport`'s constants, and the module asks the
+         * same questions in system_server (`ProcessCleanerHooks#declaresFcmComponent`)
+         * — asking it the same way is the point. GMS is the one deliberate
+         * divergence there too: the hook exempts it before asking any of this
+         * (see `AllowlistGate.moduleAppliesTo`), so it never depends on the answer.
          */
-        private fun scanPushSupport(
-            pm: PackageManager,
-            candidates: Collection<String>?
-        ): PushSupport {
+        private fun scanPushSupport(pm: PackageManager): PushSupport {
             val support = PushSupport()
             // GMS is listed unconditionally, ahead of the rule below and
-            // regardless of what its Manifest says — and regardless of whether
-            // the query that produced `candidates` even returned it, which on
-            // HyperOS it may not.
-            //
-            // Markers alone do not carry it: the SDK lets an app point `RECEIVE`
-            // at a receiver of its own, so a client — GMS included — need not
-            // declare the components the rule looks for, and on-device it did
-            // not turn up. A list of "apps that support push" with no Google Play
-            // services in it reads as a broken module rather than as a strict
-            // filter, which is the wrong trade for the one package the module
-            // exists for. The check is a plain name test, not a marker count.
+            // regardless of what its Manifest says. The check is a plain name
+            // test, not a marker count.
             support.fcm.add(GMS_PACKAGE_NAME)
-            if (candidates == null) {
-                return support
-            }
-            // Markers 3, 4 and 5, device-wide. Kept as three sets, not one: the
-            // rule counts them separately. Marker 5 tracks which packages'
-            // RECEIVE receiver is Google's notifications-platform PushReceiver —
-            // the entrypoint shape of Google's own apps, which ship no Firebase
-            // SDK push component.
+            // Markers 2, 3, 4 and 5, device-wide. Kept as separate sets, not
+            // one: the rule counts them separately. Marker 5 tracks which
+            // packages' RECEIVE receiver is Google's notifications-platform
+            // PushReceiver — the entrypoint shape of Google's own apps, which
+            // ship no Firebase SDK push component.
+            val byIidReceiver = HashSet<String>()
             val byMessagingEvent = HashSet<String>()
             val byReceive = HashSet<String>()
             val byGooglePushReceiver = HashSet<String>()
@@ -1511,6 +1756,18 @@ class MainActivity : AppCompatActivity() {
             }
             try {
                 val receivers = pm.queryBroadcastReceivers(
+                    Intent(HookerSupport.ACTION_INSTANCE_ID_EVENT),
+                    PackageManager.ResolveInfoFlags.of(0)
+                )
+                for (ri in receivers) {
+                    val info = ri.activityInfo ?: continue
+                    byIidReceiver.add(info.packageName)
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG_UI, "Failed to query instance-id receivers", t)
+            }
+            try {
+                val receivers = pm.queryBroadcastReceivers(
                     Intent(HookerSupport.ACTION_REMOTE_INTENT),
                     PackageManager.ResolveInfoFlags.of(0)
                 )
@@ -1524,18 +1781,20 @@ class MainActivity : AppCompatActivity() {
             } catch (t: Throwable) {
                 Log.w(TAG_UI, "Failed to query C2DM receivers", t)
             }
+            // The candidate set: everything at least one query answered for.
+            // A package gets in only after the one rule is applied to
+            // everything known about it — the union is the *input*, not the
+            // result.
+            val candidates = HashSet<String>()
+            candidates.addAll(byIidReceiver)
+            candidates.addAll(byMessagingEvent)
+            candidates.addAll(byReceive)
             for (pkg in candidates) {
-                val hasMessagingService =
-                    declaresFirebaseMessagingService(pm, pkg)          // ①
-                val hasIidReceiver =
-                    declaresFirebaseInstanceIdReceiver(pm, pkg)         // ②
-                val hasMessagingEvent = byMessagingEvent.contains(pkg)  // ③
-                val hasReceive = byReceive.contains(pkg)                // ④
-                val hasGooglePushReceiver =
-                    byGooglePushReceiver.contains(pkg)                  // ⑤
                 if (isFcmClient(
-                        hasMessagingService, hasIidReceiver,
-                        hasMessagingEvent, hasReceive, hasGooglePushReceiver
+                        byIidReceiver.contains(pkg),      // ②
+                        byMessagingEvent.contains(pkg),   // ③
+                        byReceive.contains(pkg),          // ④
+                        byGooglePushReceiver.contains(pkg) // ⑤
                     )
                 ) {
                     support.fcm.add(pkg)
@@ -1556,15 +1815,13 @@ class MainActivity : AppCompatActivity() {
          * even though it is also one marker. A boolean table says that;
          * `sum >= 2 || has2 || has3` hides it.
          *
-         * ① is accepted as a *contributor* (it counts toward the two-of-three)
-         * but never on its own; see the caller for why. ⑤ — the RECEIVE
-         * receiver resolves to Google's notifications-platform PushReceiver —
-         * is accepted alone: Google's own apps carry that entrypoint and none
-         * of the Firebase SDK markers, and the class namespace is a merged
-         * Google library that third-party apps do not reproduce.
+         * ⑤ — the RECEIVE receiver resolves to Google's notifications-platform
+         * PushReceiver — is accepted alone: Google's own apps carry that
+         * entrypoint and none of the Firebase SDK markers, and the class
+         * namespace is a merged Google library that third-party apps do not
+         * reproduce.
          */
         private fun isFcmClient(
-            hasMessagingService: Boolean,
             hasIidReceiver: Boolean,
             hasMessagingEvent: Boolean,
             hasReceive: Boolean,
@@ -1586,50 +1843,8 @@ class MainActivity : AppCompatActivity() {
             if (hasGooglePushReceiver) {
                 return true
             }
-            // Everything else: ① alone, ④ alone, or nothing.
+            // Everything else: ④ alone, or nothing.
             return false
-        }
-
-        /**
-         * Marker ①: does `pkg` declare the SDK's messaging *service* class?
-         *
-         * `getServiceInfo` resolves a component directly with no intent-filter
-         * involved — the whole reason the class lookups exist, since the action
-         * queries cannot see a class that ships without a filter. Absence is
-         * reported by `NameNotFoundException`, so a throw is an answer, not a
-         * failure.
-         *
-         * Split from the receiver test because the two now carry different
-         * weight in [isFcmClient]: neither is sufficient alone, but ② alone is
-         * accepted and ① alone is not.
-         */
-        private fun declaresFirebaseMessagingService(pm: PackageManager, pkg: String): Boolean {
-            return try {
-                pm.getServiceInfo(ComponentName(pkg, HookerSupport.FCM_MESSAGING_SERVICE_CLASS), 0)
-                true
-            } catch (ignored: Throwable) {
-                // Not declared (or not visible to us).
-                false
-            }
-        }
-
-        /**
-         * Marker ②: does `pkg` declare the SDK's instance-id *receiver* class?
-         *
-         * A client is not obliged to — the receiver is the SDK's entry point and
-         * an app may instead point `RECEIVE` at a receiver of its own, which is
-         * the shape GMS itself uses. Its presence is still strong evidence, so it
-         * is accepted on its own; its absence proves nothing, which is why it is
-         * not required.
-         */
-        private fun declaresFirebaseInstanceIdReceiver(pm: PackageManager, pkg: String): Boolean {
-            return try {
-                pm.getReceiverInfo(ComponentName(pkg, HookerSupport.FCM_IID_RECEIVER_CLASS), 0)
-                true
-            } catch (ignored: Throwable) {
-                // Not declared.
-                false
-            }
         }
 
         /**
@@ -1638,6 +1853,12 @@ class MainActivity : AppCompatActivity() {
          * MiPush is a system-channel push, so an app that has it does not need
          * this module to keep a second (FCM) route alive — the list tags those apps
          * and the overflow menu can leave them out.
+         *
+         * A direct component lookup — fine here because every caller passes a
+         * package the intent queries already made visible. No MiPush action is
+         * declared in `<queries>`: the SDK's service often ships without an
+         * intent-filter, so a query could not see it, while a component lookup
+         * on a visible package can.
          *
          * The lookup has to ask for disabled components, because on MIUI /
          * HyperOS a disabled `XMPushService` means the opposite of what it
@@ -1669,7 +1890,6 @@ class MainActivity : AppCompatActivity() {
                 val x = a[i]
                 val y = b[i]
                 if (x.packageName != y.packageName || x.checked != y.checked ||
-                    x.supportFcm != y.supportFcm ||
                     x.supportMiPush != y.supportMiPush ||
                     x.label != y.label
                 ) {
@@ -1682,7 +1902,7 @@ class MainActivity : AppCompatActivity() {
 
     /** One package scan: which packages carry which push route. */
     private class PushSupport {
-        /** FCM-capable: any of the four Firebase markers. */
+        /** FCM-capable: packages the rule accepted (GMS always among them). */
         val fcm = HashSet<String>()
 
         /** Declares [MIPUSH_SERVICE_CLASS]. */

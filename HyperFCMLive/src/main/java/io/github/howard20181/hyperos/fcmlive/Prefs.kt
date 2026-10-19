@@ -80,12 +80,9 @@ object Prefs {
     const val LOCAL_PREFS = "fcmlive_allowlist_cache"
     /** UI-only: set while the mirror holds edits the module service never saw. */
     private const val KEY_PENDING_PUSH = "allowlist_pending_push"
-    /** UI-only: overflow menu "Show FCM-supported apps". */
-    const val KEY_SHOW_FCM_ONLY = "show_fcm_supported_only"
     /**
-     * UI-only: overflow menu "Exclude MiPush apps". Kept next to
-     * [KEY_SHOW_FCM_ONLY] because it is the same kind of setting — a
-     * question about what the list offers, not about what the hooks do, so it
+     * UI-only: overflow menu "Exclude MiPush apps". The same kind of setting —
+     * a question about what the list offers, not about what the hooks do, so it
      * stays out of [GROUP_CONFIG] and needs no broadcast.
      *
      * Defaults to **on** at the read site (`MainActivity`): a MiPush app is
@@ -95,7 +92,7 @@ object Prefs {
     const val KEY_EXCLUDE_MIPUSH = "exclude_mipush_apps"
     /**
      * UI-only: overflow menu "Show system apps". Same kind of setting as
-     * [KEY_SHOW_FCM_ONLY] — it decides what the list offers, not what the hooks
+     * [KEY_EXCLUDE_MIPUSH] — it decides what the list offers, not what the hooks
      * do, so it stays out of [GROUP_CONFIG] and needs no broadcast.
      *
      * Persisted rather than left to `onSaveInstanceState`: that bundle only

@@ -92,24 +92,20 @@
  *
  *     light : popup 94  =  page 94   <  card 98
  *     dark  : popup 12  =  page 12   <  card 24
- *     AMOLED:           page 0   <  card 6   <  popup 12
  *
  *   Light and dark read the scheme's roles straight — page and popup are both
  *   `surfaceContainer`, the card is `surfaceBright` — so the panel sits on the
  *   page's exact tone, as Material's own menu does, and the step that decides
  *   whether it reads as a panel is the one to the *card* it lands on: 4 tones
- *   in light, 12 in dark, 6 in AMOLED. Over the page there is no tone step at
- *   all; that case is carried by the panel's shadow, which is exactly why the
- *   popup is the page's level and never the level just off it. AMOLED is the
- *   near-black ramp, neutral on purpose. Measure a level assignment in tones
- *   before trusting it: a hex step is not a step, and `#000000` next to
- *   `#0A0A0A` is 0.8, which is how an AMOLED menu came to melt into its page.
- *   The *tint* of every level is read straight off the scheme, so the app wears
+ *   in light, 12 in dark. Over the page there is no tone step at all; that
+ *   case is carried by the panel's shadow, which is exactly why the popup is
+ *   the page's level and never the level just off it. Measure a level
+ *   assignment in tones before trusting it: a hex step is not a step. The
+ *   *tint* of every level is read straight off the scheme, so the app wears
  *   a different page in every palette style — that is the point of the setting,
  *   and normalising the tint is what once made both specs look identical. Do
  *   not hand a call site a raw `colorScheme.surface*` for a page, a card or a
- *   popup either: AMOLED repaints the ramp outside the roles, so the three
- *   levels only exist as a set. [AppPalette] owns them.
+ *   popup: the three levels only exist as a set. [AppPalette] owns them.
  * - **The official token is the default — but a token is a claim about the
  *   spec, not the spec itself: where a token and a reference implementation's
  *   rendering disagree, the rendering is what this app has to match.**
@@ -347,44 +343,45 @@ class AppShapes(
 ) {
     companion object {
         /**
-         * Material You (2021): the mapping the retired View layer was using.
+         * Material You (2021).
          *
          * | role     | dp | step        | why                                       |
          * |----------|----|-------------|-------------------------------------------|
-         * | card     | 16 | large       | same radius the About card group shows    |
-         * | menu     | 16 | large       | menus and grouped cards share the card    |
-         * |          |    |             | radius so they read as one surface        |
-         * | menuItem | 8  | —           | tighter than large: a 40dp row needs a    |
-         * |          |    |             | corner that reads, not one that curves    |
+         * | card     | 12 | medium      | the spec's own card role — CardDefaults   |
+         * |          |    |             | resolves to `Shapes.medium`               |
+         * | menu     | 16 | large       | menus and grouped cards share one radius  |
+         * |          |    |             | so they read as one surface (app choice,  |
+         * |          |    |             | kept over the spec's extraLarge 28)       |
+         * | menuItem | 8  | —           | tighter than large: the ruled 48dp row    |
+         * |          |    |             | keeps its quiet 8dp corner — bigger       |
+         * |          |    |             | curves would swallow the row              |
          * | tooltip  | 4  | extraSmall  | tooltips stay small in both specs         |
          * | fab      | 16 | large       | matches the card it floats above          |
          *
-         * `card` is pinned to the group radius on purpose: one corner value for
-         * every card on every screen — the standalone privacy cards, the switch
-         * cards and the main list rows all match the four cards under the About
-         * heading, instead of each role drifting to its own number.
+         * `groupOuter` follows `card`: one corner value for every card surface
+         * on every screen, instead of each role drifting to its own number.
          */
         val Baseline = AppShapes(
-            card = RoundedCornerShape(16.dp),
+            card = RoundedCornerShape(12.dp),
             menu = RoundedCornerShape(16.dp),
             menuItem = RoundedCornerShape(8.dp),
             tooltip = RoundedCornerShape(4.dp),
             fab = RoundedCornerShape(16.dp),
-            groupOuter = RoundedCornerShape(16.dp),
+            groupOuter = RoundedCornerShape(12.dp),
             groupInner = RoundedCornerShape(4.dp),
         )
 
         /**
-         * M3 Expressive (2025): every role steps up one notch, using only the
-         * steps Expressive actually added — no invented numbers.
+         * M3 Expressive (2025): cards step up onto the new largeIncreased;
+         * the menu stays with the card's radius rather than the spec's
+         * extraLarge container (app choice, same as Baseline).
          *
          * | role     | 2021 | 2025 | step the 2025 value comes from |
          * |----------|------|------|--------------------------------|
-         * | card     | 16   | 20   | largeIncreased (group radius)  |
-         * | menu     | 16   | 20   | largeIncreased                 |
+         * | card     | 12   | 20   | largeIncreased (group radius)  |
+         * | menu     | 16   | 20   | follows the card               |
          * | menuItem | 8    | 8    | unchanged: see Baseline        |
-         * | tooltip  | 4    | 4    | extraSmall (unchanged on purpose: |
-         * |          |      |      |  tooltips stay small in both specs) |
+         * | tooltip  | 4    | 4    | extraSmall (unchanged on purpose) |
          * | fab      | 16   | 20   | largeIncreased                 |
          */
         val Expressive = AppShapes(
@@ -412,11 +409,9 @@ val LocalAppShapes = staticCompositionLocalOf { AppShapes.Baseline }
  *
  * [AppPalette] resolves the app's three levels (page, card, popup) once; this
  * carries the two that are not a `ColorScheme` slot to the call sites, the same
- * way [LocalAppShapes] carries the shape roles. They live beside the scheme
- * rather than inside it because AMOLED repaints the ramp outside the roles: on
- * the light and dark ramps the levels *are* Material roles (page and popup
- * `surfaceContainer`, card `surfaceBright`), but an AMOLED page is true black,
- * which no role resolves to. One local keeps that exception in one place.
+ * way [LocalAppShapes] carries the shape roles. The levels *are* Material roles
+ * (page and popup `surfaceContainer`, card `surfaceBright`) — one local keeps
+ * that assignment in one place.
  *
  * [popup] exists for a geometric reason: a popup panel is anchored to a row
  * *inside* a card, so most of it covers the card rather than the page. Painting

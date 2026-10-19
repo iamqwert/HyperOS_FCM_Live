@@ -46,22 +46,26 @@ object ThemeEngine {
         val dark = ThemePrefs.isDark(context)
         val variant = ThemePrefs.paletteStyle(context)
         val spec = ThemePrefs.specVersion(context)
-        val amoled = dark && ThemePrefs.isAmoled(context)
         val dynamic = ThemePrefs.dynamicColor(context)
         val seed = seed(context, dynamic)
 
         val key = (if (dark) "d" else "l") + ':' + variant.ordinal + ':' + spec + ':' +
-            (if (amoled) 'a' else 'n') + ':' + (if (dynamic) 'w' else 'c') + ':' + seed
+            (if (dynamic) 'w' else 'c') + ':' + seed
         val cached = sCached
         if (cached != null && key == sCacheKey) {
             return cached
         }
-        val specEnum = if (spec == ThemePrefs.SPEC_2025) {
-            Scheme.Spec.SPEC_2025
-        } else {
-            Scheme.Spec.SPEC_2021
+        // All three spec versions map through: 2026 is the CMF style's own
+        // layer (ThemePrefs.specVersion only ever hands it back for CMF), and
+        // folding it into 2021 here is what used to silently skip the whole
+        // ColorSpec2026 rule set — the CMF palette rendered with 2021 tone
+        // math while the UI advertised Spec 2026.
+        val specEnum = when (spec) {
+            ThemePrefs.SPEC_2025 -> Scheme.Spec.SPEC_2025
+            ThemePrefs.SPEC_2026 -> Scheme.Spec.SPEC_2026
+            else -> Scheme.Spec.SPEC_2021
         }
-        val built = AppPalette(Scheme.create(seed, variant, dark, specEnum), dark, amoled)
+        val built = AppPalette(Scheme.create(seed, variant, dark, specEnum), dark)
         sCached = built
         sCacheKey = key
         return built

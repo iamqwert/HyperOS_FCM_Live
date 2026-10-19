@@ -32,9 +32,13 @@ object ShortcutPublisher {
                 .setLongLabel(context.getString(R.string.shortcut_settings_long))
                 .setIcon(Icon.createWithResource(context, R.drawable.ic_shortcut_settings))
                 .setIntent(
-                    Intent(Intent.ACTION_VIEW).setClassName(
+                    // The home's settings TAB, not the standalone about page —
+                    // the shortcut must land where the bottom bar's 设置 lands:
+                    // same shell, same look, same foot clearance. MainActivity
+                    // picks the tab up from the action.
+                    Intent(MainActivity.ACTION_OPEN_SETTINGS).setClassName(
                         context.packageName,
-                        "io.github.howard20181.hyperos.fcmlive.AboutActivity"
+                        "io.github.howard20181.hyperos.fcmlive.MainActivity"
                     )
                 )
                 .build()
@@ -46,7 +50,7 @@ object ShortcutPublisher {
                 // page any more (the text lives in HELP.md / HELP_EN.md in the
                 // repository). The doc language follows the app's display
                 // language at publish time.
-                .setIntent(Intent(Intent.ACTION_VIEW, Uri.parse(AboutActivity.helpUrl(context))))
+                .setIntent(Intent(Intent.ACTION_VIEW, Uri.parse(AboutDelegate.helpUrl(context))))
                 .build()
             val fcm = ShortcutInfo.Builder(context, ID_FCM)
                 .setShortLabel(context.getString(R.string.fcm_diagnostics))
