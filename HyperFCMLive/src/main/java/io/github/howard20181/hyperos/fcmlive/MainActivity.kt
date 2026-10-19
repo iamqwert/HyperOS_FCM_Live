@@ -30,9 +30,9 @@ import android.view.View
 import android.view.WindowManager
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
-import io.github.howard20181.hyperos.fcmlive.nav.MaterialNavTransition
 import io.github.howard20181.hyperos.fcmlive.nav.Navigator
 import io.github.howard20181.hyperos.fcmlive.nav.Route
+import io.github.howard20181.hyperos.fcmlive.nav.rememberMaterialNavTransition
 import io.github.howard20181.hyperos.fcmlive.theme.AppPalette
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
@@ -412,8 +412,8 @@ class MainActivity : AppCompatActivity() {
      * clip taken from the device's screen corner, the 0.5 dim scrim, and input
      * closed for the duration of a transition. All four are on unconditionally,
      * with no setting exposed for them, which is how the reference ships them.
-     * Material keeps its own transition (see [MaterialNavTransition]) and with it
-     * no corner-clip effect: that look masks the sliding page with its own
+     * Material keeps its own transition (see [rememberMaterialNavTransition]) and
+     * with it no corner-clip effect: that look masks the sliding page with its own
      * rectangle, and a second mask on the same layer would fight it. Input stays
      * open under Material, as it always was.
      */
@@ -424,6 +424,10 @@ class MainActivity : AppCompatActivity() {
         SideEffect { navigator = pages }
 
         val miuix = LocalUiStyle.current.isMiuixBased
+        // Built whether or not the look is Material: it reads the theme's motion
+        // scheme, and a conditional composable call would have to remember its way
+        // through every look switch.
+        val materialTransition = rememberMaterialNavTransition()
         // What fills the strip the covered page's parallax vacates — the colour
         // the system's own window transition would have shown through. Miuix
         // paints the revealed layer in the theme's surface, which is what the
@@ -438,7 +442,7 @@ class MainActivity : AppCompatActivity() {
         NavDisplay(
             backStack = backStack,
             onBack = { pages.pop() },
-            transition = if (miuix) NavTransitions.MiuixDefault else MaterialNavTransition,
+            transition = if (miuix) NavTransitions.MiuixDefault else materialTransition,
             effects = NavDisplayEffects(
                 enableCornerClip = miuix,
                 cornerClipRadius = if (miuix) systemCorner else 0.dp,
