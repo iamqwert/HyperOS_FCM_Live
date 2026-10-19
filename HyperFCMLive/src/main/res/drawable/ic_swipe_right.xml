@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Symbols "swipe_right" (fill1, outlined family). Path data verbatim
+     from fonts.gstatic.com (Apache-2.0); the source canvas is 960x960 with a
+     -960 y origin, shifted down via the group.
+     -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M320-200q-83 0-141.5-58.5T120-400q0-83 58.5-141.5T320-600q83 0 141.5 58.5T520-400q0 83-58.5 141.5T320-200Zm0-80q50 0 85-35t35-85q0-50-35-85t-85-35q-50 0-85 35t-35 85q0 50 35 85t85 35Zm315 80q-11 13-24.5 21.5T584-78q-19-6-31.5-21.5T540-133v-535q0-19 12.5-33.5T584-724q15-7 29-.5t24 21.5l158 293q10 19 10 39t-10 39L637-200Zm37-130 96-189-96-189v378ZM255-440q11-11 17-25t6-29-6-29-17-25q-11-11-25.5-17t-29-6-29 6-25.5 17q-11 11-17 25t-6 29 6 29 17 25q11 11 25.5 17t29 6 29-6 25.5-17Z" />
+    </group>
+</vector>

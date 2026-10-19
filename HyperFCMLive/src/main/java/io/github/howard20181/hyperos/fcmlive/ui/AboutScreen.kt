@@ -1240,7 +1240,7 @@ private fun AboutBody(
                 // ui/PredictiveBack.kt, which reads this very state; nothing it
                 // touches is a colour, so no repaint callback is owed.
                 SettingsSwitchCard(
-                    iconRes = R.drawable.ic_arrow_back,
+                    iconRes = R.drawable.ic_swipe_right,
                     title = stringResource(R.string.swipe_back),
                     description = stringResource(R.string.about_sub_swipe_back),
                     checked = swipeBack,
