@@ -2,11 +2,11 @@ plugins {
     id 'com.android.application' version '9.4.1' apply false
     // Standalone Kotlin 2.4.20 — AGP's built-in Kotlin is stuck at 2.2.10, see
     // gradle.properties for the POM-verified evidence and the opt-out pair.
-    id 'org.jetbrains.kotlin.android' version '2.4.20' apply false
+    id 'org.jetbrains.kotlin.android' version '2.4.21' apply false
     // Route keys are `@Serializable` (the back stack is persisted by serializing
     // it). Published in lockstep with the compiler it plugs into, hence the same
     // version — the module applies it without a version, from here.
-    id 'org.jetbrains.kotlin.plugin.serialization' version '2.4.20' apply false
+    id 'org.jetbrains.kotlin.plugin.serialization' version '2.4.21' apply false
 }
 
 tasks.register('clean', Delete) {
