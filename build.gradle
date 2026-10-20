@@ -6,7 +6,7 @@ plugins {
     // Route keys are `@Serializable` (the back stack is persisted by serializing
     // it). Published in lockstep with the compiler it plugs into, hence the same
     // version — the module applies it without a version, from here.
-    id 'org.jetbrains.kotlin.plugin.serialization' version '2.4.20' apply false
+    id 'org.jetbrains.kotlin.plugin.serialization' version '2.4.21' apply false
 }
 
 tasks.register('clean', Delete) {
