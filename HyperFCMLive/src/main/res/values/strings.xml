@@ -240,6 +240,12 @@
     <string name="experiment_smart_power_release">Bypass Smart Power Blocking</string>
     <string name="experiment_smart_power_release_desc">Allows the app\'s FCM broadcasts and messaging service to start</string>
 
+    <!-- 「自动勾选新装应用」在实验功能页的新增区：开关与基线的语义见
+         Prefs.KEY_AUTO_CHECK_NEW / _BASELINE 与 AllowlistGate 的注释。 -->
+    <string name="experiment_section_auto_check">Auto Check</string>
+    <string name="experiment_auto_check_new">Auto-check new FCM apps</string>
+    <string name="experiment_auto_check_new_desc">This switch does not apply to unchecked apps after they are updated</string>
+
     <!-- 「显示调试日志」在设置页的「实验与调试」区（about_section_experiment_debug） -->
     <string name="experiment_debug_log">Debug Logging</string>
     <string name="experiment_debug_log_desc">Writes debug logs; turn on when troubleshooting</string>

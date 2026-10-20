@@ -234,6 +234,12 @@
     <string name="experiment_smart_power_release">Smart Power 拦截放行</string>
     <string name="experiment_smart_power_release_desc">放行应用 FCM 广播与消息服务启动</string>
 
+    <!-- 「自动勾选新装应用」：开关与基线的语义见 Prefs.KEY_AUTO_CHECK_NEW /
+         _BASELINE 与 AllowlistGate 的注释。 -->
+    <string name="experiment_section_auto_check">自动勾选</string>
+    <string name="experiment_auto_check_new">自动勾选新装 FCM 应用</string>
+    <string name="experiment_auto_check_new_desc">未勾选应用更新后，将不会应用本开关策略</string>
+
     <!-- 「显示调试日志」在设置页的「实验与调试」区（about_section_experiment_debug） -->
     <string name="experiment_debug_log">显示调试日志</string>
     <string name="experiment_debug_log_desc">输出调试日志，排查问题时启用</string>
