@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Process
@@ -23,6 +24,45 @@ internal object AllowlistGate {
 
     @Volatile
     private var sAllowlist: Set<String> = emptySet()
+
+    // ---- Auto-check experiment (Prefs.KEY_AUTO_CHECK_NEW / _BASELINE) ----
+    //
+    // The switch widens the allowlist without writing it: the effective answer
+    // is `sAllowlist ∪ autoSet`, where autoSet is the package manager's FCM
+    // client scan minus the baseline. The baseline is the part the hook cannot
+    // compute on its own — "what existed when the user turned the switch on,
+    // plus everything they unchecked since" — so it rides the same remote
+    // reload the allowlist does, and the scan half is recomputed locally.
+
+    /** The experiment switch as the last reload saw it. */
+    @Volatile
+    private var sAutoCheckEnabled = false
+
+    /**
+     * Packages the widening must never serve: the FCM set as it stood when the
+     * switch was turned on, grown by every later uncheck. **Null means the key
+     * is absent from the remote group** — the toggle landed without its
+     * baseline (one half of the pair write lost) — and the widening stays off
+     * entirely: fail closed, never "widen for everything".
+     */
+    @Volatile
+    private var sAutoBaseline: Set<String>? = null
+
+    /**
+     * The last scan's widening candidates: FCM clients minus the baseline as
+     * the scan saw it. The baseline filter is applied again at every read, so a
+     * baseline that changed between reloads cannot leak a package back in
+     * through a scan that predates the change.
+     */
+    @Volatile
+    private var sAutoSet: Set<String> = emptySet()
+
+    /** Last completed auto-check scan; drives the lazy stale check. */
+    @Volatile
+    private var sAutoScanMs = 0L
+
+    /** Coalesces the scan bursts a stream of installs would otherwise cause. */
+    private val sAutoScanQueued = AtomicBoolean(false)
 
     internal fun loadAllowlistFromRemotePrefs(module: XposedInterface) {
         try {
@@ -45,6 +85,7 @@ internal object AllowlistGate {
                 )
             }
             sAllowlist = loaded
+            loadAutoCheckConfig(module, prefs)
             sAllowlistFreshMs = SystemClock.uptimeMillis()
             sAllowlistFailureStreak = 0
         } catch (e: Exception) {
@@ -64,6 +105,134 @@ internal object AllowlistGate {
                 SystemClock.uptimeMillis() - HookerSupport.ALLOWLIST_STALE_MS + backoffMs
         }
         sAllowlistReadMs = SystemClock.uptimeMillis()
+    }
+
+    /**
+     * Read the auto-check pair from the same remote snapshot the allowlist just
+     * came from. Runs inside the reload's try block, so a throw leaves the last
+     * good pair in place — the same contract the allowlist itself has.
+     *
+     * A change invalidates the scan stamp (not the cached set): the next
+     * decision re-scans, and until then the old set is filtered through the
+     * *new* baseline, which can only narrow it.
+     */
+    private fun loadAutoCheckConfig(module: XposedInterface, prefs: SharedPreferences) {
+        val enabled = prefs.getBoolean(Prefs.KEY_AUTO_CHECK_NEW, false)
+        val stored = prefs.getStringSet(Prefs.KEY_AUTO_CHECK_BASELINE, null)
+        val baseline: Set<String>? = if (stored != null) HashSet(stored) else null
+        if (enabled != sAutoCheckEnabled || baseline != sAutoBaseline) {
+            // -1 marks "key absent" in the log, the one state that disables the
+            // widening outright; 0 is a legitimately empty baseline (nothing
+            // qualified when the switch turned on — everything after it is new).
+            module.logGated(
+                Log.INFO, HookerSupport.TAG,
+                "auto-check loaded: enabled=$enabled baseline=${baseline?.size ?: -1}"
+            )
+            sAutoScanMs = 0
+        }
+        sAutoCheckEnabled = enabled
+        sAutoBaseline = baseline
+    }
+
+    /**
+     * The widening's answer for one package, without any freshness work: a
+     * plain read of the reload state plus the cached scan. The baseline test
+     * runs here too — [sAutoSet] excludes the baseline as of its own scan, and
+     * this re-check closes the gap for a baseline that moved since.
+     */
+    private fun autoAllows(packageName: String?): Boolean {
+        if (packageName == null || !sAutoCheckEnabled) {
+            return false
+        }
+        val baseline = sAutoBaseline ?: return false
+        if (baseline.contains(packageName)) {
+            return false
+        }
+        return sAutoSet.contains(packageName)
+    }
+
+    /**
+     * Queue a re-scan when the cached one has gone stale. Called from the same
+     * hot paths as [touchAllowlistFreshness]; like it, the work happens on the
+     * allowlist handler thread and the caller answers from the cached state.
+     */
+    private fun touchAutoCheckFreshness(
+        module: XposedInterface,
+        systemContext: () -> Context?
+    ) {
+        if (!sAutoCheckEnabled || sAutoBaseline == null) {
+            return
+        }
+        if (SystemClock.uptimeMillis() - sAutoScanMs < HookerSupport.ALLOWLIST_STALE_MS) {
+            return
+        }
+        scheduleAutoScan(module, systemContext)
+    }
+
+    /**
+     * Post one scan to the allowlist handler thread. Coalesced: a burst of
+     * installs (or a decision stream during one) queues a single scan.
+     */
+    private fun scheduleAutoScan(
+        module: XposedInterface,
+        systemContext: () -> Context?
+    ) {
+        if (!sAutoCheckEnabled || sAutoBaseline == null) {
+            return
+        }
+        if (!sAutoScanQueued.compareAndSet(false, true)) {
+            return
+        }
+        try {
+            allowlistBackgroundHandler().post {
+                sAutoScanQueued.set(false)
+                runAutoScan(module, systemContext)
+            }
+        } catch (t: Throwable) {
+            sAutoScanQueued.set(false)
+            module.logGated(Log.WARN, HookerSupport.TAG, "Failed to schedule the auto-check scan", t)
+        }
+    }
+
+    /**
+     * Re-run the FCM client scan and rebuild the widening set.
+     *
+     * The scan needs the system context, which can be null during early boot;
+     * the stamp is left stale in that case, so the next decision retries — the
+     * same self-healing shape the allowlist read uses. A failed scan keeps the
+     * previous set: a partial marker answer can only narrow the widening, never
+     * widen it, and the stale stamp brings a full rescan once the package
+     * manager answers again.
+     */
+    private fun runAutoScan(
+        module: XposedInterface,
+        systemContext: () -> Context?
+    ) {
+        val baseline = sAutoBaseline
+        if (!sAutoCheckEnabled || baseline == null) {
+            return
+        }
+        val sys = systemContext() ?: return
+        val fcm = try {
+            FcmAppScan.queryFcmPackages(sys.packageManager) { label, t ->
+                module.logGated(Log.WARN, HookerSupport.TAG, label, t)
+            }
+        } catch (t: Throwable) {
+            module.logGated(Log.WARN, HookerSupport.TAG, "auto-check scan failed", t)
+            return
+        }
+        val widened = HashSet(fcm)
+        widened.removeAll(baseline)
+        if (widened != sAutoSet) {
+            // Content change only, mirroring the allowlist line: the counts are
+            // the part a troubleshooting session can act on.
+            module.logGated(
+                Log.INFO, HookerSupport.TAG,
+                "auto-check scan: fcm=${fcm.size} widened=${widened.size}"
+            )
+        }
+        sAutoSet = widened
+        sAutoScanMs = SystemClock.uptimeMillis()
     }
 
     internal fun hookAllowlist(
@@ -203,6 +372,9 @@ internal object AllowlistGate {
         ) {
             requestAllowlistReload(module)
         }
+        // The auto-check scan rides the same freshness idea: answer from the
+        // cached set, re-scan in the background when it has gone stale.
+        touchAutoCheckFreshness(module, systemContext)
     }
 
     internal fun getFcmAllowlist(
@@ -212,7 +384,19 @@ internal object AllowlistGate {
         touchAllowlistFreshness(module, systemContext)
         // A copy: callers that walk this (the autostart migration, the apply pass) must
         // not see sAllowlist swapped out from under them mid-iteration by a reload.
-        return HashSet(sAllowlist)
+        val merged = HashSet(sAllowlist)
+        // Auto-check widening, with the baseline filter re-applied at read time:
+        // sAutoSet excludes the baseline as of its own scan, and a baseline that
+        // changed since must not leak a package back in through the cached set.
+        val baseline = sAutoBaseline
+        if (sAutoCheckEnabled && baseline != null) {
+            for (pkg in sAutoSet) {
+                if (!baseline.contains(pkg)) {
+                    merged.add(pkg)
+                }
+            }
+        }
+        return merged
     }
 
     /** Membership without the copy — the hot path for the gates. */
@@ -224,7 +408,10 @@ internal object AllowlistGate {
         touchAllowlistFreshness(module, systemContext)
         // sAllowlist is only ever replaced wholesale (never mutated in place), so a
         // volatile read is a stable snapshot; no copy needed for a single contains().
-        return sAllowlist.contains(packageName)
+        if (sAllowlist.contains(packageName)) {
+            return true
+        }
+        return autoAllows(packageName)
     }
 
     /**
@@ -310,6 +497,26 @@ internal object AllowlistGate {
             val filter = IntentFilter(Prefs.ACTION_ALLOWLIST_CHANGED)
             val handler = allowlistBackgroundHandler()
             sys.registerReceiver(receiver, filter, null, handler, Context.RECEIVER_EXPORTED)
+            // Package events feed the auto-check scan cache, on a receiver of
+            // their own — deliberately NOT an action on the receiver above.
+            // That one rejects every sender it cannot positively identify as
+            // this module, and a system broadcast's sender is the platform
+            // ("android"), which would be rejected as foreign. These two
+            // actions are protected broadcasts: only the system can send them,
+            // so there is nothing for a sender check to guard against.
+            val packageReceiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    when (intent.action) {
+                        Intent.ACTION_PACKAGE_ADDED,
+                        Intent.ACTION_PACKAGE_REPLACED -> scheduleAutoScan(module, systemContext)
+                    }
+                }
+            }
+            val packageFilter = IntentFilter(Intent.ACTION_PACKAGE_ADDED)
+            packageFilter.addAction(Intent.ACTION_PACKAGE_REPLACED)
+            sys.registerReceiver(
+                packageReceiver, packageFilter, null, handler, Context.RECEIVER_EXPORTED
+            )
             allowlistReceiverRegistered = true
             module.logGated(Log.INFO, HookerSupport.TAG, "Allowlist receiver installed")
             return true

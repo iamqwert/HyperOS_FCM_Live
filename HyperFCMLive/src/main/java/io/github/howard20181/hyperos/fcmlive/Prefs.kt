@@ -375,6 +375,57 @@ object Prefs {
     /** UI-only: set while the mirror holds a smart-power change the module never saw. */
     private const val KEY_SMARTPOWER_RELEASE_PENDING_PUSH = "smartpower_release_pending_push"
 
+    /**
+     * Remote + local: "auto-check newly installed FCM apps".
+     *
+     * The settings app cannot be the detector for this one. A force-stopped app
+     * receives no broadcasts, no jobs and no alarms, and the requirement is that
+     * a fresh install is picked up with the module app dead — so the detection
+     * lives in system_server, at the same decision point that already asks the
+     * allowlist. But the hook side cannot *write* the allowlist: libxposed's
+     * remote preferences are read-only in the hooked process (the only writer is
+     * the app, through its XposedService binding). The feature therefore works
+     * as a dynamic extension of the allowlist rather than as a write into it:
+     *
+     * - this key, on, tells [AllowlistGate] to widen its answer;
+     * - [KEY_AUTO_CHECK_BASELINE] is the set of FCM packages that existed when
+     *   the switch was turned on (plus every package the user later unchecks) —
+     *   exactly the packages the switch must **never** widen for;
+     * - the effective allowlist becomes
+     *   `allowlist ∪ (scan now − baseline)`, recomputed from the package
+     *   manager, so a package installed *after* the switch turned on is served
+     *   without anything being written anywhere.
+     *
+     * The baseline is what keeps the two stated guarantees: pre-existing apps
+     * the user never checked stay unchecked forever (they are in the baseline
+     * before the first widening decision), and an app update is not an install —
+     * an updated package keeps its baseline membership, so its status does not
+     * change behind the user's back. Unchecking writes the package into the
+     * baseline too, which is what makes an auto-checked app indistinguishable
+     * from a manual one: checked = on the list, unchecked = on the baseline,
+     * and neither state can silently revert.
+     *
+     * The two keys are written in **one** editor transaction and must be: a
+     * toggle that landed without its baseline would make the hook widen for
+     * every FCM package on the device — the empty-baseline case answers nothing
+     * (fail closed) until the baseline arrives.
+     *
+     * Default **off**, like every other experiment: it widens whom the module
+     * acts for without asking per app, which is a decision the user makes
+     * deliberately.
+     */
+    const val KEY_AUTO_CHECK_NEW = "auto_check_new_apps"
+    /**
+     * Remote + local: the packages [KEY_AUTO_CHECK_NEW] must never widen for —
+     * the FCM set as it stood when the switch was turned on, grown by every
+     * package the user unchecks afterwards. Peer of the toggle, written in the
+     * same transaction, never cleared: a disabled switch ignores it, and a
+     * re-enabled one wants the old history back.
+     */
+    const val KEY_AUTO_CHECK_BASELINE = "auto_check_baseline"
+    /** UI-only: set while the mirror holds an auto-check change the module never saw. */
+    private const val KEY_AUTO_CHECK_PENDING_PUSH = "auto_check_pending_push"
+
     /** Action the app broadcasts after writing, to refresh system_server. */
     const val ACTION_ALLOWLIST_CHANGED = MODULE_PKG + ".ALLOWLIST_CHANGED"
 
@@ -965,6 +1016,125 @@ object Prefs {
             } catch (t: Throwable) {
                 localPrefs(app).edit()
                     .putBoolean(KEY_SMARTPOWER_RELEASE_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+        }
+    }
+
+    /** Auto-check switch value as the UI last left it. */
+    @JvmStatic
+    fun readLocalAutoCheckNew(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_AUTO_CHECK_NEW, false)
+    }
+
+    /** Auto-check counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingAutoCheckPush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_AUTO_CHECK_PENDING_PUSH, false)
+    }
+
+    /**
+     * The auto-check baseline as the UI last left it, or **null while the key
+     * was never written** — the distinction that decides whether turning the
+     * switch on seeds the baseline with a fresh scan (first enable) or keeps
+     * the history from a previous enable. An empty set that was actually
+     * written is a real answer ("nothing qualified then, everything after is
+     * new") and comes back as an empty set, not null.
+     */
+    @JvmStatic
+    fun readLocalAutoCheckBaseline(context: Context): Set<String>? {
+        return localPrefs(context).getStringSet(KEY_AUTO_CHECK_BASELINE, null)
+    }
+
+    private fun markPendingAutoCheckPush(context: Context) {
+        localPrefs(context).edit().putBoolean(KEY_AUTO_CHECK_PENDING_PUSH, true).apply()
+    }
+
+    private fun clearPendingAutoCheckPush(context: Context) {
+        localPrefs(context).edit().putBoolean(KEY_AUTO_CHECK_PENDING_PUSH, false).apply()
+    }
+
+    /**
+     * Write the auto-check switch **and** its baseline as one transaction, and
+     * make them live.
+     *
+     * One transaction is not an optimization here, it is the contract: the hook
+     * widens only for a package that is on neither the allowlist nor the
+     * baseline, so a toggle that landed without its baseline would read as
+     * "widen for everything FCM" (an empty stored baseline is indistinguishable
+     * from a missing one through [readLocalAutoCheckBaseline]'s default). The
+     * hook side mirrors this by refusing to widen until the baseline key is
+     * present in the remote group.
+     *
+     * Callers pass the baseline to persist along with the new state: the scan
+     * taken at the moment the switch turns on (see the experiment screen), or
+     * — on the way off — the baseline unchanged, since the materialized
+     * allowlist now carries the state and the history must survive a later
+     * re-enable.
+     */
+    @JvmStatic
+    fun writeAutoCheckEnable(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean,
+        baseline: Set<String>
+    ) {
+        val copy = HashSet(baseline)
+        val app = appContext(context)
+        localPrefs(app).edit()
+            .putBoolean(KEY_AUTO_CHECK_NEW, enabled)
+            .putStringSet(KEY_AUTO_CHECK_BASELINE, copy)
+            .apply()
+        if (remotePrefs == null) {
+            markPendingAutoCheckPush(app)
+            broadcastAllowlistChanged(app)
+            return
+        }
+        clearPendingAutoCheckPush(app)
+        WRITER.execute {
+            try {
+                remotePrefs.edit()
+                    .putBoolean(KEY_AUTO_CHECK_NEW, enabled)
+                    .putStringSet(KEY_AUTO_CHECK_BASELINE, copy)
+                    .commit()
+            } catch (t: Throwable) {
+                markPendingAutoCheckPush(app)
+            }
+            broadcastAllowlistChanged(app)
+        }
+    }
+
+    /**
+     * Grow the baseline by the packages the user just unchecked, and make it
+     * live.
+     *
+     * This is the write that makes an auto-checked app behave like a manual
+     * one: without it the dynamic half of the effective allowlist would put the
+     * package straight back the next time the hook re-scans, and the row on
+     * the 应用 page would lie. Baseline membership is permanent by design —
+     * nothing removes from it, so an unchecked package stays unchecked across
+     * updates, reinstalls and switch toggles.
+     */
+    @JvmStatic
+    fun writeAutoCheckBaseline(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        baseline: Set<String>
+    ) {
+        val copy = HashSet(baseline)
+        val app = appContext(context)
+        localPrefs(app).edit().putStringSet(KEY_AUTO_CHECK_BASELINE, copy).apply()
+        if (remotePrefs == null) {
+            markPendingAutoCheckPush(app)
+            broadcastAllowlistChanged(app)
+            return
+        }
+        clearPendingAutoCheckPush(app)
+        WRITER.execute {
+            try {
+                remotePrefs.edit().putStringSet(KEY_AUTO_CHECK_BASELINE, copy).commit()
+            } catch (t: Throwable) {
+                markPendingAutoCheckPush(app)
             }
             broadcastAllowlistChanged(app)
         }

@@ -11,7 +11,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.appcompat.app.AppCompatActivity
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -89,6 +88,25 @@ class MainActivity : AppCompatActivity() {
      */
     private val iconsByPkg = androidx.compose.runtime.mutableStateMapOf<String, android.graphics.drawable.Drawable?>()
     private var allowlist: Set<String> = HashSet()
+
+    // ---- Auto-check experiment (Prefs.KEY_AUTO_CHECK_NEW / _BASELINE) ----
+    //
+    // The hook serves FCM packages that are neither checked nor baseline when
+    // the switch is on; these three fields mirror that state so the 应用
+    // page's checkboxes answer exactly what system_server answers. The virtual
+    // set is recomputed from the package manager (same shared scan as the
+    // hook) on every list load and every allowlist reload — the screen owns no
+    // state of its own here.
+    private var autoCheckEnabled = false
+    private var autoCheckBaseline: Set<String> = emptySet()
+
+    /**
+     * FCM apps served by the widening but not on the allowlist: the rows the
+     * switch checks "by itself". Kept apart from [allowlist] so a manual
+     * uncheck of one of them can pin it into the baseline instead of
+     * silently reverting on the next scan.
+     */
+    private var autoCheckedVirtual: Set<String> = emptySet()
 
     /** Row icons: the only piece of the old adapter that survived. */
     private var store: AppListStore? = null
@@ -708,9 +726,30 @@ class MainActivity : AppCompatActivity() {
         )
         if (next) {
             allowlist = HashSet(allowlist).also { it.add(app.packageName) }
+            // A manually checked row leaves the widening for the real list;
+            // keeping it in the virtual set too would blur which list carries
+            // it (and an uncheck right after would pin it to the baseline for
+            // nothing).
+            if (autoCheckedVirtual.contains(app.packageName)) {
+                autoCheckedVirtual =
+                    HashSet(autoCheckedVirtual).also { it.remove(app.packageName) }
+            }
             perhapsAdvertiseMultiSelect()
         } else {
             allowlist = HashSet(allowlist).also { it.remove(app.packageName) }
+            // Unchecking a row that only the widening had checked pins the
+            // package into the baseline: without the write, the next scan
+            // would put the checkbox straight back and the row would argue
+            // with the choice the user just made. Baseline membership is
+            // permanent, which is exactly what makes this indistinguishable
+            // from unchecking a manually checked app.
+            if (autoCheckedVirtual.contains(app.packageName)) {
+                autoCheckedVirtual =
+                    HashSet(autoCheckedVirtual).also { it.remove(app.packageName) }
+                Prefs.writeAutoCheckBaseline(
+                    this, remotePrefs(), autoCheckBaseline + app.packageName
+                )
+            }
         }
         updateAllowlist()
         // Stay in place on tap. Order refreshes on pull-to-refresh / reopen.
@@ -1388,6 +1427,18 @@ class MainActivity : AppCompatActivity() {
             // the screen shows until the next app-side write.
             Prefs.writeSmartPowerRelease(this, prefs, Prefs.readLocalSmartPowerRelease(this))
         }
+        if (Prefs.hasPendingAutoCheckPush(this)) {
+            // Same repair for the auto-check switch — with one rule kept
+            // sacred: the switch and its baseline travel together (see
+            // [Prefs.writeAutoCheckEnable]), so the repair re-writes the pair
+            // as one write. A repaired toggle without its baseline would read
+            // to the hook as "widen for every FCM app on the device".
+            Prefs.writeAutoCheckEnable(
+                this, prefs,
+                Prefs.readLocalAutoCheckNew(this),
+                Prefs.readLocalAutoCheckBaseline(this) ?: emptySet()
+            )
+        }
         if (Prefs.hasPendingPush(this)) {
             // A check made before the service bound is newer than the remote set:
             // push it up (the write broadcasts, so system_server re-reads too)
@@ -1414,10 +1465,32 @@ class MainActivity : AppCompatActivity() {
             Prefs.broadcastAllowlistChanged(this)
         }
         for (app in allApps) {
-            app.checked = allowlist.contains(app.packageName)
+            app.checked = effectiveChecked(app.packageName)
         }
         sortApps()
         filterApps(currentQuery)
+        // Refresh the widening mirror: the switch may have been flipped on the
+        // experiment screen since the last pass (the fields above were seeded
+        // at create time), and a row the hook now serves must draw checked
+        // before the user asks why. The FCM half of the answer comes from the
+        // package manager, so it runs off the main thread; until it lands the
+        // previous virtual set (or none) is drawn.
+        autoCheckEnabled = Prefs.readLocalAutoCheckNew(this)
+        autoCheckBaseline = Prefs.readLocalAutoCheckBaseline(this) ?: emptySet()
+        if (autoCheckEnabled) {
+            recomputeAutoCheckedVirtual()
+        } else if (autoCheckedVirtual.isNotEmpty()) {
+            // Switch went off: rows checked only by the widening go back to
+            // unchecked (the materialized members stay checked — they are on
+            // the allowlist for real now).
+            autoCheckedVirtual = emptySet()
+            for (app in allApps) {
+                if (app.checked && !allowlist.contains(app.packageName)) {
+                    app.checked = false
+                }
+            }
+            refreshVisibleRows()
+        }
     }
 
     private fun updateAllowlist() {
@@ -1427,6 +1500,63 @@ class MainActivity : AppCompatActivity() {
         // writeAllowlist keeps the change in the mirror and flags it so the next
         // bind pushes it up rather than losing it.
         Prefs.writeAllowlist(this, remotePrefs(), allowlist)
+    }
+
+    /**
+     * What a row's checkbox shows: the real allowlist, plus — while the
+     * auto-check switch is on — the widening the hook applies. One predicate
+     * for every checked-assignment on this screen so a row can never disagree
+     * with the gate that actually wakes its app.
+     */
+    private fun effectiveChecked(packageName: String): Boolean {
+        return allowlist.contains(packageName) || autoCheckedVirtual.contains(packageName)
+    }
+
+    /**
+     * Re-derive [autoCheckedVirtual] from the package manager: the FCM client
+     * scan (the same shared [FcmAppScan] the hook runs) minus the baseline,
+     * minus what is already on the allowlist for real. Runs off the main
+     * thread, lands on the UI thread through the standard safe-post.
+     *
+     * Generation-guarded against a full [loadApps] that may have started
+     * meanwhile: the loser walks away, the full scan computes the same set
+     * itself. Baseline read again at apply time so a switch flip that happened
+     * during the scan cannot widen with a stale exemption set.
+     */
+    private fun recomputeAutoCheckedVirtual() {
+        val generation = appScanGeneration.get()
+        Thread {
+            try {
+                val fcm = FcmAppScan.queryFcmPackages(packageManager) { label, t ->
+                    Log.w(TAG_UI, label, t)
+                }
+                if (appScanGeneration.get() != generation) {
+                    return@Thread
+                }
+                runOnUiThreadSafe {
+                    val baseline = autoCheckBaseline
+                    if (!autoCheckEnabled || baseline == null) {
+                        return@runOnUiThreadSafe
+                    }
+                    val virtual = HashSet(fcm)
+                    virtual.removeAll(baseline)
+                    virtual.removeAll(allowlist)
+                    virtual.remove(packageName)
+                    if (virtual != autoCheckedVirtual) {
+                        autoCheckedVirtual = virtual
+                        for (app in allApps) {
+                            app.checked = effectiveChecked(app.packageName)
+                        }
+                        sortApps()
+                        filterApps(currentQuery)
+                    }
+                }
+            } catch (t: Throwable) {
+                // Same reasoning as [loadApps]' catch: swallowed here would
+                // leave rows drawing one way while the hook serves another.
+                Log.w(TAG_UI, "Failed to compute the auto-checked apps", t)
+            }
+        }.start()
     }
 
     /** True while `generation` is still the newest scan. */
@@ -1472,6 +1602,21 @@ class MainActivity : AppCompatActivity() {
                 if (!isLatestScan(generation)) {
                     return@Thread
                 }
+                // The auto-check widening, computed from the same scan the
+                // rows come from and by the same rule the hook applies (see
+                // [AllowlistGate]): FCM clients minus the baseline, minus what
+                // is checked for real. Rows in this set draw checked while the
+                // switch is on — the checkbox answers what system_server
+                // answers, not merely what this screen remembers.
+                val virtual = if (autoCheckEnabled) {
+                    val v = HashSet(support.fcm)
+                    autoCheckBaseline?.let { v.removeAll(it) }
+                    v.removeAll(allow)
+                    v.remove(packageName)
+                    v
+                } else {
+                    emptySet<String>()
+                }
                 val result = ArrayList<AppListStore.AppEntry>()
                 for (pkg in support.fcm) {
                     val ai = try {
@@ -1495,7 +1640,8 @@ class MainActivity : AppCompatActivity() {
                     result.add(entry)
                 }
                 for (app in result) {
-                    app.checked = allow.contains(app.packageName)
+                    app.checked = allow.contains(app.packageName) ||
+                        virtual.contains(app.packageName)
                 }
                 result.sortWith { a, b -> compareEntries(a, b) }
                 // Remember the scan for a configuration change.
@@ -1507,6 +1653,7 @@ class MainActivity : AppCompatActivity() {
                     if (!isLatestScan(generation)) {
                         return@runOnUiThreadSafe
                     }
+                    autoCheckedVirtual = virtual
                     applyAppSnapshot(result, true)
                     // Xposed remote prefs may bind after the first package query;
                     // re-read allowlist so checked apps stay on top after update.
@@ -1543,10 +1690,13 @@ class MainActivity : AppCompatActivity() {
      */
     private fun applyAppSnapshot(next: List<AppListStore.AppEntry>, stopRefresh: Boolean) {
         // Always re-sync from the live allowlist — loadApps may have started
-        // before libxposed bound and read remote prefs.
+        // before libxposed bound and read remote prefs. The widening rides
+        // along: a row the hook serves draws checked regardless of which pass
+        // is landing on the screen.
         val live = allowlist
         for (app in next) {
-            app.checked = live.contains(app.packageName)
+            app.checked = live.contains(app.packageName) ||
+                autoCheckedVirtual.contains(app.packageName)
         }
         val ordered = ArrayList(next)
         ordered.sortWith { a, b -> compareEntries(a, b) }
@@ -1572,6 +1722,98 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG_UI = "HyperFCMLive"
+
+        /**
+         * The experiment screen's auto-check toggle. Lives on the companion
+         * because the flip happens with the 应用 page (and its instance
+         * state) out of sight — the screen talks to prefs and the package
+         * manager directly, and this page re-derives its rows on the next
+         * [reloadAllowlist] pass.
+         *
+         * ON  — first enable seeds the baseline with the FCM scan of the
+         * moment (everything existing is thereby exempt from the widening,
+         * forever: apps the user never checked stay unchecked across updates,
+         * which are not installs). A later enable keeps the old baseline, so
+         * the history of manual unchecks survives a toggle cycle. A failed
+         * scan falls back to seeding with the current allowlist: less
+         * complete, but strictly on the safe side — a package missed by the
+         * scan stays exempt rather than being auto-checked by surprise.
+         *
+         * OFF — the widening's virtual members are materialized into the real
+         * allowlist before the switch flips: they have been drawn and served
+         * as checked, and turning the feature off must not silently uncheck
+         * them. Baseline is written back unchanged so a later re-enable sees
+         * the same history.
+         *
+         * The switch and its baseline are written by one transaction in every
+         * path — a toggle that landed alone would either widen for everything
+         * (no baseline) or strand a pending flag (see
+         * [Prefs.writeAutoCheckEnable]).
+         */
+        fun handleAutoCheckToggle(context: Context, checked: Boolean) {
+            val service = boundService
+            val remote = try {
+                service?.getRemotePreferences(Prefs.GROUP_CONFIG)
+            } catch (ignored: Throwable) {
+                null
+            }
+            // Same authority rule the reload uses: remote when it holds
+            // anything, the local mirror otherwise.
+            val current = remote?.let { Prefs.readAllowlist(it) }
+                ?.takeIf { it.isNotEmpty() }
+                ?: Prefs.readLocalAllowlist(context)
+            if (checked) {
+                val existing = Prefs.readLocalAutoCheckBaseline(context)
+                if (existing != null) {
+                    Prefs.writeAutoCheckEnable(context, remote, true, existing)
+                    return
+                }
+                var fcm = try {
+                    FcmAppScan.queryFcmPackages(context.packageManager) { label, t ->
+                        Log.w(TAG_UI, label, t)
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG_UI, "Auto-check baseline scan failed", t)
+                    null
+                }
+                if (fcm == null) {
+                    // Scan failed entirely: exempt what is already selected
+                    // rather than risking a surprise auto-check of unknowns.
+                    fcm = HashSet(current)
+                } else if (fcm.isEmpty()) {
+                    // A legitimately empty baseline is fine, but only when the
+                    // scan actually answered; an empty answer with the current
+                    // allowlist non-empty means the queries came back hollow
+                    // (they are visibility-dependent) — prefer safety.
+                    fcm = HashSet(current)
+                }
+                Prefs.writeAutoCheckEnable(context, remote, true, fcm)
+            } else {
+                val baseline = Prefs.readLocalAutoCheckBaseline(context) ?: emptySet()
+                val virtual = try {
+                    val fcm = FcmAppScan.queryFcmPackages(context.packageManager) { label, t ->
+                        Log.w(TAG_UI, label, t)
+                    }
+                    val v = HashSet(fcm)
+                    v.removeAll(baseline)
+                    v
+                } catch (t: Throwable) {
+                    // Without a scan there is nothing to materialize; the
+                    // switch still flips and the widening still stops — the
+                    // virtual members simply stay unchecked, which is the
+                    // pre-feature behaviour rather than a regression.
+                    Log.w(TAG_UI, "Auto-check materialize scan failed", t)
+                    emptySet()
+                }
+                // Order matters: materialize first, flip second. A crash in
+                // between leaves the widening on with everything it served now
+                // also on the real list — consistent, just redundant.
+                if (virtual.isNotEmpty()) {
+                    Prefs.writeAllowlist(context, remote, current + virtual)
+                }
+                Prefs.writeAutoCheckEnable(context, remote, false, baseline)
+            }
+        }
 
         /**
          * The bound libxposed service, at process level: the helper delivers its
@@ -1732,151 +1974,39 @@ class MainActivity : AppCompatActivity() {
             // regardless of what its Manifest says. The check is a plain name
             // test, not a marker count.
             support.fcm.add(GMS_PACKAGE_NAME)
-            // Markers 2, 3, 4 and 5, device-wide. Kept as separate sets, not
-            // one: the rule counts them separately. Marker 5 tracks which
-            // packages' RECEIVE receiver is Google's notifications-platform
-            // PushReceiver — the entrypoint shape of Google's own apps, which
-            // ship no Firebase SDK push component.
-            val byIidReceiver = HashSet<String>()
-            val byMessagingEvent = HashSet<String>()
-            val byReceive = HashSet<String>()
-            val byGooglePushReceiver = HashSet<String>()
-            try {
-                val services = pm.queryIntentServices(
-                    Intent(HookerSupport.ACTION_MESSAGING_EVENT),
-                    PackageManager.ResolveInfoFlags.of(0)
-                )
-                for (ri in services) {
-                    // Services resolve into serviceInfo; activityInfo is the
-                    // receiver/activity field and stays null here.
-                    byMessagingEvent.add(ri.serviceInfo.packageName)
-                }
-            } catch (t: Throwable) {
-                Log.w(TAG_UI, "Failed to query FCM messaging services", t)
-            }
-            try {
-                val receivers = pm.queryBroadcastReceivers(
-                    Intent(HookerSupport.ACTION_INSTANCE_ID_EVENT),
-                    PackageManager.ResolveInfoFlags.of(0)
-                )
-                for (ri in receivers) {
-                    val info = ri.activityInfo ?: continue
-                    byIidReceiver.add(info.packageName)
-                }
-            } catch (t: Throwable) {
-                Log.w(TAG_UI, "Failed to query instance-id receivers", t)
-            }
-            try {
-                val receivers = pm.queryBroadcastReceivers(
-                    Intent(HookerSupport.ACTION_REMOTE_INTENT),
-                    PackageManager.ResolveInfoFlags.of(0)
-                )
-                for (ri in receivers) {
-                    val info = ri.activityInfo ?: continue
-                    byReceive.add(info.packageName)
-                    if (HookerSupport.isGooglePushReceiverClass(info.name)) {
-                        byGooglePushReceiver.add(info.packageName)
-                    }
-                }
-            } catch (t: Throwable) {
-                Log.w(TAG_UI, "Failed to query C2DM receivers", t)
+            // Markers 2, 3, 4 and 5, device-wide, queried by the shared scan
+            // ([FcmAppScan]) — the exact code system_server runs when the
+            // auto-check experiment evaluates a newly installed package, so
+            // the screen and the hook cannot drift apart on what qualifies.
+            // Marker 5 tracks which packages' RECEIVE receiver is Google's
+            // notifications-platform PushReceiver — the entrypoint shape of
+            // Google's own apps, which ship no Firebase SDK push component.
+            val markers = FcmAppScan.queryMarkers(pm) { label, t ->
+                Log.w(TAG_UI, label, t)
             }
             // The candidate set: everything at least one query answered for.
             // A package gets in only after the one rule is applied to
             // everything known about it — the union is the *input*, not the
             // result.
             val candidates = HashSet<String>()
-            candidates.addAll(byIidReceiver)
-            candidates.addAll(byMessagingEvent)
-            candidates.addAll(byReceive)
+            candidates.addAll(markers.iid)
+            candidates.addAll(markers.messaging)
+            candidates.addAll(markers.receive)
             for (pkg in candidates) {
-                if (isFcmClient(
-                        byIidReceiver.contains(pkg),      // ②
-                        byMessagingEvent.contains(pkg),   // ③
-                        byReceive.contains(pkg),          // ④
-                        byGooglePushReceiver.contains(pkg) // ⑤
+                if (FcmAppScan.isFcmClient(
+                        markers.iid.contains(pkg),          // ②
+                        markers.messaging.contains(pkg),    // ③
+                        markers.receive.contains(pkg),      // ④
+                        markers.googleReceive.contains(pkg) // ⑤
                     )
                 ) {
                     support.fcm.add(pkg)
                 }
-                if (declaresMiPushService(pm, pkg)) {
+                if (FcmAppScan.declaresMiPushService(pm, pkg, MIPUSH_SERVICE_CLASS)) {
                     support.miPush.add(pkg)
                 }
             }
             return support
-        }
-
-        /**
-         * The one rule, in one place: **any two of ②③④, or ② alone, ③ alone, or ⑤ alone.**
-         *
-         * Written out as an explicit table rather than as arithmetic on a count,
-         * because the accepted shapes are not a count — "② alone" and "③ alone"
-         * are each one marker while ②+③ is two, and `④ alone` has to be rejected
-         * even though it is also one marker. A boolean table says that;
-         * `sum >= 2 || has2 || has3` hides it.
-         *
-         * ⑤ — the RECEIVE receiver resolves to Google's notifications-platform
-         * PushReceiver — is accepted alone: Google's own apps carry that
-         * entrypoint and none of the Firebase SDK markers, and the class
-         * namespace is a merged Google library that third-party apps do not
-         * reproduce.
-         */
-        private fun isFcmClient(
-            hasIidReceiver: Boolean,
-            hasMessagingEvent: Boolean,
-            hasReceive: Boolean,
-            hasGooglePushReceiver: Boolean
-        ): Boolean {
-            // ②③④: any two.
-            val amongActions =
-                (hasIidReceiver && hasMessagingEvent) ||
-                    (hasIidReceiver && hasReceive) ||
-                    (hasMessagingEvent && hasReceive)
-            if (amongActions) {
-                return true
-            }
-            // ② alone or ③ alone.
-            if (hasIidReceiver || hasMessagingEvent) {
-                return true
-            }
-            // ⑤ alone: Google's own push entrypoint.
-            if (hasGooglePushReceiver) {
-                return true
-            }
-            // Everything else: ④ alone, or nothing.
-            return false
-        }
-
-        /**
-         * Whether `pkg` ships MiPush: it declares the SDK's push service.
-         *
-         * MiPush is a system-channel push, so an app that has it does not need
-         * this module to keep a second (FCM) route alive — the list tags those apps
-         * and the overflow menu can leave them out.
-         *
-         * A direct component lookup — fine here because every caller passes a
-         * package the intent queries already made visible. No MiPush action is
-         * declared in `<queries>`: the SDK's service often ships without an
-         * intent-filter, so a query could not see it, while a component lookup
-         * on a visible package can.
-         *
-         * The lookup has to ask for disabled components, because on MIUI /
-         * HyperOS a disabled `XMPushService` means the opposite of what it
-         * looks like: MiPush is not an SDK that keeps its own connection, and a
-         * disabled state is the sign that MiPush is *live* for that app.
-         */
-        private fun declaresMiPushService(pm: PackageManager, pkg: String): Boolean {
-            return try {
-                pm.getServiceInfo(
-                    ComponentName(pkg, MIPUSH_SERVICE_CLASS),
-                    PackageManager.MATCH_DISABLED_COMPONENTS or
-                        PackageManager.MATCH_DISABLED_UNTIL_USED_COMPONENTS
-                )
-                true
-            } catch (ignored: Throwable) {
-                // Not declared (or not visible to us): no MiPush.
-                false
-            }
         }
 
         private fun sameAppSnapshot(
