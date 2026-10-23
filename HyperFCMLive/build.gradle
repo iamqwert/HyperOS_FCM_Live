@@ -269,7 +269,7 @@ dependencies {
     // `@Serializable` route keys, and `rememberNavBackStack`'s saver, which is
     // the library's own line for it. The compiler plugin is declared in the root
     // build and applied above; this is the runtime half.
-    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
     // Compile-time hidden-API signatures (not packaged in the APK).
@@ -279,7 +279,7 @@ dependencies {
     // LaunchedEffect land on the same artifacts. The Compose BOM resolves these
     // transitively already; declared here so the version the module compiles
     // against is pinned in this file rather than inherited by accident.
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.12.0'
     // JVM unit tests (no device / ADB). Release 3.5.3 dropped this line while
     // keeping src/test, which left both test classes importing org.junit with no
     // provider on the classpath: `:HyperFCMLive:testDebugUnitTest` did not even
