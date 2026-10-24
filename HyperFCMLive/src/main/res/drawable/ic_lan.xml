@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Symbols "lan" (fill1, outlined family, 24px). Path data verbatim
+     from
+     https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsoutlined/lan/fill1/24px.svg
+     — the source red line at the top of theme/ComposeTokens.kt; the source canvas
+     is 960x960 with a -960 y origin, shifted down via the group.     The M3 look's 连接 category leading icon (EventTab.Connection).
+     -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="@android:color/white"
+            android:pathData="M120-80v-280h120v-160h200v-80H320v-280h320v280H520v80h200v160h120v280H520v-280h120v-80H320v80h120v280H120Z" />
+    </group>
+</vector>

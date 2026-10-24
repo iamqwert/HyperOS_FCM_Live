@@ -1703,11 +1703,13 @@ private fun LazyItemScope.AppRow(
                     // exempt row reads no different for being exempt.
                     text = packageName,
                     // Miuix rows print their summary at body2's size (again what
-                    // BasicComponent sets).
+                    // BasicComponent sets); Material rows take the list token's
+                    // supporting size, bodyMedium — the same grade the settings
+                    // rows and the records rows now read.
                     style = if (LocalUiStyle.current.isMiuixBased) {
                         TextStyle(fontSize = MiuixTheme.textStyles.body2.fontSize)
                     } else {
-                        MaterialTheme.typography.bodySmall
+                        MaterialTheme.typography.bodyMedium
                     },
                     color = supportingColor
                 )

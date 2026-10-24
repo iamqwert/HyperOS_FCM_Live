@@ -302,6 +302,7 @@ internal object GmsSupport {
         module: XposedInterface,
         classLoader: ClassLoader,
         hookE: (Executable) -> XposedInterface.HookBuilder,
+        logSkipOtherGeneration: (String) -> Unit,
         getSystemContext: () -> Context?
     ) {
         val configureClass =
@@ -312,10 +313,17 @@ internal object GmsSupport {
         scenarioField.isAccessible = true
 
         // OS3: 7 params; OS4: 8 params (extra Map). PowerKeeperAppConfigure is arg 2.
+        // A missing form is the other generation's shape, so it reports through
+        // logSkipOtherGeneration (DEBUG) instead of passing silently — same
+        // two-level absence contract as every other hook in this module.
         for (paramCount in intArrayOf(7, 8)) {
             val method = configureClass.declaredMethods.firstOrNull { m ->
                 m.name == "fillScenarioContent" && m.parameterCount == paramCount
-            } ?: continue
+            }
+            if (method == null) {
+                logSkipOtherGeneration("PowerKeeperAppConfigure#fillScenarioContent($paramCount args)")
+                continue
+            }
 
             hookE(method).intercept { chain: XposedInterface.Chain ->
                 chain.proceed()

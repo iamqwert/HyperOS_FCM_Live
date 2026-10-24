@@ -268,8 +268,10 @@ dependencies {
     implementation 'top.yukonga.miuix.kmp:miuix-nav-android:0.9.4'
     // `@Serializable` route keys, and `rememberNavBackStack`'s saver, which is
     // the library's own line for it. The compiler plugin is declared in the root
-    // build and applied above; this is the runtime half.
-    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0'
+    // build and applied above; this is the runtime half. 1.12.0 is built on
+    // Kotlin 2.4.10 and the module compiles at 2.4.21, so the metadata is read
+    // by a newer compiler, never an older one — the only direction that breaks.
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
     // Compile-time hidden-API signatures (not packaged in the APK).

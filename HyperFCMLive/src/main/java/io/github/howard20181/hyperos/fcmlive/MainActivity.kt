@@ -43,6 +43,7 @@ import io.github.howard20181.hyperos.fcmlive.ui.AboutTabScreen
 import io.github.howard20181.hyperos.fcmlive.ui.AppListStore
 import io.github.howard20181.hyperos.fcmlive.ui.ExperimentScreen
 import io.github.howard20181.hyperos.fcmlive.ui.HomeShell
+import io.github.howard20181.hyperos.fcmlive.records.RecordsScreen
 import io.github.howard20181.hyperos.fcmlive.ui.HomeTab
 import io.github.howard20181.hyperos.fcmlive.ui.LicensesScreen
 import io.github.howard20181.hyperos.fcmlive.ui.MiuixHomeShell
@@ -504,6 +505,13 @@ class MainActivity : AppCompatActivity() {
                     onRecheck = { recheckModuleActive() }
                 )
                 HomeTab.Apps -> AppListTab()
+                HomeTab.Records -> RecordsScreen(
+                    // Polling is the page's own business, but only while it is
+                    // the tab on screen: the pager keeps its neighbours composed.
+                    active = homeTab == HomeTab.Records,
+                    moduleActive = moduleActive,
+                    onOpenStatus = { selectTab(HomeTab.Modules) }
+                )
                 HomeTab.Settings -> SettingsTab(pages)
             }
         }
