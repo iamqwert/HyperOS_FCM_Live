@@ -39,8 +39,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LeadingIconTab
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.SecondaryScrollableTabRow
+import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
@@ -169,7 +170,8 @@ private val PageTab.symbolRes: Int
  * [springAnimateToPage], and the fling snaps with [PagerNavigationSpringSpec].
  * Only the *strip* differs inside those looks — and only from Material: both
  * Miuix-dressed looks wear the capsule ([MiuixCapsuleTabRow]) where the Material
- * look keeps M3's tab rows of leading-icon tabs ([RecordsLeadingIconTab]), so
+ * look keeps M3's tab rows, leading-icon tabs on top
+ * ([RecordsLeadingIconTab]) and icon-only tabs below ([RecordsIconTab]), so
  * the pager wiring is identical and the strip's construction is the whole
  * difference between the two families.
  * A pager page leaving the viewport is a whole-page disposal, not lazy-node
@@ -972,13 +974,21 @@ private val EventTab.emptyRes: Int
  * foot. Neither implementation sits inside the list, so neither is subject to
  * Lazy prefetch reuse.
  *
- * The Material look's six are M3 secondary tabs with a leading icon
- * ([RecordsLeadingIconTab], same glyph size and gap as the primary row above),
- * one Material Symbols `fill1` glyph per category — see [EventTab.symbolRes].
- * That is what makes the row scroll under its own width rather than squeezing:
- * an icon costs 32dp a tab (24dp glyph + 8dp gap) on top of the label, so the
- * `minTabWidth` below is only a floor for the short labels, and English's
- * longer ones still take the width they measure.
+ * The Material look's six are M3 secondary tabs carrying a glyph and nothing
+ * else ([RecordsIconTab]), one Material Symbols `fill1` glyph per category —
+ * see [EventTab.symbolRes]. Three arguments decide that shape:
+ *
+ *  - Six icon-only tabs fit one phone width, so this is the fixed
+ *    [SecondaryTabRow], not the scrollable one: the six split the width evenly
+ *    and the whole category set is visible at once. A scrollable strip of pure
+ *    icons is the one thing a scrollable strip cannot afford — the labels were
+ *    what told you there were more tabs off the right edge.
+ *  - An even sixth (≈60dp on a 360dp-wide phone) is the spacing: comfortably
+ *    past the 48dp touch target with the 24dp glyph centred, and no `minTabWidth`
+ *    floor to fight, since a glyph has no text width to measure.
+ *  - `contentDescription` comes from the category's own label, which the row no
+ *    longer shows; with no text in the tab it is the only thing a screen reader
+ *    has to announce.
  *
  * The six-way strip is where the capsule earns its keep: it sizes each tab from
  * its own label and only scrolls when the six of them genuinely do not fit, so
@@ -1005,23 +1015,18 @@ private fun EventsTabRow(
         )
         return
     }
-    SecondaryScrollableTabRow(
+    SecondaryTabRow(
         selectedTabIndex = selected.ordinal,
         modifier = modifier,
-        edgePadding = 0.dp,
         containerColor = MaterialTheme.colorScheme.background,
-        contentColor = MaterialTheme.colorScheme.primary,
-        // 90dp is the component's own default (ScrollableTabRowMinTabWidth);
-        // the earlier 108dp pushed the two-glyph Chinese labels that much
-        // further apart than the spec's row ever draws them.
-        minTabWidth = 90.dp
-        // The divider stays the component's own default too — the hairline at
-        // the row's foot is the spec's separation between the strip and the
-        // list it opens onto (and it double-serves as the boundary under the
-        // two stacked rows the primary's own divider opens).
+        contentColor = MaterialTheme.colorScheme.primary
+        // The divider stays the component's own default — the hairline at the
+        // row's foot is the spec's separation between the strip and the list it
+        // opens onto (and it double-serves as the boundary under the two
+        // stacked rows the primary's own divider opens).
     ) {
         EventTab.entries.forEach { tab ->
-            RecordsLeadingIconTab(
+            RecordsIconTab(
                 selected = tab == selected,
                 onClick = { onSelect(tab) },
                 symbolRes = tab.symbolRes,
@@ -1032,16 +1037,17 @@ private fun EventsTabRow(
 }
 
 /**
- * One tab of the M3 look's two strips: the library's own [LeadingIconTab].
+ * One tab of the M3 look's top strip: the library's own [LeadingIconTab].
  *
- * The component is exactly what both strips wanted and why neither is
+ * The component is exactly what the 状态/事件 strip wanted and why it is not
  * hand-laid: glyph in front of the label 8dp apart, one 48dp line, the pair
  * centred in the tab, the label on the tab's own `titleSmall`-class style, and
  * the selected/unselected ink crossfaded by the component's own transition
  * (provided through `LocalContentColor`, so the icon's default tint and the
  * label inherit the same animated colour without either being told what it is).
- * M3's plain [androidx.compose.material3.Tab] stacks an icon ABOVE its label —
- * the primary-tab shape — which is not what either row here is after.
+ * M3's plain [Tab] stacks an icon ABOVE its label — the primary-tab shape —
+ * which is not what this row is after; the secondary strip has no label left
+ * to place, so it takes [Tab] through [RecordsIconTab] instead.
  *
  * The glyph is a 24dp Material Symbols `fill1` drawable, the size the
  * component's own documentation asks for. `contentDescription` is null on
@@ -1075,10 +1081,46 @@ private fun RecordsLeadingIconTab(
 }
 
 /**
+ * One tab of the M3 look's secondary strip: glyph only, no label.
+ *
+ * [Tab] with `text = null` is the component's own icon-only form — one 24dp
+ * glyph centred in the tab, one 48dp line high, the ink crossfaded by the same
+ * transition [RecordsLeadingIconTab] gets, so the six categories sit at exactly
+ * the height the 状态/事件 row above them does and the two strips read as one
+ * block of chrome.
+ *
+ * Because the label is gone, `contentDescription` now carries it: with no text
+ * in the tab, the description is the tab's only accessible name. The category
+ * names are short and unambiguous ("连接", "心跳", "推送"…), so they read fine
+ * spoken on their own even without the row's context.
+ */
+@Composable
+private fun RecordsIconTab(
+    selected: Boolean,
+    onClick: () -> Unit,
+    symbolRes: Int,
+    labelRes: Int
+) {
+    Tab(
+        selected = selected,
+        onClick = onClick,
+        icon = {
+            Icon(
+                painter = painterResource(symbolRes),
+                contentDescription = stringResource(labelRes),
+                modifier = Modifier.size(MATERIAL_SYMBOL_SIZE)
+            )
+        }
+    )
+}
+
+/**
  * The glyph size both M3 strips draw at. Material's tabs take 24dp icons (the
  * [LeadingIconTab] documentation says so outright); the leading place an icon
- * takes in the row's width is what the 8dp gap and the 16dp side padding are
- * measured around, so this is not a style knob.
+ * takes in the primary row's width is what its 8dp gap and 16dp side padding
+ * are measured around, so this is not a style knob. The secondary strip has
+ * nothing to measure around — this size is the whole of each of its tabs'
+ * content, so it is what the even sixth is sized for.
  */
 private val MATERIAL_SYMBOL_SIZE = 24.dp
 
