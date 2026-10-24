@@ -150,16 +150,26 @@ import kotlin.math.pow
  * Group heading shared by every page, in both looks' languages.
  *
  * The Material branch reads as the M3 settings templates print a section
- * break: `labelLarge` in the accent, 8dp of side padding and a 28dp gap above
- * (12dp for the first heading, which only needs to clear the top bar).
- * `titleSmall` was the earlier choice, but its 0.1sp tracking read as a
- * subtitle rather than a break. The Miuix branch is the system settings' own
- * `SmallTitle` — small, grey, no accent — see the body. Both branches declare
- * the heading semantics: a screen reader must not lose the section structure
- * the moment the look is switched.
+ * break: `labelLarge` in the accent, on the page inset's own axis (the list
+ * already applies it — see the body) and a 28dp gap above (12dp for the first
+ * heading, which only needs to clear the top bar). `titleSmall` was the
+ * earlier choice, but its 0.1sp tracking read as a subtitle rather than a
+ * break. The Miuix branch is the system settings' own `SmallTitle` — small,
+ * grey, no accent — see the body. Both branches declare the heading semantics:
+ * a screen reader must not lose the section structure the moment the look is
+ * switched.
  */
 @Composable
 fun SectionTitle(res: Int, modifier: Modifier = Modifier, first: Boolean = false) {
+    SectionTitleText(stringResource(res), modifier, first)
+}
+
+/**
+ * The same heading for a label computed at runtime — the records page's day
+ * headers, which are dates rather than resources.
+ */
+@Composable
+fun SectionTitleText(text: String, modifier: Modifier = Modifier, first: Boolean = false) {
     if (LocalUiStyle.current.isMiuixBased) {
         // The Miuix header is the system settings' own: small, grey, part of the
         // page. Blue was the Material reading of a section break; under Miuix an
@@ -168,7 +178,7 @@ fun SectionTitle(res: Int, modifier: Modifier = Modifier, first: Boolean = false
         // SmallTitle leaves — of which the page list already provides 12, so the
         // rest is stated here. At 8 it read as flush with the cards below.
         SmallTitle(
-            text = stringResource(res),
+            text = text,
             // The Material branch declares the section break a heading; the
             // Miuix branch must too, or a screen reader loses the section
             // structure the moment the look is switched.
@@ -185,14 +195,17 @@ fun SectionTitle(res: Int, modifier: Modifier = Modifier, first: Boolean = false
         return
     }
     Text(
-        text = stringResource(res),
+        text = text,
         modifier = modifier
             .fillMaxWidth()
             .semantics { heading() }
+            // No horizontal padding of its own: the page list already applies
+            // the 16dp inset, and M3's layout grid puts a section header on
+            // the SAME axis as the cards it heads. The 8dp this used to add
+            // pushed the header 24dp in — a heading floating inside its own
+            // group rather than leading it.
             .padding(
-                start = 8.dp,
                 top = if (first) 12.dp else 28.dp,
-                end = 8.dp,
                 bottom = 12.dp
             ),
         color = MaterialTheme.colorScheme.primary,
@@ -617,11 +630,13 @@ fun GroupRow(
     // Row metrics follow the list spec on both looks. 56dp is the single-line
     // row height — M3's list minimum, and [BasicComponent]'s own floor
     // (BasicComponentDefaults.InsideMargin under Miuix) — and a two-line row
-    // reaches M3's 72dp double-line height when the summary line carries the
-    // 4dp gap above it (24+4+16 of type against 28dp of vertical padding), so
-    // neither look needs a taller floor. Every row's summary line takes that
-    // gap; Miuix's own rows (ArrowPreference and friends) space their lines on
-    // the library's metrics and never pass through this column.
+    // reaches M3's 72dp double-line height on the line heights alone: the
+    // Material bands are bodyLarge (24dp) over bodyMedium (20dp), 44 of type
+    // against 28dp of vertical padding (ListTokens.ItemSupportingTextFont is
+    // bodyMedium — the 4dp shim this column used to need was there to prop up
+    // a 12sp summary and would overshoot the token now). Miuix's own rows
+    // (ArrowPreference and friends) space their lines on the library's metrics
+    // and never pass through this column.
     val miuixRow = LocalUiStyle.current.isMiuixBased
     MiuixCardSurface(shape = shape, modifier = modifier) {
         val view = LocalView.current
@@ -1057,6 +1072,12 @@ fun SettingsSwitchCard(
         !checked && stateLineOff != null -> stateLineOff
         else -> null
     }
+    // A state line AND a description makes this M3's three-line item: 24 + 20 +
+    // 20 of type against 12/12 of padding is the 88dp token. Either one alone
+    // is a two-line item, and 44 against 14/14 is the 72dp token. The padding
+    // is the only free variable left once the type sits on the scale's roles,
+    // so it carries the difference between the two heights.
+    val rowPadding = if (stateText != null && description.isNotEmpty()) 12.dp else 14.dp
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = LocalAppSurfaces.current.card,
@@ -1075,7 +1096,7 @@ fun SettingsSwitchCard(
                     role = Role.Switch,
                     onValueChange = { toggle() }
                 )
-                .padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 14.dp),
+                .padding(start = 16.dp, top = rowPadding, end = 16.dp, bottom = rowPadding),
             verticalAlignment = Alignment.CenterVertically
         ) {
             RowIcon(painter = painterResource(iconRes))
@@ -1087,27 +1108,22 @@ fun SettingsSwitchCard(
                 )
                 if (stateText != null) {
                     Text(
-                        // The state line wears the summary's 4dp gap only when it
-                        // IS the summary — no description below it. With a
-                        // description following, the row is M3's three-line item
-                        // (88dp) and the gap stays where it is, above the
-                        // description.
-                        modifier = if (description.isEmpty()) {
-                            Modifier.padding(top = 4.dp)
-                        } else {
-                            Modifier
-                        },
+                        // No gap: bodyLarge's 24dp label over bodyMedium's 20dp
+                        // lines already totals 44 for two lines (72 with 14/14)
+                        // and 64 for three (88 with 12/12). The 4dp shim that
+                        // used to sit here existed only because a 12sp line
+                        // fell short of those tokens; with the summary on
+                        // bodyMedium it would overshoot both by 4dp.
                         text = stateText,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall
+                        style = pageSecondaryStyle()
                     )
                 }
                 if (description.isNotEmpty()) {
                     Text(
-                        modifier = Modifier.padding(top = 4.dp),
                         text = description,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall
+                        style = pageSecondaryStyle()
                     )
                 }
             }
@@ -1224,10 +1240,11 @@ fun SettingsMenuCard(
                     )
                     if (description.isNotEmpty()) {
                         Text(
-                            modifier = Modifier.padding(top = 4.dp),
+                            // Two-line item: title 24 + summary 20 + 14/14 is
+                            // the 72dp token, so no gap between the lines.
                             text = description,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall
+                            style = pageSecondaryStyle()
                         )
                     }
                 }
@@ -1343,10 +1360,10 @@ fun NavCard(
                 )
                 if (subtitle.isNotEmpty()) {
                     Text(
-                        modifier = Modifier.padding(top = 4.dp),
+                        // Two-line item, no gap: see [pageSecondaryStyle].
                         text = subtitle,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall
+                        style = pageSecondaryStyle()
                     )
                 }
             }
@@ -1492,6 +1509,16 @@ internal fun MiuixSwitchSlice(
  *   look — its blur runs on miuix's progressive shader, which reads the layer
  *   instead of Haze's sources (see [GLASS_BLUR_PROGRESSIVE]). `null` — every
  *   other look, or a device without a shader engine — keeps the Haze band.
+ * @param progressive whether the 柔光玻璃 pane may run that shader at all. The
+ *   fade is the look's resting recipe and the default; a page whose chrome
+ *   reaches the pane's FOOT asks for the band instead, because a fade is by
+ *   definition clear at its foot — see the records page, whose two tab strips
+ *   are pinned right there and would otherwise sit on plain page colour with
+ *   sharp rows travelling under them. Turning this off is what leaves it the
+ *   MIUIX constant band: same 25dp radius, same 0.8 page tone, same hard
+ *   bottom edge the plain Miuix look wears, that look's recipe reused rather
+ *   than re-derived. It has no effect without a [backdrop] (there is no shader
+ *   path to suppress).
  */
 @Composable
 fun HazeGlassBar(
@@ -1501,6 +1528,7 @@ fun HazeGlassBar(
     progress: Float = 1f,
     frost: Float = 1f,
     backdrop: Backdrop? = null,
+    progressive: Boolean = true,
     content: @Composable () -> Unit
 ) {
     // The collapse fraction reads as NaN before the bar's scroll range has
@@ -1527,14 +1555,16 @@ fun HazeGlassBar(
     // conflict, and the style is back — scoped to this look, no switch.)
     val blurRadius = (GLASS_BLUR_GAUSSIAN * strength).coerceAtLeast(1.dp)
     val scrimAlpha = BAR_GLASS_SCRIM_GAUSSIAN * strength
-    val progressive = backdrop != null && isRuntimeShaderSupported()
+    val progressiveBlur = progressive && backdrop != null && isRuntimeShaderSupported()
     Box(modifier = modifier.fillMaxWidth()) {
-        if (progressive) {
+        if (progressiveBlur) {
             Box(
                 modifier = Modifier
                     .matchParentSize()
                     .progressiveTextureBlur(
-                        backdrop = backdrop!!,
+                        // K2 keeps the null check inside `progressiveBlur` in
+                        // view, so this is a smart cast rather than an `!!`.
+                        backdrop = backdrop,
                         shape = RectangleShape,
                         blurRadius = (GLASS_BLUR_PROGRESSIVE * strength).coerceAtLeast(1f),
                         gradient = ProgressiveBlur.Top.copy(curve = GLASS_BLUR_CURVE),
@@ -1706,6 +1736,34 @@ fun PageScaffold(
      * the page measures its own hero and hands the number in.
      */
     barScrollProgress: (() -> Float)? = null,
+    /**
+     * Miuix only: chrome pinned directly under the bar, INSIDE the glass pane —
+     * the records page's two tab strips, which are navigation, not content. The
+     * pane wraps the whole column (bar + extension), so the page's own blur
+     * recipe covers the strips too, and the scrolling body passes under the lot.
+     * The records page also sets [barProgressive] to false: its extension is
+     * what the pane's foot lands on, and the 柔光玻璃 fade is clear there, so it
+     * wears the MIUIX Gaussian band instead — the blur the plain Miuix look has
+     * had on this page all along. The apps page runs the same model with its
+     * pinned search capsule.
+     *
+     * The scaffold measures the topBar slot's full height into
+     * `innerPadding.calculateTopPadding()`, so a page that mounts an extension
+     * sees the strips in its top inset for free and needs no second number.
+     * Null — every page but the records page — keeps the bar alone.
+     */
+    barExtension: (@Composable ColumnScope.() -> Unit)? = null,
+    /**
+     * 柔光玻璃 only: whether the pane runs the look's progressive fade. True is
+     * the look's own recipe, where the blur is strongest at the bar's top edge
+     * and fades to clear at its foot; false trades it for the plain MIUIX
+     * constant band ([HazeGlassBar]'s `progressive`). A page flips it off when
+     * its chrome reaches the pane's foot — a fade is clear exactly there — so
+     * the records page's pinned strips are the only caller today: they want the
+     * MIUIX Gaussian under them, not a window onto sharp rows. Has no effect on
+     * the other looks: plain MIUIX already runs the band, Material has no pane.
+     */
+    barProgressive: Boolean = true,
     // A BoxScope receiver, because the body Box below is where the content is
     // mounted (both branches) — the Example's pages lean on the same scope to
     // hang a VerticalScrollBar beside their list without wrapping it.
@@ -1772,31 +1830,44 @@ fun PageScaffold(
                             barScrollProgress?.invoke() ?: scrollBehavior.state.collapsedFraction
                         )
                     ) {
-                    val travel = barScrollProgress?.invoke()
-                    if (travel == null) {
-                        MiuixTopAppBar(
-                            title = title,
-                            largeTitle = title,
-                            color = barColor,
-                            navigationIcon = backControl,
-                            actions = actions,
-                            scrollBehavior = scrollBehavior
-                        )
+                    val appBar: @Composable () -> Unit = {
+                        val travel = barScrollProgress?.invoke()
+                        if (travel == null) {
+                            MiuixTopAppBar(
+                                title = title,
+                                largeTitle = title,
+                                color = barColor,
+                                navigationIcon = backControl,
+                                actions = actions,
+                                scrollBehavior = scrollBehavior
+                            )
+                        } else {
+                            // The hero IS this page's title, so the bar keeps none of
+                            // its own: the reference's compact bar, whose title walks
+                            // in as the hero walks out — nothing over the hero's first
+                            // third of travel, the whole title once it is gone.
+                            MiuixSmallTopAppBar(
+                                title = title,
+                                titleColor = MiuixTheme.colorScheme.onSurface.copy(
+                                    alpha = ((travel - 0.35f) / 0.65f).coerceIn(0f, 1f)
+                                ),
+                                color = barColor,
+                                navigationIcon = backControl,
+                                actions = actions,
+                                scrollBehavior = scrollBehavior
+                            )
+                        }
+                    }
+                    if (barExtension == null) {
+                        appBar()
                     } else {
-                        // The hero IS this page's title, so the bar keeps none of
-                        // its own: the reference's compact bar, whose title walks
-                        // in as the hero walks out — nothing over the hero's first
-                        // third of travel, the whole title once it is gone.
-                        MiuixSmallTopAppBar(
-                            title = title,
-                            titleColor = MiuixTheme.colorScheme.onSurface.copy(
-                                alpha = ((travel - 0.35f) / 0.65f).coerceIn(0f, 1f)
-                            ),
-                            color = barColor,
-                            navigationIcon = backControl,
-                            actions = actions,
-                            scrollBehavior = scrollBehavior
-                        )
+                        // One column under one pane: the bar and the pinned chrome
+                        // below it travel as a unit — the extension rides the bar's
+                        // collapse, and the pane's blur covers both.
+                        Column {
+                            appBar()
+                            barExtension()
+                        }
                     }
                     }
                 }
@@ -1818,7 +1889,10 @@ fun PageScaffold(
                         frost = 1f,
                         // The 柔光玻璃 look's blur reads the recorded layer; the
                         // layer is only recorded where that look is live.
-                        backdrop = if (chromeGlass) pageBackdrop else null
+                        backdrop = if (chromeGlass) pageBackdrop else null,
+                        // ...unless the page's chrome reaches the pane's foot and
+                        // asks for the constant band instead (see barProgressive).
+                        progressive = barProgressive
                     ) {
                         bar()
                     }
@@ -1946,14 +2020,23 @@ fun pageBodyStyle(): TextStyle =
 
 /**
  * Secondary line under [pageBodyStyle]: the row summary grade — Miuix `body2`
- * (14sp, the size `BasicComponent` prints its summary at) against M3 bodySmall.
+ * (14sp, the size `BasicComponent` prints its summary at) against M3
+ * bodyMedium, the size `ListTokens.ItemSupportingTextFont` names for a list
+ * row's supporting line. The two looks land on 14sp on purpose: this is the
+ * same slot in both languages, so it takes the same grade in both.
+ *
+ * No caller may add a gap above this line any more. The old pairing was
+ * bodyLarge over bodySmall with a 4dp shim, because 24 + 16 fell 4 short of
+ * the 72dp two-line item; bodyMedium's 20dp line closes that gap on its own
+ * (24 + 20 + 28 of padding = 72 exactly), so the shim is gone and a caller that
+ * keeps one overshoots the token.
  */
 @Composable
 fun pageSecondaryStyle(): TextStyle =
     if (LocalUiStyle.current.isMiuixBased) {
         MiuixTheme.textStyles.body2
     } else {
-        MaterialTheme.typography.bodySmall
+        MaterialTheme.typography.bodyMedium
     }
 
 /**

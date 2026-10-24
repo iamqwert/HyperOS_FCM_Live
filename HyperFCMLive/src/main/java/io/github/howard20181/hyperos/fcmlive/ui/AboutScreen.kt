@@ -1481,10 +1481,11 @@ private fun PopupCard(
                         style = MaterialTheme.typography.bodyLarge
                     )
                     Text(
-                        modifier = Modifier.padding(top = 4.dp),
+                        // Two-line item: 24 + 20 of type against GroupRow's
+                        // 14/14 is the 72dp token, so no gap between the lines.
                         text = subtitle,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall
+                        style = MaterialTheme.typography.bodyMedium
                     )
                 }
                 // The accent, like the XML's `md_primary`: this is the one
@@ -1617,9 +1618,13 @@ private fun DynamicColorCard(
                         style = MaterialTheme.typography.bodyLarge
                     )
                     Text(
+                        // The row is a fixed 72dp with 14/14 of padding: a
+                        // 24dp label plus bodyMedium's 20dp line is 44, which
+                        // fills the token exactly. At 12sp the pair left 4dp
+                        // of slack and the row read a notch loose.
                         text = stateLine,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall
+                        style = MaterialTheme.typography.bodyMedium
                     )
                 }
                 Switch(

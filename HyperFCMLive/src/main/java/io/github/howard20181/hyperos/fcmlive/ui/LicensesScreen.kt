@@ -169,10 +169,11 @@ private fun LicensesBody(
     // ArrowPreference does. The plain licence texts open a sheet like any dep
     // row does, so they wear the mark too.
     val miuixRows = LocalUiStyle.current.isMiuixBased
-    // The summary line's gap under the row title. M3's two-line row is 72dp —
-    // 24 + 4 + 16 of type against 28dp of padding — so Material rows take the
-    // 4dp; Miuix rows space their own lines and must not grow.
-    val summaryGap = if (miuixRows) 0.dp else 4.dp
+    // No gap between a row's title and its summary on either look. M3's 72dp
+    // two-line item is bodyLarge's 24dp over bodyMedium's 20dp against 28dp of
+    // padding — the line heights close it — and Miuix spaces its own lines. The
+    // 4dp this page used to add was propping up a 12sp summary and now only
+    // pushes the row 4dp past the token.
     val plainLicenses = listOf(
         stringResource(R.string.license_apache_2) to R.raw.license_apache2,
         stringResource(R.string.license_gpl_3) to R.raw.license_gpl3,
@@ -208,7 +209,6 @@ private fun LicensesBody(
                                     style = pageBodyStyle()
                                 )
                                 AppText(
-                                    modifier = Modifier.padding(top = summaryGap),
                                     text = hint,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = pageSecondaryStyle()
@@ -248,7 +248,7 @@ private fun LicensesBody(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                Row(modifier = Modifier.padding(top = summaryGap)) {
+                                Row {
                                     if (version.isNotEmpty()) {
                                         AppText(
                                             text = version,
@@ -304,7 +304,6 @@ private fun LicensesBody(
                                     style = pageBodyStyle()
                                 )
                                 AppText(
-                                    modifier = Modifier.padding(top = summaryGap),
                                     text = license,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = pageSecondaryStyle()

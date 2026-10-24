@@ -243,6 +243,9 @@ class Hooker : XposedModule() {
         Group("start", "GMS traffic probe") {
             TrafficProbe.startGmsTrafficProbe(this, ::gmsUid, ::broadcastGateSummary)
         },
+        Group("start", "records bridge") {
+            RecordsBridge.install(this, ::getSystemContext)
+        },
         Group("start", "autostart switch-op migration") {
             AutostartGate.backfillAutostartOpsAtStartup(this, ::getSystemContext)
         },
@@ -312,7 +315,9 @@ class Hooker : XposedModule() {
                 )
             },
             Group("hook", "ScenarioCompiler") {
-                GmsSupport.hookScenarioCompiler(this, classLoader, ::hookE, ::getSystemContext)
+                GmsSupport.hookScenarioCompiler(
+                    this, classLoader, ::hookE, ::logSkipOtherGeneration, ::getSystemContext
+                )
             },
             Group("hook", "WeChat doze keepout") {
                 PowerKeeperHooks.hookWechatDozeKeepout(this, classLoader, ::hookE, ::logSkip)
@@ -678,7 +683,16 @@ class Hooker : XposedModule() {
         val systemServerCl = InternationalPolicyManagerClass.classLoader
         hookE(isPushAppMethod).intercept { chain: XposedInterface.Chain ->
             val pkg = chain.getArg(0) as? String
-            if (AllowlistGate.moduleAppliesTo(this, ::getSystemContext, pkg)) {
+            // The gate read is inside its own try so a preference or receiver
+            // failure can never escape the intercept (fail-open, §3.11): on
+            // error this hook answers nothing and the ROM verdict stands.
+            val applies = try {
+                AllowlistGate.moduleAppliesTo(this, ::getSystemContext, pkg)
+            } catch (t: Throwable) {
+                logGated(Log.ERROR, HookerSupport.TAG, "isPushApp: gate check failed", t)
+                false
+            }
+            if (applies) {
                 try {
                     val fromRestrictNet = HookerSupport.STACK_WALKER.walk { frames ->
                         frames.anyMatch { frame ->

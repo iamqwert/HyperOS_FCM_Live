@@ -34,9 +34,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarDefaults
+import androidx.compose.material3.ShortNavigationBar
+import androidx.compose.material3.ShortNavigationBarDefaults
+import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -76,6 +76,7 @@ import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.GridView
 import top.yukonga.miuix.kmp.icon.extended.Home
+import top.yukonga.miuix.kmp.icon.extended.Notes
 import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.basic.FloatingNavigationBar
 import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
@@ -103,6 +104,12 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 enum class HomeTab(val titleRes: Int, val iconRes: Int, val iconFilledRes: Int) {
     Modules(R.string.nav_modules, R.drawable.ic_home, R.drawable.ic_home_filled),
     Apps(R.string.nav_apps, R.drawable.ic_apps_outline, R.drawable.ic_apps),
+    /**
+     * GCM's own event log, read through the module's system_server half (see
+     * [io.github.howard20181.hyperos.fcmlive.records.RecordsScreen]). Sits
+     * between the whitelist and settings: it is a read-out, not a control.
+     */
+    Records(R.string.nav_records, R.drawable.ic_records, R.drawable.ic_records),
     Settings(R.string.settings, R.drawable.ic_settings_outline, R.drawable.ic_settings)
 }
 
@@ -116,13 +123,23 @@ private val HomeTab.miuixIcon: ImageVector
     get() = when (this) {
         HomeTab.Modules -> MiuixIcons.Home
         HomeTab.Apps -> MiuixIcons.GridView
+        HomeTab.Records -> MiuixIcons.Notes
         HomeTab.Settings -> MiuixIcons.Settings
     }
 
 /**
- * The Material 3 Expressive home frame: one standard NavigationBar docked at
- * the screen's foot, the selected tab filling the rest — the plain bottom
+ * The Material 3 Expressive home frame: one [ShortNavigationBar] docked at the
+ * screen's foot, the selected tab filling the rest — the plain bottom
  * navigation the spec describes, not a floating pill.
+ *
+ * The bar is the *short* bar, the expressive cut: the toolkit's baseline
+ * [androidx.compose.material3.NavigationBar] is the pre-2025 component and the
+ * M3 site no longer recommends it for new work, while `ShortNavigationBar` is
+ * the one bar the library ships marked expressive. Its container height is the
+ * same `NavigationBarTokens.ContainerHeight` token (64dp in this release — the
+ * "80dp" the old comment here carried was stale), so the frame's geometry is
+ * unchanged — what differs is the item: the indicator is the full-corner pill
+ * the expressive spec draws, sized to the icon rather than to the item's cell.
  *
  * The bar sits in a plain [Column], not a Scaffold slot: every tab is itself a
  * full Scaffold (the app list's search bar, the settings page's collapsing
@@ -161,7 +178,7 @@ fun HomeShell(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxSize()
-                    .consumeWindowInsets(NavigationBarDefaults.windowInsets)
+                    .consumeWindowInsets(ShortNavigationBarDefaults.windowInsets)
             ) {
                 val stateHolder = rememberSaveableStateHolder()
                 AnimatedTabContent(
@@ -172,17 +189,18 @@ fun HomeShell(
                 )
             }
         }
-        // The bar, back on the toolkit default: the ruled 80dp NavigationBar
-        // pads the gesture inset INSIDE itself, the way stock M3 bottom bars
-        // do — the custom 72/74dp cuts (2026-10-19 trials) measured shorter
-        // but lost to the default on balance, so the bar reads stock M3
-        // again. The content box above consumes the navigation-bar inset
-        // (see its consumeWindowInsets), so pages still stop at the bar's
-        // top edge; at large font scales the bar grows the same way the
-        // default always did.
-        NavigationBar {
+        // The bar, on the expressive cut: [ShortNavigationBar] pads the
+        // gesture inset INSIDE itself off the same container token the
+        // baseline bar reads (NavigationBarTokens.ContainerHeight, 64dp), so
+        // the ruled height and the stock M3 footing both survive the swap. The
+        // content box above consumes the navigation-bar inset (see its
+        // consumeWindowInsets, which now reads the short bar's default so both
+        // sides reference one value), so pages still stop at the bar's top
+        // edge; at large font scales the bar grows the same way the default
+        // always did.
+        ShortNavigationBar {
             HomeTab.entries.forEach { tab ->
-                NavigationBarItem(
+                ShortNavigationBarItem(
                     selected = tab == selected,
                     onClick = {
                         // Deliberately silent: a tab swap is not a press on

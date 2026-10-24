@@ -315,13 +315,17 @@ private fun StatusHero(
                         R.string.status_version_line, versionName, versionCode
                     ),
                     // Full ink, no alpha cut: the sub-line's hierarchy comes
-                    // from bodySmall itself. The 0.8f wash measured fine on
+                    // from the type role itself. The 0.8f wash measured fine on
                     // common palettes but is an unpaired foreground — composited
                     // over the container it can slip under the 4.5:1 body-text
                     // floor on some seed/style combos (the same trap the red
                     // lines call out), while the paired role never does.
+                    //
+                    // bodyMedium, not bodySmall: this is the supporting line of
+                    // a headline, the same slot a row's second line occupies, so
+                    // it takes the same grade the rows read.
                     color = ink,
-                    style = MaterialTheme.typography.bodySmall
+                    style = MaterialTheme.typography.bodyMedium
                 )
             }
             Spacer(modifier = Modifier.weight(1f))
@@ -471,9 +475,11 @@ private fun MiuixStatusHero(
 }
 
 /**
- * One informative device row. Clickable with the standard ripple — the user
- * asked for rows that answer a press — but the click itself does nothing:
- * the information is the whole feature.
+ * One informative device row. No click: the information is the whole feature,
+ * and in M3 a state layer means "this activates something" — an empty handler
+ * put a click action on the row's semantics and had a screen reader offer a
+ * device property as a control. (This is the row family the records page's
+ * config rows were modelled on; both lost the same no-op click.)
  */
 @Composable
 private fun InfoRow(
@@ -483,7 +489,7 @@ private fun InfoRow(
     first: Boolean,
     last: Boolean
 ) {
-    GroupRow(first = first, last = last, onClick = {}, haptic = false) {
+    GroupRow(first = first, last = last, onClick = null) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             RowIcon(painter = painterResource(iconRes))
             Column(modifier = Modifier.weight(1f)) {
@@ -512,7 +518,9 @@ private fun InfoRow(
                         style = pageBodyStyle()
                     )
                     Text(
-                        modifier = Modifier.padding(top = 4.dp),
+                        // Two-line item with no gap: pageSecondaryStyle is the
+                        // list token's bodyMedium now, and 24 + 20 against the
+                        // row's 14/14 lands on the 72dp token by itself.
                         text = value,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = pageSecondaryStyle()

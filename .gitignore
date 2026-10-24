@@ -63,6 +63,11 @@ logcat_*.txt
 # 与本文件上面「分析报告 / 内部日志」同一性质，只是文件名是英文，旧规则接不住。
 .forensics/
 
+# 真机 ROM 静态字节码源（2026-10-22 拉取，来自 REDMI K90 Pro Max / HyperOS 4.0.4.0）：
+# framework.jar / services.jar / miui-services.jar / miui-framework.jar /
+# miui-wifi-service.jar / PowerKeeper.apk，供 DexSQL 钩点定位用。仅供本地分析，不入库。
+/rom-dump/
+
 # Windows folder customization
 desktop.ini
 
