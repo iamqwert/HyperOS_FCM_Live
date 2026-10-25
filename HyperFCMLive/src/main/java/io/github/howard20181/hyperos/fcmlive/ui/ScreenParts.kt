@@ -837,7 +837,12 @@ fun MenuItemRow(
                     MaterialTheme.colorScheme.onSurface
                 },
                 style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1
+                maxLines = 1,
+                // At a large font scale a one-line menu label has to end in an
+                // ellipsis: without one the clipped glyphs stop naming the
+                // option at all, and the panel is the only place the value is
+                // written down.
+                overflow = TextOverflow.Ellipsis
             )
             if (trailing != null) {
                 Spacer(modifier = Modifier.width(MENU_ITEM_PAD_H))

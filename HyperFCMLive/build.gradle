@@ -61,8 +61,8 @@ android {
         targetSdkVersion 37
         // Fixed (bumped by hand each release) so LSPosed update checks never treat
         // this fork as older than upstream builds that inherit a low jgit commitCount.
-        versionCode 54
-        versionName "4.2.0"
+        versionCode 55
+        versionName "4.3.0"
 
         // HyperOS modules ship arm64 only; drop armv7a / x86 / x86_64 natives.
         ndk {
@@ -158,7 +158,10 @@ dependencies {
     // — verified on device, and verified against 1.13.0's own sources, where
     // ComponentActivity.onCreate does window.decorView.setViewTree...(this).
     implementation 'androidx.activity:activity:1.13.0'
-    // Compose entry points for the Activities (setContent). Same version line as
+    // The Compose activity integration. Called for real by
+    // `rememberLauncherForActivityResult` in records/RecordsScreen.kt (the
+    // diagnostics export's SAF contract); the Activities themselves use
+    // ComposeView + setContentView, not `setContent`. Same version line as
     // `activity` above: the Compose integration and the core artifact are
     // versioned together, and declaring the pair keeps Dependabot moving them as
     // one.

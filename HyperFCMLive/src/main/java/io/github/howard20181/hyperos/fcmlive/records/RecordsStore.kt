@@ -1,6 +1,7 @@
 package io.github.howard20181.hyperos.fcmlive.records
 
 import android.content.Context
+import io.github.howard20181.hyperos.fcmlive.Prefs
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -15,15 +16,31 @@ import java.io.File
  * would render as a lie. Writes go through a temp file + rename, so a process
  * death mid-write leaves the previous file intact.
  *
- * Retention: [MAX_EVENTS] newest events, none older than [RETENTION_MS]. The
- * file is a view, not an audit log.
+ * Retention: a user-chosen number of newest events (「事件记录上限行数」,
+ * 200/300/500/800/1200, default [Prefs.DEFAULT_RECORD_ROWS] = 500), none older
+ * than [RETENTION_MS]. The file is a view, not an audit log.
+ *
+ * The row cap is a setting because the two limits disagree about which one
+ * actually binds: a single reconnect storm (one network handover prints three
+ * or four lines, a heartbeat timeout a dozen) can fill a few hundred rows in an
+ * afternoon, and the page would then claim a seven-day history it does not
+ * have. One capture can only ever add the ~200 lines GMS's own ring holds, so
+ * anything above that comes from polling across captures.
  */
 object RecordsStore {
 
     private const val FILE_NAME = "records/records.json"
     private const val VERSION = 1
-    const val MAX_EVENTS = 350
     const val RETENTION_MS = 7L * 24 * 60 * 60 * 1000
+
+    /**
+     * How much of a second a gap has to cover before it is worth a row. Two
+     * polls normally leave a minute of silence with no events; the ring only
+     * stops being continuous when its oldest line is NEWER than the cursor,
+     * which cannot happen from mere silence — so the threshold is just "some
+     * time at all", and it exists to absorb equal timestamps.
+     */
+    private const val GAP_FLOOR_MS = 1_000L
 
     /** What the page renders: latest snapshot plus the merged event history. */
     data class Archive(
@@ -54,6 +71,13 @@ object RecordsStore {
      * poll, so accept only events newer than the stored cursor. When the pid
      * moves, the ring is empty again — take the whole list and insert one
      * [GcmEvent.EventKind.GmsRestart] marker so the gap is visible.
+     *
+     * The ring is append-only, so it always holds a continuous run of lines
+     * ending at its newest one. If its OLDEST line is newer than the cursor,
+     * everything between the two was overwritten between polls — that is a
+     * real, unrecoverable loss (a reconnect storm prints faster than the 60 s
+     * poll reads), and it used to be silent. It now gets a row of its own, so
+     * the page cannot imply a continuity the data does not have.
      */
     fun capture(context: Context, dump: GcmDump, now: Long = System.currentTimeMillis()): Capture {
         val file = file(context)
@@ -74,11 +98,37 @@ object RecordsStore {
             } else {
                 emptyList()
             }
-            val merged = trim(fresh + marker + stored.events, now)
+            // Overflow is only readable while the pid is unchanged: after a
+            // restart the ring starts empty by design and the cursor is
+            // meaningless, which [marker] already reports.
+            val ringOldest = dump.events.minByOrNull { it.ts }
+            val lostMs = if (!restarted && cursor.pid == dump.snapshot.pid &&
+                cursor.ts > 0 && ringOldest != null &&
+                ringOldest.ts - cursor.ts >= GAP_FLOOR_MS
+            ) {
+                ringOldest.ts - cursor.ts
+            } else {
+                0L
+            }
+            val gapMarker = if (lostMs > 0 && ringOldest != null) {
+                listOf(
+                    GcmEvent(
+                        // Sits at the boundary where the loss happened, not at
+                        // `now`: the rows around it are the evidence.
+                        ts = ringOldest.ts,
+                        net = -1,
+                        kind = GcmEvent.EventKind.SamplingGap,
+                        text = "${GcmEvent.EventKind.SamplingGap.name} ${lostMs / 1000}s"
+                    )
+                )
+            } else {
+                emptyList()
+            }
+            val merged = trim(context, fresh + marker + gapMarker + stored.events, now)
             android.util.Log.d(
                 "RecordsStore",
                 "capture pid=${dump.snapshot.pid} ring=${dump.events.size} fresh=${fresh.size} " +
-                    "merged=${merged.size}"
+                    "merged=${merged.size} lost=${lostMs / 1000}s"
             )
             val archive = Archive(snapshot = dump.snapshot, fetchedAt = now, events = merged)
             // The cursor tracks the newest event GMS itself reported, never the
@@ -105,12 +155,12 @@ object RecordsStore {
         file(context).delete()
     }
 
-    private fun trim(events: List<GcmEvent>, now: Long): List<GcmEvent> =
+    private fun trim(context: Context, events: List<GcmEvent>, now: Long): List<GcmEvent> =
         events.asSequence()
             .filter { it.ts >= now - RETENTION_MS }
             .sortedByDescending { it.ts }
             .distinctBy { it.ts to it.text }
-            .take(MAX_EVENTS)
+            .take(Prefs.readRecordRows(context))
             .toList()
 
     private data class Cursor(val pid: Int, val ts: Long, val text: String)
@@ -159,6 +209,9 @@ object RecordsStore {
                         .put("net", event.net)
                         .put("kind", event.kind.name)
                         .put("text", event.text)
+                        .put("prev_net", event.previousNetwork?.transport ?: JSONObject.NULL)
+                        .put("prev_id", event.previousNetwork?.netId ?: JSONObject.NULL)
+                        .put("prev_state", event.previousNetwork?.state ?: JSONObject.NULL)
                 )
             }
         })
@@ -364,6 +417,23 @@ object RecordsStore {
             val kind = runCatching {
                 GcmEvent.EventKind.valueOf(event.optString("kind"))
             }.getOrElse { GcmEvent.EventKind.Other }
+            // The network a change came FROM. Written by the current version
+            // only; an archive written before it has no such field, and the
+            // row then falls back to whatever its own text names.
+            val prevTransport = event.optString("prev_net").takeIf {
+                it.isNotEmpty() && it != "null"
+            }
+            val previous = prevTransport?.let {
+                GcmDumpParser.NetworkRef(
+                    transport = it,
+                    netId = event.optString("prev_id").takeIf { s ->
+                        s.isNotEmpty() && s != "null"
+                    },
+                    state = event.optString("prev_state").takeIf { s ->
+                        s.isNotEmpty() && s != "null"
+                    }
+                )
+            }
             add(
                 GcmEvent(
                     ts = event.optLong("ts"),
@@ -373,7 +443,8 @@ object RecordsStore {
                     // wrapper fix still holds `McsConnection{Cell, type=0}` in
                     // its raw text, and the current rule is idempotent, so this
                     // heals old rows instead of leaving them unreadable.
-                    text = GcmDumpParser.prettifyEventText(event.optString("text"))
+                    text = GcmDumpParser.prettifyEventText(event.optString("text")),
+                    previousNetwork = previous
                 )
             )
         }

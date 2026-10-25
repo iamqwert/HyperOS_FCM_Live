@@ -1,5 +1,39 @@
 # Changelog
 
+## 4.3.0 (55)
+
+### 简体中文
+
+#### 新增
+
+- 记录页：无需打开 FCM Diagnostics 就能看到当前 FCM 状态与事件记录，并支持一键导出诊断文本。事件按六大类归档（全部、连接、心跳、推送、休眠、异常），便于快速筛选和定位；记录上限默认 500 行（设置可调），通常能覆盖最近 12 小时。思路参考 [ByteJuno/fcmfix-coloros](https://github.com/ByteJuno/fcmfix-coloros)，TabRow 实现参考 [Miuix for Compose](https://github.com/compose-miuix-ui/miuix) 与 [AritxOnly/F1Info](https://github.com/AritxOnly/F1Info/releases)。
+
+- 设置页新增「自动勾选新装 FCM 应用」开关：开启后，新安装的 FCM 应用自动勾选；开关开启之前就已安装、且未被勾选的应用不受影响，应用后续更新也不算新装，勾选状态不会自行改变。
+
+- 主页重新提供检查更新入口。
+
+#### 变更
+
+- 备份与恢复的范围由应用白名单扩展到设置项：一次备份同时携带白名单与模块开关，恢复时一并写回。
+
+- 升级依赖版本，同步更新「开放源代码许可」页。
+
+### English
+
+#### Added
+
+- The Records tab: current FCM status and event history without opening FCM Diagnostics, plus a one-tap plain-text export. Events are filed in six classes (All, Connection, Heartbeat, Push, Sleep, Error) for quick filtering and triage; the archive keeps 500 rows by default (adjustable in Settings), which usually covers the last 12 hours. The idea comes from [ByteJuno/fcmfix-coloros](https://github.com/ByteJuno/fcmfix-coloros); the tab row follows [Miuix for Compose](https://github.com/compose-miuix-ui/miuix) and [AritxOnly/F1Info](https://github.com/AritxOnly/F1Info/releases).
+
+- Settings gains an "auto-check newly installed FCM apps" switch: with it on, a freshly installed FCM app is checked by itself. Apps that were already installed and left unchecked when the switch was turned on are not affected, and an app update does not count as an install, so a check state never changes on its own.
+
+- The Home tab offers the update check again.
+
+#### Changed
+
+- Backup and restore now cover settings as well as the app allowlist: one file carries both, and a restore writes both back.
+
+- Dependency bumps, with the open-source licences page refreshed.
+
 ## 4.2.0 (54)
 
 ### 简体中文

@@ -89,3 +89,6 @@ java_pid*.hprof
 /screen*.png
 /switch_log.txt
 /ui.xml
+
+#agents
+AGENTS.md

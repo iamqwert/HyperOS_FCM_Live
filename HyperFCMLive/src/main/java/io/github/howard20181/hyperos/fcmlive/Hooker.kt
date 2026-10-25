@@ -246,9 +246,6 @@ class Hooker : XposedModule() {
         Group("start", "records bridge") {
             RecordsBridge.install(this, ::getSystemContext)
         },
-        Group("start", "autostart switch-op migration") {
-            AutostartGate.backfillAutostartOpsAtStartup(this, ::getSystemContext)
-        },
     )
 
     override fun onPackageReady(param: XposedModuleInterface.PackageReadyParam) {

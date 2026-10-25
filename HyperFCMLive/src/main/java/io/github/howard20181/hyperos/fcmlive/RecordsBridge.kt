@@ -63,6 +63,17 @@ internal object RecordsBridge {
     private const val CONTEXT_RETRY_MS = 5_000L
     private const val CONTEXT_MAX_ATTEMPTS = 120
 
+    /**
+     * Registration can also arrive before the activity service exists.
+     * `ContextImpl.registerReceiver` calls `ActivityManager.getService()`,
+     * which is still null while SystemServer is inside
+     * `startBootstrapServices` — the very pass this bridge installs from. The
+     * NPE it throws is therefore not a broken install but a clock that has not
+     * reached AMS yet: retry on the same timer instead of losing the receiver
+     * for the whole boot. Twelve tries is a minute, far past AMS coming up.
+     */
+    private const val REGISTER_MAX_ATTEMPTS = 12
+
     @Volatile
     private var failureLogged = false
 
@@ -70,6 +81,7 @@ internal object RecordsBridge {
         val worker = HandlerThread("fcmlive-records").apply { start() }
         val handler = Handler(worker.looper)
         var attempts = 0
+        var registerAttempts = 0
         val register = object : Runnable {
             override fun run() {
                 val context = try {
@@ -142,8 +154,27 @@ internal object RecordsBridge {
                         "Records bridge installed (token $token, attempts $attempts)"
                     )
                 } catch (t: Throwable) {
-                    logFailureOnce(module, "Records bridge registration failed", t)
-                    worker.quitSafely()
+                    registerAttempts++
+                    if (registerAttempts < REGISTER_MAX_ATTEMPTS) {
+                        // The usual cause is AMS not published yet (see
+                        // REGISTER_MAX_ATTEMPTS); a genuinely broken install
+                        // exhausts this in a minute and is reported then, once,
+                        // with the stack instead of once per retry.
+                        module.logGated(
+                            Log.DEBUG, TAG,
+                            "Records bridge not registered yet " +
+                                "(attempt $registerAttempts): $t"
+                        )
+                        handler.postDelayed(this, CONTEXT_RETRY_MS)
+                    } else {
+                        logFailureOnce(
+                            module,
+                            "Records bridge aborted: registration failed " +
+                                "after $registerAttempts attempts",
+                            t
+                        )
+                        worker.quitSafely()
+                    }
                 }
             }
         }

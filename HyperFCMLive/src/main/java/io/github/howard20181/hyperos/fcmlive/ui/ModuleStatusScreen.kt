@@ -1,7 +1,9 @@
 package io.github.howard20181.hyperos.fcmlive.ui
 
 import android.os.Build
+import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,24 +25,34 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.howard20181.hyperos.fcmlive.R
+import io.github.howard20181.hyperos.fcmlive.UpdateChecker
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppShapes
 import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
@@ -84,15 +96,59 @@ fun ModuleStatusScreen(
     onHelp: () -> Unit,
     /** Opens the about page. */
     onAbout: () -> Unit,
+    /** Runs the release check; the outcome comes back to this page to present. */
+    onCheckUpdate: (report: (UpdateOutcome) -> Unit) -> Unit,
+    /** Opens the release the check just offered, clearing the badge with it. */
+    onUpdateOpen: () -> Unit,
     /** Re-runs the activation check — the tap target when the module reads inactive. */
     onRecheck: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    // The stored flag, so the dot survives a page rebuild; the check below is
+    // what moves it (and the Activity clears the flag when the release opens).
+    var updateBadge by remember { mutableStateOf(UpdateChecker.isUpdateAvailable(context)) }
+    var updateOffer by remember { mutableStateOf<UpdateOutcome.Available?>(null) }
+    val checkingText = stringResource(R.string.update_checking)
+    val noneText = stringResource(R.string.update_none)
+    val errorText = stringResource(R.string.update_error)
+    val miuixNow = LocalUiStyle.current.isMiuixBased
+
+    fun show(text: String) {
+        if (miuixNow) {
+            // This look's one-line acknowledgment is the system toast, not the
+            // Material bar at the page's foot.
+            Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+            return
+        }
+        scope.launch {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(text)
+        }
+    }
+
+    updateOffer?.let { offer ->
+        AppDialog(
+            onDismissRequest = { updateOffer = null },
+            title = stringResource(R.string.update_found_title),
+            text = stringResource(R.string.update_found, offer.version),
+            confirmLabel = stringResource(R.string.update_open),
+            onConfirm = {
+                updateBadge = false
+                onUpdateOpen()
+            },
+            dismissLabel = stringResource(android.R.string.cancel)
+        )
+    }
+
     PageScaffold(
         titleRes = R.string.nav_modules,
         onBack = {},
         showBack = false,
-        modifier = modifier
+        modifier = modifier,
+        snackbarHostState = snackbarHostState
     ) { innerPadding ->
         val inset = pageHorizontalInset()
         // Card spacing: the reference runs its list on spacedBy(12.dp) end to
@@ -195,6 +251,41 @@ fun ModuleStatusScreen(
                         onClick = onHelp,
                         first = true,
                         last = false
+                    )
+                    // The middle row: the same manual check the about page
+                    // runs, with the stored badge riding before the chevron.
+                    NavCard(
+                        iconRes = R.drawable.ic_check_update,
+                        title = stringResource(R.string.check_for_updates),
+                        subtitle = "",
+                        onClick = {
+                            show(checkingText)
+                            onCheckUpdate { outcome ->
+                                updateBadge = outcome is UpdateOutcome.Available
+                                when (outcome) {
+                                    UpdateOutcome.None -> show(noneText)
+                                    UpdateOutcome.Error -> show(errorText)
+                                    is UpdateOutcome.Available -> updateOffer = outcome
+                                }
+                            }
+                        },
+                        first = false,
+                        last = false,
+                        trailing = {
+                            if (updateBadge) {
+                                val badgeDesc = stringResource(R.string.update_badge_desc)
+                                Box(
+                                    modifier = Modifier
+                                        .padding(start = 8.dp)
+                                        .size(8.dp)
+                                        // The dot is colour alone; without a
+                                        // label the row reads as an ordinary
+                                        // "check for updates" entry.
+                                        .semantics { contentDescription = badgeDesc }
+                                        .background(MaterialTheme.colorScheme.error, CircleShape)
+                                )
+                            }
+                        }
                     )
                     NavCard(
                         iconRes = R.drawable.ic_info,

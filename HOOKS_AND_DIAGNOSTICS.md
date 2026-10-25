@@ -305,9 +305,9 @@ getReceiverInfo(pkg, com.google.firebase.iid.FirebaseInstanceIdReceiver)
 
 前两问靠 intent-filter，后两问**直接解析组件**——这正是后两问存在的理由：有些应用的 Firebase 类不带 intent-filter，只靠 action 查询看不见它们。结果按包名缓存 5 分钟（上限 256 条，满了整体清空）。
 
-#### 3.6.1 自启动阶梯与 10053 回填迁移（4.0.x 现役形态）
+#### 3.6.1 自启动阶梯（4.0.x 现役形态）
 
-自启动链路的钩子全部在 `AutostartGate.kt`，安装组 `autostart gate`；写档动作独立成组 `autostart switch-op migration`。整组按"阶梯"组织——**每一档读自己的开关，且 AND 上方各档**（主 → 副档依次串联，与 UI 上行的显隐链一致：被隐藏的行同时是惰性的行）：
+自启动链路的钩子全部在 `AutostartGate.kt`，安装组 `autostart gate`。**全链只读**：10008 与 10053 都不写（4.2.0 删掉了 10053 的开机回填，见本节末）。整组按"阶梯"组织——**每一档读自己的开关，且 AND 上方各档**（主 → 副档依次串联，与 UI 上行的显隐链一致：被隐藏的行同时是惰性的行）：
 
 | 档          | 钩点 / 动作                                                                                                                                          | 开关（默认全关，fail-closed）                          | 明细桶                          |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- | ---------------------------- |
@@ -316,16 +316,9 @@ getReceiverInfo(pkg, com.google.firebase.iid.FirebaseInstanceIdReceiver)
 | 副档 root    | `AppOpsManager#checkOpNoThrow(int,int,String)` + `#noteOpNoThrow(int,int,String,String,String)`：白名单内包的 10008 查询在 ROM 判定前直接答 `MODE_ALLOWED`（根部收口） | `autostart_root_release` AND 主档 AND restart 档 | `root`（只借明细预算，永不出现 DENIED 行） |
 | 只读探针       | `PreStartFeedbackImpl#isAutoStart(String,int)`：预启动惩罚面（拦窗口 / 扣通知 / 标记缓存进程可杀），**恒只读**，不改写返回值                                                       | 无（不受任何开关影响）                                   | `pre-start`                  |
 
-**10008 全模块只读不写**——唯一的写档是下述 10053 回填迁移。`PreStartFeedbackImpl#isAutoStart` 是否启用是 ROM 静态开关，模块不得假设，故保持探针。
+**自启动链路全模块只读**：10008（行为 op）与 10053（手机管家开关 op）都不写，模块只回答查询、只观察判定。`PreStartFeedbackImpl#isAutoStart` 是否启用是 ROM 静态开关，模块不得假设，故保持探针。
 
-**root 收口的自保护**：迁移流程自己也要读 10008（读前写），root 钩恰好钩在这些读取经过的方法上——不处理的话"读到的永远是已放行"会静默终止回填。`autostartWriteReadInFlight`（ThreadLocal）在迁移走读路径期间挂起 root 收口，finally 里必清。
-
-**开机 10053 回填迁移**（`backfillAutostartOpsAtStartup`，延迟 `AUTOSTART_BACKFILL_DELAY_MS` = 60 s，走安装组 `autostart switch-op migration`）：遍历白名单，读 10008 与 10053（`OP_AUTO_START_SWITCH`，手机管家自启动开关自己的 op）；两者不一致（旧版模块只把 10008 写成 allow、10053 留在 ignore）时经反射 `AppOpsManager#setMode` 把 10053 回填为 `MODE_ALLOWED`。结果码：`AUTOSTART_ALREADY / WRITTEN / FAILED / SKIPPED_SYSTEM / SKIPPED_MISSING`。两条刻意的静默跳过：
-
-- `FLAG_SYSTEM` 包一律拒写（`SKIPPED_SYSTEM`）：ROM 唯一的撤销路径是手机管家自启动开关，而深度系统包根本不出现在那一页 ⇒ 模块无法撤销的写就是不该做的写。
-- 已卸载残留（`SKIPPED_MISSING`）：白名单合法的滞留态，不是错误，逐条 ERROR 会变成风暴。
-
-整轮打一行汇总（各结果码计数），不逐包成行。
+**4.2.0 移除的 10053 开机回填**（原 `backfillAutostartOpsAtStartup`，延迟 60 s、安装组 `autostart switch-op migration`）：它只在一种陈旧安装上有活可干——旧版模块把 10008 写成 allow、10053 留在 ignore。这类装在当年开机的头几轮里已写回，之后每 60 s 再遍历一次白名单不再改变任何结论，却留下两个真实代价：一是经反射 `AppOpsManager#setMode` 写手机管家自己的开关，用户之后在手机管家页上关掉它，下次开机又被模块改回 allow，"谁的意愿生效"取决于重启时序；二是它必须在自己读 10008 期间挂起 root 收口（`autostartWriteReadInFlight`），给一个纯回答的钩子加了写侧状态。两处一并删除，该 ThreadLocal 也随之消失。
 
 **日志形状**：`autostart gate: <gate> [start ]DENIED #N -> probe|kept|released (callee=…[, 组件短名], caller-uid=…)`，`<gate>` ∈ {`service`, `process`, `restart`, `pre-start`}（`root` 不入 DENIED 行）。明细预算**按 callee 分桶 + 每小时重置**：每包 4 行、全组每小时 40 行（`AUTOSTART_GATE_DETAIL_PER_CALLEE` / `AUTOSTART_GATE_DETAIL_PER_HOUR` / `AUTOSTART_GATE_DETAIL_WINDOW_MS`）。计数器 `restart-denied= / pre-start-denied= / released= / restart-released= / root-released=` 全部进 30 min 摘要行。
 
@@ -597,7 +590,6 @@ hookSystemServer
        ├─ Group("hook",    "autostart gate")           失败 → ERROR "Failed to hook autostart gate"
        ├─ Group("install", "wake-path probe")          失败 → ERROR "Failed to install wake-path probe"
        ├─ Group("start",   "GMS traffic probe")        失败 → ERROR "Failed to start GMS traffic probe"
-       ├─ Group("start",   "autostart switch-op migration") 失败 → ERROR（同形）
        ├─ …（逐组独立 try/catch(Throwable)，一组炸了不影响后面的组）
        └─ logSummary("system_server")   ← 在 onSystemServerStarting 末尾，全部组跑完才打一次
 ```
@@ -924,6 +916,43 @@ adb shell dumpsys activity service com.google.android.gms/.gcm.GcmService > gcm.
 
 再配合 `net=-1` 行（连蜂窝也没有）区分「只掉 WiFi」与「两个射频一起掉」。
 
+**对象不总是 `GcmNetwork{N X(1)}` 这个裸形（2026-10-24 补充，真机 dump 实证）**：`toString()` 还会把「已不在线」这件事拼进去，于是同一个对象可能印成 `GcmNetwork{103 Cell(0) DISCONNECTED}`。三个后果：
+
+- **括号里可能还有第四段**：`GcmNetwork{104 VPN(17) [WiFi(1)]` 的 `[WiFi(1)]` 是 VPN 承载在哪个传输上，括号内的 `1` 是传输**类型 id**、不是 netId，别当身份读。
+- **`DISCONNECTED` 是解释，不是噪声**：它出现在 `Active network switched to …` / `went away, was …` / `onGcmNetworkChanged: …` 的行里，紧跟其后的往往就是 `Skipping connect attempt since the network is suspended` —— GCM 拿到的是一个已经断掉的网络对象，所以跳过连接、等下一次变更。看到这个后缀就先去找那两行。
+- **同类型换网络也是变更**：`Cell 103` → `Cell 107` 的 type 都是 0，只有 netId 不同，这同样是一次真实的网络对象替换（旧的消失、新的出现），不能因为没有跨传输就当"没变化"。records 页因此**始终保留 netId**（`Cell · 103`），不再只显示传输名。
+
+**`toString()` 的完整格式（GMS 26.41.62 字节码实证，`Lcoew;->toString`）**：
+
+```
+GcmNetwork{<netId> <Type>(<typeId>)[ <SubType>(<id>)][ DISCONNECTED][ BYPASSABLE][ RESTRICTED][ CONSTRAINED]}
+```
+
+四个标志位可叠加，`[SubType(id)]` 只在 netId 为 -1 时出现，且其中的数字是**传输类型 id**、不是 netId。
+
+**「同一网络」的判据也是 netId**：`Lcoew;->equals` 比较 netId 载体（`Libgb;->equals`
+比的就是那个 id）、传输类型、subtype 与三个标志位。也就是说 **netId 相同即同一个网络**，
+netId 不同即两个不同的网络，哪怕传输类型完全一样——这正是「移动数据换到另一个移动数据
+网络」必须按换网计、而不是按「没变化」计的依据。
+
+**三种网络行的来源（`Lcogi;->n(old, new)`，GMS 26.41.62 字节码实证）**：
+
+| 条件 | 打印 |
+| --- | --- |
+| `old == null` | `Active network is now <new>` |
+| `old.equals(new)` | **什么都不打印** |
+| `new == null` | `Active network went away, was <old>` |
+| 其余 | `Active network switched to <new>, was <old>` |
+
+由此可得两条对读日志很重要的推论：
+
+- **同类型换网必然落在 `switched to` 形状上**（旧对象与新对象 netId 不同 ⇒ 不相等 ⇒
+  不走「什么都不打印」那条），所以这一行同时带两端，两端都带 netId。
+- **`onGcmNetworkChanged: <new>` 行内只有新网络**：它由网络回调 `Lcogf;->run` 在把
+  新旧两网交给 `Lcogi;->n` **之前**打印。想答「怎么个变更法」，得看同一次回调随后
+  打印的那条换网行——records 页在解析阶段按「同 netId + 时间戳 2 s 内」把两者配对
+  （两个条件缺一不可：环里同一个网络可能换手多次，只看 netId 会张冠李戴）。
+
 **典型成对签名**：`err:20`（WiFi 网络消失）→ 约 3 s 后 `err:27` 且 `time:1`（刚在蜂窝上建好 1 s 的连接又被回来的 WiFi 顶掉）。
 
 #### 4.7.3 四条排除判据
@@ -1224,7 +1253,7 @@ adb logcat -d -v time | grep -a "notifySwitchNetworkByOtherStrategies"
 - ②服务绑定 `AutoStartManagerServiceStub#isAllowStartService` / `canRestartServiceLocked`（上游 SyncManager / AccountManager）+ `JobServiceContextImpl#checkIfCancelJob`；
 - ③进程重启 `ProcessManagerService#isAllowAutoStart`（上游 `ProcessStarter` 一族 + `ProcessPolicy`；同族另有 `PreStartFeedbackImpl#isAutoStart`、`greeze.InternationalPolicyManager#isAutoStartRestrict`）；
 - ④通用查询 `AppOpsServiceStubImpl#isOpAllowedForUid`——**在 `miui-services` 内没有调用者**，调用方在 `services.jar` 或上层应用。GMS 声明的 c2dm action 只有 RECEIVE（投递）/ REGISTER / UNREGISTER（应用→GMS）⇒ **投递面只需放行 RECEIVE**；②③是 Firebase token 维护走的路径，与投递无关，但**与「唤醒后活得下去」有关**（见 4.7.4）。
-- 上述检查点的**模块覆盖现状（2026-10-13，v4.0.x 工作树；完整阶梯见 3.6.1）**——放行 2 处（主档，`autostart_gate_release`）：`AutoStartManagerServiceStubImpl#isAllowStartService`（含 Intent 重载）+ `ProcessManagerService#isAllowAutoStart`；**restart 档可放行**（`autostart_restart_release`，AND 主档）：`canRestartServiceLocked` 两个重载；**root 收口档**（`autostart_root_release`，AND 全链）：`AppOpsManager#checkOpNoThrow` / `#noteOpNoThrow` 对白名单包直接答 `MODE_ALLOWED`；**只读探针 1 处**（计数 + 明细，永不改写返回值）：`PreStartFeedbackImpl#isAutoStart(String,int)`。**写档只有一处**：开机 60 s 延迟的 10053 回填迁移（只写 `OP_AUTO_START_SWITCH`；**10008 全模块只读**，旧版"写 10008"的选项已在 4.0.3 删除）。
+- 上述检查点的**模块覆盖现状（2026-10-13，v4.0.x 工作树；完整阶梯见 3.6.1）**——放行 2 处（主档，`autostart_gate_release`）：`AutoStartManagerServiceStubImpl#isAllowStartService`（含 Intent 重载）+ `ProcessManagerService#isAllowAutoStart`；**restart 档可放行**（`autostart_restart_release`，AND 主档）：`canRestartServiceLocked` 两个重载；**root 收口档**（`autostart_root_release`，AND 全链）：`AppOpsManager#checkOpNoThrow` / `#noteOpNoThrow` 对白名单包直接答 `MODE_ALLOWED`；**只读探针 1 处**（计数 + 明细，永不改写返回值）：`PreStartFeedbackImpl#isAutoStart(String,int)`。**全链无写档**：10008 与 10053 都不写（旧版"写 10008"的选项在 4.0.3 删除，4.2.0 删掉 10053 的开机回填）。
   - `canRestartServiceLocked` **形参 0 = callee 包名**（两个重载都是），impl `locals` 表、调用点取值与桥接调用三处字节码证据一致。接口定义在 **services.jar**（`PUBLIC INTERFACE ABSTRACT`），impl 在 `miui-services.jar`。唯一入口 `ActiveServices.scheduleServiceRestartLocked(ServiceRecord,boolean)` = 服务被杀死后的重启调度。
   - **`canRestartServiceLocked` 不是「静默无日志」**（旧表述作废）：它有独立日志行 `MIUILOG- Reject RestartService service :`（tag `AutoStartManagerService`），全 dex 唯一归属该方法，仅在 5 参路径（ComponentName 非空 + boolean 真）才打。`MIUILOG- Reject service :`（string@9657）仍唯一属于 `isAllowStartService`。
   - `PreStartFeedbackImpl#isAutoStart` 归入 ③ 是**按调用族粗分**，其真实角色是**预启动惩罚**：调用者 `isProhibitShowWindow`（拦窗口）/ `isTempDeniedNotificationForPreStart`（临时拒通知）/ `reportProcStartedLocked`（标记进 `mActiveCachedProcs`，配 `ENABLE_PRESTART_CACHED_KILL`）。即"没自启动就后台起来"的应用不只被拒启，还会丢窗口与通知——**这是唯一一条能直接作用在通知投递面上的 10008 读取点**，故本轮以只读探针先行取证。
@@ -1372,7 +1401,6 @@ adb logcat -d -v time | grep -a "notifySwitchNetworkByOtherStrategies"
 | system_server | 自启动 | `AutoStartManagerServiceStubImpl#isAllowStartService`（含 Intent 重载）+ `ProcessManagerService#isAllowAutoStart` | 白名单内被拒 → true（`autostart_gate_release`）                         |
 | system_server | 自启动 | `AutoStartManagerServiceStubImpl#canRestartServiceLocked` ×2                                                 | 白名单内被拒 → true（`autostart_restart_release` AND 主档）               |
 | system_server | 自启动 | `AppOpsManager#checkOpNoThrow` / `#noteOpNoThrow`                                                            | 白名单包 10008 查询 → `MODE_ALLOWED`（`autostart_root_release` AND 全链） |
-| system_server | 自启动 | `AppOpsManager#setMode`（反射，开机延迟 60 s 回填迁移）                                                                   | 10008/10053 不一致 → 10053 写 allow；`FLAG_SYSTEM`/已卸载静默跳过           |
 | system_server | 探针  | `PreStartFeedbackImpl#isAutoStart`                                                                           | 只读计数（预启动惩罚面）                                                    |
 | system_server | 睡眠  | `MiuiNetworkPolicyManagerService#setSleepModeWhitelistUidRules`                                              | 注入 GMS uid（V816 上为防御位）                                          |
 | system_server | 睡眠  | `MiuiNetworkPolicyManagerService#enableSleepModeChain`                                                       | 日志 + 条件 nudge（V816 上为防御位）                                       |
@@ -1437,9 +1465,7 @@ adb logcat -d -v time | grep -a "notifySwitchNetworkByOtherStrategies"
 | `WAKE_PATH_DETAIL_LIMIT`                                                  | 10                                                                                                  | Gate-W / Gate-B 明细行数上限                |
 | 临时豁免参数                                                                    | `(pkg, 102, "GOOGLE_C2DM", 2000)`                                                                   | 2 s 省电豁免                              |
 | 本机 `cloud_min_rssi_for_data_switch_5GHzwifi`                              | −72（2.4 GHz 为 −73）                                                                                  | ROM 的弱信号切蜂窝阈值；`cloud_*` 前缀意味着可能被云端覆盖  |
-| `MIUIOP_AUTO_START` / `MIUIOP_AUTO_START_SWITCH`                          | 10008 / 10053                                                                                       | 自启动行为 op / 手机管家开关 op；**10008 全模块只读**  |
-| `AUTOSTART_ALREADY / WRITTEN / FAILED / SKIPPED_SYSTEM / SKIPPED_MISSING` | 0 / 1 / −1 / 2 / 3                                                                                  | 10053 回填迁移结果码                         |
-| `AUTOSTART_BACKFILL_DELAY_MS`                                             | 60 000 ms（60 s）                                                                                     | 开机 10053 回填延迟                         |
+| `MIUIOP_AUTO_START`                                                       | 10008                                                                                               | 自启动行为 op；**全模块只读**（10053 手机管家开关 op 不再写，故无对应常量） |
 | `AUTOSTART_STUB_CLASS`                                                    | `com.android.server.am.AutoStartManagerServiceStubImpl`                                             | 自启动 Stub 实现类（非 `…Stub` 短名）            |
 | `AUTOSTART_SERVICE / PROCESS / RESTART_METHOD`                            | `isAllowStartService` / `isAllowAutoStart` / `canRestartServiceLocked`                              | 自启动钩点方法                               |
 | `AUTOSTART_PRE_START_CLASS / _METHOD`                                     | `com.android.server.am.PreStartFeedbackImpl` / `isAutoStart`                                        | 预启动惩罚只读探针                             |

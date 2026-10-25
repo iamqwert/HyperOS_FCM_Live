@@ -231,6 +231,17 @@ fun MiuixCapsuleTabRow(
             label = "soft_glass_tab_indicator_width",
         )
 
+        // The pill rides OUTSIDE the scroll container. Compose's horizontalScroll
+        // clips its content to a rectangle at the viewport edge, so the bouncy
+        // overshoot at either end — first or last tab — had its round corner
+        // sliced flat. The reference never shows that: its strip does not scroll,
+        // and the only clip around the pill is the capsule itself, so an overshoot
+        // is rounded off rather than squared off.
+        //
+        // So the pill gets its own layer, clipped to the capsule, offset by
+        // [scrollState] so it still travels with the labels; the row below keeps
+        // the scroll, whose rectangular clip only ever cuts text that has already
+        // left the viewport.
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -238,65 +249,71 @@ fun MiuixCapsuleTabRow(
                     horizontal = MiuixCapsuleTabRowDefaults.HorizontalPadding,
                     vertical = MiuixCapsuleTabRowDefaults.VerticalPadding,
                 )
-                .horizontalScroll(scrollState, enabled = scrollable)
         ) {
             Box(
                 modifier = Modifier
-                    .width(if (scrollable) contentWidth else available)
-                    .fillMaxHeight()
+                    .fillMaxSize()
+                    .clip(shape)
             ) {
                 Box(
                     modifier = Modifier
-                        .offset { IntOffset(indicatorStart.roundToInt(), 0) }
+                        .offset {
+                            IntOffset(
+                                (indicatorStart - scrollState.value).roundToInt(),
+                                0,
+                            )
+                        }
                         .width(with(density) { indicatorWidth.toDp() })
                         .fillMaxHeight()
                         .clip(shape)
                         .background(indicatorColor)
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .selectableGroup(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    tabs.forEachIndexed { index, label ->
-                        val selected = index == selectedIndex
-                        val textColor by animateColorAsState(
-                            targetValue = if (selected) {
-                                contentColor
+            }
+            Row(
+                modifier = Modifier
+                    .horizontalScroll(scrollState, enabled = scrollable)
+                    .width(if (scrollable) contentWidth else available)
+                    .fillMaxHeight()
+                    .selectableGroup(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                tabs.forEachIndexed { index, label ->
+                    val selected = index == selectedIndex
+                    val textColor by animateColorAsState(
+                        targetValue = if (selected) {
+                            contentColor
+                        } else {
+                            contentColor.copy(alpha = 0.50f)
+                        },
+                        label = "soft_glass_tab_color_$index",
+                    )
+                    val interactionSource = remember { MutableInteractionSource() }
+                    Box(
+                        modifier = Modifier
+                            .width(itemWidths[index])
+                            .fillMaxHeight()
+                            .clip(shape)
+                            .selectable(
+                                selected = selected,
+                                role = Role.Tab,
+                                interactionSource = interactionSource,
+                                indication = null,
+                                onClick = { onTabSelected(index) },
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = label,
+                            color = textColor,
+                            style = labelStyle,
+                            fontWeight = if (selected) {
+                                FontWeight.Medium
                             } else {
-                                contentColor.copy(alpha = 0.50f)
+                                FontWeight.Normal
                             },
-                            label = "soft_glass_tab_color_$index",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                        val interactionSource = remember { MutableInteractionSource() }
-                        Box(
-                            modifier = Modifier
-                                .width(itemWidths[index])
-                                .fillMaxHeight()
-                                .clip(shape)
-                                .selectable(
-                                    selected = selected,
-                                    role = Role.Tab,
-                                    interactionSource = interactionSource,
-                                    indication = null,
-                                    onClick = { onTabSelected(index) },
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = label,
-                                color = textColor,
-                                style = labelStyle,
-                                fontWeight = if (selected) {
-                                    FontWeight.Medium
-                                } else {
-                                    FontWeight.Normal
-                                },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
                     }
                 }
             }

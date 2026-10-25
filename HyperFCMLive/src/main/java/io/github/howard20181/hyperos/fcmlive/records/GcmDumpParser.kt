@@ -9,12 +9,18 @@ import java.util.Calendar
  * [text] is GMS's own wording, network names prettified; [kind] is our
  * classification of it. [ts] is wall-clock millis, inferred by the year — the
  * dump prints `MM-dd HH:mm:ss.SSS` without one.
+ *
+ * [previousNetwork] is the network the client was on BEFORE a network-change
+ * line, for the shapes whose own text names only the new network. It is
+ * filled in while the whole ring is still in hand — see
+ * `GcmDumpParser.parseEvents`.
  */
 data class GcmEvent(
     val ts: Long,
     val net: Int,
     val kind: EventKind,
-    val text: String
+    val text: String,
+    val previousNetwork: GcmDumpParser.NetworkRef? = null
 ) {
     enum class EventKind {
         Connected,
@@ -63,7 +69,15 @@ data class GcmEvent(
          * changes, because the event ring is in-memory and starts empty after
          * every GMS restart.
          */
-        GmsRestart
+        GmsRestart,
+
+        /**
+         * Not from GMS either: the ring overflowed between two polls (its
+         * oldest line is newer than the previous read's cursor), so the lines
+         * in between are gone. The marker says how much time it covers; the
+         * store writes it with this kind's own name as its text.
+         */
+        SamplingGap
     }
 }
 
@@ -286,8 +300,183 @@ object GcmDumpParser {
     private val EVENT = Regex(
         """^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s+net=(-?\d+):\s?(.*)$"""
     )
-    /** The closing brace must be escaped: ICU's regex rejects a bare `}`. */
-    private val GCM_NETWORK = Regex("""GcmNetwork\{(\d+) (\w+)\((\d+)\)\}""")
+    /**
+     * The closing brace must be escaped: ICU's regex rejects a bare `}`.
+     *
+     * The object is not always the bare `GcmNetwork{103 Cell(0)}` the docs of
+     * old builds show. Its `toString()` appends what it knows beyond identity,
+     * and both extras are real on device:
+     *
+     *  - a state word once the object is no longer up —
+     *    `GcmNetwork{103 Cell(0) DISCONNECTED}`, what a suspended network looks
+     *    like right before GCM skips a connect attempt;
+     *  - the network a VPN rides on — `GcmNetwork{104 VPN(17) [WiFi(1)]}`.
+     *
+     * Matching only `…(0)}` let both of those through untouched, so the raw
+     * braces landed in a row's title (`活动网络已切换为 GcmNetwork{103 Cell(0)
+     * DISCONNECTED}`). The tail is therefore captured as free text and read for
+     * its parts by [networkRefOf]; groups 1-3 keep the identity they always had.
+     */
+    private val GCM_NETWORK = Regex("""GcmNetwork\{(\d+) (\w+)\((\d+)\)([^{}]*)\}""")
+
+    /**
+     * The state word in a `GcmNetwork` tail — GMS prints it in caps, alone.
+     *
+     * `toString()` can stack several: `DISCONNECTED`, `BYPASSABLE`,
+     * `RESTRICTED`, `CONSTRAINED` (GMS 26.41.62's `Lcoew;->toString`).
+     * The row keeps the one that answers 「这网怎么了」 — `DISCONNECTED` is
+     * what makes GMS skip the next connect attempt — and the capability
+     * flags (`BYPASSABLE` / `RESTRICTED` / `CONSTRAINED`) say nothing about
+     * the change, so they do not crowd the label.
+     */
+    private val STATE_WORD = Regex("""\b[A-Z][A-Z_]+\b""")
+
+    /**
+     * The state word the row reads, and ONLY that one.
+     *
+     * `DISCONNECTED` is the only tail word that says something happened to the
+     * network: it is what makes GMS skip the next connect attempt, and it is
+     * what the following `Skipping connect attempt since the network is
+     * suspended` line is about. The capability flags (`BYPASSABLE` /
+     * `RESTRICTED` / `CONSTRAINED`) are properties, not events — passing the
+     * first cap word through used to put an untranslated English token in a
+     * title (`已变更为 VPN · 105（BYPASSABLE）`) and made the row longer
+     * without saying anything.
+     */
+    private fun stateOf(tail: String): String? =
+        STATE_WORD.findAll(tail).map { it.value }.firstOrNull { it == "DISCONNECTED" }
+
+    /**
+     * The `[WiFi(1)]` a VPN network carries: the transport it actually rides.
+     * Only the transport name is kept — the number inside the brackets is a
+     * transport TYPE id, not a netId, and quoting it as one would invent an
+     * identity (`WiFi · 1`) that no network has.
+     */
+    private val UNDERLYING = Regex("""\[(\w+)\(\d+\)]""")
+
+    /**
+     * A network already in this file's prettified shape — `Cell · 103`,
+     * optionally with the state in brackets and a `[WiFi · 102]` tail. This is
+     * what [prettifyNetworkTokens] emits, and therefore what an event row
+     * holds, so the readers below parse the prettified text and this shape is
+     * the one they meet.
+     */
+    private val PRETTY_NETWORK =
+        Regex("""^(\w+)(?: · (\d+))?(?: \(([A-Z_]+)\))?(?: \[([^\]]+)])?$""")
+
+    /**
+     * A network named in one of GCM's network lines, in parts.
+     *
+     * Identity is (transport, netId): the netId is the ConnectivityManager id,
+     * monotonic within a boot, so two networks of the SAME transport — a
+     * handover from one cell network to another, which the records page used to
+     * print as the tautology `切换为 Cell，原为 Cell` — are only distinguishable
+     * through it. [state] is the dump's own word for a network that is no longer
+     * up, kept verbatim here and translated by the row.
+     */
+    data class NetworkRef(
+        val transport: String,
+        val netId: String? = null,
+        val state: String? = null,
+        val underlying: String? = null
+    ) {
+        /** True when the dump itself marks this network as gone. */
+        val isDown: Boolean get() = state != null && state.startsWith("DISCONNECT")
+
+        /**
+         * True when the two names are the SAME network.
+         *
+         * The netId is the whole test, and it is GMS's own: `Lcoew;->equals`
+         * compares the netId carrier (`Libgb;->equals` compares that id), the
+         * transport type and the flags — so two `GcmNetwork` objects with one
+         * netId are one network, and two with different netIds are two
+         * networks even when the transport is identical. That is what makes a
+         * mobile-data handover (`Cell · 103` → `Cell · 107`) a real change
+         * rather than the tautology `切换为 Cell，原为 Cell`.
+         *
+         * A name WITHOUT a netId cannot be compared: it does not say which
+         * network it was, only which transport. Such a pair is never the
+         * same network — the honest answer is "unknown", and the row says so
+         * rather than claiming a change it cannot support.
+         *
+         * Note that "same netId" is NOT "same situation": GMS's own
+         * `Lcoew;->equals` also compares the four flags `d`/`e`/`f`/`g`, and
+         * `d` is the `DISCONNECTED` one. A network that dropped and came back
+         * keeps its netId but flips `d`, so GMS itself treats the two as
+         * different and prints a handover line for them. This method answers
+         * the narrower question 「同一个网吗」, and the row reads [state]
+         * separately to tell a drop from a restore.
+         */
+        fun sameAs(other: NetworkRef): Boolean =
+            netId != null && netId == other.netId
+
+        /** The flat form [prettifyNetworkTokens] emits. */
+        fun format(): String = buildString {
+            append(transport)
+            if (netId != null) append(" · ").append(netId)
+            if (state != null) append(" (").append(state).append(')')
+            if (underlying != null) append(" [").append(underlying).append(']')
+        }
+    }
+
+    /**
+     * What kind of change a network row reports.
+     *
+     * The three answers the dump can give, and the reader needs all three:
+     * moving to another network, the same network losing its link, and the
+     * same network getting it back. Without the last two, a drop and a
+     * restore read as a handover to somewhere else.
+     */
+    enum class NetworkChange {
+        /**
+         * Another network took over — the netIds differ.
+         *
+         * This is the case the transport name cannot express: `Cell · 103`
+         * → `Cell · 107` is two mobile-data networks, and the netId is the
+         * only thing that says so.
+         */
+        Handover,
+
+        /**
+         * The same network lost its link — same netId, and the dump now
+         * marks it `DISCONNECTED`.
+         *
+         * GMS's own `Lcoew;->equals` compares the netId AND the four state
+         * flags, the `DISCONNECTED` one among them, so it prints a handover
+         * line for this. It is a change, and the row must not pretend
+         * otherwise — nor call it a move to a different network.
+         */
+        Dropped,
+
+        /**
+         * The same network got its link back — same netId, and the dump no
+         * longer marks it `DISCONNECTED`.
+         */
+        Restored
+    }
+
+    /**
+     * What changed between [previous] and [landed].
+     *
+     * The netId says whether the client moved to a DIFFERENT network — two
+     * cell networks are two networks even though the transport is the same,
+     * and that is the whole point of keeping the netId. The state word
+     * says whether the network it was on merely lost its link: GMS counts
+     * that as a change too, because its `Lcoew;->equals` compares the
+     * state flags as well as the netId.
+     *
+     * Null when the two cannot be compared at all — a name without a netId
+     * does not say which network it was.
+     */
+    fun classifyNetworkChange(landed: NetworkRef?, previous: NetworkRef?): NetworkChange? {
+        if (landed == null || previous == null) return null
+        if (!landed.sameAs(previous)) return NetworkChange.Handover
+        return when {
+            landed.isDown && !previous.isDown -> NetworkChange.Dropped
+            !landed.isDown && previous.isDown -> NetworkChange.Restored
+            else -> null
+        }
+    }
 
     /**
      * An `McsConnection` wrapper around a network. GMS nests the network two
@@ -312,6 +501,8 @@ object GcmDumpParser {
     private val CONNECTIONS_LIMIT = Regex("""connectionsLimit:\s*(\d+)""")
     private val LAST_DURATION = Regex("""lastConnectionDurationS=(-?\d+)""")
     private val DISCONNECT_TIME = Regex("""disconnectTime=([^\s,]+)""")
+    /** The store's own overflow marker — see [GcmEvent.EventKind.SamplingGap]. */
+    private val SAMPLING_GAP = Regex("""^SamplingGap (\d+)s$""")
 
     /**
      * The link-health lines of the Client block. All of them are printed only
@@ -491,6 +682,97 @@ object GcmDumpParser {
     }
 
     /**
+     * Parses the whole event ring, binding each network-change line to the
+     * network it came FROM.
+     *
+     * Two of GMS's network shapes carry only the new network — `onGcmNetworkChanged:
+     * <new>` and `Active network is now <new>` — and the first is the one a
+     * reader meets most often (every network callback prints it). Answering
+     * "how did it change?" for those needs a handover line that names both
+     * ends, so the pairing has to happen here, where the whole ring is still
+     * in hand: by the time a row is rendered, its neighbours are gone.
+     *
+     * The partner is found by TWO conditions together, because neither is
+     * enough alone:
+     *
+     *  - it names the SAME new network (the netId) — GMS prints the handover
+     *    line from two different places, the network callback and the
+     *    heartbeat alarm path, so adjacency alone proves nothing, and one
+     *    network can change hands more than once in a ring;
+     *  - and it was written at the SAME MOMENT — the two ends of one change
+     *    are written by one callback, so their timestamps are within a
+     *    heartbeat of each other. A network that changed hands minutes ago
+     *    is not the change this line reports.
+     *
+     * The second condition is what keeps a notification from borrowing the
+     * history of an unrelated earlier change of the same network.
+     */
+    private fun parseEvents(lines: List<String>): List<GcmEvent> {
+        // One pass: parse every line, and remember the handover lines so the
+        // single-network shapes can find theirs.
+        val parsed = ArrayList<GcmEvent>(lines.size)
+        val handovers = ArrayList<Handover>()
+        for (line in lines) {
+            val event = parseEvent(line) ?: continue
+            if (event.kind != GcmEvent.EventKind.Network) {
+                parsed += event
+                continue
+            }
+            val target = parseNetworkTarget(event.text)
+            // The line's own `was` clause wins: the dump naming both ends of
+            // the change in one sentence is the best evidence there is.
+            val own = parseNetworkPrevious(event.text)
+            if (target != null && own != null) {
+                handovers += Handover(landed = target, previous = own, at = event.ts)
+            }
+            parsed += event.copy(previousNetwork = own)
+        }
+
+        // Now that every handover in the ring is known, the single-network
+        // shapes can be matched against them.
+        return parsed.map { event ->
+            if (event.previousNetwork != null) return@map event
+            if (event.kind != GcmEvent.EventKind.Network) return@map event
+            // The `went away` shape already names the network it is about —
+            // the one that vanished. It is not a single-network shape waiting
+            // for a partner, and borrowing one would give the row a "came
+            // from" that the dump never said.
+            if (isNetworkGone(event.text)) return@map event
+            val target = parseNetworkTarget(event.text) ?: return@map event
+            if (target.netId == null) return@map event
+            val partner = handovers
+                .filter { it.landed.netId == target.netId }
+                .filter { kotlin.math.abs(it.at - event.ts) <= SAME_CHANGE_WINDOW_MS }
+                .minByOrNull { kotlin.math.abs(it.at - event.ts) }
+            event.copy(previousNetwork = partner?.previous)
+        }.distinctBy { it.ts to it.text }
+    }
+
+    /**
+     * How far apart two lines may be and still be the two ends of ONE change.
+     *
+     * A callback writes its lines one after another, so they land in the same
+     * millisecond or the one after it; a second is already generous. It has
+     * to be a bound at all: a network that changes hands twice in a ring
+     * would otherwise lend its history to both notifications.
+     */
+    private const val SAME_CHANGE_WINDOW_MS = 2_000L
+
+    /** A handover line: the network the client landed on and the one it left. */
+    private class Handover(
+        val landed: NetworkRef,
+        val previous: NetworkRef,
+        /** When the line was written — its timestamp. */
+        val at: Long
+    )
+
+    /**
+     * Parses event-ring lines into events. Exposed for the tests, which feed
+     * it the raw `MM-dd HH:mm:ss.SSS net=N: <text>` lines the dump prints.
+     */
+    internal fun parseEventsForTest(lines: List<String>): List<GcmEvent> = parseEvents(lines)
+
+    /**
      * `MM-dd` carries no year. Parse as the current year, and treat a date
      * more than a month ahead as last year's — a dump taken on New Year's Day
      * still holds December's lines.
@@ -582,6 +864,10 @@ object GcmDumpParser {
      * stage from it so archives written by older builds classify correctly.
      */
     internal fun classifyText(text: String): GcmEvent.EventKind = classify(text)
+
+    /** `SamplingGap 12s` — the store's own marker text, seconds it covers. */
+    fun parseSamplingGapSeconds(text: String): Long? =
+        SAMPLING_GAP.find(text)?.groupValues?.get(1)?.toLongOrNull()
 
     /** `Received <pkg> <msgid>` fields, or null when [text] is not one. */
     fun parseMessageReceived(text: String): MessageRef? {
@@ -800,17 +1086,14 @@ object GcmDumpParser {
             .joinToString("\n") { it.trim() }
     }
 
-    private fun parseEvents(lines: List<String>): List<GcmEvent> =
-        lines.mapNotNull(::parseEvent).distinctBy { it.ts to it.text }
-
     /**
-     * The network a network-change event line names as its subject, already in
-     * prettified `Cell` / `WiFi` form — `switched to`/`is now`/
-     * `onGcmNetworkChanged` name the network the client lands on,
-     * `went away, was` the one it lost. Any trailing flag clause is dropped.
-     * Null when the line names none: an unknown shape keeps its raw text.
+     * The network a network-change event line names as its subject —
+     * `switched to`/`is now`/`onGcmNetworkChanged` name the network the client
+     * lands on, `went away, was` the one it lost. Any trailing flag clause is
+     * dropped. Null when the line names none: an unknown shape keeps its raw
+     * text.
      */
-    fun parseNetworkTarget(text: String): String? {
+    fun parseNetworkTarget(text: String): NetworkRef? {
         val raw = when {
             text.startsWith("Active network switched to ") ->
                 NET_SWITCHED.find(text)?.groupValues?.get(1)
@@ -822,7 +1105,7 @@ object GcmDumpParser {
                 NET_CHANGED.find(text)?.groupValues?.get(1)
             else -> null
         } ?: return null
-        return networkName(raw).ifEmpty { null }
+        return networkRefOf(raw)
     }
 
     /** True when the line reports the active network vanishing, not a handover. */
@@ -830,19 +1113,46 @@ object GcmDumpParser {
         text.startsWith("Active network went away")
 
     /**
-     * The `was` (previous) network of a handover / gone line — the value the
-     * new title templates quote as 原为 B. Null on shapes that name no
-     * previous network (`is now` / `onGcmNetworkChanged`).
+     * The `was` (previous) network of a handover — the value the new title
+     * templates quote as 原为 B. Null on the shapes that name no previous
+     * network (`is now` / `onGcmNetworkChanged`).
+     *
+     * The `went away` shape is one of them, and deliberately so: it names ONE
+     * network — the one that vanished — and that network is the row's
+     * SUBJECT, not where the row came from. Reading its `was` clause as a
+     * previous network produced the tautology 「变更前后都是 Cell · 103」:
+     * a callback announcing network 103 was paired with the `went away` line
+     * naming 103, and the row then claimed 103 was reached from 103. There
+     * is no second end here to pair with, so there is no previous network
+     * either — see [parseNetworkTarget], which is where the vanished network
+     * is read.
      */
-    fun parseNetworkPrevious(text: String): String? {
+    fun parseNetworkPrevious(text: String): NetworkRef? {
         val raw = when {
             text.startsWith("Active network switched to ") ->
                 NET_SWITCHED.find(text)?.groupValues?.get(2)
-            text.startsWith("Active network went away, was ") ->
-                text.removePrefix("Active network went away, was ")
             else -> null
         } ?: return null
-        return networkName(raw).ifEmpty { null }
+        val previous = networkRefOf(raw) ?: return null
+        // GMS printed this line, so something DID change: its `Lcogi;->n`
+        // prints the handover only when the two networks are not `equals`,
+        // and `Lcoew;->equals` compares the netId carrier, the transport
+        // type and four state flags — the `DISCONNECTED` one among them.
+        //
+        // So two entries carrying ONE netId are the same network whose
+        // state flipped: it dropped, or it came back. Calling that a
+        // handover would read as a tautology (`Cell · 103 → Cell · 103`),
+        // but dropping it would hide the very change the reader is
+        // looking for. The row tells the two apart by the state word —
+        // see [classifyNetworkChange].
+        //
+        // Only a line whose two ends are indistinguishable is dropped here,
+        // so that no row ever reads 「从 X 变成了 X」.
+        val landed = parseNetworkTarget(text)
+        if (landed != null && landed.sameAs(previous) && landed.state == previous.state) {
+            return null
+        }
+        return previous
     }
 
     /** `Heartbeat alarm delay: %d ms` — when the next heartbeat alarm is set for.
@@ -903,54 +1213,79 @@ object GcmDumpParser {
         }
 
     /**
-     * Status-page variant: keeps the netId (`WiFi 102`) — the structured
-     * configuration benefits from the concrete network identity.
-     */
-    fun prettifyNetworks(text: String): String = prettifyNetworkTokens(text, withNetId = true)
-
-    /**
-     * Event-line variant: type only (`WiFi` / `Cell`), no netId — the events
-     * page reads the transport type, not the number.
+     * Rewrites every network object in [text] into `Cell · 103` form.
      *
-     * Both variants drop GMS's wrappers entirely: an event line names a
-     * transport, not a data structure, so
-     * `McsConnection{GcmNetwork{100 Cell(0)}, type=0}` becomes `Cell`. Flag
-     * tokens stay, comma-separated, so the raw line a tap reveals still
-     * carries them; the title reads the known one through
+     * One variant for both callers. The event rows used to drop the netId
+     * (type only: `Cell`), on the reasoning that the events page reads a
+     * transport, not a number — but a handover between two networks of the
+     * same transport then reads as the tautology `切换为 Cell，原为 Cell`, and
+     * "the mobile data came back on a different network" is exactly the change
+     * worth seeing. The netId is the only thing that tells those two apart, so
+     * it stays.
+     *
+     * Both variants drop GMS's wrappers entirely: a row names a transport, not
+     * a data structure, so `McsConnection{GcmNetwork{100 Cell(0)}, type=0}`
+     * becomes `Cell · 100`. Flag tokens stay, comma-separated, so the raw line
+     * a tap reveals still carries them; the title reads the known one through
      * [parseConnectingFallbackPort].
      */
-    internal fun prettifyEventText(text: String): String =
-        prettifyNetworkTokens(text, withNetId = false)
+    internal fun prettifyEventText(text: String): String = prettifyNetworkTokens(text)
 
-    private fun prettifyNetworkTokens(text: String, withNetId: Boolean): String {
+    /** Status-page alias of [prettifyEventText], kept for the call sites' sake. */
+    fun prettifyNetworks(text: String): String = prettifyNetworkTokens(text)
+
+    private fun prettifyNetworkTokens(text: String): String {
         // McsConnection first: its inner network is a GcmNetwork token itself,
         // so consuming the wrapper before the standalone pass is what keeps
         // the braces out of the result.
         val mcs = MCS_CONNECTION.replace(text) { match ->
-            val (name, netId) = networkOf(match.groupValues[1])
+            val (ref, flags) = networkOf(match.groupValues[1]) to match.groupValues[3].trim()
             buildString {
-                append(name)
-                if (withNetId && netId.isNotEmpty()) append(' ').append(netId)
-                val flags = match.groupValues[3].trim()
+                append(ref.format())
                 if (flags.isNotEmpty()) append(", ").append(flags)
             }
         }
         return GCM_NETWORK.replace(mcs) { match ->
-            val netId = match.groupValues[1]
-            val name = match.groupValues[2]
-            if (withNetId) "$name $netId" else name
+            networkRefOf(match.value)?.format() ?: match.value
         }
     }
 
-    /** Transport name and netId out of either inner `McsConnection` shape. */
-    private fun networkOf(inner: String): Pair<String, String> {
-        GCM_NETWORK.find(inner)?.let { match ->
-            return match.groupValues[2] to match.groupValues[1]
+    /**
+     * Reads one network token — raw `GcmNetwork{…}` or already prettified
+     * `Cell · 103` — into parts. Flag clauses are cut first: GMS appends them
+     * after a comma (`Cell · 103, FALLBACK_ALTERNATIVE_HOSTPORT`), and none is
+     * part of the identity.
+     */
+    private fun networkRefOf(raw: String): NetworkRef? {
+        val text = raw.substringBefore(',').trim()
+        if (text.isEmpty()) return null
+        GCM_NETWORK.find(text)?.let { match ->
+            val tail = match.groupValues[4]
+            return NetworkRef(
+                transport = match.groupValues[2],
+                netId = match.groupValues[1],
+                state = stateOf(tail),
+                underlying = UNDERLYING.find(tail)?.groupValues?.get(1)
+            )
         }
+        PRETTY_NETWORK.find(text)?.let { match ->
+            return NetworkRef(
+                transport = match.groupValues[1],
+                netId = match.groupValues[2].ifEmpty { null },
+                state = match.groupValues[3].ifEmpty { null },
+                underlying = match.groupValues[4].ifEmpty { null }
+            )
+        }
+        return null
+    }
+
+    /** Transport and netId out of an `McsConnection`'s inner network. */
+    private fun networkOf(inner: String): NetworkRef {
+        networkRefOf(inner)?.let { return it }
         NETWORK_PAIR.find(inner)?.let { match ->
-            return match.groupValues[1] to match.groupValues[2]
+            return NetworkRef(transport = match.groupValues[1], netId = match.groupValues[2])
         }
-        return inner.trim() to ""
+        return NetworkRef(transport = inner.trim())
     }
 
     /** A network value with any trailing `, <flag>` clause stripped. */

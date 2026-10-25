@@ -110,12 +110,13 @@ object EventTaxonomy {
      * kind here is what lets archives written before the message kinds existed
      * classify (and render) correctly.
      */
-    fun kindOf(event: GcmEvent): GcmEvent.EventKind =
-        if (event.kind == GcmEvent.EventKind.GmsRestart) {
-            GcmEvent.EventKind.GmsRestart
-        } else {
-            GcmDumpParser.classifyText(event.text)
-        }
+    fun kindOf(event: GcmEvent): GcmEvent.EventKind = when (event.kind) {
+        // The two markers are the store's, not GMS's: their text would classify
+        // as `Other`, so the stored kind is the only thing that knows them.
+        GcmEvent.EventKind.GmsRestart,
+        GcmEvent.EventKind.SamplingGap -> event.kind
+        else -> GcmDumpParser.classifyText(event.text)
+    }
 
     fun classes(event: GcmEvent): EventClasses {
         val kind = kindOf(event)
@@ -161,6 +162,7 @@ object EventTaxonomy {
             GcmEvent.EventKind.Transport -> labels += EventLabel.Connection
 
             GcmEvent.EventKind.GmsRestart,
+            GcmEvent.EventKind.SamplingGap,
             GcmEvent.EventKind.Other -> Unit
         }
 
@@ -286,7 +288,93 @@ object EventTaxonomy {
 
             GcmEvent.EventKind.GmsRestart -> EventSeverity.Watch
 
+            // The history itself lost rows: nothing about the connection is
+            // known, only that the page cannot vouch for the gap.
+            GcmEvent.EventKind.SamplingGap -> EventSeverity.Watch
+
             GcmEvent.EventKind.Other -> EventSeverity.Unknown
         }
     }
+
+    /**
+     * How long each close row's connection had been up, keyed by that close.
+     *
+     * GMS prints `Connected` when a session starts and `Close err:N time:M`
+     * when it ends; `M` is the connection's own age but it is not on every
+     * close line (and `time:` may be absent). Rebuilding the age from the two
+     * timestamps works for every close the archive still holds the start of:
+     * the ring is walked oldest-first so each `Connected` marks the session
+     * that the closes after it belong to.
+     *
+     * A close whose start has already rolled out of the archive is simply
+     * absent from the map — better than a duration guessed from some earlier
+     * session. Sessions older than a day are dropped for the same reason: at
+     * that distance the pairing is more likely to be a restart artifact than a
+     * real uptime.
+     */
+    fun connectionUptimes(events: List<GcmEvent>): Map<GcmEvent, Long> {
+        val out = HashMap<GcmEvent, Long>()
+        var connectedAt = 0L
+        for (event in events.asReversed()) {
+            when (kindOf(event)) {
+                GcmEvent.EventKind.Connected -> connectedAt = event.ts
+                GcmEvent.EventKind.Close -> {
+                    val seconds = (event.ts - connectedAt) / 1000
+                    if (connectedAt > 0 && seconds > 0 && seconds < MAX_UPTIME_S) {
+                        out[event] = seconds
+                    }
+                }
+                else -> Unit
+            }
+        }
+        return out
+    }
+
+    private const val MAX_UPTIME_S = 24L * 60 * 60
+
+    /**
+     * For each 回执 and 完成 row, how long after its message arrived it happened.
+     *
+     * The three stages of one delivery print the same `id=<msgid>`: `Received
+     * <pkg> <id>`, `Acked <pkg>:N <id>`, `Successful broadcast to <pkg>
+     * (id=<id> time=…ms …)`. Each line used to stand alone, so "the push is
+     * slow" had no answer on the page — the broadcast's own `time=` only covers
+     * its last hop, and the 回执 row had no duration at all.
+     *
+     * Joining them answers the question that brings someone here: how much of
+     * the delay is GCM's (arrival → ack) and how much is the broadcast (the
+     * `time=` clause still shows that hop on its own). Nothing is inferred from
+     * adjacency: the message id has to match, and the arrival has to be the
+     * earlier line — an id that repeats after a re-delivery restarts the clock
+     * rather than inheriting an old arrival time.
+     */
+    fun pushArrivals(events: List<GcmEvent>): Map<GcmEvent, Long> {
+        val out = HashMap<GcmEvent, Long>()
+        val arrivedAt = HashMap<String, Long>()
+        // Oldest first, so a re-delivered id overwrites the earlier arrival:
+        // the newest arrival is the one the later stages belong to.
+        for (event in events.asReversed()) {
+            val messageId = when (kindOf(event)) {
+                GcmEvent.EventKind.MessageReceived ->
+                    GcmDumpParser.parseMessageReceived(event.text)?.messageId
+                GcmEvent.EventKind.MessageAcked ->
+                    GcmDumpParser.parseMessageAcked(event.text)?.messageId
+                GcmEvent.EventKind.BroadcastCompleted ->
+                    GcmDumpParser.parseBroadcastCompleted(event.text)?.messageId
+                else -> null
+            } ?: continue
+            when (kindOf(event)) {
+                GcmEvent.EventKind.MessageReceived -> arrivedAt[messageId] = event.ts
+                else -> {
+                    val start = arrivedAt[messageId] ?: continue
+                    val delta = event.ts - start
+                    if (delta in 0..MAX_PUSH_ARRIVAL_MS) out[event] = delta
+                }
+            }
+        }
+        return out
+    }
+
+    /** Ten minutes: longer than any delivery a user would still attribute to this arrival. */
+    private const val MAX_PUSH_ARRIVAL_MS = 10L * 60 * 1000
 }

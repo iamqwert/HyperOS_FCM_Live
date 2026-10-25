@@ -2,6 +2,7 @@ package io.github.howard20181.hyperos.fcmlive.records
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -33,6 +34,84 @@ class RecordsTaxonomyTest {
     }
 
     // ---------- connection ----------
+
+    @Test
+    fun closeRowsCarryTheSessionTheyEnded() {
+        // Newest first, the way the archive holds them. The close at 3000s
+        // belongs to the session opened at 2000s (one second up); the one at
+        // 1000s has no `Connected` before it in the archive, so it stays
+        // absent — a duration must never be guessed from an earlier session.
+        val closedYoung = GcmEvent(3_000, 1, GcmEvent.EventKind.Close, "Close err:6 time:1")
+        val connected = GcmEvent(2_000, 1, GcmEvent.EventKind.Connected, "Connected")
+        val closedOrphan = GcmEvent(1_000, 1, GcmEvent.EventKind.Close, "Close err:20 time:1")
+        val uptimes = EventTaxonomy.connectionUptimes(listOf(closedYoung, connected, closedOrphan))
+        assertEquals(1L, uptimes[closedYoung])
+        assertNull(uptimes[closedOrphan])
+        assertEquals(1, uptimes.size)
+    }
+
+    @Test
+    fun samplingGapMarkerIsItsOwnKind() {
+        // The store's overflow row: its text would classify as `Other`, so the
+        // stored kind is what keeps it recognisable after a reload.
+        val marker = GcmEvent(12_000, -1, GcmEvent.EventKind.SamplingGap, "SamplingGap 42s")
+        assertEquals(GcmEvent.EventKind.SamplingGap, EventTaxonomy.kindOf(marker))
+        assertEquals(EventSeverity.Watch, EventTaxonomy.severity(marker))
+        assertEquals(42L, GcmDumpParser.parseSamplingGapSeconds(marker.text))
+        // It belongs to 异常 (Watch severity) and to 全部 only.
+        assertTrue(EventTaxonomy.classes(marker).inTab(EventTab.Error))
+        assertFalse(EventTaxonomy.classes(marker).inTab(EventTab.Connection))
+    }
+
+    @Test
+    fun pushStagesShareTheArrivalTime() {
+        // One delivery, newest first. Both later stages print the same message
+        // id, so both can say how long after arrival they happened — the
+        // number "the push is slow" never had.
+        val dump = """
+            10-24 12:10:02.300 net=0: Successful broadcast to com.example (id=0:abc time=322ms priority=HIGH)
+            10-24 12:10:01.200 net=0: Acked com.example:7 0:abc
+            10-24 12:10:00.000 net=0: Received com.example 0:abc
+        """.trimIndent().lines()
+
+        val events = GcmDumpParser.parseEventsForTest(dump)
+        val arrivals = EventTaxonomy.pushArrivals(events)
+        val acked = events.first { it.text.startsWith("Acked ") }
+        val completed = events.first { it.text.startsWith("Successful broadcast") }
+
+        assertEquals(1_200L, arrivals[acked])
+        assertEquals(2_300L, arrivals[completed])
+        // The arrival row itself is the clock, not a measurement.
+        assertNull(arrivals[events.first { it.text.startsWith("Received ") }])
+    }
+
+    @Test
+    fun pushStagesWithoutAnArrivalStaySilent() {
+        // No `Received` in the archive (rolled out, or read before it landed):
+        // a stage row must not borrow another delivery's clock.
+        val dump = """
+            10-24 12:10:02.300 net=0: Successful broadcast to com.example (id=0:abc time=322ms priority=HIGH)
+        """.trimIndent().lines()
+
+        val events = GcmDumpParser.parseEventsForTest(dump)
+        assertTrue(EventTaxonomy.pushArrivals(events).isEmpty())
+    }
+
+    @Test
+    fun redeliveryRestartsTheClock() {
+        // The same id printed twice: the later arrival is the one a later
+        // stage belongs to, so the gap is measured from the second print.
+        val dump = """
+            10-24 12:10:30.000 net=0: Acked com.example:7 0:abc
+            10-24 12:10:20.000 net=0: Received com.example 0:abc
+            10-24 12:10:00.000 net=0: Received com.example 0:abc
+        """.trimIndent().lines()
+
+        val events = GcmDumpParser.parseEventsForTest(dump)
+        val arrivals = EventTaxonomy.pushArrivals(events)
+        val acked = events.first { it.text.startsWith("Acked ") }
+        assertEquals(10_000L, arrivals[acked])
+    }
 
     @Test
     fun connectedIsConnectionOnly() {
@@ -374,21 +453,90 @@ class RecordsTaxonomyTest {
         assertEquals(
             "WiFi · 106",
             GcmDumpParser.parseNetworkTarget("Active network switched to WiFi · 106, was Cell · 103")
+                ?.format()
         )
         assertEquals(
             "WiFi · 104",
-            GcmDumpParser.parseNetworkTarget("Active network is now WiFi · 104")
+            GcmDumpParser.parseNetworkTarget("Active network is now WiFi · 104")?.format()
         )
         assertEquals(
             "WiFi · 106",
-            GcmDumpParser.parseNetworkTarget("onGcmNetworkChanged: WiFi · 106")
+            GcmDumpParser.parseNetworkTarget("onGcmNetworkChanged: WiFi · 106")?.format()
         )
         assertEquals(
             "the `went away` shape names the network it lost",
             "Cell · 103",
-            GcmDumpParser.parseNetworkTarget("Active network went away, was Cell · 103")
+            GcmDumpParser.parseNetworkTarget("Active network went away, was Cell · 103")?.format()
         )
         assertNull(GcmDumpParser.parseNetworkTarget("some future GCM network line"))
+    }
+
+    @Test
+    fun aDisconnectedNetworkKeepsItsNetIdButLosesItsBraces() {
+        // What the device actually prints once a network is down:
+        // `GcmNetwork{103 Cell(0) DISCONNECTED}`. The braces must not survive
+        // into a title, and the netId and the state word must — the netId is
+        // what tells two cell networks apart, the state explains the
+        // `Skipping connect attempt since the network is suspended` that
+        // follows it.
+        val text = GcmDumpParser.prettifyEventText(
+            "Active network switched to GcmNetwork{103 Cell(0) DISCONNECTED}, " +
+                "was GcmNetwork{105 Cell(0)}"
+        )
+        assertEquals(
+            "Active network switched to Cell · 103 (DISCONNECTED), was Cell · 105",
+            text
+        )
+        val target = GcmDumpParser.parseNetworkTarget(text)
+        assertEquals("Cell · 103 (DISCONNECTED)", target?.format())
+        assertEquals("103", target?.netId)
+        assertTrue("the dump marks this one as gone", target!!.isDown)
+        // Cell -> Cell is still a handover: the two netIds differ.
+        val previous = GcmDumpParser.parseNetworkPrevious(text)
+        assertEquals("Cell · 105", previous?.format())
+        assertNotEquals(target.netId, previous?.netId)
+    }
+
+    @Test
+    fun prettifyReadsTheVpnTailAndTheSuspendedState() {
+        // A VPN object names the network it rides in brackets; the number in
+        // there is a transport type id, not a netId, so it is dropped.
+        assertEquals(
+            "Active network is now VPN · 104 [WiFi]",
+            GcmDumpParser.prettifyEventText(
+                "Active network is now GcmNetwork{104 VPN(17) [WiFi(1)]}"
+            )
+        )
+        assertEquals(
+            "Active network went away, was Cell · 103 (DISCONNECTED)",
+            GcmDumpParser.prettifyEventText(
+                "Active network went away, was GcmNetwork{103 Cell(0) DISCONNECTED}"
+            )
+        )
+    }
+
+    @Test
+    fun capabilityFlagsAreNotStateWords() {
+        // `BYPASSABLE` / `RESTRICTED` / `CONSTRAINED` are properties of a
+        // network, not something that happened to it. Taking the first cap
+        // word as the state put an untranslated token in a row's title
+        // (`已变更为 VPN · 105（BYPASSABLE）`) and lengthened the line for
+        // nothing; only `DISCONNECTED` survives now.
+        val text = GcmDumpParser.prettifyEventText(
+            "Active network is now GcmNetwork{105 VPN(17) [WiFi(1)] BYPASSABLE}"
+        )
+        assertEquals("Active network is now VPN · 105 [WiFi]", text)
+        assertNull(GcmDumpParser.parseNetworkTarget(text)?.state)
+    }
+
+    @Test
+    fun nestedMcsConnectionKeepsTheNetId() {
+        // The nested wrapper HyperOS 4 prints (see the McsConnection regex);
+        // its inner object is a GcmNetwork token, braces and all.
+        assertEquals(
+            "Cell · 100",
+            GcmDumpParser.prettifyEventText("McsConnection{GcmNetwork{100 Cell(0)}, type=0}")
+        )
     }
 
     @Test
@@ -404,7 +552,80 @@ class RecordsTaxonomyTest {
         // A handover line names two networks; the title must carry the one the
         // client landed on.
         val text = "Active network switched to WiFi · 106, was Cell · 103"
-        assertEquals("WiFi · 106", GcmDumpParser.parseNetworkTarget(text))
+        assertEquals("WiFi · 106", GcmDumpParser.parseNetworkTarget(text)?.format())
         assertFalse(GcmDumpParser.isNetworkGone(text))
+    }
+
+    // ---------- the "how did it change?" answer ----------
+
+    @Test
+    fun aSameTransportHandoverIsAChangeBecauseTheNetIdDiffers() {
+        // Mobile data moving from one cell network to another is a real
+        // change even though the transport is identical — the netId is what
+        // tells the two apart, and dropping it produced the tautology
+        // `切换为 Cell，原为 Cell`.
+        val text = GcmDumpParser.prettifyEventText(
+            "Active network switched to GcmNetwork{107 Cell(0)}, was GcmNetwork{103 Cell(0)}"
+        )
+        val target = GcmDumpParser.parseNetworkTarget(text)
+        val previous = GcmDumpParser.parseNetworkPrevious(text)
+        assertEquals("Cell · 107", target?.format())
+        assertEquals("Cell · 103", previous?.format())
+        assertFalse(
+            "two cell networks with different netIds are two networks",
+            target!!.sameAs(previous!!)
+        )
+        assertEquals(
+            "the same netId is the same network",
+            true,
+            target.sameAs(GcmDumpParser.NetworkRef("Cell", "107"))
+        )
+    }
+
+    @Test
+    fun aBareTransportNameIsNotComparableToANetworkWithAnId() {
+        // GMS prints the bare transport on some paths (the `was` side of a
+        // handover), which says nothing about WHICH network it was. Such a
+        // pair must never be read as "the same network".
+        val bare = GcmDumpParser.NetworkRef("Cell", null)
+        val withId = GcmDumpParser.NetworkRef("Cell", "103")
+        assertFalse("a bare name cannot be matched", bare.sameAs(withId))
+        assertFalse("nor the other way round", withId.sameAs(bare))
+    }
+
+    @Test
+    fun theCallbackLineBorrowsThePreviousNetworkFromItsSibling() {
+        // GMS's callback prints `onGcmNetworkChanged: <new>` and then the
+        // handover line naming both ends — the callback's own line carries
+        // only the new network, so without the sibling it cannot answer
+        // "how did it change?".
+        val dump = """
+            10-24 12:09:08.100 net=0: Active network switched to GcmNetwork{103 Cell(0)}, was GcmNetwork{101 Cell(0)}
+            10-24 12:09:08.150 net=0: onGcmNetworkChanged: GcmNetwork{103 Cell(0)}
+        """.trimIndent().lines()
+
+        val events = GcmDumpParser.parseEventsForTest(dump)
+        assertEquals(2, events.size)
+        val callback = events.first { it.text.startsWith("onGcmNetworkChanged: ") }
+        assertEquals("Cell · 103", GcmDumpParser.parseNetworkTarget(callback.text)?.format())
+        assertEquals(
+            "the callback line now knows the network it came from",
+            "Cell · 101",
+            callback.previousNetwork?.format()
+        )
+        val handover = events.first { it.text.startsWith("Active network switched to ") }
+        assertEquals("Cell · 101", handover.previousNetwork?.format())
+    }
+
+    @Test
+    fun aCallbackLineWithNoMatchingSiblingKeepsOnlyWhatItSays() {
+        // Nothing to pair it with: the row must not invent a previous network.
+        val dump = """
+            10-24 12:09:08.150 net=0: onGcmNetworkChanged: GcmNetwork{103 Cell(0)}
+        """.trimIndent().lines()
+
+        val events = GcmDumpParser.parseEventsForTest(dump)
+        assertEquals(1, events.size)
+        assertNull(events.first().previousNetwork)
     }
 }

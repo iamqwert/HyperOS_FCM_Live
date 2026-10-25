@@ -34,7 +34,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import io.github.howard20181.hyperos.fcmlive.MainActivity
 import io.github.howard20181.hyperos.fcmlive.Prefs
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
@@ -140,9 +139,6 @@ private fun ExperimentBody(
     }
     var smartPowerRelease by remember {
         mutableStateOf(Prefs.readLocalSmartPowerRelease(context))
-    }
-    var autoCheckNew by remember {
-        mutableStateOf(Prefs.readLocalAutoCheckNew(context))
     }
     // Smart Power 只在 OS3 上存在（OS4 已移除拦截决策，hook 侧连目标方法都
     // 找不到），所以整节按世代隐藏，而不是显示一个永远无效的开关。读一次即
@@ -426,23 +422,6 @@ private fun ExperimentBody(
                     stateLineOff = emptyAllowlistHint
                 )
             }
-        }
-        // 自动勾选：一节一项。与其他实验不同，这里的开关不作用于某个 ROM
-        // 门，而是扩展应用页勾选状态的来源（见 [MainActivity.handleAutoCheckToggle]
-        // 与 AllowlistGate 的虚拟成员合并）；因此没有空白名单提示——它改变的
-        // 恰恰是"哪些应用算已勾选"本身。
-        item {
-            SectionTitle(R.string.experiment_section_auto_check)
-            SettingsSwitchCard(
-                iconRes = R.drawable.ic_library_add_check,
-                title = stringResource(R.string.experiment_auto_check_new),
-                description = stringResource(R.string.experiment_auto_check_new_desc),
-                checked = autoCheckNew,
-                onCheckedChange = { checked ->
-                    MainActivity.handleAutoCheckToggle(context, checked)
-                    autoCheckNew = checked
-                }
-            )
         }
         // The same 16dp tail the settings page ends on, so the last card does
         // not sit flush against the gesture strip on a fully scrolled page.

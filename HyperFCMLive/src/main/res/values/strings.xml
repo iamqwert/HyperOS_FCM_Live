@@ -52,8 +52,8 @@
     <string name="about_sub_hide_icon_on">Hidden — open the app from LSPosed</string>
     <string name="about_sub_hide_icon_off">Visible — tap to hide</string>
     <string name="about_sub_check_update">Current version %1$s (%2$d)</string>
-    <string name="about_sub_export">Back up the allowlist to a text file</string>
-    <string name="about_sub_import">Restore the allowlist from a text file</string>
+    <string name="about_sub_export">Back up the current configuration to a text file</string>
+    <string name="about_sub_import">Import the module configuration from a text file</string>
     <string name="view_source_code">View Source</string>
     <string name="about_license">License</string>
     <string name="dialog_close">Close</string>
@@ -64,19 +64,16 @@
     <string name="update_error">Couldn\'t check for updates. Check your connection and try again</string>
     <string name="export_allowlist">Backup</string>
     <string name="import_allowlist">Restore</string>
-    <string name="allowlist_export_failed">Backup failed</string>
-    <string name="allowlist_import_failed">Restore failed</string>
-    <string name="allowlist_import_empty">No valid package names in the file</string>
-    <plurals name="allowlist_import_done">
-        <item quantity="one">Imported %1$d app</item>
-        <item quantity="other">Imported %1$d apps</item>
-    </plurals>
-    <plurals name="allowlist_export_done">
-        <item quantity="one">Exported %1$d app</item>
-        <item quantity="other">Exported %1$d apps</item>
-    </plurals>
+    <string name="config_export_failed">Backup failed</string>
+    <string name="config_import_failed">Import failed</string>
+    <string name="config_import_empty">Nothing in the file to import</string>
+    <!-- Settings include module switches and appearance, hence two counts. -->
+    <string name="config_export_done">Backed up %1$d apps and %2$d settings</string>
+    <string name="config_import_done">Imported %1$d apps and %2$d settings</string>
     <string name="update_found">New version available: %1$s</string>
     <string name="update_found_title">Update Available</string>
+    <!-- The badge is colour only; a screen reader needs words on its node -->
+    <string name="update_badge_desc">New version available</string>
     <string name="update_open">Download</string>
     <string name="open_source_licenses">Open-Source Licenses</string>
     <string name="licenses_title">Open-Source Licenses</string>
@@ -186,7 +183,8 @@
          No message content exists in the dump and DeviceID is deliberately
          discarded. -->
     <string name="nav_records">Records</string>
-    <string name="records_refresh">Refresh</string>
+    <string name="records_export">Export diagnostics</string>
+    <string name="records_export_failed">Could not write to the chosen file</string>
     <string name="records_locked_title">Module not active</string>
     <string name="records_locked_body">Records reads GCM\'s dump through the module running inside the system framework. Enable the module and tick the system framework scope in LSPosed.</string>
     <string name="records_module_off">Module not active, showing saved records</string>
@@ -194,6 +192,7 @@
     <string name="records_loading">Reading…</string>
     <string name="records_never">Not read yet</string>
     <string name="records_updated_at">Updated %1$s</string>
+    <string name="records_updated_label">Snapshot time</string>
     <string name="records_updated_stale">%1$s, stale</string>
     <string name="records_error_parse">Couldn\'t parse GCM\'s dump</string>
     <string name="records_no_events">No events yet</string>
@@ -213,7 +212,18 @@
     <string name="records_day_today">Today</string>
     <string name="records_day_yesterday">Yesterday</string>
     <string name="records_section_connection">Connection</string>
-    <string name="records_connection_state">State</string>
+    <!-- The bracketed half of the Connection state row: Connected (3 drops in the past hour, reason: "…") -->
+    <string name="records_state_note">%1$s (%2$s)</string>
+    <string name="records_verdict_no_drops">no drops in the past hour</string>
+    <string name="records_verdict_drops">%1$d drops in the past hour</string>
+    <string name="records_verdict_drops_reason">%1$d drops in the past hour, reason: \"%2$s\"</string>
+    <!-- Several distinct reasons: the split is listed, not ranked -->
+    <string name="records_verdict_reasons">%1$d drops in the past hour, reasons: %2$s</string>
+    <string name="records_verdict_reason_count">\"%1$s\" ×%2$d</string>
+    <string name="records_verdict_reason_unknown_count">unrecorded reason ×%1$d</string>
+    <string name="records_verdict_last_reason">last drop %1$s ago, reason: \"%2$s\"</string>
+    <string name="records_verdict_last">last drop %1$s ago</string>
+    <string name="records_connection_state">Connection state</string>
     <string name="records_section_network">Network</string>
     <string name="records_section_heartbeat">Heartbeat</string>
     <string name="records_section_push">Push</string>
@@ -231,14 +241,19 @@
     <string name="records_hb_alarm_early_by">, %1$s ms before its deadline</string>
     <string name="records_hb_timeout">Heartbeat timeout, connection reset</string>
     <string name="records_event_network">Network change</string>
-    <string name="records_event_network_switched">Active network switched to %1$s, was %2$s</string>
-    <string name="records_event_network_now">Active network is now %1$s</string>
-    <string name="records_event_network_changed">GCM network changed to %1$s</string>
-    <string name="records_event_network_gone">Active network lost, was %1$s</string>
+    <string name="records_event_network_switched">Network switched from %1$s to %2$s</string>
+    <string name="records_event_network_switched_same">%1$s network switched from %2$s to %3$s</string>
+    <string name="records_event_network_switched_to">Switched to %1$s</string>
+    <string name="records_event_network_now">Current network %1$s</string>
+    <string name="records_event_network_dropped">%1$s network disconnected</string>
+    <string name="records_event_network_restored">%1$s network reconnected</string>
+    <string name="records_network_down_suffix">, already disconnected</string>
     <string name="records_event_reconnect">Reconnect</string>
     <string name="records_event_reconnect_alarm_scheduled">Reconnect alarm scheduled</string>
     <string name="records_reconnect_delay">, retries in %1$s ms</string>
     <string name="records_push_duration">, took %1$s ms</string>
+    <string name="records_push_arrival_ms">, %1$s ms after arrival</string>
+    <string name="records_push_arrival_s">, %1$d.%2$d s after arrival</string>
     <string name="records_join_raw">, %1$s</string>
     <string name="records_event_failed_connection">Connection failed</string>
     <string name="records_event_failed_connection_with">%1$s, connection failed</string>
@@ -251,6 +266,7 @@
     <string name="records_global_backoff_event">Global backoff</string>
     <string name="records_event_close">Connection closed</string>
     <string name="records_close_with">%1$s, connection closed</string>
+    <string name="records_close_uptime">, connection lasted %1$s</string>
     <string name="records_close_gloss_1">ERR_NET_DOWN</string>
     <string name="records_close_gloss_3">ERR_UNKNOWN_HOST</string>
     <string name="records_close_gloss_4">ERR_AUTH</string>
@@ -311,7 +327,8 @@
     <string name="records_event_broadcast_no_response">Broadcast no response</string>
     <string name="records_event_other">Other</string>
     <string name="records_event_restart">GMS restarted</string>
-    <string name="records_event_restart_detail">GMS restarted; the previous event ring was cleared</string>
+    <string name="records_event_sampling_gap">About %1$s of events were lost between samples</string>
+    <string name="records_event_sampling_gap_plain">Events were lost between samples</string>
     <string name="records_doze_entering">Entering Doze</string>
     <string name="records_doze_exiting">Exiting Doze</string>
     <string name="records_doze_bit_enter">Enter-doze bit sent</string>
@@ -369,6 +386,13 @@
     <string name="records_close_code">code %1$d</string>
     <string name="records_disconnect_time">Last disconnected</string>
     <string name="records_fallback_mode">Host fallback</string>
+    <!-- GMS's Fallback mode enum: known values only; unknown ones stay verbatim -->
+    <string name="records_fallback_none">No fallback</string>
+    <string name="records_fallback_none_vpn">No fallback, VPN bypass disallowed</string>
+    <string name="records_fallback_cellular">Fall back to cellular</string>
+    <string name="records_fallback_constrained">Fall back to a constrained network</string>
+    <string name="records_fallback_satellite">Fall back to satellite</string>
+    <string name="records_fallback_unknown">Unknown</string>
     <string name="records_gms_pid">GMS process</string>
     <string name="records_heartbeat_ack">Heartbeat ack</string>
     <string name="records_heartbeat_ack_value">sent, not acknowledged</string>
@@ -458,6 +482,16 @@
     <!-- 「显示调试日志」在设置页的「实验与调试」区（about_section_experiment_debug） -->
     <string name="experiment_debug_log">Debug Logging</string>
     <string name="experiment_debug_log_desc">Writes debug logs; turn on when troubleshooting</string>
+    <!-- 「事件记录上限行数」：只影响记录页本地归档的行数上限，钩子侧不读 -->
+    <string name="record_rows_limit">Event History Limit</string>
+    <string name="record_rows_limit_desc">Adjust how many event rows are kept</string>
+    <string-array name="record_rows_entries">
+        <item>200</item>
+        <item>300</item>
+        <item>500</item>
+        <item>800</item>
+        <item>1200</item>
+    </string-array>
 
     <!-- 模块状态页 -->
     <string name="status_yes">Yes</string>
