@@ -118,6 +118,7 @@ GMS 侧的四项保护：
 - [HappyMax0/FCMPushViewer](https://github.com/HappyMax0/FCMPushViewer)
 - [dingwen07/hyperos-fcm-fix](https://github.com/dingwen07/hyperos-fcm-fix)
 - [Kr328/HyperOSFCMFix](https://github.com/Kr328/HyperOSFCMFix)
+- [ByteJuno/fcmfix-coloros](https://github.com/ByteJuno/fcmfix-coloros)
 - [ReedGAOOO/FCMGuard-HyperOS](https://github.com/ReedGAOOO/FCMGuard-HyperOS)
 - [zuohl/HyperOS_FCM_Live](https://github.com/zuohl/HyperOS_FCM_Live)
 - `GET_INSTALLED_APPS` 运行时权限的最初申请思路参考自 250king 的 [PR #1](https://github.com/250king/HyperOS_FCM_Live/pull/1)；该权限现已随应用列表改为包可见性方案而移除

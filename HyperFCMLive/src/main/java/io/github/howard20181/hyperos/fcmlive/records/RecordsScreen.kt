@@ -1,8 +1,20 @@
-@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@file:OptIn(
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
+    // The tooltip wrapper's default position is an experimental M3 type.
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    // The Material look's pull indicator is the M3 Expressive contained one
+    // (ContainedLoadingIndicator) — the same spinner the apps page pulls, only
+    // seated so it pushes the content down instead of floating over it.
+    androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class
+)
 
 package io.github.howard20181.hyperos.fcmlive.records
 
+import android.os.SystemClock
 import android.util.Log
+import android.view.HapticFeedbackConstants
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -34,6 +46,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LeadingIconTab
@@ -43,12 +56,16 @@ import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshState
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -58,13 +75,18 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -78,8 +100,10 @@ import androidx.compose.ui.unit.sp
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
 import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
+import io.github.howard20181.hyperos.fcmlive.ui.AppDialog
 import io.github.howard20181.hyperos.fcmlive.ui.GroupRow
 import io.github.howard20181.hyperos.fcmlive.ui.GROUP_ROW_GAP
+import io.github.howard20181.hyperos.fcmlive.ui.LongPressTooltip
 import io.github.howard20181.hyperos.fcmlive.ui.NavCard
 import io.github.howard20181.hyperos.fcmlive.ui.PageScaffold
 import io.github.howard20181.hyperos.fcmlive.ui.SectionTitle
@@ -96,8 +120,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Refresh
+import top.yukonga.miuix.kmp.basic.PullToRefresh as MiuixPullToRefresh
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
 import top.yukonga.miuix.kmp.utils.springAnimateToPage
@@ -203,6 +226,28 @@ fun RecordsScreen(
     var refreshKey by remember { mutableIntStateOf(0) }
     var pageTabIndex by rememberSaveable { mutableIntStateOf(0) }
     var eventTabIndex by rememberSaveable { mutableIntStateOf(0) }
+    var exportText by remember { mutableStateOf("") }
+    var exportProblem by remember { mutableStateOf(false) }
+    val versionName = remember {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull().orEmpty()
+    }
+    // SAF, the same path the allowlist export uses: the user picks the file,
+    // and the page never writes outside a granted URI. The text is built on the
+    // click, not in this lambda — a report assembled after the picker returns
+    // would describe a page the reader may have left.
+    val createDoc = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) {
+            exportProblem = !runCatching {
+                context.contentResolver.openOutputStream(uri)?.use {
+                    it.write(exportText.toByteArray())
+                }
+            }.isSuccess
+        }
+    }
     val pageTab = PageTab.entries[pageTabIndex.coerceIn(PageTab.entries.indices)]
     val selectedEventTab =
         EventTab.entries[eventTabIndex.coerceIn(EventTab.entries.indices)]
@@ -230,12 +275,43 @@ fun RecordsScreen(
 
     val noSource = !moduleActive
 
+    // The pull indicator's own level, and deliberately not [loading]: `loading`
+    // is also raised by the once-a-minute poll, and a spinner appearing on its
+    // own would read as a refresh nobody asked for. Only a pull raises this, and
+    // every way out of the read below lowers it again — including the two early
+    // returns, or a pull on a stack with no module would spin for ever.
+    var refreshing by remember { mutableStateOf(false) }
+
+    // When the pull started. A read is fast — the dump parse can come back in
+    // well under a hundred milliseconds — and an indicator that appears and
+    // vanishes inside a frame reads as a flicker, not as "done". The read below
+    // holds [refreshing] for [MIN_REFRESH_VISIBLE_MS] from this stamp, so one
+    // pull always shows one complete beat of the indicator.
+    var pulledAt by remember { mutableLongStateOf(0L) }
+
+    // One action, one path — the pull is the page's only way to ask for a fresh
+    // read now: bump the key, which restarts the read below from its first line
+    // (local archive, then the dump), and raise the level so the indicator
+    // stands while it runs.
+    val pullToRefresh: () -> Unit = {
+        if (!refreshing) {
+            loading = true
+            refreshing = true
+            pulledAt = SystemClock.uptimeMillis()
+            refreshKey++
+        }
+    }
+
     LaunchedEffect(active, moduleActive, refreshKey) {
-        if (!active) return@LaunchedEffect
+        if (!active) {
+            refreshing = false
+            return@LaunchedEffect
+        }
         archive = withContext(Dispatchers.IO) { RecordsStore.load(context) }
         problem = null
         if (noSource) {
             loading = false
+            refreshing = false
             return@LaunchedEffect
         }
         loading = true
@@ -253,6 +329,13 @@ fun RecordsScreen(
                 }
             }
             loading = false
+            // One read is one refresh: the indicator retracts on its own here,
+            // and the following passes are the poll's (which never raised it).
+            // The hold only pads a fast read up to the beat below; a slow one
+            // has already spent it and falls through with no wait at all.
+            val stand = MIN_REFRESH_VISIBLE_MS - (SystemClock.uptimeMillis() - pulledAt)
+            if (stand > 0) delay(stand)
+            refreshing = false
             delay(POLL_INTERVAL_MS)
         }
     }
@@ -263,32 +346,52 @@ fun RecordsScreen(
         showBack = false,
         modifier = modifier,
         actions = {
+            // 搜索：难以完善，不再需要。A sheet over a pager that disposes its
+            // pages had to filter text rewritten per look and per locale, so
+            // what it found changed with the look; the export below is the
+            // "hand me the evidence" path that stayed. Do not re-add without
+            // solving that first.
+            //
+            // No 刷新 button: the page refreshes by pulling, on both looks (see
+            // the pull seat in the body below). The button and the pull do the
+            // same thing — read the dump now — and a bar action that duplicates
+            // the page's own gesture is one affordance too many.
             if (LocalUiStyle.current.isMiuixBased) {
-                // The bar action every other Miuix screen wears: the library's
-                // own Refresh glyph inside [TopBarIconButton] — the style's
-                // button (the 柔光玻璃 glass disc included) with the bar's
-                // onSurface ink. The material3 icon here was the odd one out:
+                // The bar action every other Miuix screen wears: [TopBarIconButton],
+                // the style's button (the 柔光玻璃 glass disc included) with the
+                // bar's onSurface ink. A material3 icon here was the odd one out:
                 // a Material glyph in a Miuix bar, tinted a caption grey.
                 TopBarIconButton(
-                    painter = rememberVectorPainter(MiuixIcons.Refresh),
-                    description = stringResource(R.string.records_refresh),
+                    painter = painterResource(R.drawable.ic_upload),
+                    description = stringResource(R.string.records_export),
                     onClick = {
-                        loading = true
-                        refreshKey++
+                        exportText = diagnosticsReport(
+                            archive = archive,
+                            versionName = versionName,
+                            exportedAt = System.currentTimeMillis()
+                        )
+                        createDoc.launch(exportFileName())
                     }
                 )
             } else {
-                IconButton(
-                    onClick = {
-                        loading = true
-                        refreshKey++
+                // The Material look keeps the same long-press bubble every other
+                // page's bar icons wear ([LongPressTooltip] is a no-op under
+                // Miuix); this was the only bar control without one.
+                LongPressTooltip(label = stringResource(R.string.records_export)) {
+                    IconButton(onClick = {
+                        exportText = diagnosticsReport(
+                            archive = archive,
+                            versionName = versionName,
+                            exportedAt = System.currentTimeMillis()
+                        )
+                        createDoc.launch(exportFileName())
+                    }) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_upload),
+                            contentDescription = stringResource(R.string.records_export),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_refresh),
-                        contentDescription = stringResource(R.string.records_refresh),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
         },
@@ -367,6 +470,8 @@ fun RecordsScreen(
                 pageFling = pageFling,
                 eventFling = eventFling,
                 statusScroll = statusScroll,
+                refreshing = refreshing,
+                onRefresh = pullToRefresh,
                 modifier = Modifier.fillMaxSize()
             )
             return@PageScaffold
@@ -381,29 +486,158 @@ fun RecordsScreen(
                 onSelect = { pageTabIndex = it.ordinal },
                 modifier = Modifier.padding(start = inset, end = inset)
             )
-            when (pageTab) {
-                PageTab.Status -> StatusTab(
-                    archive = archive,
-                    noSource = noSource,
-                    problem = problem,
-                    loading = loading,
-                    onOpenStatus = onOpenStatus,
-                    inset = inset,
-                    bottomPad = innerPadding.calculateBottomPadding(),
-                    scrollState = statusScroll,
-                    modifier = Modifier.weight(1f)
-                )
-                PageTab.Events -> EventsTab(
-                    archive = archive,
-                    selected = selectedEventTab,
-                    onSelect = { eventTabIndex = it.ordinal },
-                    inset = inset,
-                    bottomPad = innerPadding.calculateBottomPadding(),
-                    modifier = Modifier.weight(1f)
-                )
+            // The pull seat. Unlike the apps page — whose box begins at the
+            // window's top edge and therefore drops its indicator by the bar's
+            // inset — this box begins under the two strips, which are this
+            // column's own children above it, so the indicator rests at the
+            // box's own top and needs no offset. Clipped, because the column
+            // draws the strips first: without the clip a half-risen indicator
+            // would be painted OVER the strip it is supposed to slide out from
+            // under (the apps page gets that layering for free — its bar is a
+            // scaffold slot, drawn after the body).
+            val pullState = rememberPullToRefreshState()
+            // 阈值触感：拉过阈值的那一刻响一下，与系统自己的下拉刷新同拍。
+            // 只在"越过"时响 —— snapshotFlow 本来就只在布尔值翻转时发射，所以
+            // 原路退回阈值以内不会补一声，来回蹭阈值也不会响成打字机。
+            val view = LocalView.current
+            LaunchedEffect(pullState) {
+                snapshotFlow { pullState.distanceFraction >= 1f }
+                    .collect { armed ->
+                        if (armed) {
+                            view.performHapticFeedback(
+                                HapticFeedbackConstants.GESTURE_THRESHOLD_ACTIVATE
+                            )
+                        }
+                    }
+            }
+            PullToRefreshBox(
+                isRefreshing = refreshing,
+                onRefresh = pullToRefresh,
+                state = pullState,
+                // 官方默认 80dp 在这张页太浅：两次条紧贴内容，手指轻轻一划就见
+                // 底，刷新几乎是被"蹭"出来的。120dp 让这一下拉真正需要用力，也
+                // 让下面那颗指示器的 0→1 走得慢一点，不再一碰就整个蹦出来。
+                threshold = PULL_INDICATOR_THRESHOLD,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clipToBounds(),
+                indicator = {
+                    M3PullIndicator(
+                        state = pullState,
+                        isRefreshing = refreshing,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+            ) {
+                // 内容不动。试过 m3e 规范那套"把内容整体推下去"（内容跟着
+                // fraction 一起位移）—— 在这张页上是错的：两条 tab 条紧贴内容
+                // 上沿、中间没有呼吸位，内容一下移就在条脚下裂出一道缝，看着像
+                // 内容脱开了条，而不是像 indicator 把它顶开。指示器因此回到覆盖
+                // 式（和应用页同一套），滑出时压住第一行 48dp，收手即退。
+                when (pageTab) {
+                    PageTab.Status -> StatusTab(
+                        archive = archive,
+                        noSource = noSource,
+                        problem = problem,
+                        loading = loading,
+                        onOpenStatus = onOpenStatus,
+                        inset = inset,
+                        bottomPad = innerPadding.calculateBottomPadding(),
+                        scrollState = statusScroll,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    PageTab.Events -> EventsTab(
+                        archive = archive,
+                        selected = selectedEventTab,
+                        onSelect = { eventTabIndex = it.ordinal },
+                        inset = inset,
+                        bottomPad = innerPadding.calculateBottomPadding(),
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
     }
+    if (exportProblem) {
+        AppDialog(
+            onDismissRequest = { exportProblem = false },
+            title = stringResource(R.string.records_export),
+            text = stringResource(R.string.records_export_failed),
+            confirmLabel = stringResource(R.string.dialog_close),
+            onConfirm = { exportProblem = false }
+        )
+    }
+}
+
+/** 官方 contained 指示器的容器边长（`LoadingIndicatorDefaults.ContainerWidth`，48dp）。 */
+private val PULL_INDICATOR_SIZE = 48.dp
+
+/**
+ * 触发刷新所需的下拉距离。官方 [PullToRefreshDefaults.PositionalThreshold] 是 80dp，
+ * 在这张页偏浅 —— 条与内容之间没有余量，80dp 的手指位移已经划过两行卡片。120dp
+ * 让下拉重新有"要拉到底"的手感，也顺带让指示器的 0→1 走得从容。
+ */
+private val PULL_INDICATOR_THRESHOLD = 120.dp
+
+/**
+ * 指示器落定后与箱顶（第一条 tab 条的下沿）之间的呼吸位。
+ *
+ * 箱顶正是第一条条的边线，指示器贴着它落定就像长在条上 —— 事件页那条分类条还
+ * 紧贴其下，两颗圆直接叠在一起。取值等于一条分类条的高度（48dp），也就是指示器
+ * 把自己整个"让"到条下面去：事件页的分类条能完整露在它上方，状态页则落在
+ * 「连接」那一行上。比这更小会重新压住条，比这更大就盖住了首张卡片。
+ */
+private val PULL_INDICATOR_GAP = 48.dp
+
+/**
+ * 记录页 M3 那张下拉指示器：官方 M3E 的 contained 形变指示器（48dp / CornerFull /
+ * primaryContainer 上 onPrimaryContainer），与 apps 页同一颗。与官方
+ * `PullToRefreshDefaults.LoadingIndicator` 唯一的不同是落点：官方按
+ * `fraction × 80dp − height` 一路滑到 40dp、把第一行压掉大半；这里滑到距箱顶
+ * [PULL_INDICATOR_GAP] 才停住（`f × (边长 + 间距) − 边长`），正好让开下面那条
+ * 分类条。
+ *
+ * 内容不跟它下推：这张页的两条 tab 条紧贴内容上沿，内容位移会在条脚下裂出缝，
+ * 见调用处的说明。所以这里是覆盖式，位移只由
+ * [PullToRefreshState.distanceFraction] 一个读数决定，逐帧不重组。
+ */
+@Composable
+private fun M3PullIndicator(
+    state: PullToRefreshState,
+    isRefreshing: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val gapPx = with(LocalDensity.current) { PULL_INDICATOR_GAP.toPx() }
+    Box(
+        modifier = modifier
+            .size(PULL_INDICATOR_SIZE)
+            .graphicsLayer {
+                val fraction = state.distanceFraction
+                // f=0 时整颗停在箱顶之上（被 clip 掉，看不见），f=1 时落定在距
+                // 箱顶 [PULL_INDICATOR_GAP] 处；越过阈值不再继续下移，改成整块
+                // 旋转 —— 与官方那颗同规。
+                translationY = fraction.coerceIn(0f, 1f) * (size.height + gapPx) - size.height
+                rotationZ = if (fraction > 1f) -(fraction - 1f) * 180f else 0f
+            }
+    ) {
+        // 两态的形变序列首尾相接：determinate 拉满是 SoftBurst，indeterminate
+        // 的第一个形状也是 SoftBurst，所以这里刻意不带 Crossfade —— 切换的那一
+        // 帧本来就同一形状，交叉淡入只会把它抹糊。刷新时是那颗七形状循环的
+        // 不定式（SoftBurst → Cookie9 → Pentagon → Pill → Sunny → Cookie4 →
+        // Oval，650ms 一个，弹簧 0.6/200）。
+        if (isRefreshing) {
+            ContainedLoadingIndicator()
+        } else {
+            ContainedLoadingIndicator(progress = { state.distanceFraction })
+        }
+    }
+}
+
+/** `hyperfcmlive-diagnostics-20261024-2230.txt` — sorts by time in any picker. */
+private fun exportFileName(): String {
+    val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())
+    return "hyperfcmlive-diagnostics-$stamp.txt"
 }
 
 /**
@@ -496,6 +730,15 @@ private fun RecordsPageTabRow(
  * the example's own pagers — resident pages made this tab heavy enough to
  * jank the home's tab spring — and every scroll position is hoisted here, so
  * a disposed page returns where it left.
+ *
+ * The body's pull-to-refresh is the library's own ([MiuixPullToRefresh]) — the
+ * circle-and-text indicator the apps page wears — wrapped around the PAGER
+ * rather than around each page: both levels of pages are scrollables, so the
+ * gesture arrives here as unconsumed nested scroll from whichever page is
+ * showing, and one container serves 状态 and all six categories alike. The
+ * indicator's anchor is the pane, handed in as [topPad] (the library offsets
+ * its header by the box's `contentPadding` top and nothing else), so it rises
+ * out from under the strips into the open body instead of behind the glass.
  */
 @Composable
 private fun MiuixRecordsPagerBody(
@@ -512,6 +755,8 @@ private fun MiuixRecordsPagerBody(
     pageFling: TargetedFlingBehavior,
     eventFling: TargetedFlingBehavior,
     statusScroll: ScrollState,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Hoisted above the pagers on purpose: a page is disposed when the reader
@@ -520,13 +765,26 @@ private fun MiuixRecordsPagerBody(
     val eventClasses = remember(archive.events) {
         archive.events.associateWith { EventTaxonomy.classes(it) }
     }
-    Column(
+    MiuixPullToRefresh(
+        isRefreshing = refreshing,
+        onRefresh = onRefresh,
+        // The library's defaults are hard-coded English; the text is part of
+        // the indicator, so it localises here — the same four strings the apps
+        // page hands it.
+        refreshTexts = listOf(
+            stringResource(R.string.refresh_pull_down),
+            stringResource(R.string.refresh_release),
+            stringResource(R.string.refreshing),
+            stringResource(R.string.refresh_done)
+        ),
+        // Top padding only, and only for the indicator: it anchors the header
+        // just below the pane (bar + strips) instead of at the window's top
+        // edge, behind the glass, where a pull would only grow it out of sight.
+        // No padding on the content either side — the pager takes the box's
+        // full height, and each page keeps its own distance from the chrome as
+        // CONTENT padding ([topPad]), so rows travel under the glass.
+        contentPadding = PaddingValues(top = topPad),
         modifier = modifier
-        // Deliberately NO top padding: the pager spans the body's full height
-        // (from behind the pane), and each page keeps its own distance from
-        // the chrome as CONTENT padding — [topPad] is the pane's whole extent,
-        // bar and strips — so scrolled rows travel under the glass instead of
-        // stopping at its edge (see the class KDoc).
     ) {
         HorizontalPager(
             state = pagePagerState,
@@ -545,9 +803,13 @@ private fun MiuixRecordsPagerBody(
             // its neighbour pages — dropped frames building status plus all
             // six event categories mid-flight; the tap spring composing one
             // target page is the only cost left, the same one the example pays.
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
+            //
+            // Full size, not weight: this is the pull container's own Column,
+            // not this function's (a weight would need a ColumnScope receiver
+            // that is not in scope here). The header is 0dp tall at rest and
+            // takes its height back from this pager while pulled, which is
+            // exactly the shift the gesture wants.
+            modifier = Modifier.fillMaxSize()
         ) { page ->
             when (PageTab.entries[page]) {
                 PageTab.Status -> StatusTab(
@@ -674,6 +936,14 @@ private fun EventsContent(
         archive.events.filter { classes[it]?.inTab(selected) == true }
     }
     val days = remember(visibleEvents) { groupByDay(visibleEvents) }
+    // How long each close row's connection had been up. Keyed on the whole
+    // archive, not on [visibleEvents]: a close in the 连接 tab may have started
+    // with a `Connected` row that the tab also holds, but the pairing has to
+    // see the full timeline to stay honest across category filters.
+    val uptimes = remember(archive.events) { EventTaxonomy.connectionUptimes(archive.events) }
+    // Same idea for delivery: how long after its arrival each 回执 / 完成 row
+    // happened, keyed on the message id GMS prints on all three stages.
+    val arrivals = remember(archive.events) { EventTaxonomy.pushArrivals(archive.events) }
     // The collapsed row shows the app's display name — a package id is for the
     // expanded raw line, not for a first glance. Keyed on the whole archive,
     // not on the category: switching categories must not re-query
@@ -779,6 +1049,8 @@ private fun EventsContent(
                 EventRow(
                     event = event,
                     appLabel = appLabels[eventPackage(event)].orEmpty(),
+                    uptimeSeconds = uptimes[event],
+                    arrivalMs = arrivals[event],
                     first = index == 0,
                     last = index == day.events.lastIndex
                 )
@@ -818,12 +1090,19 @@ private fun StatusTab(
             .verticalScroll(scrollState)
             .padding(start = inset, top = topPad, end = inset, bottom = bottomPad)
     ) {
-        RecordsStatusLine(
-            loading = loading,
-            fetchedAt = archive.fetchedAt,
-            stale = archive.isStale(System.currentTimeMillis()),
-            problemRes = problem
-        )
+        val snapshot = archive.snapshot
+        // Without a snapshot there is no connection group to host it, so the
+        // one-line read status keeps its old place at the top. With one, it
+        // moves into the group as the 更新于 row under 已连接时长 — the same
+        // fact, next to the numbers it dates.
+        if (snapshot == null) {
+            RecordsStatusLine(
+                loading = loading,
+                fetchedAt = archive.fetchedAt,
+                stale = archive.isStale(System.currentTimeMillis()),
+                problemRes = problem
+            )
+        }
         if (noSource) {
             val gap = if (LocalUiStyle.current.isMiuixBased) 12.dp else 16.dp
             Spacer(modifier = Modifier.height(gap))
@@ -838,7 +1117,6 @@ private fun StatusTab(
                 )
             }
         }
-        val snapshot = archive.snapshot
         if (snapshot != null) {
             // The newest close the ring still holds. The snapshot says whether
             // the link is up; only the events say how the last one ended, and
@@ -854,7 +1132,21 @@ private fun StatusTab(
             }
             ConfigSection(
                 R.string.records_section_connection,
-                connectionConfigRows(snapshot, lastClose)
+                connectionConfigRows(
+                    snapshot = snapshot,
+                    lastClose = lastClose,
+                    stateDetail = connectionVerdictDetail(archive),
+                    updatedValue = when {
+                        loading -> stringResource(R.string.records_loading)
+                        problem != null -> stringResource(problem)
+                        archive.fetchedAt == 0L -> stringResource(R.string.records_never)
+                        archive.isStale(System.currentTimeMillis()) -> stringResource(
+                            R.string.records_updated_stale,
+                            timeOf(archive.fetchedAt)
+                        )
+                        else -> timeOf(archive.fetchedAt)
+                    }
+                )
             )
             ConfigSection(R.string.records_section_network, networkConfigRows(snapshot))
             ConfigSection(R.string.records_section_heartbeat, heartbeatConfigRows(snapshot))
@@ -877,6 +1169,92 @@ private fun StatusTab(
             ConfigSection(R.string.records_section_push, pushConfigRows(snapshot, appLabels))
             ConfigSection(R.string.records_section_error, errorConfigRows(snapshot))
         }
+    }
+}
+
+/**
+ * The bracketed half of the 连接状态 row: the one-sentence answer to "is my push
+ * working right now, and how often does it break", folded into the row it
+ * qualifies instead of standing above the cards on its own line.
+ *
+ * Both halves are read off data the page already holds: the snapshot's own
+ * connected flag, and the closes the archive kept from the past hour, so the
+ * value can always be checked against the rows under it. When the hour holds
+ * more than one reason, the split is listed rather than a "most often" winner
+ * invented — with two drops of two kinds there is no majority. Null means the
+ * row has nothing to add — the bare state already says everything (e.g. no
+ * close is left in the ring after a GMS restart).
+ */
+@Composable
+private fun connectionVerdictDetail(archive: RecordsStore.Archive): String? {
+    val snapshot = archive.snapshot ?: return null
+    // The read's own clock, not "now": the poll hands in a new archive every
+    // minute, and recomposing for an unrelated reason must not silently move
+    // the one-hour window.
+    val readAt = if (archive.fetchedAt > 0L) archive.fetchedAt else System.currentTimeMillis()
+    val closes = remember(archive.events, readAt) {
+        archive.events.filter { event ->
+            event.ts >= readAt - VERDICT_WINDOW_MS &&
+                EventTaxonomy.kindOf(event) == GcmEvent.EventKind.Close
+        }
+    }
+    val latestClose = remember(archive.events) {
+        archive.events.firstNotNullOfOrNull { event ->
+            if (EventTaxonomy.kindOf(event) == GcmEvent.EventKind.Close) event else null
+        }
+    }
+    // Counts per close code, most frequent first. A close whose text carries no
+    // parsable code becomes its own bucket rather than vanishing from the
+    // split — otherwise the reasons would not add up to the drop count.
+    val reasonCounts = remember(closes) {
+        closes.groupingBy { GcmDumpParser.parseClose(it.text)?.code }
+            .eachCount()
+            .entries
+            .sortedWith(
+                compareByDescending<Map.Entry<Int?, Int>> { it.value }
+                    .thenBy { it.key ?: Int.MAX_VALUE }
+            )
+    }
+    if (snapshot.connected) {
+        if (closes.isEmpty()) return stringResource(R.string.records_verdict_no_drops)
+        val separator = stringResource(R.string.records_list_separator)
+        val onlyCode = reasonCounts.singleOrNull()?.key
+        if (reasonCounts.size == 1) {
+            // One reason the whole hour: name it, no "most often" — there is no
+            // second candidate for it to beat.
+            return if (onlyCode != null) {
+                stringResource(
+                    R.string.records_verdict_drops_reason,
+                    closes.size,
+                    closeText(onlyCode)
+                )
+            } else {
+                stringResource(R.string.records_verdict_drops, closes.size)
+            }
+        }
+        // Several reasons: say so and spell the split out. Ranking them would
+        // invent a winner when there is none (2 drops, 2 reasons, 1 each).
+        val parts = ArrayList<String>(reasonCounts.size)
+        for ((code, count) in reasonCounts) {
+            parts += if (code != null) {
+                stringResource(R.string.records_verdict_reason_count, closeText(code), count)
+            } else {
+                stringResource(R.string.records_verdict_reason_unknown_count, count)
+            }
+        }
+        return stringResource(
+            R.string.records_verdict_reasons,
+            closes.size,
+            parts.joinToString(separator)
+        )
+    }
+    val last = latestClose ?: return null
+    val ago = secondsText(((readAt - last.ts) / 1000).coerceAtLeast(0L).toInt())
+    val reason = GcmDumpParser.parseClose(last.text)?.code?.let { closeText(it) }
+    return if (reason != null) {
+        stringResource(R.string.records_verdict_last_reason, ago, reason)
+    } else {
+        stringResource(R.string.records_verdict_last, ago)
     }
 }
 
@@ -1248,14 +1626,23 @@ private fun ConfigSection(titleRes: Int, rows: List<Pair<String, String>>) {
 private fun connectionConfigRows(
     snapshot: GcmSnapshot,
     /** The newest close the event ring still holds: code and when it fired. */
-    lastClose: Pair<Int, Long>?
+    lastClose: Pair<Int, Long>?,
+    /** The verdict folded into the 状态 row; null when it has nothing to add. */
+    stateDetail: String?,
+    /** What the 更新于 row reads — a clock, or the reason it cannot date the read. */
+    updatedValue: String
 ): List<Pair<String, String>> {
     return buildList {
+        val state = when {
+            snapshot.connected -> stringResource(R.string.records_connected_state)
+            snapshot.connecting -> stringResource(R.string.records_connecting_state)
+            else -> stringResource(R.string.records_disconnected_state)
+        }
         add(
-            stringResource(R.string.records_connection_state) to when {
-                snapshot.connected -> stringResource(R.string.records_connected_state)
-                snapshot.connecting -> stringResource(R.string.records_connecting_state)
-                else -> stringResource(R.string.records_disconnected_state)
+            stringResource(R.string.records_connection_state) to if (stateDetail != null) {
+                stringResource(R.string.records_state_note, state, stateDetail)
+            } else {
+                state
             }
         )
         if (snapshot.endpoint.isNotEmpty()) {
@@ -1265,6 +1652,9 @@ private fun connectionConfigRows(
         // and how long has this session with it been up. The counters below
         // (stream / connects / limit) are identities and budgets, not the pair.
         add(stringResource(R.string.records_connected_for) to snapshot.connectTime.ifEmpty { "—" })
+        // The read's own timestamp, directly under the session's age: both
+        // answer "how recent is what I am reading".
+        add(stringResource(R.string.records_updated_label) to updatedValue)
         val lastDuration = snapshot.lastConnectionDurationS
         if (lastDuration != null && lastDuration > 0) {
             add(stringResource(R.string.records_last_connection) to secondsText(lastDuration))
@@ -1294,10 +1684,14 @@ private fun connectionConfigRows(
                 }
             )
         }
-        // The host-fallback policy the reconnect path is allowed to use; the
-        // dump prints the enum name, which needs no translation.
+        // The host-fallback policy the reconnect path is allowed to use. GMS
+        // prints it as an enum name; the page names the handful that exist and
+        // passes anything else through unchanged rather than guessing at it.
         if (snapshot.fallbackMode.isNotEmpty()) {
-            add(stringResource(R.string.records_fallback_mode) to snapshot.fallbackMode)
+            add(
+                stringResource(R.string.records_fallback_mode) to
+                    fallbackModeText(snapshot.fallbackMode)
+            )
         }
         // Shown because it explains a reset the reader would otherwise blame on
         // the network: every counter above belongs to one GMS process.
@@ -1529,9 +1923,14 @@ private fun EventRow(
     event: GcmEvent,
     appLabel: String,
     first: Boolean,
-    last: Boolean
+    last: Boolean,
+    /** Seconds the connection had been up when this close ended it; null when unknown. */
+    uptimeSeconds: Long? = null,
+    /** Milliseconds since the message arrived at this 回执 / 完成 row; null when unknown. */
+    arrivalMs: Long? = null
 ) {
     val miuix = LocalUiStyle.current.isMiuixBased
+    val strings = rememberEventText()
     val kind = remember(event.ts, event.text, event.kind) {
         EventTaxonomy.kindOf(event)
     }
@@ -1548,7 +1947,7 @@ private fun EventRow(
     // all fold into that qualifier — they are the three things a delivery row
     // is read for.
     val pushStage = pushStageLabelRes(kind)
-    val pushStageSuffix = pushStageSuffix(event, kind)
+    val pushStageSuffix = pushStageSuffix(event, kind, arrivalMs)
     EventCard(
         first = first,
         last = last,
@@ -1584,7 +1983,7 @@ private fun EventRow(
                     modifier = Modifier.weight(1f)
                 )
             } else {
-                val title = eventTitle(event, kind)
+                val title = eventTitle(event, kind, uptimeSeconds, strings)
                 if (miuix) {
                     MiuixText(
                         text = title,
@@ -1630,11 +2029,19 @@ private fun EventRow(
 
 /**
  * The clauses a push row adds after its stage word, in reading order:
- * `，耗时 322 ms`, `，错误码 3`, `，高优先级`. Each part is only there when the
- * line actually carries it, so an absence never reads as a value.
+ * `，到达后 2.3 秒`, `，耗时 322 ms`, `，错误码 3`, `，高优先级`. Each part is
+ * only there when the data carries it, so an absence never reads as a value.
+ *
+ * `到达后` is the end-to-end half — see [EventTaxonomy.pushArrivals]; the
+ * broadcast's own `time=` only ever covered its last hop, which left "the push
+ * took 8 seconds" with no number attached to the 8 seconds.
  */
-@Composable
-private fun pushStageSuffix(event: GcmEvent, kind: GcmEvent.EventKind): String {
+internal fun pushStageSuffix(
+    event: GcmEvent,
+    kind: GcmEvent.EventKind,
+    arrivalMs: Long?,
+    strings: EventText
+): String {
     val duration = if (kind == GcmEvent.EventKind.BroadcastCompleted) {
         GcmDumpParser.parseBroadcastCompleted(event.text)
     } else {
@@ -1651,17 +2058,50 @@ private fun pushStageSuffix(event: GcmEvent, kind: GcmEvent.EventKind): String {
         null
     }
     return buildString {
-        if (duration != null) {
-            append(stringResource(R.string.records_push_duration, duration.durationMs))
+        // The two measurements overlap: 到达后 starts at GMS's own `Received`,
+        // so the broadcast's `time=` is only the last hop of it. Printing both
+        // pushed the priority clause — the part a 完成 row is read for — off
+        // the end of an 11 sp line (`普通优先级` became `普通…`), so the
+        // superset wins and `耗时` appears only when the arrival is unknown,
+        // e.g. a 完成 row whose `Received` has rolled out of the archive.
+        val arrival = arrivalMs?.takeIf { it >= 0 }
+        if (arrival != null) {
+            append(arrivalClause(arrival, strings))
+        }
+        if (duration != null && arrival == null) {
+            append(strings.format(R.string.records_push_duration, duration.durationMs))
         }
         if (errorCode != null) {
-            append(stringResource(R.string.records_push_error_code, errorCode))
+            append(strings.format(R.string.records_push_error_code, errorCode))
         }
         if (priority != null) {
-            append(stringResource(priorityClauseRes(priority)))
+            append(strings.get(priorityClauseRes(priority)))
         }
     }
 }
+
+/**
+ * `，到达后 840 ms` under a second, `，到达后 2.3 秒` above it.
+ *
+ * Tenths come from integer arithmetic (`ms / 100`) rather than a decimal
+ * format: `%.1f` would print `2,3` under a comma-decimal locale, and every
+ * other number on this page is a plain integer.
+ */
+private fun arrivalClause(arrivalMs: Long, strings: EventText): String {
+    if (arrivalMs < 1000) {
+        return strings.format(R.string.records_push_arrival_ms, arrivalMs)
+    }
+    val tenths = arrivalMs / 100
+    return strings.format(
+        R.string.records_push_arrival_s,
+        tenths / 10,
+        tenths % 10
+    )
+}
+
+@Composable
+private fun pushStageSuffix(event: GcmEvent, kind: GcmEvent.EventKind, arrivalMs: Long?): String =
+    pushStageSuffix(event, kind, arrivalMs, rememberEventText())
 
 /** `priority=HIGH` → the clause GMS's own wording maps onto; unknown stays off. */
 private fun priorityClauseRes(priority: String): Int = when (priority) {
@@ -1674,19 +2114,27 @@ private fun priorityClauseRes(priority: String): Int = when (priority) {
  * The dot colour = how much the row deserves attention, not which stage it
  * belongs to. The stage is already the tab; the colour's only job is to answer
  * "do I need to look at this" while reading 全部. Four levels, three fixed
- * inks and the theme's own error/outline so it follows the look.
+ * inks and the theme's own outline for the fourth so it follows the look.
+ *
+ * Error used to be the theme's `error` role, and that was the one level where
+ * following the theme got it wrong: an 8 dp dot is pure signal, and M3's
+ * dynamic error in the dark is tone 80 — a pale pink that reads as the
+ * quietest ink on the page while marking the one row that wants attention. The
+ * same event then looked like two different severities depending on the look,
+ * because Miuix's own error stays saturated. A fixed red is now used by both
+ * looks: it is chosen for an 8 dp dot on a light or dark page (~4:1 either
+ * way), not for text, which is why the push stage's 11 sp error text keeps
+ * reading the theme's role — text has a contrast floor the dot does not.
  */
+private val SEVERITY_ERROR_INK = Color(0xFFE51C23)
+
 @Composable
 private fun severityColor(severity: EventSeverity): Color {
     val miuix = LocalUiStyle.current.isMiuixBased
     return when (severity) {
         EventSeverity.Normal -> Color(0xFF2E9E5B)
         EventSeverity.Watch -> Color(0xFFE8A33D)
-        EventSeverity.Error -> if (miuix) {
-            MiuixTheme.colorScheme.error
-        } else {
-            MaterialTheme.colorScheme.error
-        }
+        EventSeverity.Error -> SEVERITY_ERROR_INK
         EventSeverity.Unknown -> if (miuix) {
             MiuixTheme.colorScheme.outline
         } else {
@@ -1713,6 +2161,7 @@ private fun eventTitleRes(kind: GcmEvent.EventKind): Int = when (kind) {
     GcmEvent.EventKind.ProxiedNotification -> R.string.records_event_proxied
     GcmEvent.EventKind.BroadcastCancelled -> R.string.records_event_broadcast_cancelled
     GcmEvent.EventKind.GmsRestart -> R.string.records_event_restart
+    GcmEvent.EventKind.SamplingGap -> R.string.records_event_sampling_gap_plain
     GcmEvent.EventKind.Transport -> R.string.records_event_transport
     GcmEvent.EventKind.Other -> R.string.records_event_other
 }
@@ -1951,8 +2400,53 @@ private fun TitleAndQualifier(
  * clause, and a value that cannot fold this way stays in the raw line.
  * English build reads the same folding with English base titles.
  */
+
+/**
+ * The two lookups a title needs, as an interface instead of the Compose
+ * runtime.
+ *
+ * Titles are the part of this page that keeps being wrong (`GcmNetwork{…}`
+ * reaching the screen, a bare `Cell` standing in for a handover), and until
+ * now the only way to check one was to install a build and read a screenshot.
+ * Making the lookup a parameter is what lets a JVM test call [eventTitle] and
+ * assert which resource carried which argument. Production supplies it from
+ * [rememberEventText]; tests supply their own table.
+ */
+internal interface EventText {
+    fun get(id: Int): String
+    fun format(id: Int, vararg args: Any): String
+}
+
+/**
+ * The production [EventText]: the app's resources, re-resolved when the
+ * configuration changes (locale, font scale), exactly like `stringResource`.
+ */
 @Composable
-private fun eventTitle(event: GcmEvent, kind: GcmEvent.EventKind): String = when (kind) {
+private fun rememberEventText(): EventText {
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    return remember(context, configuration) {
+        object : EventText {
+            private val resources = context.resources
+            override fun get(id: Int): String = resources.getString(id)
+            override fun format(id: Int, vararg args: Any): String =
+                resources.getString(id, *args)
+        }
+    }
+}
+
+internal fun eventTitle(
+    event: GcmEvent,
+    kind: GcmEvent.EventKind,
+    uptimeSeconds: Long? = null,
+    strings: EventText
+): String {
+    // These two locals are the seam. They shadow the Compose functions of the
+    // same name on purpose: the body below is the one that shipped, unchanged,
+    // so a refactor cannot quietly pick the wrong resource id along the way.
+    fun stringResource(id: Int): String = strings.get(id)
+    fun stringResource(id: Int, vararg args: Any): String = strings.format(id, *args)
+    return when (kind) {
     GcmEvent.EventKind.Doze -> when {
         event.text.startsWith("Client Entering doze") ->
             stringResource(R.string.records_doze_entering)
@@ -1974,25 +2468,58 @@ private fun eventTitle(event: GcmEvent, kind: GcmEvent.EventKind): String = when
     }
     GcmEvent.EventKind.Network -> {
         val target = GcmDumpParser.parseNetworkTarget(event.text)
+        // Both network lines of one change are bound at parse time: a handover
+        // line's own `was`, or the sibling line of a callback — so the row
+        // never has to re-read the text to answer "came from where".
+        val previous = event.previousNetwork
+        val change = GcmDumpParser.classifyNetworkChange(target, previous)
+        // A network that went away and a network that lost its link are the
+        // same news to the reader; GMS just prints them on different lines.
+        val down = GcmDumpParser.isNetworkGone(event.text) ||
+            change == GcmDumpParser.NetworkChange.Dropped
         when {
             event.text.startsWith("Active network is now cellular, but already") ->
                 stringResource(R.string.records_event_network_cellular_fallback)
             target == null -> stringResource(eventTitleRes(kind))
-            event.text.startsWith("Active network switched to ") -> {
-                val was = GcmDumpParser.parseNetworkPrevious(event.text)
-                if (was != null) {
-                    stringResource(R.string.records_event_network_switched, target, was)
-                } else {
-                    stringResource(R.string.records_event_network_now, target)
-                }
-            }
-            event.text.startsWith("Active network went away") ->
-                stringResource(R.string.records_event_network_gone, target)
-            event.text.startsWith("Active network is now ") ->
-                stringResource(R.string.records_event_network_now, target)
-            event.text.startsWith("onGcmNetworkChanged: ") ->
-                stringResource(R.string.records_event_network_changed, target)
-            else -> stringResource(eventTitleRes(kind))
+            // The identity leads: `Cell 100 网络已断开` says WHICH network in
+            // one glance, and repeated rows still read as separate networks.
+            down -> stringResource(
+                R.string.records_event_network_dropped,
+                networkName(target)
+            )
+            change == GcmDumpParser.NetworkChange.Restored -> stringResource(
+                R.string.records_event_network_restored,
+                networkName(target)
+            )
+            // Two networks of one transport are told apart by the netId alone:
+            // `Cell 网络已从 100 切换到 107` says "the mobile data moved to
+            // another network" in the shortest form that stays true — dropping
+            // the numbers would read as no change at all.
+            change == GcmDumpParser.NetworkChange.Handover &&
+                previous != null &&
+                previous.transport == target.transport &&
+                previous.netId != null && target.netId != null ->
+                stringResource(
+                    R.string.records_event_network_switched_same,
+                    target.transport,
+                    previous.netId,
+                    target.netId
+                ) + downSuffix(target, strings)
+            change == GcmDumpParser.NetworkChange.Handover && previous != null ->
+                stringResource(
+                    R.string.records_event_network_switched,
+                    networkName(previous),
+                    networkName(target)
+                ) + downSuffix(target, strings)
+            // A shape that names only one end (`onGcmNetworkChanged`, or a
+            // handover with no paired sibling) has nothing to compare with —
+            // the row states where the client is and stops there.
+            event.text.startsWith("Active network is now ") && !target.isDown ->
+                stringResource(R.string.records_event_network_now, networkName(target))
+            else -> stringResource(
+                R.string.records_event_network_switched_to,
+                networkName(target)
+            ) + downSuffix(target, strings)
         }
     }
     GcmEvent.EventKind.Heartbeat -> when {
@@ -2048,7 +2575,18 @@ private fun eventTitle(event: GcmEvent, kind: GcmEvent.EventKind): String = when
         // own — appending 连接关闭 to 连接正常结束 only repeats itself. Every
         // other code keeps the outcome clause.
         val orderly = code != null && EventTaxonomy.severity(event, kind) == EventSeverity.Normal
-        when {
+        // How old the connection was when it ended. The reason alone cannot
+        // tell a flapping link from a session that lived for an hour; the two
+        // share close codes. Absent for a close whose `Connected` start has
+        // rolled out of the archive — the row then says nothing rather than
+        // guessing.
+        val age = uptimeSeconds?.takeIf { it > 0 }?.let { secondsText(it.toInt(), strings) }
+        val ageClause = if (age != null) {
+            stringResource(R.string.records_close_uptime, age)
+        } else {
+            ""
+        }
+        val base = when {
             glossRes != null && orderly -> stringResource(glossRes)
             glossRes != null ->
                 stringResource(R.string.records_close_with, stringResource(glossRes))
@@ -2059,6 +2597,7 @@ private fun eventTitle(event: GcmEvent, kind: GcmEvent.EventKind): String = when
                 )
             else -> stringResource(R.string.records_event_close)
         }
+        base + ageClause
     }
     GcmEvent.EventKind.ServerClose -> when {
         event.text == "Received Close" -> stringResource(R.string.records_server_close_received)
@@ -2185,9 +2724,43 @@ private fun eventTitle(event: GcmEvent, kind: GcmEvent.EventKind): String = when
         }
         else -> stringResource(eventTitleRes(kind))
     }
+    // The store's overflow marker. The seconds it covers are the only useful
+    // part: "the page is missing this much of the timeline" is the reading.
+    GcmEvent.EventKind.SamplingGap -> {
+        val seconds = GcmDumpParser.parseSamplingGapSeconds(event.text)
+        if (seconds != null && seconds > 0) {
+            stringResource(R.string.records_event_sampling_gap, secondsText(seconds.toInt(), strings))
+        } else {
+            stringResource(R.string.records_event_sampling_gap_plain)
+        }
+    }
     else -> stringResource(eventTitleRes(kind))
+    }
 }
 
+/** `，但已断开` for a title that landed on a network the dump marks as gone. */
+private fun downSuffix(ref: GcmDumpParser.NetworkRef, strings: EventText): String =
+    if (ref.isDown) strings.get(R.string.records_network_down_suffix) else ""
+
+/**
+ * A network as a row writes it: transport and netId (`Cell 103`) — the pair
+ * the dump's `GcmNetwork{…}` object carries.
+ *
+ * The netId is not decoration. Without it every handover between two networks
+ * of the same transport renders as `切换为 Cell，原为 Cell`, which says nothing
+ * at all — while "mobile data came back on a different network" and "the same
+ * network object came back" are two very different stories (the netId is
+ * monotonic within a boot and never reused, so a new number means a new
+ * network object: a cell-tower handover while riding a train). See
+ * HOOKS_AND_DIAGNOSTICS.md on `GcmNetwork{N …}`.
+ *
+ * The dump's `DISCONNECTED` tail is not part of the name: the row's verb says
+ * it (`… 网络已断开`), so repeating it in brackets only lengthened the title.
+ * A space, not `·`: one glyph of punctuation per row is a glyph not spent on
+ * the numbers.
+ */
+private fun networkName(ref: GcmDumpParser.NetworkRef): String =
+    if (ref.netId == null) ref.transport else ref.transport + " " + ref.netId
 
 /** The package an event names, for the app-label cache; null when it names none. */
 private fun eventPackage(event: GcmEvent): String? =
@@ -2316,16 +2889,37 @@ private const val INLINE_NAMES = 3
 private fun typeLabel(snapshot: GcmSnapshot, type: Int): String =
     snapshot.networkTypeNames[type] ?: "type $type"
 
-/** A whole number of seconds as a duration a row can read. */
+/**
+ * The `Fallback mode:` enum as the page's own words.
+ *
+ * GMS prints the enum name — `FALLBACK_NONE` in older builds, lowercased on
+ * newer ones — so the lookup folds case. The set is closed and small; a value
+ * outside it is shown verbatim, because inventing a translation for an unknown
+ * mode would be worse than the raw token.
+ */
 @Composable
-private fun secondsText(seconds: Int): String {
+private fun fallbackModeText(mode: String): String = when (mode.uppercase(Locale.ROOT)) {
+    "FALLBACK_NONE" -> stringResource(R.string.records_fallback_none)
+    "FALLBACK_NONE_DISALLOW_VPN_BYPASS" -> stringResource(R.string.records_fallback_none_vpn)
+    "FALLBACK_CELLULAR" -> stringResource(R.string.records_fallback_cellular)
+    "FALLBACK_CONSTRAINED" -> stringResource(R.string.records_fallback_constrained)
+    "FALLBACK_RESTRICTED_SATELLITE" -> stringResource(R.string.records_fallback_satellite)
+    "FALLBACK_MODE_UNKNOWN" -> stringResource(R.string.records_fallback_unknown)
+    else -> mode
+}
+
+/** A whole number of seconds as a duration a row can read. */
+internal fun secondsText(seconds: Int, strings: EventText): String {
     val minutes = seconds / 60
     return when {
-        minutes < 1 -> stringResource(R.string.records_seconds, seconds.toString())
-        minutes < 60 -> stringResource(R.string.records_minutes, minutes, seconds % 60)
-        else -> stringResource(R.string.records_hours, minutes / 60, minutes % 60)
+        minutes < 1 -> strings.format(R.string.records_seconds, seconds.toString())
+        minutes < 60 -> strings.format(R.string.records_minutes, minutes, seconds % 60)
+        else -> strings.format(R.string.records_hours, minutes / 60, minutes % 60)
     }
 }
+
+@Composable
+private fun secondsText(seconds: Int): String = secondsText(seconds, rememberEventText())
 
 /**
  * `java.time.Duration.toString()` — `PT12S`, `PT4.026S`, `PT1M30S` — as the
@@ -2452,6 +3046,17 @@ private fun RecordsStatusLine(
 
 private const val TAG = "HyperFCMLive"
 private const val POLL_INTERVAL_MS = 60_000L
+
+/**
+ * 一次下拉最短站多久。读一份 dump 常常几十毫秒就回来，指示器一闪而过会被读成
+ * "闪了一下"而不是"刷好了" —— 所以刷新的档位至少撑这么久，短的补长，长的照旧。
+ * 420ms 是一次 complete beat：滑出（弹簧到位）+ 一个形变节拍（650ms 周期的大半），
+ * 收手回弹之前眼睛能确认它确实转过。
+ */
+private const val MIN_REFRESH_VISIBLE_MS = 420L
+
+/** The window the status page's one-sentence verdict counts closes in. */
+private const val VERDICT_WINDOW_MS = 60L * 60 * 1000
 
 /**
  * The 12dp breath under each capsule strip — the example's own spacing, which

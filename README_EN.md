@@ -119,6 +119,7 @@ This project is a fork; thanks to these projects and contributors:
 - [HappyMax0/FCMPushViewer](https://github.com/HappyMax0/FCMPushViewer)
 - [dingwen07/hyperos-fcm-fix](https://github.com/dingwen07/hyperos-fcm-fix)
 - [Kr328/HyperOSFCMFix](https://github.com/Kr328/HyperOSFCMFix)
+- [ByteJuno/fcmfix-coloros](https://github.com/ByteJuno/fcmfix-coloros)
 - [ReedGAOOO/FCMGuard-HyperOS](https://github.com/ReedGAOOO/FCMGuard-HyperOS)
 - [zuohl/HyperOS_FCM_Live](https://github.com/zuohl/HyperOS_FCM_Live)
 - The original idea for requesting the `GET_INSTALLED_APPS` runtime permission came from 250king's [PR #1](https://github.com/250king/HyperOS_FCM_Live/pull/1); that permission has since been removed when the app list moved to the package-visibility approach

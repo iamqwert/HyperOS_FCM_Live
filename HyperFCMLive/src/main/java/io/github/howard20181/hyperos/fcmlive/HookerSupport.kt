@@ -1,10 +1,8 @@
 package io.github.howard20181.hyperos.fcmlive
 
-import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
 import android.os.PowerExemptionManager
-import java.lang.reflect.Method
 
 internal object HookerSupport {
     internal const val TAG = "HyperGreeze"
@@ -85,98 +83,6 @@ internal object HookerSupport {
      * read-only `checkWakePath` probe logs as `checkWakePath DENIED`.
      */
     internal const val MIUIOP_AUTO_START = 10008
-
-    /**
-     * `10053 = OP_AUTO_START_SWITCH` — the manager toggle's own op, which
-     * 手机管家's autostart switch writes alongside `10008`
-     * (framework.jar → `miui/MiuiAppOpsNames.java`). The module only ever
-     * **writes** this op, and only from the boot-time migration
-     * (`AutostartGate.backfillAutostartOpsAtStartup`), which backfills it for
-     * packages older builds left at `10008=allow / 10053=ignore`; the behavior
-     * op itself is read-only everywhere in this module.
-     */
-    internal const val MIUIOP_AUTO_START_SWITCH = 10053
-
-    /**
-     * Outcomes of the boot-time autostart switch-op migration
-     * (`AutostartGate.syncAutostartSwitchOpIfNeeded`). Ints rather than an enum
-     * so the walk stays allocation-free; the caller only compares them, it
-     * never holds them.
-     */
-    internal const val AUTOSTART_ALREADY = 0
-    internal const val AUTOSTART_WRITTEN = 1
-    internal const val AUTOSTART_FAILED = -1
-
-    /**
-     * The package carries [ApplicationInfo.FLAG_SYSTEM], so the write was
-     * refused on purpose. One flag covers every preloaded shape the user
-     * can end up with — factory apps on any preloaded partition, and
-     * updated system apps, where the update only replaces the APK under
-     * /data and never clears the flag.
-     *
-     * The reason for the refusal is reversibility, not harm: the ROM's own
-     * undo path for a written op is 手机管家's autostart toggle, and the
-     * deep system packages do not appear on that page at all. This module
-     * never learns the previous op values, so a write it cannot undo
-     * through the ROM is a write it cannot undo at all.
-     */
-    internal const val AUTOSTART_SKIPPED_SYSTEM = 2
-
-    /**
-     * The allowlisted package is no longer installed — checked once, then
-     * uninstalled without being unchecked first. There is nothing to write
-     * and nothing to fail at: the entry is stale in the allowlist until the
-     * user unchecks it (or reinstalls), and the ROM's own op row for a
-     * removed package is gone anyway. Skipped silently, like
-     * [AUTOSTART_SKIPPED_SYSTEM], because it is a state the allowlist can
-     * legitimately sit in, not an error — an ERROR per stale entry per
-     * broadcast would be indistinguishable from a storm.
-     */
-    internal const val AUTOSTART_SKIPPED_MISSING = 3
-
-    /**
-     * Set while the module itself is reading the autostart ops for the
-     * boot-time migration's read-before-write. The root choke hooks the very
-     * method these reads go through, and without the flag the choke's answer
-     * ("allowed") would make every read see an already-allowed op and silently
-     * stop the manager-switch backfill from ever writing while the root rung
-     * is on. Thread-local because the walk runs on the allowlist handler
-     * thread; always cleared in a finally.
-     */
-    internal val autostartWriteReadInFlight = ThreadLocal<Boolean>()
-
-    /**
-     * `AppOpsManager#setMode(int, int, String, int)` and
-     * `#checkOpNoThrow(int, int, String)`, resolved once.
-     *
-     * Neither overload is in the public SDK — it only exposes the name-based
-     * forms, because the op *code* is the hidden half. Resolved by
-     * reflection and invoked through [XposedInterface.getInvoker], the route
-     * the module already uses for hidden framework methods; a miss makes the
-     * migration report [AUTOSTART_FAILED] rather than crash.
-     */
-    internal val APP_OPS_SET_MODE: Method? by lazy {
-        try {
-            AppOpsManager::class.java.getDeclaredMethod(
-                "setMode",
-                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType,
-                String::class.java, Int::class.javaPrimitiveType
-            )
-        } catch (t: Throwable) {
-            null
-        }
-    }
-    internal val APP_OPS_CHECK_OP_NO_THROW: Method? by lazy {
-        try {
-            AppOpsManager::class.java.getDeclaredMethod(
-                "checkOpNoThrow",
-                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, String::class.java
-            )
-        } catch (t: Throwable) {
-            null
-        }
-    }
-
 
     /**
      * WiFi scorer behind the relaxed weak-signal switch.

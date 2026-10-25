@@ -502,6 +502,8 @@ class MainActivity : AppCompatActivity() {
                         // reveals the page itself rather than a picture of one.
                         pages.push(Route.About)
                     },
+                    onCheckUpdate = aboutDelegate::checkForUpdates,
+                    onUpdateOpen = aboutDelegate::openPendingUpdate,
                     onRecheck = { recheckModuleActive() }
                 )
                 HomeTab.Apps -> AppListTab()
@@ -593,8 +595,8 @@ class MainActivity : AppCompatActivity() {
         onLicense = { aboutDelegate.openLink(AboutDelegate.GPL3_URL) },
         onLicenses = { pages.push(Route.Licenses) },
         onExperiment = { pages.push(Route.Experiment) },
-        onExport = aboutDelegate::exportAllowlist,
-        onImport = aboutDelegate::importAllowlist,
+        onExport = aboutDelegate::exportConfig,
+        onImport = aboutDelegate::importConfig,
         onCheckUpdate = aboutDelegate::checkForUpdates,
         onUpdateOpen = aboutDelegate::openPendingUpdate,
         versionLine = settingsVersionLine,

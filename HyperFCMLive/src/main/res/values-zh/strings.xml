@@ -53,8 +53,8 @@
     <string name="about_sub_hide_icon_on">已隐藏，可从 LSPosed 打开</string>
     <string name="about_sub_hide_icon_off">已显示，点击后隐藏</string>
     <string name="about_sub_check_update">当前版本 %1$s (%2$d)</string>
-    <string name="about_sub_export">将白名单备份为文本文件</string>
-    <string name="about_sub_import">从文本文件恢复白名单</string>
+    <string name="about_sub_export">将当前配置备份为文本文件</string>
+    <string name="about_sub_import">从文本文件导入模块配置</string>
     <string name="view_source_code">查看源代码</string>
     <string name="about_license">许可证</string>
     <string name="dialog_close">关闭</string>
@@ -65,19 +65,16 @@
     <string name="update_error">检查更新失败，请检查网络后重试</string>
     <string name="export_allowlist">备份配置</string>
     <string name="import_allowlist">恢复配置</string>
-    <string name="allowlist_export_failed">备份失败</string>
-    <string name="allowlist_import_failed">恢复失败</string>
-    <string name="allowlist_import_empty">文件中没有有效的包名</string>
-    <plurals name="allowlist_import_done">
-        <item quantity="one">已导入 %1$d 个应用</item>
-        <item quantity="other">已导入 %1$d 个应用</item>
-    </plurals>
-    <plurals name="allowlist_export_done">
-        <item quantity="one">已导出 %1$d 个应用</item>
-        <item quantity="other">已导出 %1$d 个应用</item>
-    </plurals>
+    <string name="config_export_failed">备份失败</string>
+    <string name="config_import_failed">导入失败</string>
+    <string name="config_import_empty">文件中没有可导入的内容</string>
+    <!-- 设置项含模块开关与外观，所以消息同时报两个数。 -->
+    <string name="config_export_done">已备份 %1$d 个应用、%2$d 项设置</string>
+    <string name="config_import_done">已导入 %1$d 个应用、%2$d 项设置</string>
     <string name="update_found">发现新版本 %1$s</string>
     <string name="update_found_title">发现新版本</string>
+    <!-- 更新徽标只有颜色，读屏需要一句文字；挂在徽标节点上 -->
+    <string name="update_badge_desc">有新版本可用</string>
     <string name="update_open">前往下载</string>
     <string name="open_source_licenses">开放源代码许可</string>
     <string name="licenses_title">开放源代码许可</string>
@@ -181,7 +178,8 @@
          连接、心跳与网络事件；Root 仅作为模块未激活时的可选备用通道。
          dump 中不含消息内容，DeviceID 一律丢弃。 -->
     <string name="nav_records">记录</string>
-    <string name="records_refresh">刷新</string>
+    <string name="records_export">导出诊断</string>
+    <string name="records_export_failed">写入所选文件失败</string>
     <string name="records_locked_title">模块未激活</string>
     <string name="records_locked_body">记录页通过运行在系统框架内的模块读取 GCM 的 dump。请在 LSPosed 中启用模块并勾选「系统框架」作用域。</string>
     <string name="records_module_off">模块未激活，显示已保存的记录</string>
@@ -189,6 +187,7 @@
     <string name="records_loading">正在读取…</string>
     <string name="records_never">尚未读取</string>
     <string name="records_updated_at">更新于 %1$s</string>
+    <string name="records_updated_label">快照时间</string>
     <string name="records_updated_stale">%1$s，已过期</string>
     <string name="records_error_parse">无法解析 GCM dump</string>
     <string name="records_no_events">暂无事件</string>
@@ -208,7 +207,18 @@
     <string name="records_day_today">今天</string>
     <string name="records_day_yesterday">昨天</string>
     <string name="records_section_connection">连接</string>
-    <string name="records_connection_state">状态</string>
+    <!-- 「连接状态」行的括号补充：已连接（近 1 小时断开 3 次，原因：「…」） -->
+    <string name="records_state_note">%1$s（%2$s）</string>
+    <string name="records_verdict_no_drops">近 1 小时无断开</string>
+    <string name="records_verdict_drops">近 1 小时断开 %1$d 次</string>
+    <string name="records_verdict_drops_reason">近 1 小时断开 %1$d 次，原因：「%2$s」</string>
+    <!-- 多种原因并列，不做「最多」排名 -->
+    <string name="records_verdict_reasons">近 1 小时断开 %1$d 次，原因：%2$s</string>
+    <string name="records_verdict_reason_count">「%1$s」%2$d 次</string>
+    <string name="records_verdict_reason_unknown_count">「未记录原因」%1$d 次</string>
+    <string name="records_verdict_last_reason">最近一次断开于 %1$s前，原因：「%2$s」</string>
+    <string name="records_verdict_last">最近一次断开于 %1$s前</string>
+    <string name="records_connection_state">连接状态</string>
     <string name="records_section_network">网络</string>
     <string name="records_section_heartbeat">心跳</string>
     <string name="records_section_push">推送</string>
@@ -226,10 +236,13 @@
     <string name="records_hb_alarm_early_by">，早于预定 %1$s ms</string>
     <string name="records_hb_timeout">心跳超时，连接重置</string>
     <string name="records_event_network">网络切换</string>
-    <string name="records_event_network_switched">活动网络已切换为 %1$s，原为 %2$s</string>
-    <string name="records_event_network_now">当前活动网络为 %1$s</string>
-    <string name="records_event_network_changed">GCM 网络已变更为 %1$s</string>
-    <string name="records_event_network_gone">活动网络已断开，断开前为 %1$s</string>
+    <string name="records_event_network_switched">网络已从 %1$s 切换到 %2$s</string>
+    <string name="records_event_network_switched_same">%1$s 网络已从 %2$s 切换到 %3$s</string>
+    <string name="records_event_network_switched_to">已切换到 %1$s</string>
+    <string name="records_event_network_now">当前网络为 %1$s</string>
+    <string name="records_event_network_dropped">%1$s 网络已断开</string>
+    <string name="records_event_network_restored">%1$s 网络已恢复</string>
+    <string name="records_network_down_suffix">，但已断开</string>
     <string name="records_event_reconnect">重连</string>
     <string name="records_event_reconnect_alarm_scheduled">重连闹钟已排期</string>
     <string name="records_reconnect_delay">，%1$s ms 后重试</string>
@@ -242,10 +255,13 @@
     <string name="records_event_connecting_fallback">正在连接 %1$s，使用备用端口</string>
     <string name="records_delay_overdue">，已逾期 %1$s ms</string>
     <string name="records_push_duration">，耗时 %1$s ms</string>
+    <string name="records_push_arrival_ms">，到达后 %1$s ms</string>
+    <string name="records_push_arrival_s">，到达后 %1$d.%2$d 秒</string>
     <string name="records_join_raw">，%1$s</string>
     <string name="records_global_backoff_event">全局退避</string>
     <string name="records_event_close">连接关闭</string>
     <string name="records_close_with">%1$s，连接关闭</string>
+    <string name="records_close_uptime">，连接存活 %1$s</string>
     <string name="records_close_gloss_1">网络已断开</string>
     <string name="records_close_gloss_3">域名解析失败</string>
     <string name="records_close_gloss_4">鉴权失败</string>
@@ -306,7 +322,8 @@
     <string name="records_event_broadcast_no_response">广播无响应</string>
     <string name="records_event_other">其他</string>
     <string name="records_event_restart">GMS 已重启</string>
-    <string name="records_event_restart_detail">GMS 已重启，之前的事件环已清空</string>
+    <string name="records_event_sampling_gap">两次采样之间约 %1$s的事件已丢失</string>
+    <string name="records_event_sampling_gap_plain">两次采样之间的事件已丢失</string>
     <string name="records_doze_entering">进入 Doze</string>
     <string name="records_doze_exiting">退出 Doze</string>
     <string name="records_doze_bit_enter">已下发进入 Doze 指令</string>
@@ -364,6 +381,13 @@
     <string name="records_close_code">错误码 %1$d</string>
     <string name="records_disconnect_time">上次断开</string>
     <string name="records_fallback_mode">主机回退</string>
+    <!-- GMS 的 Fallback mode 枚举：只译已知值，未知值原样显示 -->
+    <string name="records_fallback_none">不回退</string>
+    <string name="records_fallback_none_vpn">不回退，且不允许绕过 VPN</string>
+    <string name="records_fallback_cellular">回退到蜂窝网络</string>
+    <string name="records_fallback_constrained">回退到受限网络</string>
+    <string name="records_fallback_satellite">回退到卫星网络</string>
+    <string name="records_fallback_unknown">未知</string>
     <string name="records_gms_pid">GMS 进程</string>
     <string name="records_heartbeat_ack">心跳确认</string>
     <string name="records_heartbeat_ack_value">已发出，等待确认</string>
@@ -446,11 +470,21 @@
          _BASELINE 与 AllowlistGate 的注释。 -->
     <string name="experiment_section_auto_check">自动勾选</string>
     <string name="experiment_auto_check_new">自动勾选新装 FCM 应用</string>
-    <string name="experiment_auto_check_new_desc">未勾选应用更新后，将不会应用本开关策略</string>
+    <string name="experiment_auto_check_new_desc">未勾选应用更新后不会应用本开关</string>
 
     <!-- 「显示调试日志」在设置页的「实验与调试」区（about_section_experiment_debug） -->
     <string name="experiment_debug_log">显示调试日志</string>
     <string name="experiment_debug_log_desc">输出调试日志，排查问题时启用</string>
+    <!-- 「事件记录上限行数」：只影响记录页本地归档的行数上限，钩子侧不读 -->
+    <string name="record_rows_limit">事件记录上限行数</string>
+    <string name="record_rows_limit_desc">调整事件记录上限</string>
+    <string-array name="record_rows_entries">
+        <item>200</item>
+        <item>300</item>
+        <item>500</item>
+        <item>800</item>
+        <item>1200</item>
+    </string-array>
 
     <!-- 模块状态页 -->
     <string name="status_yes">是</string>

@@ -559,6 +559,18 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  *   statement, the same way the annotation-only rows are. It exists because
  *   `testImplementation` is back in build.gradle after Release 3.5.3 dropped it
  *   and orphaned src/test.
+ *
+ * The 2026-10-25 pass re-audited the resolved graph against
+ * `releaseRuntimeClasspath` plus the classes left in `mapping/release/mapping.txt`.
+ * Two rows had drifted, both by being a version behind what was declared:
+ * - Kotlin Stdlib: 2.4.20 → **2.4.21** — the root build pins the KGP at 2.4.21,
+ *   and 2.4.21 wins over every 2.4.20 request in the graph.
+ * - Kotlinx Serialization: 1.11.0 → **1.12.0** — 1.12.0 is what build.gradle
+ *   declares; 1.11.0 is only what miuix-nav asks for, and it loses. Its
+ *   surviving-class count is 150 today (127 was the 2026-10-19 reading).
+ * Nothing else moved: every other row still resolves to the version it states.
+ * ConstraintLayout's surviving-class count is 55 now — the 3 recorded above was
+ * a reading of a thinner graph, and the reason that row exists has not changed.
  */
 private val DEPS = arrayOf(
     arrayOf("AndroidX Activity", "1.13.0", "Apache License 2.0", ANDROIDX_URL),
@@ -580,7 +592,8 @@ private val DEPS = arrayOf(
     arrayOf("AndroidX Core", "1.19.1", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Interpolator", "1.0.0", "Apache License 2.0", ANDROIDX_URL),
     // Miuix's responsive-layout chain (material3-window-size-class): real code
-    // in the APK, 10 classes of it, verified against the R8 mapping.
+    // in the APK, 12 classes of it (window + window-core), verified against the
+    // R8 mapping.
     arrayOf("AndroidX Window", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
     // Build-only stubs vendored under hiddenapi/stubs; kept for attribution.
     arrayOf("AOSP Framework Annotations", "", "Apache License 2.0", AOSP_URL),
@@ -596,7 +609,7 @@ private val DEPS = arrayOf(
     // reason as the annotation-only rows: it is a third-party project in the
     // build with its own licence. EPL-1.0 (see licenseRawFor).
     arrayOf("JUnit", "4.13.2", "Eclipse Public License 1.0", "https://github.com/junit-team/junit4"),
-    arrayOf("Kotlin Stdlib", "2.4.20", "Apache License 2.0", "https://github.com/JetBrains/kotlin"),
+    arrayOf("Kotlin Stdlib", "2.4.21", "Apache License 2.0", "https://github.com/JetBrains/kotlin"),
     // Declared explicitly in build.gradle since UpdateChecker's network check
     // moved onto Dispatchers.IO: real runtime code in the APK now, not a
     // licence statement for a transitive leftover.
@@ -612,7 +625,7 @@ private val DEPS = arrayOf(
     // all of it" note below no longer holds).
     arrayOf(
         "Kotlinx Serialization",
-        "1.11.0",
+        "1.12.0",
         "Apache License 2.0",
         "https://github.com/Kotlin/kotlinx.serialization"
     ),
@@ -643,7 +656,8 @@ private val DEPS = arrayOf(
     // toolchain comment in build.gradle has the audit. One row for the project,
     // though it ships as miuix-ui, miuix-core, miuix-preference, miuix-icons,
     // miuix-blur (back since the floating bottom bar — the title-bar glass stayed
-    // on Haze) and miuix-nav (the navigation runtime the pages run through).
+    // on Haze), miuix-shader and miuix-squircle behind it, and miuix-nav (the
+    // navigation runtime the pages run through).
     arrayOf(
         "Miuix",
         "0.9.4",
@@ -665,6 +679,11 @@ private val REFERENCES = arrayOf(
     // Same MIUIX / soft-glass family — the row links to its releases page.
     arrayOf("AritxOnly/F1Info", "GPL-3.0", "https://github.com/AritxOnly/F1Info/releases"),
     arrayOf("billtv/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/billtv/HyperOS_FCM_Live"),
+    // A sibling repair in the same family as the ColorOS row at the foot of this
+    // list: FCM tuned for ColorOS 16/17 (国行), derived from kooritea/fcmfix. No
+    // LICENSE file in the repository — shown as 「—」, so a tap opens the project
+    // itself like the other unlicensed rows.
+    arrayOf("ByteJuno/fcmfix-coloros", "—", "https://github.com/ByteJuno/fcmfix-coloros"),
     arrayOf("dingwen07/hyperos-fcm-fix", "GPL-3.0", "https://github.com/dingwen07/hyperos-fcm-fix"),
     arrayOf(
         "google/material-design-icons",

@@ -358,6 +358,29 @@ object Prefs {
     private const val KEY_DEBUG_LOG_PENDING_PUSH = "debug_log_pending_push"
 
     /**
+     * UI-only: 「事件记录上限行数」— how many events the records archive keeps.
+     *
+     * Nothing in system_server reads it: the hooks hand back GCM's dump and the
+     * app decides how much history to merge onto disk, so this key never joins
+     * [GROUP_CONFIG] and needs no reload broadcast. The archive is a view of the
+     * ring, not an audit log — a smaller value simply ages rows out at the next
+     * capture.
+     */
+    const val KEY_RECORD_ROWS = "record_rows_limit"
+
+    /** The menu's values, in the order of `R.array.record_rows_entries`. */
+    val RECORD_ROWS_CHOICES = intArrayOf(200, 300, 500, 800, 1_200)
+
+    /**
+     * The out-of-the-box cap; always one of [RECORD_ROWS_CHOICES].
+     *
+     * 500 rather than the ring's own 200: one capture only ever holds the last
+     * ~200 GMS lines, so anything above that comes from polling — 500 covers a
+     * few captures' worth of a storm without turning the file into an audit log.
+     */
+    const val DEFAULT_RECORD_ROWS = 500
+
+    /**
      * Remote + local: "Smart Power 拦截放行"（OS3 世代实验功能）。
      *
      * Read inside system_server by [SmartPowerHooks]: when on, a c2dm
@@ -972,6 +995,48 @@ object Prefs {
             }
             broadcastAllowlistChanged(app)
         }
+    }
+
+    /** 记录页归档的行数上限；不在档位上的值（手改 prefs、菜单将来再变）回默认。 */
+    @JvmStatic
+    fun readRecordRows(context: Context): Int {
+        val stored = localPrefs(context).getInt(KEY_RECORD_ROWS, DEFAULT_RECORD_ROWS)
+        return if (stored in RECORD_ROWS_CHOICES) stored else DEFAULT_RECORD_ROWS
+    }
+
+    /** Persist the chosen row cap; the next capture applies it. */
+    @JvmStatic
+    fun writeRecordRows(context: Context, rows: Int) {
+        if (rows !in RECORD_ROWS_CHOICES) return
+        localPrefs(appContext(context)).edit().putInt(KEY_RECORD_ROWS, rows).apply()
+    }
+
+    /** [KEY_EXCLUDE_MIPUSH] as the overflow menu last left it. */
+    @JvmStatic
+    fun readLocalExcludeMiPush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_EXCLUDE_MIPUSH, true)
+    }
+
+    /**
+     * Persist the MiPush filter. Read once per Activity ([MainActivity] seeds it
+     * in `onCreate`), so a write from outside that Activity — the config import
+     * is the only one — lands on the next launch, not on the current list.
+     */
+    @JvmStatic
+    fun writeExcludeMiPush(context: Context, enabled: Boolean) {
+        localPrefs(appContext(context)).edit().putBoolean(KEY_EXCLUDE_MIPUSH, enabled).apply()
+    }
+
+    /** [KEY_SHOW_SYSTEM] as the overflow menu last left it. */
+    @JvmStatic
+    fun readLocalShowSystem(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_SHOW_SYSTEM, false)
+    }
+
+    /** Persist the system-app filter; same read-once-per-Activity rule as above. */
+    @JvmStatic
+    fun writeShowSystem(context: Context, enabled: Boolean) {
+        localPrefs(appContext(context)).edit().putBoolean(KEY_SHOW_SYSTEM, enabled).apply()
     }
 
     /** Smart Power 放行开关在 UI 侧留下的最近值。 */

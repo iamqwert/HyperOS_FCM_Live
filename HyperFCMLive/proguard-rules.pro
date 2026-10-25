@@ -51,11 +51,14 @@
 # retention on top of them.
 #
 # The companion rule `-keep class androidx.activity.compose.** { *; }` went for a
-# different reason: nothing in this app uses it. Every screen is a `ComposeView`
-# + `setContentView` (see the five Activities), i.e.
-# `androidx.compose.ui.platform.ComposeView#setContent`, never
-# `androidx.activity.compose.setContent`. That module is on the runtime
-# classpath, pulled in transitively, but no source file references it.
+# different reason: a blanket keep is not what makes Compose work here. The single
+# Activity (MainActivity, an AppCompatActivity) hosts a `ComposeView` +
+# `setContentView`, i.e. `androidx.compose.ui.platform.ComposeView#setContent`,
+# never `androidx.activity.compose.setContent`. The module is on the runtime
+# classpath and one API in it is genuinely called —
+# `rememberLauncherForActivityResult`, in records/RecordsScreen.kt — but that is a
+# direct call R8 resolves on its own; nothing reaches it by name, so keeping every
+# class in the package added retention and nothing else.
 #
 # `-dontwarn androidx.**` / `-dontwarn com.google.android.material.**` above still
 # cover anything R8 cannot resolve. Note what that means: R8 will not report a

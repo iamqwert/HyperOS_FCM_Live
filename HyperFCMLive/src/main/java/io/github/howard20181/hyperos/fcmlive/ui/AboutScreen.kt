@@ -100,9 +100,11 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
@@ -111,6 +113,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.howard20181.hyperos.fcmlive.AppLocale
 import io.github.howard20181.hyperos.fcmlive.LauncherIcon
+import io.github.howard20181.hyperos.fcmlive.MainActivity
 import io.github.howard20181.hyperos.fcmlive.Prefs
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.UpdateChecker
@@ -843,10 +846,14 @@ private fun AboutProjectSection(
                 last = false,
                 trailing = {
                     if (updateBadge) {
+                        val badgeDesc = stringResource(R.string.update_badge_desc)
                         Box(
                             modifier = Modifier
                                 .padding(start = 8.dp)
                                 .size(8.dp)
+                                // Colour alone says nothing to a screen reader;
+                                // see the same badge on the home page.
+                                .semantics { contentDescription = badgeDesc }
                                 .background(MaterialTheme.colorScheme.error, CircleShape)
                         )
                     }
@@ -942,9 +949,15 @@ private fun AboutBody(
     var sleepKeepaliveData by remember {
         mutableStateOf(Prefs.readLocalSleepKeepaliveData(context))
     }
+    // 自动勾选新装应用：它不作用于某个 ROM 门，而是扩展应用页勾选状态的来源
+    // （见 MainActivity.handleAutoCheckToggle 与 AllowlistGate 的虚拟成员合并），
+    // 所以从实验页搬到设置页后依旧没有空白名单提示。
+    var autoCheckNew by remember { mutableStateOf(Prefs.readLocalAutoCheckNew(context)) }
     var debugLog by remember {
         mutableStateOf(Prefs.readLocalDebugLog(context))
     }
+    // 记录页归档的行数上限：纯本地值，钩子侧不读，所以没有 remote 镜像要同步。
+    var recordRows by remember { mutableStateOf(Prefs.readRecordRows(context)) }
     val themeMode by AppearanceState.themeMode
     val uiStyle by AppearanceState.uiStyle
     val dynamic by AppearanceState.dynamicColor
@@ -977,6 +990,8 @@ private fun AboutBody(
     // 语言下拉：选项是各自的原生名（简体中文 / English），不翻译，所以这份
     // 数组只有 values/ 一份定义。
     val languageEntries = stringArrayResource(R.array.language_entries)
+    // 「事件记录上限行数」的下拉：标签数组与 [Prefs.RECORD_ROWS_CHOICES] 同序。
+    val recordRowsEntries = stringArrayResource(R.array.record_rows_entries)
 
     // The two appearance menus are scoped by each other, because the settings
     // are not independent: the 2025 spec covers four palette styles and nothing
@@ -1330,6 +1345,26 @@ private fun AboutBody(
         }
 
         item {
+            // Moved down from the experiment page: this switch changes which apps
+            // count as checked, so it sits next to the allowlist's own behaviour
+            // rather than behind the experiment entry. No empty-allowlist hint —
+            // it is the source of that list's virtual members.
+            SectionTitle(R.string.experiment_section_auto_check)
+            SettingsGroup {
+                SettingsSwitchCard(
+                    iconRes = R.drawable.ic_library_add_check,
+                    title = stringResource(R.string.experiment_auto_check_new),
+                    description = stringResource(R.string.experiment_auto_check_new_desc),
+                    checked = autoCheckNew,
+                    onCheckedChange = { checked ->
+                        MainActivity.handleAutoCheckToggle(context, checked)
+                        autoCheckNew = checked
+                    }
+                )
+            }
+        }
+
+        item {
             // One merged section: the debug switch on top (a pure emission
             // toggle — nothing here changes what a hook decides, only whether
             // the log line describing it is written out), the experiment
@@ -1356,6 +1391,24 @@ private fun AboutBody(
                     },
                     first = true,
                     last = false
+                )
+                PopupCard(
+                    iconRes = R.drawable.ic_event_note,
+                    title = stringResource(R.string.record_rows_limit),
+                    subtitle = stringResource(R.string.record_rows_limit_desc),
+                    entries = recordRowsEntries.toList(),
+                    // 档位没在菜单里时（旧值或数组被改过）落到默认档，而不是显示 -1。
+                    currentIndex = Prefs.RECORD_ROWS_CHOICES
+                        .indexOf(recordRows)
+                        .takeIf { it >= 0 }
+                        ?: Prefs.RECORD_ROWS_CHOICES.indexOf(Prefs.DEFAULT_RECORD_ROWS),
+                    first = false,
+                    last = false,
+                    onPick = { index ->
+                        val rows = Prefs.RECORD_ROWS_CHOICES[index]
+                        Prefs.writeRecordRows(context, rows)
+                        recordRows = rows
+                    }
                 )
                 NavCard(
                     iconRes = R.drawable.ic_science,

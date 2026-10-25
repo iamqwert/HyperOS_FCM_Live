@@ -3,8 +3,6 @@ package io.github.howard20181.hyperos.fcmlive
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
 import android.os.Binder
 import android.os.SystemClock
 import android.util.Log
@@ -22,24 +20,11 @@ import java.lang.reflect.Method
  * summary that stays with `Hooker`), and `getSystemContext` is
  * `Hooker#getSystemContext` as a supplier.
  *
- * The write half of this object is the boot-time migration only: it backfills
- * the manager switch op (`10053`) for packages an older build left at
- * `10008=allow / 10053=ignore`, and never writes the behavior op — the switch
- * that used to grant autostart is retired, and the experiment screen carries a
- * plain entry into 手机管家's own autostart management instead.
+ * This object only ever **reads** the autostart ops. The switch that used to
+ * grant autostart is retired, and the experiment screen carries a plain entry
+ * into 手机管家's own autostart management instead.
  */
 internal object AutostartGate {
-
-    /**
-     * How long after system_server install the boot-time backfill walk waits.
-     *
-     * Sixty seconds: comfortably past the tail of service bring-up (the AppOps
-     * service the walk reads is registered well before this on every observed
-     * boot), yet still inside the window where the user has not usually started
-     * interacting with the device, so the walk's one read per allowlisted
-     * package lands on an idle binder pool.
-     */
-    private const val AUTOSTART_BACKFILL_DELAY_MS = 60_000L
 
     /**
      * The four autostart checkpoints that read `MIUIOP 10008`, and the runtime
@@ -270,14 +255,6 @@ internal object AutostartGate {
         for (method in rootTargets) {
             method.isAccessible = true
             hookE(method).intercept { chain: XposedInterface.Chain ->
-                // The migration's read-before-write goes through this same
-                // method; answering it here would make every read see "already
-                // allowed" and silently stop the manager-switch backfill from
-                // ever writing while the root rung is on. The migration raises
-                // this flag around its reads.
-                if (java.lang.Boolean.TRUE == HookerSupport.autostartWriteReadInFlight.get()) {
-                    return@intercept chain.proceed()
-                }
                 var answered = false
                 try {
                     val pkg = chain.getArg(2) as? String
@@ -512,188 +489,6 @@ internal object AutostartGate {
         packageName: String
     ): Boolean {
         return AllowlistGate.allowlistContains(module, getSystemContext, packageName)
-    }
-
-    /**
-     * The boot-time migration: a delayed whole-allowlist walk, run once per
-     * system_server generation, that backfills the manager switch op (`10053`)
-     * for packages an older build left at `10008=allow / 10053=ignore` —
-     * functionally allowed but with 手机管家's autostart row showing "off", the
-     * "self-deceiving" state the retired write switch created and this walk
-     * exists to end. With no user action beyond the reboot a module update
-     * causes anyway, every allowlisted package the user can see in the manager
-     * ends up showing the state the behavior op is actually in.
-     *
-     * This is a **reconciliation**, not a write switch: the behavior op (`10008`)
-     * is only ever read here, never written. A package the user (or the retired
-     * switch) did not allow is left exactly as it is, and so is anything the
-     * manager already shows as on — the read-before-write touches nothing that
-     * is already consistent. 手机管家's own toggles are never fought: whatever
-     * the user changed there since the last boot is the state this walk finds
-     * and keeps.
-     *
-     * The retired switch's key is deliberately *not* consulted — the walk runs
-     * unconditionally — because the packages that need the backfill are
-     * identified by the ops' state on disk, not by a config value: an old
-     * user who never opens the app again (so the retired keys are dropped
-     * without ever being seen) must still be migrated.
-     *
-     * Delayed rather than run inline: install happens while system_server is
-     * still bringing services up, and the AppOps service the walk needs is
-     * registered only later — running it immediately would fail every read.
-     * A failed walk is not retried within the generation; the next boot tries
-     * again. Hot reloads re-arm it, which costs one redundant read per package
-     * and nothing more.
-     */
-    internal fun backfillAutostartOpsAtStartup(
-        module: XposedInterface,
-        getSystemContext: () -> Context?
-    ) {
-        AllowlistGate.postDelayedToAllowlistHandler(module, AUTOSTART_BACKFILL_DELAY_MS) {
-            walkAutostartSwitchOpSync(module, getSystemContext)
-        }
-    }
-
-    /**
-     * The migration walk itself: re-read the allowlist, backfill `10053` for
-     * every allowlisted package sitting at `10008=allow / 10053=ignore`, and
-     * log one line for the whole pass.
-     */
-    private fun walkAutostartSwitchOpSync(
-        module: XposedInterface,
-        getSystemContext: () -> Context?
-    ) {
-        AllowlistGate.loadAllowlistFromRemotePrefs(module)
-        val allowlist = AllowlistGate.getFcmAllowlist(module, getSystemContext)
-        if (allowlist.isEmpty()) {
-            module.logGated(
-                Log.INFO, HookerSupport.TAG,
-                "wake: autostart sync skipped, the allowlist is empty"
-            )
-            return
-        }
-        var synced = 0
-        var consistent = 0
-        var skipped = 0
-        var missing = 0
-        var failed = 0
-        for (pkg in allowlist) {
-            when (syncAutostartSwitchOpIfNeeded(module, getSystemContext, pkg)) {
-                HookerSupport.AUTOSTART_WRITTEN -> synced++
-                HookerSupport.AUTOSTART_FAILED -> failed++
-                HookerSupport.AUTOSTART_SKIPPED_SYSTEM -> skipped++
-                HookerSupport.AUTOSTART_SKIPPED_MISSING -> missing++
-                else -> consistent++
-            }
-        }
-        module.logGated(
-            Log.INFO, HookerSupport.TAG,
-            "wake: autostart on startup over ${allowlist.size} allowlisted package(s): " +
-                "$synced manager-switch op(s) backfilled, $consistent already consistent, " +
-                "$skipped system, $missing missing, $failed failed"
-        )
-    }
-
-    /**
-     * One package of the migration: read the op pair, and set the manager
-     * switch op (`10053`) to `MODE_ALLOWED` only when the behavior op (`10008`)
-     * is allowed and the switch op is not — the exact fingerprint older builds
-     * left behind. Everything else is a read and nothing more.
-     *
-     * There is no public API for this. The op is
-     * `MIUIOP_AUTO_START_SWITCH = 10053`, and MIUI's own write is
-     * `android.miui.AppOpsUtils#setApplicationAutoStart(Context, String, boolean)`
-     * — `AppOpsManager.setMode(op, uid, pkg, allowed ? 0 : 2)` underneath
-     * (`AppOpsUtils` disassembly: `MODE_ALLOWED` / `MODE_ERRORED`). Calling
-     * `setMode` directly keeps this off the `AppOpsUtils` hidden class and lets
-     * the uid be resolved for the user this module actually runs in.
-     *
-     * The op code is not in the SDK either — the public `AppOpsManager` only
-     * exposes the name-based overloads — so both methods are resolved by
-     * reflection and invoked through [XposedInterface.getInvoker], the same
-     * route the module already uses for other hidden framework methods.
-     *
-     * Identity is cleared around the calls. The walk runs on the allowlist
-     * handler thread inside system_server, so the uid it presents is already
-     * 1000 — the clear is belt-and-braces, kept because the ROM judges
-     * `setMode` against `MANAGE_APP_OPS_MODES` and the thread's identity is
-     * not part of any contract this module owns.
-     *
-     * Both reads go through the same AppOpsManager entry the root choke hooks;
-     * with the flag up the choke passes them through instead of answering, so
-     * the migration keeps seeing the ops' real values even while the root rung
-     * is on.
-     *
-     * System packages are refused outright — see [AUTOSTART_SKIPPED_SYSTEM] for
-     * why (the manager page cannot undo an op it does not list). A package that
-     * cannot be resolved at all falls through to [HookerSupport.AUTOSTART_FAILED].
-     *
-     * Returns [HookerSupport.AUTOSTART_WRITTEN], [HookerSupport.AUTOSTART_ALREADY],
-     * [HookerSupport.AUTOSTART_SKIPPED_SYSTEM], [HookerSupport.AUTOSTART_SKIPPED_MISSING]
-     * or [HookerSupport.AUTOSTART_FAILED]. A failure is logged here with the
-     * exception — it has to name its package to be useful.
-     */
-    private fun syncAutostartSwitchOpIfNeeded(
-        module: XposedInterface,
-        getSystemContext: () -> Context?,
-        packageName: String
-    ): Int {
-        val setMode = HookerSupport.APP_OPS_SET_MODE
-        val checkOpNoThrow = HookerSupport.APP_OPS_CHECK_OP_NO_THROW
-        if (setMode == null || checkOpNoThrow == null) {
-            return HookerSupport.AUTOSTART_FAILED
-        }
-        val context = getSystemContext() ?: return HookerSupport.AUTOSTART_FAILED
-        val token = Binder.clearCallingIdentity()
-        try {
-            val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
-                ?: return HookerSupport.AUTOSTART_FAILED
-            val ai = try {
-                context.packageManager.getApplicationInfo(packageName, 0)
-            } catch (e: PackageManager.NameNotFoundException) {
-                // Checked, then uninstalled without being unchecked first: skip
-                // silently — see [HookerSupport.AUTOSTART_SKIPPED_MISSING]. Not the
-                // generic catch below: that logs an ERROR with a stack per stale
-                // entry per boot, which is noise, not a failure.
-                return HookerSupport.AUTOSTART_SKIPPED_MISSING
-            }
-            if ((ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0) {
-                return HookerSupport.AUTOSTART_SKIPPED_SYSTEM
-            }
-            val uid = ai.uid
-            HookerSupport.autostartWriteReadInFlight.set(true)
-            try {
-                val behaviorOp = module.getInvoker(checkOpNoThrow).invoke(
-                    appOps, HookerSupport.MIUIOP_AUTO_START, uid, packageName
-                )
-                if (behaviorOp != AppOpsManager.MODE_ALLOWED) {
-                    // Never allowed by anyone (or switched off in the manager,
-                    // which writes the pair back): nothing to migrate.
-                    return HookerSupport.AUTOSTART_ALREADY
-                }
-                val switchOp = module.getInvoker(checkOpNoThrow).invoke(
-                    appOps, HookerSupport.MIUIOP_AUTO_START_SWITCH, uid, packageName
-                )
-                if (switchOp == AppOpsManager.MODE_ALLOWED) {
-                    return HookerSupport.AUTOSTART_ALREADY
-                }
-                module.getInvoker(setMode).invoke(
-                    appOps, HookerSupport.MIUIOP_AUTO_START_SWITCH, uid, packageName,
-                    AppOpsManager.MODE_ALLOWED
-                )
-                return HookerSupport.AUTOSTART_WRITTEN
-            } finally {
-                HookerSupport.autostartWriteReadInFlight.set(false)
-            }
-        } catch (t: Throwable) {
-            module.logGated(
-                Log.ERROR, HookerSupport.TAG,
-                "wake: failed to sync the autostart switch op of $packageName", t
-            )
-            return HookerSupport.AUTOSTART_FAILED
-        } finally {
-            Binder.restoreCallingIdentity(token)
-        }
     }
 
     /**

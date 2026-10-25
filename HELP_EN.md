@@ -156,7 +156,7 @@ The allowlist decides whether the target app gets the wake-up privileges — aut
 | Theme | Theme mode, dynamic color, palette style, color spec |
 | Battery optimization | WeChat battery optimization switch, AOSP app battery usage entry |
 | Sleep mode | Keep Wi-Fi, keep mobile data (off by default, see below) |
-| Backup & restore | Export settings, import settings (allowlist as a text file) |
+| Backup & restore | Back up the current configuration to a text file, import it back (allowlist and switches together) |
 | Privacy & permissions | What each permission is for, and the privacy commitment |
 | Experiments & debugging | Debug logging, experimental features entry |
 | About | View source, check for updates, open-source licenses |

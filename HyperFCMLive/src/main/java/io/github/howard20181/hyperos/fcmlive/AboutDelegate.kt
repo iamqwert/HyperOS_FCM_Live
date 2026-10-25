@@ -44,20 +44,23 @@ class AboutDelegate(
     private var pendingDownloadUrl: String? = null
 
     /**
-     * SAF export/import via Activity Result API (no startActivityForResult).
-     * The returned URI is externally supplied, so both paths are re-checked
-     * before any stream is opened — see [isGrantedContentUri].
+     * SAF export/import of the configuration file via Activity Result API (no
+     * startActivityForResult). The returned URI is externally supplied, so both
+     * paths are re-checked before any stream is opened — see
+     * [isGrantedContentUri]. The file itself is read and written by
+     * [ConfigBackup]; this object only owns the picker, the streams and the
+     * message.
      */
-    private val createAllowlistDoc =
+    private val createConfigDoc =
         activity.registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
             if (uri != null) {
-                writeAllowlistTo(uri)
+                writeConfigTo(uri)
             }
         }
-    private val openAllowlistDoc =
+    private val openConfigDoc =
         activity.registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
-                readAllowlistFrom(uri)
+                readConfigFrom(uri)
             }
         }
 
@@ -157,37 +160,37 @@ class AboutDelegate(
         ThemeSupport.reapplyWindow(activity)
     }
 
-    fun exportAllowlist() {
+    /**
+     * Writes every setting plus the allowlist to a text file the user picks.
+     * "Configuration" here means both: the switches the hooks read and the
+     * package list they act on are one thing in a restore, and splitting them
+     * into two files would let a restore leave the two halves disagreeing.
+     * [ConfigBackup] owns the format.
+     */
+    fun exportConfig() {
         try {
-            createAllowlistDoc.launch("fcmlive-allowlist.txt")
+            createConfigDoc.launch(ConfigBackup.FILE_NAME)
         } catch (t: Throwable) {
-            showMessage(activity.getString(R.string.allowlist_export_failed))
+            showMessage(activity.getString(R.string.config_export_failed))
         }
     }
 
-    fun importAllowlist() {
+    /** Reads a file written by [exportConfig] — or by hand, in that format. */
+    fun importConfig() {
         try {
-            openAllowlistDoc.launch(arrayOf("text/plain"))
+            openConfigDoc.launch(arrayOf("text/plain"))
         } catch (t: Throwable) {
-            showMessage(activity.getString(R.string.allowlist_import_failed))
+            showMessage(activity.getString(R.string.config_import_failed))
         }
     }
 
-    private fun currentAllowlist(): Set<String> {
-        val allow = Prefs.readAllowlist(Prefs.remote())
-        return if (allow.isEmpty()) Prefs.readLocalAllowlist(activity) else allow
-    }
-
-    private fun writeAllowlistTo(uri: Uri) {
-        val sorted = currentAllowlist().toMutableList()
-        java.util.Collections.sort(sorted)
-
+    private fun writeConfigTo(uri: Uri) {
         // ACTION_CREATE_DOCUMENT returns an externally supplied URI. Require a
         // content URI and an explicit write grant before resolving it. This
         // prevents an arbitrary caller/provider URI from being used as a
         // ContentResolver target.
         if (!isGrantedContentUri(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION)) {
-            showMessage(activity.getString(R.string.allowlist_export_failed))
+            showMessage(activity.getString(R.string.config_export_failed))
             return
         }
         // The authority decides which provider answers; the *path* is what the
@@ -197,73 +200,102 @@ class AboutDelegate(
         // Normalising first is what makes the prefix test mean anything:
         // "/safe/../../data/data/<app>/x" names the /data path it normalises to.
         if (!isSafeDocumentPath(uri)) {
-            showMessage(activity.getString(R.string.allowlist_export_failed))
+            showMessage(activity.getString(R.string.config_export_failed))
             return
         }
 
         try {
+            val snapshot = ConfigBackup.encode(activity)
             val out: OutputStream = activity.contentResolver.openOutputStream(uri)
                 ?: throw IOException("null stream")
             out.use { stream ->
-                val sb = StringBuilder()
-                for (pkg in sorted) {
-                    sb.append(pkg).append('\n')
-                }
-                stream.write(sb.toString().toByteArray(StandardCharsets.UTF_8))
-                // getQuantityString: first count picks the CLDR plural rule,
-                // the same count formats the %1$d slot — English splits on
-                // 1 app / N apps, Chinese reuses one wording for both.
-                showMessage(activity.resources.getQuantityString(
-                    R.plurals.allowlist_export_done, sorted.size, sorted.size
-                ))
+                stream.write(snapshot.text.toByteArray(StandardCharsets.UTF_8))
             }
+            showMessage(
+                activity.getString(
+                    R.string.config_export_done,
+                    snapshot.packages,
+                    snapshot.settings
+                )
+            )
         } catch (t: Throwable) {
-            showMessage(activity.getString(R.string.allowlist_export_failed))
+            showMessage(activity.getString(R.string.config_export_failed))
         }
     }
 
-    private fun readAllowlistFrom(uri: Uri) {
-        val allow = HashSet<String>()
-
+    private fun readConfigFrom(uri: Uri) {
         // Same checks as the export side: the provider interprets the path, so
         // it is normalised and the private roots are refused before a stream is
         // opened — otherwise a provider can answer with this app's own files.
         if (!isGrantedContentUri(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)) {
-            showMessage(activity.getString(R.string.allowlist_import_failed))
+            showMessage(activity.getString(R.string.config_import_failed))
             return
         }
         if (!isSafeDocumentPath(uri)) {
-            showMessage(activity.getString(R.string.allowlist_import_failed))
+            showMessage(activity.getString(R.string.config_import_failed))
             return
         }
 
-        try {
-            val input = activity.contentResolver.openInputStream(uri)
-                ?: throw IOException("null stream")
-            input.use { stream ->
-                BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8)).use { reader ->
-                    var line = reader.readLine()
-                    while (line != null) {
-                        val pkg = line.trim()
-                        if (pkg.isNotEmpty() && !pkg.startsWith("#")) {
-                            allow.add(pkg)
-                        }
-                        line = reader.readLine()
+        val text = try {
+            readConfigText(uri)
+        } catch (t: Throwable) {
+            showMessage(activity.getString(R.string.config_import_failed))
+            return
+        }
+        val restored = try {
+            ConfigBackup.decode(activity, text)
+        } catch (t: Throwable) {
+            showMessage(activity.getString(R.string.config_import_failed))
+            return
+        }
+        if (restored.isEmpty) {
+            showMessage(activity.getString(R.string.config_import_empty))
+            return
+        }
+        // A file holding only settings must not empty the allowlist: the package
+        // half is written only when the file actually carried one.
+        if (restored.packages.isNotEmpty()) {
+            Prefs.writeAllowlist(activity, Prefs.remote(), restored.packages)
+        }
+        // The appearance half was written to disk by [ConfigBackup]; what is
+        // left is the View-side repaint no recomposition performs.
+        if (restored.appearanceChanged) {
+            applyAppearanceChange()
+        }
+        showMessage(
+            activity.getString(
+                R.string.config_import_done,
+                restored.packages.size,
+                restored.settings
+            )
+        )
+    }
+
+    /**
+     * The file as text, refusing anything past [MAX_CONFIG_CHARS].
+     *
+     * A backup of this app is a few hundred short lines; the cap is what keeps a
+     * picker-fed stream from inflating into the heap on the main thread. The
+     * whole file is parsed as one document, so a truncated read would be a
+     * partial restore — it fails the import instead.
+     */
+    private fun readConfigText(uri: Uri): String {
+        val input = activity.contentResolver.openInputStream(uri)
+            ?: throw IOException("null stream")
+        val builder = StringBuilder()
+        input.use { stream ->
+            BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8)).use { reader ->
+                var line = reader.readLine()
+                while (line != null) {
+                    builder.append(line).append('\n')
+                    if (builder.length > MAX_CONFIG_CHARS) {
+                        throw IOException("config too large")
                     }
+                    line = reader.readLine()
                 }
             }
-        } catch (t: Throwable) {
-            showMessage(activity.getString(R.string.allowlist_import_failed))
-            return
         }
-        if (allow.isEmpty()) {
-            showMessage(activity.getString(R.string.allowlist_import_empty))
-            return
-        }
-        Prefs.writeAllowlist(activity, Prefs.remote(), allow)
-        showMessage(activity.resources.getQuantityString(
-            R.plurals.allowlist_import_done, allow.size, allow.size
-        ))
+        return builder.toString()
     }
 
     /**
@@ -303,6 +335,13 @@ class AboutDelegate(
 
     companion object {
         private const val TAG = "AboutDelegate"
+
+        /**
+         * Ceiling for an imported configuration file. A full backup is a few
+         * hundred short lines; 512 KiB is far past any legitimate one and still
+         * small enough to parse on the main thread without a stall.
+         */
+        private const val MAX_CONFIG_CHARS = 512 * 1024
 
         const val REPO_URL = "https://github.com/iamqwert/HyperOS_FCM_Live"
 
