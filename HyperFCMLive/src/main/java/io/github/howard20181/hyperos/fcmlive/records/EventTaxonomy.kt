@@ -64,14 +64,14 @@ data class EventClasses(
  * Maps one GCM event line to the page's tabs.
  *
  * Basis, all from the captured `GcmService` dump and the project's
- * HOOKS_AND_DIAGNOSTICS.md §4.7:
+ * FCM_HOOK_TECH_DOC.md §5.7:
  *
  * - `Connected`, `Sent LoginRequest`, network changes, reconnect setup
  *   (`Connecting using`, `Starting parallel`, reconnect scheduling) and the
  *   protocol `IqStanza` lines -> connection. This tab follows the lifecycle
  *   from the network object to the NCS/MCS connection.
  * - `Received/Sent * HB`, `Heartbeat alarm delay` -> heartbeat. A delay alone
- *   is not an error; §4.7.1 uses it only as the co-occurrence context for
+ *   is not an error; §5.7.1 uses it only as the co-occurrence context for
  *   `Close err:6`.
  * - `Received`, `Acked`, `Successful broadcast` -> push. They are independent
  *   stages; none of them proves app processing or a displayed notification.

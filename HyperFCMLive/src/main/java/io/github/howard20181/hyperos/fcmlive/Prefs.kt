@@ -63,10 +63,10 @@ import java.util.concurrent.Executors
  * `isSleepKeepaliveDataEnabled()` in SleepModeGate.kt for why rule 1 stopped applying
  * to that pair. A `…_charging_only` sibling
  * used to live beside them and was later removed — see
- * HOOKS_AND_DIAGNOSTICS.md §5.5 for why ("only while charging" narrowed the
+ * FCM_HOOK_TECH_DOC.md §5.8 for why ("only while charging" narrowed the
  * master and could never widen it, and the premise it was justified by turned
  * out to be false). The WeChat pair was removed with the shield (see
- * HOOKS_AND_DIAGNOSTICS.md Appendix C).
+ * FCM_HOOK_TECH_DOC.md §5.8).
  *
  * Rare paths need an explicit "applied / handed back to the ROM" log line:
  * **never infer that a hook worked from the absence of a log line.**
