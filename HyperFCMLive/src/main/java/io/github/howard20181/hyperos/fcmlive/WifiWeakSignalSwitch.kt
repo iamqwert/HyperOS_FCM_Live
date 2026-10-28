@@ -23,7 +23,7 @@ internal object WifiWeakSignalSwitch {
      * Relaxed WiFi weak-signal switch, hooked in system_server.
      *
      * What the ROM does without us (measured on-device, V816, see
-     * HOOKS_AND_DIAGNOSTICS.md §3.9): `AmlMiuiThirdPartScorer` keeps a legacy
+     * FCM_HOOK_TECH_DOC.md §4.1（S22）): `AmlMiuiThirdPartScorer` keeps a legacy
      * score in `mLegacyIntScore` and turns it into a usable/unusable verdict at
      * a **hardcoded** 50 inside `notifyScoreAndIsUsable()`. A single call there
      * publishes everything outward — `notifyScoreUpdate(sessionId, score)` for
@@ -56,7 +56,7 @@ internal object WifiWeakSignalSwitch {
      * without ever causing a switch, so it is a watch item and not a fixed
      * gap — if a switch is later reported while every sub-floor score stayed
      * unflipped, check that call first before suspecting this hook. See
-     * HOOKS_AND_DIAGNOSTICS.md §6.3.
+     * FCM_HOOK_TECH_DOC.md §5.7.1.
      *
      * Class resolution note, which is the reason this one is not a plain
      * `classLoader.loadClass`: the class is **not reachable from system_server's
