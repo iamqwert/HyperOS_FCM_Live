@@ -512,6 +512,9 @@ class MainActivity : AppCompatActivity() {
                     // the tab on screen: the pager keeps its neighbours composed.
                     active = homeTab == HomeTab.Records,
                     moduleActive = moduleActive,
+                    // Same string the status tab lists; the records export states
+                    // it so a report can be matched to an LSPosed API generation.
+                    managerVersion = moduleManagerVersion,
                     onOpenStatus = { selectTab(HomeTab.Modules) }
                 )
                 HomeTab.Settings -> SettingsTab(pages)

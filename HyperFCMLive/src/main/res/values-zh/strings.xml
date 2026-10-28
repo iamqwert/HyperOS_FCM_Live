@@ -361,6 +361,10 @@
     <string name="records_pending_messages">排队消息</string>
     <string name="records_pending_none">无</string>
     <string name="records_pending_count">%1$d 条</string>
+    <!-- 按 App 的每日高优先级额度，由 App Standby bucket 推出（GMS 自己的
+         gcm_high_priority_quotas 表）。是上限，不是剩余。 -->
+    <string name="records_quota_limited">每日高优额度</string>
+    <string name="records_quota_per_day">%1$d 条/天</string>
     <string name="records_on">开启</string>
     <string name="records_off">关闭</string>
     <string name="records_reconnect_alarm">重连闹钟</string>
@@ -371,6 +375,9 @@
     <string name="records_network_available">可用网络</string>
     <string name="records_list_separator">，</string>
     <string name="records_queued_clients">支持队列的应用</string>
+    <!-- 清单扫描结果与 GMS 自己的登记列表对比：只有一边多出来时才出现。 -->
+    <string name="records_push_declared_only">已声明未登记</string>
+    <string name="records_push_registered_only">已登记未声明</string>
     <string name="records_affinity_clients">亲和评分</string>
     <string name="records_high_priority">高优先级配额</string>
     <string name="records_connected_state">已连接</string>
@@ -387,6 +394,7 @@
     <string name="records_fallback_cellular">回退到蜂窝网络</string>
     <string name="records_fallback_constrained">回退到受限网络</string>
     <string name="records_fallback_satellite">回退到卫星网络</string>
+    <string name="records_fallback_hostport">回退到备用主机端口</string>
     <string name="records_fallback_unknown">未知</string>
     <string name="records_gms_pid">GMS 进程</string>
     <string name="records_heartbeat_ack">心跳确认</string>

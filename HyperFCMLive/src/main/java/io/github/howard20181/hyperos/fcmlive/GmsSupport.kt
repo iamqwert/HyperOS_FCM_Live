@@ -481,19 +481,29 @@ internal object GmsSupport {
      * After a repair, triggers P4 recovery so an already-frozen GMS gets a
      * chance to reconnect.
      *
-     * Write-surface audit (2026-10-03, extended 2026-10-08): these are the only
-     * **five** places in the module that persist anything outside its own prefs —
-     * this one, [ensureGmsUserTableBgControl], the WeChat doze keepout (default
-     * off), and the autostart switch-op backfill (`AutostartGate`'s boot-time
-     * migration: `setMode(10053)` only, one-directional, for allowlisted
-     * packages already allowed at the behavior op — it never grants `10008`).
-     * All of
-     * them widen a restriction; none can blacklist an app, and there is no path
-     * that leaves an app worse off after uninstalling the module than it was
-     * before installing it. Runtime-only effects a reboot erases — sleep-mode
+     * Write-surface audit (2026-10-03, extended 2026-10-08, recounted
+     * 2026-10-26): the module persists anything outside its own prefs in exactly
+     * **three** places —
+     *
+     *  1. this one: `Settings.System.MILLET_NO_RESTRICT_APP`, GMS appended;
+     *  2. [ensureGmsUserTableBgControl]: the PowerKeeper `userTable` row for GMS,
+     *     `bgControl = noRestrict`;
+     *  3. the WeChat doze keepout (default off) — and that one is **indirect**:
+     *     the hook drops WeChat from `CommonAdapter.addPowerSaveWhitelistApps`'
+     *     argument list and the *ROM* then writes `/data/system/deviceidle.xml`
+     *     without it. The module never touches that file.
+     *
+     * The earlier "five places" count was wrong and is retired: it still listed
+     * the autostart `10053` switch-op backfill, which 4.2.0 deleted (autostart
+     * is read-only now — [AutostartGate]), and the fifth entry was never
+     * identified by anyone. Three is the whole surface; a fourth would have to
+     * be a new write, and it has to justify itself against this list.
+     *
+     * All three widen a restriction; none can blacklist an app, and there is no
+     * path that leaves an app worse off after uninstalling the module than it
+     * was before installing it. Runtime-only effects a reboot erases — sleep-mode
      * uid injections, netd/DNS rule rewrites, in-memory hook answers — are
-     * deliberately not counted here: this list tracks what persists. Keep it
-     * that way: a new write has to justify itself against this list.
+     * deliberately not counted here: this list tracks what persists.
      */
     internal fun ensureGmsInMilletSetting(
         module: XposedInterface,

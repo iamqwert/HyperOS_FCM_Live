@@ -355,14 +355,20 @@ object GcmDumpParser {
     private val UNDERLYING = Regex("""\[(\w+)\(\d+\)]""")
 
     /**
-     * A network already in this file's prettified shape — `Cell · 103`,
-     * optionally with the state in brackets and a `[WiFi · 102]` tail. This is
+     * A network already in this file's prettified shape — `Cell 103`,
+     * optionally with the state in brackets and a `[WiFi 102]` tail. This is
      * what [prettifyNetworkTokens] emits, and therefore what an event row
      * holds, so the readers below parse the prettified text and this shape is
      * the one they meet.
+     *
+     * The `· ` between transport and netId is **optional and legacy**: earlier
+     * builds wrote `Cell · 103`, and those rows are still inside the stored
+     * archive (they age out over seven days, not on upgrade). Both shapes have
+     * to parse, or a handover that happened before the change would lose its
+     * netId and read as a tautology again.
      */
     private val PRETTY_NETWORK =
-        Regex("""^(\w+)(?: · (\d+))?(?: \(([A-Z_]+)\))?(?: \[([^\]]+)])?$""")
+        Regex("""^(\w+)(?: (?:· )?(\d+))?(?: \(([A-Z_]+)\))?(?: \[([^\]]+)])?$""")
 
     /**
      * A network named in one of GCM's network lines, in parts.
@@ -410,10 +416,10 @@ object GcmDumpParser {
         fun sameAs(other: NetworkRef): Boolean =
             netId != null && netId == other.netId
 
-        /** The flat form [prettifyNetworkTokens] emits. */
+        /** The flat form [prettifyNetworkTokens] emits — a plain space, no mid-dot. */
         fun format(): String = buildString {
             append(transport)
-            if (netId != null) append(" · ").append(netId)
+            if (netId != null) append(" ").append(netId)
             if (state != null) append(" (").append(state).append(')')
             if (underlying != null) append(" [").append(underlying).append(']')
         }
@@ -1234,8 +1240,27 @@ object GcmDumpParser {
     /** Status-page alias of [prettifyEventText], kept for the call sites' sake. */
     fun prettifyNetworks(text: String): String = prettifyNetworkTokens(text)
 
-    private fun prettifyNetworkTokens(text: String): String {
-        // McsConnection first: its inner network is a GcmNetwork token itself,
+    /**
+     * `Cell · 103` → `Cell 103`, for text stored before the separator changed.
+     *
+     * The archive keeps seven days of rows, so both shapes sit on the page at
+     * once after an upgrade — and a page that spells the same network two ways
+     * in adjacent rows reads as two different things. Rewriting on load (not
+     * on write) is what makes the change retroactive without touching the
+     * stored file: [LEGACY_NET_SEPARATOR] only matches `transport · digits`,
+     * the one place the old build emitted that glyph.
+     */
+    internal fun normalizeLegacySeparator(text: String): String {
+        if (text.indexOf('·') < 0) return text
+        return LEGACY_NET_SEPARATOR.replace(text) { m ->
+            m.groupValues[1] + " " + m.groupValues[2]
+        }
+    }
+
+    /** `Cell · 103`, and the `WiFi · 102` inside a VPN's `[...]` tail. */
+    private val LEGACY_NET_SEPARATOR = Regex("""([A-Za-z][A-Za-z0-9_]*) · (\d+)""")
+
+    private fun prettifyNetworkTokens(text: String): String {        // McsConnection first: its inner network is a GcmNetwork token itself,
         // so consuming the wrapper before the standalone pass is what keeps
         // the braces out of the result.
         val mcs = MCS_CONNECTION.replace(text) { match ->
@@ -1245,9 +1270,16 @@ object GcmDumpParser {
                 if (flags.isNotEmpty()) append(", ").append(flags)
             }
         }
-        return GCM_NETWORK.replace(mcs) { match ->
-            networkRefOf(match.value)?.format() ?: match.value
-        }
+        // The final pass retires the old mid-dot: text that is already
+        // `Cell · 103` carries no `GcmNetwork{…}` wrapper left to rewrite, so
+        // the two `replace` calls above never touch it — and this function is
+        // the one every reader funnels through, including `eventsFrom`'s
+        // re-prettify on load.
+        return normalizeLegacySeparator(
+            GCM_NETWORK.replace(mcs) { match ->
+                networkRefOf(match.value)?.format() ?: match.value
+            }
+        )
     }
 
     /**

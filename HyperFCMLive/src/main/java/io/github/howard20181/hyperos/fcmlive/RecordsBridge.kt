@@ -11,6 +11,7 @@ import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import io.github.howard20181.hyperos.fcmlive.records.RecordsProtocol
+import io.github.howard20181.hyperos.fcmlive.records.StandbyQuota
 import io.github.libxposed.api.XposedInterface
 import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
@@ -77,7 +78,16 @@ internal object RecordsBridge {
     @Volatile
     private var failureLogged = false
 
-    internal fun install(module: XposedInterface, systemContext: () -> Context?) {
+    internal fun install(
+        module: XposedInterface,
+        systemContext: () -> Context?,
+        /**
+         * The hook side's end-of-install summary, read per query rather than
+         * captured at install time: a hot reload reuses this same receiver, and
+         * an install pass that has not finished yet has nothing truthful to say.
+         */
+        summary: () -> String?
+    ) {
         val worker = HandlerThread("fcmlive-records").apply { start() }
         val handler = Handler(worker.looper)
         var attempts = 0
@@ -123,9 +133,40 @@ internal object RecordsBridge {
                         handler.post {
                             try {
                                 val extras = Bundle()
+                                // Stated before the dump is read: it is the
+                                // answer to "are the hooks installed", and it
+                                // stays useful even when the dump read fails.
+                                try {
+                                    summary()?.takeIf { it.isNotBlank() }?.let {
+                                        extras.putString(RecordsProtocol.EXTRA_SUMMARY, it)
+                                    }
+                                } catch (t: Throwable) {
+                                    module.logGated(Log.DEBUG, TAG, "summary unavailable: $t")
+                                }
                                 when (val result = readGcmDump(module)) {
-                                    is DumpResult.Success ->
+                                    is DumpResult.Success -> {
                                         extras.putString(RecordsProtocol.EXTRA_DUMP, result.text)
+                                        // The bucket read needs system UID, so it
+                                        // rides the same answer instead of costing
+                                        // the app a second round trip it could not
+                                        // complete anyway.
+                                        try {
+                                            val buckets = readStandbyBuckets(context, result.text)
+                                            if (buckets.isNotEmpty()) {
+                                                extras.putString(
+                                                    RecordsProtocol.EXTRA_BUCKETS,
+                                                    StandbyQuota.encode(buckets)
+                                                )
+                                            }
+                                        } catch (t: Throwable) {
+                                            // A diagnostic extra must never fail the
+                                            // dump read it was attached to.
+                                            module.logGated(
+                                                Log.DEBUG, TAG,
+                                                "standby buckets unavailable: $t"
+                                            )
+                                        }
+                                    }
                                     is DumpResult.Failed ->
                                         extras.putString(RecordsProtocol.EXTRA_ERROR, result.reason)
                                 }
@@ -258,8 +299,50 @@ internal object RecordsBridge {
         }
     }
 
-    /** `android.os.ServiceManager.getService("activity")`, via reflection (hidden API). */
-    private fun activityBinder(): IBinder? = try {
+    /**
+     * App Standby bucket per package, for the apps the dump itself just listed
+     * in its `Apps supporting client queue:` block.
+     *
+     * Two reasons the list comes from the dump rather than from a package scan:
+     * it is exactly the set the page is about to render (so the row can never
+     * name an app that has no line above it), and GMS's own list is the
+     * authority on who uses the push channel — a manifest scan answers a
+     * slightly different question and the two have disagreed before.
+     *
+     * `getAppStandbyBucket(String)` is a `@SystemApi` overload: invisible to the
+     * compiler, so it is fetched reflectively, and it is gated on
+     * `PACKAGE_USAGE_STATS`, which system_server holds. Any failure (method
+     * absent on this ROM, permission refused, a package that vanished between
+     * the dump and this call) drops that package and leaves the rest — the row
+     * is advisory, never load-bearing.
+     */
+    private fun readStandbyBuckets(context: Context, dump: String): Map<String, Int> {
+        val packages = StandbyQuota.packagesFromDump(dump)
+        if (packages.isEmpty()) return emptyMap()
+        val manager = try {
+            context.getSystemService(android.app.usage.UsageStatsManager::class.java)
+        } catch (t: Throwable) {
+            null
+        } ?: return emptyMap()
+        val lookup = try {
+            android.app.usage.UsageStatsManager::class.java
+                .getMethod("getAppStandbyBucket", String::class.java)
+        } catch (t: NoSuchMethodException) {
+            null
+        } ?: return emptyMap()
+        val out = LinkedHashMap<String, Int>()
+        for (pkg in packages) {
+            val bucket = try {
+                (lookup.invoke(manager, pkg) as? Int) ?: continue
+            } catch (t: Throwable) {
+                continue
+            }
+            out[pkg] = bucket
+        }
+        return out
+    }
+
+    /** `android.os.ServiceManager.getService("activity")`, via reflection (hidden API). */    private fun activityBinder(): IBinder? = try {
         Class.forName("android.os.ServiceManager")
             .getMethod("getService", String::class.java)
             .invoke(null, "activity") as? IBinder

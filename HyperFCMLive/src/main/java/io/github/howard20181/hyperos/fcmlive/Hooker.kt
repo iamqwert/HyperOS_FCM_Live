@@ -23,7 +23,7 @@ import java.lang.reflect.Method
  * - Root is not module privilege. No `su`/`exec su` from a hook (watchdog risk),
  *   no SELinux changes, no injection into GMS or into a target app, no cloud
  *   (云控) countermeasures, no global writes upstream of this module's own
- *   five documented write sites — see the write-surface audit on
+ *   three documented write sites — see the write-surface audit on
  *   [ensureGmsInMilletSetting].
  *
  * Defence placement, which decides whether a hook is worth having:
@@ -127,7 +127,7 @@ class Hooker : XposedModule() {
      *    what makes "never existed on this generation" indistinguishable from
      *    "lost in the last OTA".
      * 3. The failure wording `Failed to <verb> <name>`, which
-     *    HOOKS_AND_DIAGNOSTICS.md 3.11 quotes verbatim — hence the verb being
+     *    FCM_HOOK_TECH_DOC.md §3.6 quotes verbatim — hence the verb being
      *    part of the entry rather than a fixed "hook".
      */
     private fun systemServerGroups(classLoader: ClassLoader): List<Group> = listOf(
@@ -144,6 +144,16 @@ class Hooker : XposedModule() {
         Group("hook", "GreezerNoRestrict") {
             GmsSupport.hookGreezerNoRestrict(
                 this, classLoader, ::hookE, ::logSkip, ::logSkipOtherGeneration, ::isGmsUid
+            )
+        },
+        Group("hook", "greeze wake-up list") {
+            GreezeHooks.hookAllowWakeUpList(
+                this, classLoader, ::hookE, ::logSkip, ::isGmsUid
+            )
+        },
+        Group("hook", "greeze alarm cache") {
+            GreezeHooks.hookGreezeAlarmCache(
+                this, classLoader, ::hookE, ::logSkip, ::isGmsUid
             )
         },
         Group("hook", "DomesticPolicyManager") {
@@ -226,6 +236,11 @@ class Hooker : XposedModule() {
         Group("install", "broadcast wake-path probe") {
             WakePathProbe.probeBroadcastWakePath(this, classLoader, ::hookE, ::logSkipOtherGeneration)
         },
+        Group("install", "receiver-skip probe") {
+            WakePathProbe.probeReceiverAppDealBroadcast(
+                this, classLoader, ::hookE, ::logSkipOtherGeneration
+            )
+        },
         Group("probe", "mMessageApp") {
             SystemProbes.probeGmsInMessageApp(this, classLoader, ::logSkip, ::recordProbe)
         },
@@ -244,7 +259,7 @@ class Hooker : XposedModule() {
             TrafficProbe.startGmsTrafficProbe(this, ::gmsUid, ::broadcastGateSummary)
         },
         Group("start", "records bridge") {
-            RecordsBridge.install(this, ::getSystemContext)
+            RecordsBridge.install(this, ::getSystemContext) { installBook.lastSummary }
         },
     )
 
@@ -536,6 +551,9 @@ class Hooker : XposedModule() {
             WakePathProbe.broadcastWakePathC2dmCount == 0 &&
             WakePathProbe.broadcastWakePathDeniedCount == 0 &&
             WakePathProbe.broadcastWakePathC2dmDeniedCount == 0 &&
+            WakePathProbe.receiverSkipReachedCount == 0 &&
+            WakePathProbe.receiverSkipC2dmCount == 0 &&
+            WakePathProbe.receiverSkipC2dmDeniedCount == 0 &&
             AutostartGate.autostartGateServiceDeniedCount == 0 &&
             AutostartGate.autostartGateProcessDeniedCount == 0 &&
             AutostartGate.autostartGateRestartDeniedCount == 0 &&
@@ -549,6 +567,7 @@ class Hooker : XposedModule() {
             return "broadcast gate idle — c2dm " +
                 "allowed/skipped/reached-defer/cn-actions/autostart-allow/autostart-skipped = 0, " +
                 "wake-path reached/c2dm/denied/c2dm-denied = 0, " +
+                "receiver-skip reached/c2dm/c2dm-denied = 0, " +
                 "autostart gate service/process/restart/pre-start-denied, " +
                 "released, restart-released, root-released, net-released, " +
                 "smart-power-released = 0"
@@ -564,6 +583,9 @@ class Hooker : XposedModule() {
             "c2dm=${WakePathProbe.broadcastWakePathC2dmCount}, " +
             "denied=${WakePathProbe.broadcastWakePathDeniedCount}, " +
             "c2dm-denied=${WakePathProbe.broadcastWakePathC2dmDeniedCount}; " +
+            "receiver-skip reached=${WakePathProbe.receiverSkipReachedCount}, " +
+            "c2dm=${WakePathProbe.receiverSkipC2dmCount}, " +
+            "c2dm-denied=${WakePathProbe.receiverSkipC2dmDeniedCount}; " +
             "autostart gate service-denied=${AutostartGate.autostartGateServiceDeniedCount}, " +
                 "process-denied=${AutostartGate.autostartGateProcessDeniedCount}, " +
                 "restart-denied=${AutostartGate.autostartGateRestartDeniedCount}, " +
@@ -715,6 +737,7 @@ class Hooker : XposedModule() {
             }
             chain.proceed()
         }
+        deoptimize(isPushAppMethod)
     }
 
 }

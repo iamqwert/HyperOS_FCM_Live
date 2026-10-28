@@ -6,7 +6,7 @@
 
 **本模块使用 AI 辅助**
 
-[使用帮助](HELP.md) · [技术文档](HOOKS_AND_DIAGNOSTICS.md) · [更新日志](CHANGELOG.md) · [下载](https://github.com/iamqwert/HyperOS_FCM_Live/releases)
+[使用帮助](HELP.md) · [技术文档](FCM_HOOK_TECH_DOC.md) · [更新日志](CHANGELOG.md) · [下载](https://github.com/iamqwert/HyperOS_FCM_Live/releases)
 
 ---
 
@@ -14,7 +14,7 @@
 
 澎湃 OS 的省电策略会限制后台应用的广播与网络。谷歌推送（FCM）靠 GMS 发一条广播把应用叫醒，这条广播一旦被延后或拦下，应用就收不到推送
 
-本模块在系统框架层（`system_server` 与 `com.miui.powerkeeper`）放行谷歌推送与重连相关的广播，不让 GMS 断网、被冻结或被拉黑；收到推送时按白名单为应用申请约 2 秒的临时省电豁免，并让应用即使在「已停止」状态下也能收到这条广播
+本模块在系统框架层（`system_server` 与 `com.miui.powerkeeper`）放行谷歌推送与重连相关的广播，不让 GMS 断网、被冻结或被拉黑；并让应用即使在「已停止」状态下也能收到这条广播
 
 它**不保活 FCM 应用、不阻止系统回收 FCM 应用进程、不修改 GMS 的推送处理逻辑** 
 
@@ -24,16 +24,17 @@
 
 ## 功能
 
-| 分类 | 项目 |
-|---|---|
-| 推送修复 | 放行 c2dm 投递与重连广播、补 `FLAG_INCLUDE_STOPPED_PACKAGES`、过 greeze 自启动与冻结门、投递时约 2 秒省电豁免 |
-| GMS 保护 | 写入不限制名单、省电场景改为「无限制」、跳过快速冻结、关闭网络限制；睡眠模式期间是否断网由系统决定，默认不介入 |
-| 白名单 | 唯一的收窄手段：决定哪些应用拿到「被推送唤醒」与放行特权；支持多选批量加入/移出、搜索、全选 |
-| 列表过滤 | 仅展示声明了推送组件的应用（Android 11+ 包可见性，无需任何权限）、排除 MiPush 应用（默认开启）、显示系统应用 |
-| 工具 | 打开 GMS 自带诊断界面、白名单导出/导入、检查更新 |
-| 显示与外观 | 语言（简体中文 / English）、主题模式、动态颜色、调色风格、颜色规格、隐藏桌面图标 |
-| 实验功能 | 自启动三档放行（链式）、弱信号切换放宽、冻结期联网、Smart Power（仅 OS3）；微信电池优化与睡眠保活在设置页 |
-| 入口 | Shortcuts 直达设置、帮助、FCM 诊断 |
+| 分类       | 项目                                                                                                           |
+| ---------- | -------------------------------------------------------------------------------------------------------------- |
+| 推送修复   | 放行 c2dm 投递与重连广播、补 `FLAG_INCLUDE_STOPPED_PACKAGES`、过 greeze 自启动与冻结门  |
+| GMS 保护   | 写入不限制名单、省电场景改为「无限制」、跳过快速冻结、关闭网络限制；睡眠模式期间是否断网由系统决定，默认不介入 |
+| 白名单     | 唯一的收窄手段：决定哪些应用拿到「被推送唤醒」与放行特权；支持多选批量加入/移出、搜索、全选                    |
+| 列表过滤   | 仅展示声明了推送组件的应用（Android 11+ 包可见性，无需任何权限）、排除 MiPush 应用（默认开启）、显示系统应用   |
+| 工具       | 打开 GMS 自带诊断界面、白名单导出/导入、检查更新                                                               |
+| 记录页     | 无需打开 FCM 诊断即可看到当前 FCM 状态与事件记录，事件按六类归档，并一键导出诊断文本（含机型、系统版本与钩子装载摘要） |
+| 显示与外观 | 语言（简体中文 / English）、主题模式、动态颜色、调色风格、颜色规格、隐藏桌面图标                               |
+| 实验功能   | 自启动三档放行（链式）、弱信号切换放宽、冻结期联网、Smart Power（仅 OS3）；微信电池优化与睡眠保活在设置页      |
+| 入口       | Shortcuts 直达设置、帮助、FCM 诊断                                                                             |
 
 > 「帮助」入口用浏览器打开在线文档 [HELP.md](HELP.md)，应用内不再内置帮助页
 
@@ -45,17 +46,17 @@
 
 澎湃 OS 在这条链路上叠加了多层门控，模块按门控逐层处理：
 
-| 环节 | 系统侧门控 | 模块的处理 |
-|---|---|---|
-| 广播能否送达 | `GreezeManagerService#isAllowBroadcast` | 按白名单，未勾选应用交回系统 |
-| 应用处于「已停止」 | 「已停止」过滤 | 补 `FLAG_INCLUDE_STOPPED_PACKAGES` |
-| 自启动判定 | `BroadcastQueueModernStubImpl#checkApplicationAutoStart` | 按白名单放行 |
-| 应用已被冻结 | `isRestrictReceiver`（greeze 广播门） | 放行并复现原生解冻 |
-| 省电场景 / 待机 | `AppStandbyController#setUidState` | 改写为 allow |
-| 冻结策略 | `AurogonImmobulusMode#isNoRestrictApp` 等 | 对 GMS 返回豁免 |
-| 广播被延后 | `isNeedCachedBroadcast`（greeze 广播缓存） | 按白名单放行 |
-| 重连/心跳被延后 | `deferBroadcastForMiui` | 仅 GMS 重连类动作返回不放行 |
-| 强停 | `isForceStopEnable` | 只对勾选的应用生效 |
+| 环节               | 系统侧门控                                               | 模块的处理                         |
+| ------------------ | -------------------------------------------------------- | ---------------------------------- |
+| 广播能否送达       | `GreezeManagerService#isAllowBroadcast`                  | 按白名单，未勾选应用交回系统       |
+| 应用处于「已停止」 | 「已停止」过滤                                           | 补 `FLAG_INCLUDE_STOPPED_PACKAGES` |
+| 自启动判定         | `BroadcastQueueModernStubImpl#checkApplicationAutoStart` | 按白名单放行                       |
+| 应用已被冻结       | `isRestrictReceiver`（greeze 广播门）                    | 放行并复现原生解冻                 |
+| 省电场景 / 待机    | `AppStandbyController#setUidState`                       | 改写为 allow                       |
+| 冻结策略           | `AurogonImmobulusMode#isNoRestrictApp` 等                | 对 GMS 返回豁免                    |
+| 广播被延后         | `isNeedCachedBroadcast`（greeze 广播缓存）               | 按白名单放行                       |
+| 重连/心跳被延后    | `deferBroadcastForMiui`                                  | 仅 GMS 重连类动作返回不放行        |
+| 强停               | `isForceStopEnable`                                      | 只对勾选的应用生效                 |
 
 被 hook 的宿主：主线钩点在 `system`（系统框架）与 `com.miui.powerkeeper`；模块不注入 `com.google.android.gms` 进程（原「GCM 重连修复」实验功能因 GMS 热更新加强完整性检测，已于 4.1.1 移除）
 
@@ -88,10 +89,11 @@ GMS 侧的四项保护：
 ---
 
 ## 兼容性
+
 已验证机型：
 
-| 机型 | 系统 |
-|---|---|
+| 机型              | 系统                   |
+| ----------------- | ---------------------- |
 | Xiaomi 17 Pro Max | OS3.0.319 / Android 16 |
 | REDMI K90 Pro Max | OS4.0.33  / Android 17 |
 

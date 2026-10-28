@@ -27,7 +27,20 @@ object RecordsQuery {
     private const val TIMEOUT_MS = 8_000L
 
     sealed interface Result {
-        data class Success(val dump: String) : Result
+        /**
+         * [summary] is the hook side's own install line ("N hook(s) installed,
+         * M target(s) absent…"), null when that pass had not reported yet. It
+         * is carried with the dump because the export has to answer "are the
+         * hooks installed" without asking the reporter for a logcat.
+         *
+         * [standbyBuckets] is package → App Standby bucket, empty when the hook
+         * side could not read them; see [RecordsProtocol.EXTRA_BUCKETS].
+         */
+        data class Success(
+            val dump: String,
+            val summary: String? = null,
+            val standbyBuckets: Map<String, Int> = emptyMap()
+        ) : Result
 
         /** The hook answered, but could not read the dump. */
         data class Failed(val reason: String) : Result
@@ -54,7 +67,17 @@ object RecordsQuery {
                             extras.containsKey(RecordsProtocol.EXTRA_DUMP) ->
                                 extras.getString(RecordsProtocol.EXTRA_DUMP)
                                     ?.takeIf { it.isNotBlank() }
-                                    ?.let { Result.Success(it) }
+                                    ?.let {
+                                        Result.Success(
+                                            dump = it,
+                                            summary = extras
+                                                .getString(RecordsProtocol.EXTRA_SUMMARY)
+                                                ?.takeIf { line -> line.isNotBlank() },
+                                            standbyBuckets = StandbyQuota.decode(
+                                                extras.getString(RecordsProtocol.EXTRA_BUCKETS)
+                                            )
+                                        )
+                                    }
                                     ?: Result.Unavailable
                             extras.containsKey(RecordsProtocol.EXTRA_ERROR) ->
                                 Result.Failed(

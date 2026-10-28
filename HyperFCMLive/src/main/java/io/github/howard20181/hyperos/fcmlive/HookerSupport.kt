@@ -2,7 +2,6 @@ package io.github.howard20181.hyperos.fcmlive
 
 import android.content.Context
 import android.content.Intent
-import android.os.PowerExemptionManager
 
 internal object HookerSupport {
     internal const val TAG = "HyperGreeze"
@@ -61,16 +60,16 @@ internal object HookerSupport {
      * the ROM does. The module's write switch used to write `10008` alone,
      * which left packages at `10008=allow / 10053=ignore` — functionally
      * allowed, only the manager row lying. Nothing in the module writes `10008`
-     * any more — the pair is reconciled by the `10053` backfill once per boot —
-     * so the two-step revert corollary no longer applies to anything the
-     * current build writes.
+     * any more, and the `10053` backfill that used to reconcile the pair was
+     * removed in 4.2.0 (autostart is read-only now) — the current build writes
+     * neither op, so the two-step revert corollary applies to nothing here.
      *
      * **Why this op decides delivery although the module already answers
      * the broadcast gate.** The hook on
      * `BroadcastQueueModernStubImpl#checkApplicationAutoStart` short-circuits
      * at method entry for caller=GMS + c2dm, so on the FCM hop the op is
      * never even read there. The op is read by the *other* checkpoints
-     * (see HOOKS_AND_DIAGNOSTICS §「自启动 AppOps 10008 共四类检查点」):
+     * (see FCM_HOOK_TECH_DOC.md §4.1（S9、S24–S28 自启动检查点）):
      * service start/bind (`AutoStartManagerServiceStubImpl#isAllowStartService`
      * and friends) and process start (`ProcessManagerService#isAllowAutoStart`).
      * A message whose process is cached still has to start the messaging
@@ -272,21 +271,6 @@ internal object HookerSupport {
 
     internal val STACK_WALKER: StackWalker =
         StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE)
-
-    private var powerExemptionManager: PowerExemptionManager? = null
-
-    /**
-     * The one caller used to sit behind `SDK_INT >= S`; minSdk is 35, so
-     * that branch could never be taken and its `@RequiresApi(S)` was
-     * documenting nothing — both were removed, and this is now a plain
-     * helper.
-     */
-    internal fun getPowerExemptionManager(context: Context): PowerExemptionManager {
-        if (powerExemptionManager == null) {
-            powerExemptionManager = PowerExemptionManager(context)
-        }
-        return powerExemptionManager!!
-    }
 
     internal fun targetPackageOf(intent: Intent): String? {
         val pkg = intent.getPackage()

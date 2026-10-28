@@ -68,6 +68,7 @@ internal object ProcessCleanerHooks {
             }
             chain.proceed()
         }
+        module.deoptimize(isForceStopEnableMethod)
     }
 
     private val fcmCache = HashMap<String, FcmQuery>()

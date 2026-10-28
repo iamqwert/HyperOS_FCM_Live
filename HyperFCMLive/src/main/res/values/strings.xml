@@ -366,6 +366,10 @@
     <string name="records_pending_messages">Queued messages</string>
     <string name="records_pending_none">None</string>
     <string name="records_pending_count">%1$d</string>
+    <!-- Per-app daily high-priority quota, derived from the App Standby bucket
+         (GMS's own `gcm_high_priority_quotas` table). A ceiling, not a remainder. -->
+    <string name="records_quota_limited">High-priority cap</string>
+    <string name="records_quota_per_day">%1$d/day</string>
     <string name="records_on">On</string>
     <string name="records_off">Off</string>
     <string name="records_reconnect_alarm">Reconnect alarm</string>
@@ -376,6 +380,10 @@
     <string name="records_network_available">Available networks</string>
     <string name="records_list_separator">, </string>
     <string name="records_queued_clients">Apps in the client queue</string>
+    <!-- The manifest scan versus GMS's own registration list. Each row only
+         appears when that side has an entry the other lacks. -->
+    <string name="records_push_declared_only">Declared, not registered</string>
+    <string name="records_push_registered_only">Registered, not declared</string>
     <string name="records_affinity_clients">Affinity scores</string>
     <string name="records_high_priority">High priority quota</string>
     <string name="records_connected_state">Connected</string>
@@ -392,6 +400,7 @@
     <string name="records_fallback_cellular">Fall back to cellular</string>
     <string name="records_fallback_constrained">Fall back to a constrained network</string>
     <string name="records_fallback_satellite">Fall back to satellite</string>
+    <string name="records_fallback_hostport">Fall back to the alternative host/port</string>
     <string name="records_fallback_unknown">Unknown</string>
     <string name="records_gms_pid">GMS process</string>
     <string name="records_heartbeat_ack">Heartbeat ack</string>

@@ -36,8 +36,6 @@ internal object AmsHooks {
     ) {
         val ActivityManagerServiceClass =
             classLoader.loadClass("com.android.server.am.ActivityManagerService")
-        val mContextField = ActivityManagerServiceClass.getDeclaredField("mContext")
-        mContextField.isAccessible = true
         val IApplicationThreadClass = classLoader.loadClass("android.app.IApplicationThread")
         val IIntentReceiverClass = classLoader.loadClass("android.content.IIntentReceiver")
         val ProcessRecordClass = classLoader.loadClass("com.android.server.am.ProcessRecord")
@@ -152,22 +150,23 @@ internal object AmsHooks {
                         } catch (t: Throwable) {
                             module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to add FLAG_INCLUDE_STOPPED_PACKAGES", t)
                         }
-                        try {
-                            val mContext = mContextField.get(chain.thisObject) as? Context
-                            if (mContext != null) {
-                                HookerSupport.getPowerExemptionManager(mContext).addToTemporaryAllowList(
-                                    targetPackage,
-                                    102,
-                                    "GOOGLE_C2DM",
-                                    // 2s: verified sufficient end-to-end
-                                    // (528-561ms cold start; diagnostics show
-                                    // LoginRequest->Connected 0.4-1.4s).
-                                    2000
-                                )
-                            }
-                        } catch (t: Throwable) {
-                            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to add temporary power exemption", t)
-                        }
+                        // No temporary power exemption here. GMS already attaches one
+                        // to every delivery that needs it: 10 s / type 0 for high and
+                        // reduced priority, 20 s / type 4 for normal priority whose
+                        // receiver declares the FINISHED_AFTER_HANDLED meta-data
+                        // (Lcnyc;->p). AMS applies that option later, through the
+                        // PUSH_TEMP_ALLOWLIST_UI_MSG handler, so a longer ROM grant
+                        // overwrites anything this synchronous path could add.
+                        //
+                        // The direct 2 s call that used to sit here was therefore
+                        // redundant where GMS grants, and actively wrong elsewhere:
+                        // reason 102 is the one code DeviceIdleController maps through
+                        // the over-quota DeviceConfig (default type 1, not a freeze
+                        // delay), and addPowerSaveTempWhitelistAppDirectInternal
+                        // overwrites the end time instead of taking the maximum, so a
+                        // 2 s grant can truncate a longer entry left by a previous
+                        // message. Only the stopped-package flag remains, because GMS
+                        // does not add that one.
                     }
                 } catch (t: Throwable) {
                     module.logGated(Log.ERROR, HookerSupport.TAG, "C2DM broadcast hook failed", t)

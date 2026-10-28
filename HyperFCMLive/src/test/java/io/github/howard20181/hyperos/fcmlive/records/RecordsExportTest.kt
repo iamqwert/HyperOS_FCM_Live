@@ -63,7 +63,7 @@ class RecordsExportTest {
         assertTrue(header[1].startsWith("模块版本: 4.2.0"))
         assertTrue(report.contains("[快照]"))
         assertTrue(report.contains("pid=6053"))
-        assertTrue(report.contains("network.active=WiFi · 102"))
+        assertTrue(report.contains("network.active=WiFi 102"))
         assertTrue(report.contains("[事件] 旧 → 新"))
         assertTrue("the archive is newest-first; the report is chronological",
             report.indexOf("Received com.android.chrome") < report.indexOf("Close err:20"))
@@ -108,5 +108,52 @@ class RecordsExportTest {
         // The dump carries it; nothing in this module parses it, and the report
         // is meant to be pasted into a chat.
         assertFalse(report().contains("4071119566194407730"))
+    }
+
+    @Test
+    fun theReportStatesTheEnvironmentAndSkipsRowsItDoesNotHave() {
+        // 环境行排在模块版本之前：报「推送不来了」时先要知道设备和系统。
+        // 空值不出现，也不补占位（与状态页的条件行同一条规则）。
+        val report = diagnosticsReport(
+            archive = RecordsStore.Archive(
+                snapshot = parsed.snapshot,
+                fetchedAt = 1_000L,
+                events = parsed.events
+            ),
+            versionName = "4.3.1",
+            exportedAt = 1_000L,
+            env = DiagnosticsEnv(
+                device = "REDMI K90 Pro Max",
+                osVersion = "4.0.4.0.XPMCNXM",
+                androidVersion = "17 (API 37)",
+                managerVersion = ""
+            )
+        )
+        val lines = report.lines()
+        assertEquals("机型: REDMI K90 Pro Max", lines[1])
+        assertEquals("系统版本: 4.0.4.0.XPMCNXM", lines[2])
+        assertEquals("Android: 17 (API 37)", lines[3])
+        assertEquals("an empty row is dropped, not filled in", "模块版本: 4.3.1", lines[4])
+        assertFalse(report.contains("管理器版本"))
+    }
+
+    @Test
+    fun theReportSaysWhetherTheHooksInstalledAtAll() {
+        // 这是「钩子装上没有」的答案：只有模块 system_server 侧知道。
+        val summary = "HyperFCMLive active in system_server: 120 hook(s) installed, " +
+            "3 target(s) absent on this ROM"
+        val withSummary = diagnosticsReport(
+            archive = RecordsStore.Archive(
+                snapshot = parsed.snapshot,
+                fetchedAt = 1_000L,
+                events = parsed.events,
+                hookSummary = summary
+            ),
+            versionName = "4.3.1",
+            exportedAt = 1_000L
+        )
+        assertTrue(withSummary.contains("钩子装载: $summary"))
+        // 模块没回报时说「未回报」，不猜、不留空
+        assertTrue(report().contains("钩子装载: 模块未回报"))
     }
 }

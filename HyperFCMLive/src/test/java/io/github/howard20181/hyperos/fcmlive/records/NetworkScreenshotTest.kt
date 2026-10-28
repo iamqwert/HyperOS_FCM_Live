@@ -44,7 +44,7 @@ class NetworkScreenshotTest {
         val handover = events.first { it.text.startsWith("Active network switched to ") }
         assertEquals(
             "the landed network keeps its netId and its state",
-            "Cell · 103 (DISCONNECTED)",
+            "Cell 103 (DISCONNECTED)",
             GcmDumpParser.parseNetworkTarget(handover.text)?.format()
         )
         assertEquals(
@@ -82,8 +82,8 @@ class NetworkScreenshotTest {
         )
         assertEquals(
             "the later one names its own network and nothing more",
-            "Cell · 103 (DISCONNECTED)",
-            without.first { it.text.startsWith("onGcmNetworkChanged: Cell ·") }.text
+            "Cell 103 (DISCONNECTED)",
+            without.first { it.text.startsWith("onGcmNetworkChanged: Cell ") }.text
                 .removePrefix("onGcmNetworkChanged: ")
         )
     }
@@ -98,12 +98,12 @@ class NetworkScreenshotTest {
         )
         val events = GcmDumpParser.parseEventsForTest(lines)
         val handover = events.first { it.text.startsWith("Active network switched to ") }
-        assertEquals("Cell · 107 (DISCONNECTED)", GcmDumpParser.parseNetworkTarget(handover.text)?.format())
-        assertEquals("Cell · 103", handover.previousNetwork?.format())
+        assertEquals("Cell 107 (DISCONNECTED)", GcmDumpParser.parseNetworkTarget(handover.text)?.format())
+        assertEquals("Cell 103", handover.previousNetwork?.format())
 
         val callback = events.first { it.text.startsWith("onGcmNetworkChanged: ") }
         assertNotNull("the callback knows where it came from", callback.previousNetwork)
-        assertEquals("Cell · 103", callback.previousNetwork?.format())
+        assertEquals("Cell 103", callback.previousNetwork?.format())
     }
 
     @Test
