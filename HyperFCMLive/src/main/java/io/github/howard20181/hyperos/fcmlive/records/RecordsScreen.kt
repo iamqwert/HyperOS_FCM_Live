@@ -64,8 +64,10 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -97,6 +99,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.howard20181.hyperos.fcmlive.FcmAppScan
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
 import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
@@ -111,9 +114,13 @@ import io.github.howard20181.hyperos.fcmlive.ui.SectionTitleText
 import io.github.howard20181.hyperos.fcmlive.ui.SettingsGroup
 import io.github.howard20181.hyperos.fcmlive.ui.softglass.MiuixCapsuleTabRow
 import io.github.howard20181.hyperos.fcmlive.ui.connectedGroupShape
+import io.github.howard20181.hyperos.fcmlive.ui.androidVersion
+import io.github.howard20181.hyperos.fcmlive.ui.deviceName
+import io.github.howard20181.hyperos.fcmlive.ui.osVersion
 import io.github.howard20181.hyperos.fcmlive.ui.listScrollEndHaptic
 import io.github.howard20181.hyperos.fcmlive.ui.pageHorizontalInset
 import io.github.howard20181.hyperos.fcmlive.ui.TopBarIconButton
+import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -217,6 +224,12 @@ fun RecordsScreen(
     moduleActive: Boolean,
     /** The inactive card's tap target — the module status tab. */
     onOpenStatus: () -> Unit,
+    /**
+     * The LSPosed manager's framework version, the same string the 状态 page
+     * lists. Only the export uses it: a report that omits the manager cannot be
+     * matched against the LSPosed API differences the module depends on.
+     */
+    managerVersion: String = "",
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -232,6 +245,17 @@ fun RecordsScreen(
         runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull().orEmpty()
+    }
+    // The 状态 page's own readers (`DeviceInfo.kt`), called once per
+    // composition: prop lookups, no permission, no root — and by construction
+    // the same values the status page shows.
+    val env = remember(managerVersion) {
+        DiagnosticsEnv(
+            device = deviceName(),
+            osVersion = osVersion(),
+            androidVersion = androidVersion(),
+            managerVersion = managerVersion
+        )
     }
     // SAF, the same path the allowlist export uses: the user picks the file,
     // and the page never writes outside a granted URI. The text is built on the
@@ -255,6 +279,54 @@ fun RecordsScreen(
     // Each tab keeps its own scroll position across a round trip: the status
     // tab is a plain Column (a dozen rows), the events tab a LazyColumn.
     val statusScroll = rememberScrollState()
+
+    // The bar's glass, read from the page the reader is actually looking at
+    // rather than from the bar's own collapse fraction. The fraction is one
+    // accumulated nested-scroll reading of the ONE connection the body box
+    // wears, and this body is two page tabs over six category lists: whichever
+    // page last moved it owns it, so a tab switch inherits the other tab's
+    // frost — full glass over a list sitting at its top, or a clear pane with
+    // rows already under it. Each page therefore reports its own travel and
+    // the page picks the reading belonging to the tab on screen.
+    var statusGlass by remember { mutableFloatStateOf(0f) }
+    // One entry per event category, so the bar always shows the reading of the
+    // category on screen: a single shared number would be whichever category
+    // spoke last, and the spring composes the incoming category while the
+    // outgoing one is still the one being reported.
+    val eventsGlass = remember { mutableStateMapOf<Int, Float>() }
+    // One ramp for both pages, px because both readings are px.
+    val glassRampPx = with(LocalDensity.current) { GLASS_RAMP.toPx() }
+    // A pager's own reading, blended across the pages it is showing. While a
+    // spring is in flight two pages are on screen at once — one leaving, one
+    // arriving — and picking either one alone flips mid-flight, which the eye
+    // reads as the glass suddenly changing over a page that has not moved.
+    // Each page's reading therefore counts for exactly the share of it that is
+    // on screen, which is 1 for the settled page and a cross-fade in between.
+    val blendOver: (PagerState, (Int) -> Float) -> Float = { state, reading ->
+        val info = state.layoutInfo
+        val size = info.pageSize
+        if (size <= 0 || info.visiblePagesInfo.isEmpty()) {
+            reading(state.currentPage)
+        } else {
+            var sum = 0f
+            var weight = 0f
+            info.visiblePagesInfo.forEach { page ->
+                val shown = (size - abs(page.offset)).coerceIn(0, size)
+                val share = shown.toFloat() / size
+                sum += share * reading(page.index)
+                weight += share
+            }
+            if (weight == 0f) reading(state.currentPage) else sum / weight
+        }
+    }
+    // The status page is a hoisted [ScrollState], so its travel is readable
+    // right here — including the restored offset it comes back with, which is
+    // exactly the value a scroll-event-based reading never sees.
+    LaunchedEffect(statusScroll, glassRampPx) {
+        snapshotFlow { statusScroll.value }.collect { scrolled ->
+            statusGlass = (scrolled / glassRampPx).coerceIn(0f, 1f)
+        }
+    }
 
     // The Miuix looks' pager wiring, hoisted to the screen on purpose: the two
     // tab strips ride INSIDE the bar's glass pane (PageScaffold's barExtension),
@@ -368,7 +440,8 @@ fun RecordsScreen(
                         exportText = diagnosticsReport(
                             archive = archive,
                             versionName = versionName,
-                            exportedAt = System.currentTimeMillis()
+                            exportedAt = System.currentTimeMillis(),
+                            env = env
                         )
                         createDoc.launch(exportFileName())
                     }
@@ -382,7 +455,8 @@ fun RecordsScreen(
                         exportText = diagnosticsReport(
                             archive = archive,
                             versionName = versionName,
-                            exportedAt = System.currentTimeMillis()
+                            exportedAt = System.currentTimeMillis(),
+                            env = env
                         )
                         createDoc.launch(exportFileName())
                     }) {
@@ -404,6 +478,24 @@ fun RecordsScreen(
         // AnimatedVisibility recipe so the pane's height glides instead of
         // jumping. The body below scrolls under the lot — which is the whole
         // point: rows travelling beneath the pane are what the blur reads.
+        // This page's own reading of how far its visible content has travelled
+        // under the pane — see the two numbers above. Handed in on both Miuix
+        // looks and ignored by Material, which has no pane. It feeds the pane's
+        // frost and the reveal ONLY: the bar itself is the standard large
+        // title, collapsing on the nested scroll like every other page's
+        // (compactBar stays false) — a page whose bar collapsed over its own
+        // reading grew a small title that never came back, and a title whose
+        // alpha was keyed to that reading vanished whenever the visible tab
+        // sat at its top.
+        barScrollProgress = {
+            // The event page's reading is itself a blend: the six categories
+            // slide horizontally under the same pane, and a category switch
+            // flips `currentPage` mid-flight exactly as a page tab does.
+            val events = blendOver(eventPagerState) { eventsGlass[it] ?: 0f }
+            blendOver(pagePagerState) { page ->
+                if (PageTab.entries.getOrNull(page) == PageTab.Events) events else statusGlass
+            }
+        },
         barExtension = if (LocalUiStyle.current.isMiuixBased) { {
             // `backdrop = null` on both strips: they sit ON the pane (the bar's
             // Gaussian band is the blur here), and the capsule's
@@ -472,6 +564,13 @@ fun RecordsScreen(
                 statusScroll = statusScroll,
                 refreshing = refreshing,
                 onRefresh = pullToRefresh,
+                // The events lists cannot be read from here — their states
+                // belong to the pages, which is what keeps a disposed page
+                // from handing a wedged scroll session back — so the travel
+                // comes back up through this callback instead.
+                onEventsScrolled = { page, travelled ->
+                    eventsGlass[page] = (travelled / glassRampPx).coerceIn(0f, 1f)
+                },
                 modifier = Modifier.fillMaxSize()
             )
             return@PageScaffold
@@ -757,6 +856,15 @@ private fun MiuixRecordsPagerBody(
     statusScroll: ScrollState,
     refreshing: Boolean,
     onRefresh: () -> Unit,
+    /**
+     * The event list's travel, for the bar's glass — forwarded to
+     * [EventsCategoriesPager], which tags it with the category that reported
+     * it. See the screen's own note: the glass reads the visible page's
+     * travel, and the event lists are the only scrollables whose state this
+     * body does not hold — their states belong to their pages, which is what
+     * keeps a disposed page from handing a wedged scroll session back.
+     */
+    onEventsScrolled: (page: Int, travelledPx: Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     // Hoisted above the pagers on purpose: a page is disposed when the reader
@@ -832,6 +940,7 @@ private fun MiuixRecordsPagerBody(
                     inset = inset,
                     topPad = topPad,
                     bottomPad = bottomPad,
+                    onPageScrolled = onEventsScrolled,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -859,6 +968,15 @@ private fun EventsCategoriesPager(
     inset: androidx.compose.ui.unit.Dp,
     topPad: androidx.compose.ui.unit.Dp,
     bottomPad: androidx.compose.ui.unit.Dp,
+    /**
+     * The visible list's travel, tagged with the category it belongs to. Every
+     * composed category reports — each keeps its own saved position, and the
+     * caller files the readings per category so the bar can pick the one on
+     * screen. Gating this on the current page instead would drop the incoming
+     * category's first word, which is its restored position spoken on attach,
+     * before any gesture has happened.
+     */
+    onPageScrolled: (page: Int, travelledPx: Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     HorizontalPager(
@@ -879,6 +997,7 @@ private fun EventsCategoriesPager(
             inset = inset,
             topPad = topPad,
             bottomPad = bottomPad,
+            onScrolled = { travelled -> onPageScrolled(page, travelled) },
             modifier = Modifier.fillMaxSize()
         )
     }
@@ -917,6 +1036,20 @@ private fun EventsContent(
      */
     topPad: androidx.compose.ui.unit.Dp = 0.dp,
     bottomPad: androidx.compose.ui.unit.Dp,
+    /**
+     * How far the list has travelled from its own top, in px, reported so the
+     * page's bar can keep its glass while rows sit under it. `0` is the top of
+     * the list; anything at or past the caller's ramp reads as full.
+     *
+     * Needed because the glass's own reading (`collapsedFraction`) is an
+     * accumulated nested-scroll value: a page that comes back already scrolled
+     * — which is exactly what `rememberSaveable` above does for this list —
+     * generates no scroll event, so the fraction is still 0 while the rows are
+     * halfway up the screen, and a strength of 0 leaves the pane transparent.
+     * Every category reports, tagged with its own index; the screen files the
+     * readings and reads the one on screen (see [EventsCategoriesPager]).
+     */
+    onScrolled: (travelledPx: Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Owned by the page, not hoisted above the pager. A hoisted state survives
@@ -928,6 +1061,29 @@ private fun EventsContent(
     // disposal while giving each visit a fresh object, so a wedged scroll
     // session cannot come back.
     val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
+
+    // Report where the list sits, for the bar's glass floor. Keyed on the
+    // state object, not on [onScrolled]: a saveable list hands back a NEW
+    // object per visit, and re-subscribing is the point — the restored offset
+    // is the first thing this reports, without any gesture having happened.
+    LaunchedEffect(listState, onScrolled) {
+        snapshotFlow {
+            // Measured off the layout rather than off
+            // `firstVisibleItemScrollOffset`: that reading's zero point moves
+            // with the list's top content padding — which here is the glass
+            // pane's whole extent — while the item's own offset against the
+            // padding is the travel plain to read. Only the first item's
+            // travel is measured exactly (the ramp is shorter than a row
+            // anyway); anything past it is simply "past the ramp".
+            val info = listState.layoutInfo
+            val first = info.visibleItemsInfo.firstOrNull()
+            when {
+                first == null -> 0
+                first.index > 0 -> Int.MAX_VALUE
+                else -> (info.beforeContentPadding - first.offset).coerceAtLeast(0)
+            }
+        }.collect { onScrolled(it) }
+    }
 
     // [classes] arrives hoisted: a pager page is disposed on the way out, so a
     // remember on this side would re-derive the classification of every event
@@ -1156,9 +1312,33 @@ private fun StatusTab(
             // PackageManager round trip per package per poll is pointless when
             // the package list has not moved.
             val context = LocalContext.current
-            val appLabels = remember(snapshot.queuedPackages, snapshot.affinityScores) {
+            // The manifest-side answer, for the cross-check row. Keyed on the
+            // registered list: it is the only thing that can move this diff,
+            // and the scan itself is a whole-PackageManager query that must
+            // not run once a minute for nothing. An empty registered list
+            // means GMS named nobody, in which case every declared app would
+            // trivially be "not registered" — that is not a finding, so the
+            // comparison is skipped rather than reported as a wall of drift.
+            val declaredFcm = remember(snapshot.queuedPackages) {
+                if (snapshot.queuedPackages.isEmpty()) {
+                    emptySet()
+                } else {
+                    runCatching {
+                        FcmAppScan.queryFcmPackages(context.packageManager) { _, _ -> }
+                    }.getOrDefault(emptySet())
+                }
+            }
+            val pushDiff = remember(declaredFcm, snapshot.queuedPackages) {
+                if (declaredFcm.isEmpty()) {
+                    null
+                } else {
+                    PushHealth.compare(declaredFcm, snapshot.queuedPackages)
+                }
+            }
+            val appLabels = remember(snapshot.queuedPackages, snapshot.affinityScores, pushDiff) {
                 val pm = context.packageManager
-                (snapshot.queuedPackages + snapshot.affinityScores.map { it.packageName })
+                (snapshot.queuedPackages + snapshot.affinityScores.map { it.packageName } +
+                    pushDiff?.let { it.declaredOnly + it.registeredOnly }.orEmpty())
                     .distinct()
                     .associateWith { pkg ->
                         runCatching {
@@ -1166,7 +1346,10 @@ private fun StatusTab(
                         }.getOrDefault(pkg)
                     }
             }
-            ConfigSection(R.string.records_section_push, pushConfigRows(snapshot, appLabels))
+            ConfigSection(
+                R.string.records_section_push,
+                pushConfigRows(snapshot, appLabels, archive.standbyBuckets, pushDiff)
+            )
             ConfigSection(R.string.records_section_error, errorConfigRows(snapshot))
         }
     }
@@ -1822,7 +2005,18 @@ private fun heartbeatConfigRows(snapshot: GcmSnapshot): List<Pair<String, String
 private fun pushConfigRows(
     snapshot: GcmSnapshot,
     /** Package id to display name, resolved by the caller for both lists. */
-    appLabels: Map<String, String>
+    appLabels: Map<String, String>,
+    /**
+     * App Standby bucket per package, read by the hook side in the same query
+     * (see `StandbyQuota`). Empty when it could not be read.
+     */
+    standbyBuckets: Map<String, Int> = emptyMap(),
+    /**
+     * Manifest scan versus GMS's own registration list (see `PushHealth`).
+     * Null when the comparison could not be made — the rows then stay absent
+     * instead of claiming agreement.
+     */
+    pushDiff: PushHealth.Diff? = null
 ): List<Pair<String, String>> {
     return buildList {
         val queuedNames = snapshot.queuedPackages.map { appLabels[it] ?: it }
@@ -1834,6 +2028,28 @@ private fun pushConfigRows(
                     countList(queuedNames)
                 }
         )
+        // The two lists disagreeing is the finding, so each side gets its own
+        // row and an agreeing pair says nothing at all. "Declared, not
+        // registered" is the one that costs the user pushes: the app carries
+        // the SDK and GMS has no record of it. The reverse is usually residue
+        // from an uninstall — worth showing, not worth alarming about.
+        pushDiff?.let { diff ->
+            // Every name, no cap ([countList], not [countWithNames]): these two
+            // rows exist so a reader can act on a specific app, and a list cut
+            // off at four hides exactly the apps they have not looked at yet.
+            if (diff.declaredOnly.isNotEmpty()) {
+                add(
+                    stringResource(R.string.records_push_declared_only) to
+                        countList(diff.declaredOnly.map { appLabels[it] ?: it })
+                )
+            }
+            if (diff.registeredOnly.isNotEmpty()) {
+                add(
+                    stringResource(R.string.records_push_registered_only) to
+                        countList(diff.registeredOnly.map { appLabels[it] ?: it })
+                )
+            }
+        }
         val affinity = snapshot.affinityScores.map {
             (appLabels[it.packageName] ?: it.packageName) + " " + scoreText(it.score)
         }
@@ -1845,6 +2061,28 @@ private fun pushConfigRows(
                     countWithNames(affinity)
                 }
         )
+        // The apps GMS will cap today, from its own standby-bucket table. Only
+        // the ones that *have* a cap are listed: ACTIVE / WORKING_SET apps are
+        // unlimited, and printing "unlimited" for the other ten lines would
+        // bury the two that matter. Tightest first — 5/day is the state that
+        // makes a push disappear, 20/day is a warning.
+        val capped = standbyBuckets.entries
+            .filter { StandbyQuota.isLimited(it.value) }
+            .sortedBy { StandbyQuota.quotaFor(it.value) }
+            .map { (pkg, bucket) ->
+                val name = appLabels[pkg] ?: pkg
+                name + " " + stringResource(
+                    R.string.records_quota_per_day, StandbyQuota.quotaFor(bucket)
+                )
+            }
+        if (capped.isNotEmpty()) {
+            // Every capped app, no cap on the list itself: the row exists to
+            // name the apps GMS will throttle today, and "…等 N 个" would hide
+            // exactly the ones a reader has not thought about yet. Same rule as
+            // the client-queue row above ([countList]); only the affinity list
+            // stays truncated, because it is a ranking.
+            add(stringResource(R.string.records_quota_limited) to countList(capped))
+        }
         if (snapshot.highPriorityQuota.isNotEmpty()) {
             add(stringResource(R.string.records_high_priority) to snapshot.highPriorityQuota)
         }
@@ -2752,7 +2990,7 @@ private fun downSuffix(ref: GcmDumpParser.NetworkRef, strings: EventText): Strin
  * network object came back" are two very different stories (the netId is
  * monotonic within a boot and never reused, so a new number means a new
  * network object: a cell-tower handover while riding a train). See
- * HOOKS_AND_DIAGNOSTICS.md on `GcmNetwork{N …}`.
+ * FCM_HOOK_TECH_DOC.md §5.7.2 on `GcmNetwork{N …}`.
  *
  * The dump's `DISCONNECTED` tail is not part of the name: the row's verb says
  * it (`… 网络已断开`), so repeating it in brackets only lengthened the title.
@@ -2904,6 +3142,11 @@ private fun fallbackModeText(mode: String): String = when (mode.uppercase(Locale
     "FALLBACK_CELLULAR" -> stringResource(R.string.records_fallback_cellular)
     "FALLBACK_CONSTRAINED" -> stringResource(R.string.records_fallback_constrained)
     "FALLBACK_RESTRICTED_SATELLITE" -> stringResource(R.string.records_fallback_satellite)
+    // The sixth and last member of GMS's enum (`Lhzln`), which the table was
+    // missing: the seven `FALLBACK_*` this enum can print are exactly the ones
+    // below plus this one. Anything else reaching `else` is a token this build
+    // has never seen, not a translation gap.
+    "FALLBACK_ALTERNATIVE_HOSTPORT" -> stringResource(R.string.records_fallback_hostport)
     "FALLBACK_MODE_UNKNOWN" -> stringResource(R.string.records_fallback_unknown)
     else -> mode
 }
@@ -3068,6 +3311,21 @@ private val STRIP_BREATH = 12.dp
 /** Logcat tag for the event list's scroll diagnostics. */
 private const val SCROLL_LOG = "RecordsScroll"
 
+/**
+ * How far a page's list has to travel before the bar's glass is at full
+ * strength — the ramp this page hands [PageScaffold.barScrollProgress] for the
+ * pane's frost and the reveal. The title's own collapse is the nested scroll's
+ * business, never this number's.
+ *
+ * The bar's collapse eats the first ~44dp of every upward gesture
+ * (exitUntilCollapsed pre-scroll) before the list itself moves, so this ramp
+ * runs over the list's own travel, one beat behind the title it sits under —
+ * the page reading cannot see the consumed stretch, and that is the price of a
+ * frost that belongs to the tab on screen rather than to whichever tab scrolled
+ * last.
+ */
+private val GLASS_RAMP = 48.dp
+
 /** One poll's result, mapped to a string resource by the caller. */
 private sealed interface Outcome {
     data class Ok(val archive: RecordsStore.Archive) : Outcome
@@ -3088,7 +3346,14 @@ private suspend fun read(context: android.content.Context): Outcome {
         is RecordsQuery.Result.Success -> {
             val dump = GcmDumpParser.parse(hook.dump)
             if (dump != null) {
-                return Outcome.Ok(RecordsStore.capture(context, dump).archive)
+                // The hook side's install line rides the same query; a module
+                // build that predates it answers null and the archive keeps
+                // whatever it already had. Same for the standby buckets.
+                return Outcome.Ok(
+                    RecordsStore.capture(
+                        context, dump, hook.summary, hook.standbyBuckets
+                    ).archive
+                )
             }
             Log.w(TAG, "Records: the hook's GCM dump did not parse")
             return Outcome.Unparsable

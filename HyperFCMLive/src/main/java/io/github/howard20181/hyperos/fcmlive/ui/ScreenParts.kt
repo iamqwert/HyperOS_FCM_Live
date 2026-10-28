@@ -1727,20 +1727,50 @@ fun PageScaffold(
      */
     background: (@Composable BoxScope.() -> Unit)? = null,
     /**
-     * Miuix only, and only for a page whose own hero IS its title: draw the bar
-     * compact — the centred title alone, no band of its own — and let that title
-     * arrive as the hero scrolls away. The number is how far the page's hero has
-     * travelled, `0f` with the hero whole and `1f` once it is gone. Null keeps
-     * the standard large-title bar.
+     * Miuix only: the page's own reading of how far its visible content has
+     * travelled, `0f` with everything at home and `1f` once it is gone. Null —
+     * every page but two — keeps every reading on the bar's own collapse
+     * fraction.
      *
-     * The model is KernelSU's about page, and the two reads below are its recipe:
-     * the title fades in over the tail of the travel, and the pane builds on the
-     * whole of it — the ramp a large bar would have taken from its own collapse
-     * fraction. A compact bar cannot supply either, because the library pins its
-     * [MiuixScrollBehavior] flat the moment a `SmallTopAppBar` attaches; hence
-     * the page measures its own hero and hands the number in.
+     * The fraction is one accumulated nested-scroll reading of the ONE
+     * connection the body box wears, and a body made of several scrollables
+     * (the records page's pager, most of all) keeps whichever value the last
+     * one left: a page that comes back already scrolled produces no scroll
+     * event at all, so it inherits its neighbour's reading. The two pages that
+     * cannot live with that hand their own number in, and each spends it on a
+     * different slice of the bar:
+     *
+     * - The about page, whose hero IS its title — [compactBar] true: the
+     *   reading replaces the fraction everywhere and the bar goes compact, its
+     *   title arriving as the hero walks out.
+     * - The records page — [compactBar] false (the default): the reading feeds
+     *   the pane's frost and the reveal ONLY. The bar stays the standard
+     *   large-title bar and its collapse stays on the nested scroll, the same
+     *   driver every standard page uses — the title's size may briefly inherit
+     *   the previous tab's state until the first scroll gesture, the same
+     *   inheritance the M3 look has always had on this page.
      */
     barScrollProgress: (() -> Float)? = null,
+    /**
+     * Miuix only, and only with [barScrollProgress] supplied: draw the bar
+     * compact — the centred title alone, no band of its own — and let that
+     * title arrive as the page's hero scrolls away. The number [barScrollProgress]
+     * hands in is how far the hero has travelled, `0f` with the hero whole and
+     * `1f` once it is gone.
+     *
+     * The model is KernelSU's about page, and the two reads are its recipe: the
+     * title fades in over the tail of the travel, and the pane builds on the
+     * whole of it — the ramp a large bar would have taken from its own collapse
+     * fraction. A compact bar cannot supply either, because the library pins
+     * its [MiuixScrollBehavior] flat the moment a `SmallTopAppBar` attaches;
+     * hence the page measures its own hero and hands the number in.
+     *
+     * False — the default — keeps the standard large-title bar even though a
+     * reading is supplied: the records page hands one in for the pane alone
+     * (see [barScrollProgress]) and its title must still collapse like every
+     * other page's.
+     */
+    compactBar: Boolean = false,
     /**
      * Miuix only: chrome pinned directly under the bar, INSIDE the glass pane —
      * the records page's two tab strips, which are navigation, not content. The
@@ -1837,16 +1867,7 @@ fun PageScaffold(
                     ) {
                     val appBar: @Composable () -> Unit = {
                         val travel = barScrollProgress?.invoke()
-                        if (travel == null) {
-                            MiuixTopAppBar(
-                                title = title,
-                                largeTitle = title,
-                                color = barColor,
-                                navigationIcon = backControl,
-                                actions = actions,
-                                scrollBehavior = scrollBehavior
-                            )
-                        } else {
+                        if (travel != null && compactBar) {
                             // The hero IS this page's title, so the bar keeps none of
                             // its own: the reference's compact bar, whose title walks
                             // in as the hero walks out — nothing over the hero's first
@@ -1856,6 +1877,20 @@ fun PageScaffold(
                                 titleColor = MiuixTheme.colorScheme.onSurface.copy(
                                     alpha = ((travel - 0.35f) / 0.65f).coerceIn(0f, 1f)
                                 ),
+                                color = barColor,
+                                navigationIcon = backControl,
+                                actions = actions,
+                                scrollBehavior = scrollBehavior
+                            )
+                        } else {
+                            // The standard large-title bar — every page's resting
+                            // shape, records page included. Its collapse rides the
+                            // nested scroll like every other page's, even where a
+                            // page hands its own pane reading in (compactBar false):
+                            // the reading is the pane's business, never the title's.
+                            MiuixTopAppBar(
+                                title = title,
+                                largeTitle = title,
                                 color = barColor,
                                 navigationIcon = backControl,
                                 actions = actions,
@@ -1885,10 +1920,24 @@ fun PageScaffold(
                         hazeState = hazeState,
                         scrim = MaterialTheme.colorScheme.background,
                         // A large bar hands in its own collapse fraction; a
-                        // compact hero page hands in its hero's travel instead
-                        // (the compact bar is pinned flat — see
-                        // [barScrollProgress]).
-                        progress = barScrollProgress?.invoke() ?: scrollBehavior.state.collapsedFraction,
+                        // page that measures its own scroll — the records
+                        // page, whose body is a pager — hands in that reading
+                        // instead, and it REPLACES the fraction rather than
+                        // raising it. The fraction is an accumulated
+                        // nested-scroll reading of the ONE connection the body
+                        // box wears, and a body made of several scrollables
+                        // (two page tabs, six category lists) keeps whichever
+                        // value the last one left: a page that comes back
+                        // already scrolled produces no scroll event at all,
+                        // so it inherits the previous page's — frost over
+                        // empty air, or a clear pane with rows under it. A
+                        // caller that supplies [barScrollProgress] owns the
+                        // whole reading, and is expected to derive it from
+                        // whichever page is visible; every other page keeps
+                        // the fraction, which is exactly right for a single
+                        // scrollable under a bar of its own.
+                        progress = barScrollProgress?.invoke()
+                            ?: scrollBehavior.state.collapsedFraction,
                         // The pane never goes away in this look; the glass is
                         // always full.
                         frost = 1f,

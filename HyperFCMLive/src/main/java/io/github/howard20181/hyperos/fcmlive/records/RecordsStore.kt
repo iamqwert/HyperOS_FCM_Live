@@ -48,7 +48,26 @@ object RecordsStore {
         /** When [snapshot] was read; 0 before the first successful capture. */
         val fetchedAt: Long,
         /** Newest first. */
-        val events: List<GcmEvent>
+        val events: List<GcmEvent>,
+        /**
+         * The hook side's install summary carried by the same query that
+         * produced [snapshot]. Persisted with the archive so the export states
+         * it even when the page was opened from disk without a fresh capture,
+         * and null on an archive written before that extra existed.
+         */
+        val hookSummary: String? = null,
+        /**
+         * App Standby bucket per package, from the same query that produced
+         * [snapshot]. Kept on the archive rather than inside [GcmSnapshot]
+         * because it is **not** part of GMS's dump — it is read separately by
+         * the hook side, and mixing the two would make "what GMS printed"
+         * indistinguishable from "what we asked the platform".
+         *
+         * Empty on an archive written before the extra existed, and empty when
+         * the bucket read failed; the page then omits the row instead of
+         * implying every app is unlimited.
+         */
+        val standbyBuckets: Map<String, Int> = emptyMap()
     ) {
         /** The snapshot is only "live" while the poll keeps refreshing it. */
         fun isStale(now: Long): Boolean =
@@ -79,7 +98,13 @@ object RecordsStore {
      * poll reads), and it used to be silent. It now gets a row of its own, so
      * the page cannot imply a continuity the data does not have.
      */
-    fun capture(context: Context, dump: GcmDump, now: Long = System.currentTimeMillis()): Capture {
+    fun capture(
+        context: Context,
+        dump: GcmDump,
+        hookSummary: String? = null,
+        standbyBuckets: Map<String, Int> = emptyMap(),
+        now: Long = System.currentTimeMillis()
+    ): Capture {
         val file = file(context)
         val persisted = read(file)
         val stored = persisted.archive
@@ -130,7 +155,18 @@ object RecordsStore {
                 "capture pid=${dump.snapshot.pid} ring=${dump.events.size} fresh=${fresh.size} " +
                     "merged=${merged.size} lost=${lostMs / 1000}s"
             )
-            val archive = Archive(snapshot = dump.snapshot, fetchedAt = now, events = merged)
+            val archive = Archive(
+                snapshot = dump.snapshot,
+                fetchedAt = now,
+                events = merged,
+                // A module build that predates the extra answers without one;
+                // the stored line then still describes the same boot's install.
+                hookSummary = hookSummary ?: stored.hookSummary,
+                // Same fallback for the buckets: an empty answer means "the
+                // hook could not read them", not "every app is unlimited", so
+                // the last good reading survives a transient failure.
+                standbyBuckets = standbyBuckets.ifEmpty { stored.standbyBuckets }
+            )
             // The cursor tracks the newest event GMS itself reported, never the
             // restart marker: the marker carries `now`, and a cursor at `now`
             // would filter out every real event the next poll brings.
@@ -179,7 +215,14 @@ object RecordsStore {
                 archive = Archive(
                     snapshot = root.optJSONObject("snapshot")?.let(::snapshotFrom),
                     fetchedAt = root.optLong("fetched_at", 0),
-                    events = root.optJSONArray("events")?.let(::eventsFrom) ?: emptyList()
+                    events = root.optJSONArray("events")?.let(::eventsFrom) ?: emptyList(),
+                    // Absent on an archive written before the extra existed.
+                    hookSummary = root.optString("hook_summary").takeIf { it.isNotEmpty() },
+                    standbyBuckets = root.optJSONObject("standby_buckets")?.let { o ->
+                        val map = LinkedHashMap<String, Int>()
+                        for (key in o.keys()) map[key] = o.optInt(key)
+                        map
+                    } ?: emptyMap()
                 ),
                 cursor = Cursor(
                     pid = root.optInt("cursor_pid", -1),
@@ -198,6 +241,14 @@ object RecordsStore {
         root.put("version", VERSION)
         root.put("fetched_at", archive.fetchedAt)
         archive.snapshot?.let { root.put("snapshot", snapshotTo(it)) }
+        archive.hookSummary?.let { root.put("hook_summary", it) }
+        // Omitted when empty: "we could not read buckets" and "every app is
+        // unlimited" are different statements, and only the first is true here.
+        if (archive.standbyBuckets.isNotEmpty()) {
+            root.put("standby_buckets", JSONObject().apply {
+                archive.standbyBuckets.forEach { (pkg, bucket) -> put(pkg, bucket) }
+            })
+        }
         root.put("cursor_pid", cursor.pid)
         root.put("cursor_ts", cursor.ts)
         root.put("cursor_text", cursor.text)

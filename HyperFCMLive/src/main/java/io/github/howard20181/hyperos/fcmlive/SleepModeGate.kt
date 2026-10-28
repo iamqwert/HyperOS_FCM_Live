@@ -36,7 +36,7 @@ internal object SleepModeGate {
      *
      * The step from "the uid rule was applied" to "the link stayed up" is a
      * generation assumption, not a measurement — see the exit branch in
-     * [armSleepModeChain] and HOOKS_AND_DIAGNOSTICS.md §3.8.6.
+     * [armSleepModeChain] and FCM_HOOK_TECH_DOC.md §4.1（S16）and §8.2.
      */
     @Volatile
     private var sGmsKeptOnSleepWhitelist = false
@@ -249,7 +249,7 @@ internal object SleepModeGate {
                     // radios in PowerKeeper would satisfy the flag while the
                     // link was down. The line names the assumption rather than
                     // leaving it to be re-derived; the cross-generation gap is
-                    // tracked in HOOKS_AND_DIAGNOSTICS.md §3.8.6.
+                    // tracked in FCM_HOOK_TECH_DOC.md §4.1（S16）and §8.2.
                     module.logGated(
                         Log.INFO, HookerSupport.TAG,
                         "Sleep mode exited: GMS was kept on the whitelist, " +
@@ -742,6 +742,7 @@ internal object SleepModeGate {
                         }
                         result
                     }
+                    module.deoptimize(getDozeWhiteListAppsMethod)
                 } catch (e: NoSuchMethodException) {
                     logSkip(
                         "GlobalFeatureConfigureHelper#getDozeWhiteListApps(" +

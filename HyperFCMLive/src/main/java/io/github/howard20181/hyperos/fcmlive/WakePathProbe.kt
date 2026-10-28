@@ -82,6 +82,30 @@ internal object WakePathProbe {
     internal var broadcastWakePathC2dmDeniedCount = 0
 
     /**
+     * Gate-R: the warm-receiver path, `BroadcastQueueModernStubImpl
+     * #checkReceiverAppDealBroadcast`.
+     *
+     * `checkSkipReceiver` sends a *warm* process down this method and skips the
+     * broadcast when it answers false; the cold path is
+     * `checkApplicationAutoStart`, which the module answers itself. The ROM's
+     * warm path can reject on `SecurityManagerInternal#calleeAliveMatchBlackRule`
+     * (and on the PACKAGE_ADDED rule), and until now none of that was visible:
+     * the module's counters only covered the cold path and the freeze path.
+     *
+     * Read-only. `reached` proves the gate runs, `c2dm` the subset carrying the
+     * push action, `c2dm-denied` the number that matters — a non-zero value is
+     * a push the ROM dropped before the module's own checks saw it.
+     */
+    @Volatile
+    internal var receiverSkipReachedCount = 0
+
+    @Volatile
+    internal var receiverSkipC2dmCount = 0
+
+    @Volatile
+    internal var receiverSkipC2dmDeniedCount = 0
+
+    /**
      * Gate-W probe (read-only).
      *
      * The wake-path chain is the one §7 candidate with a **cross-jar** entry: AOSP
@@ -295,6 +319,114 @@ internal object WakePathProbe {
         module.logGated(
             Log.INFO, HookerSupport.TAG,
             "P2: wake-path probe: checkBroadcastWakePath hooked (read-only); " +
+                "counter rides the 30min broadcast-gate summary"
+        )
+    }
+
+    /**
+     * Gate-R probe (read-only): the warm-receiver skip check.
+     *
+     * `BroadcastQueueModernStubImpl#checkReceiverAppDealBroadcast` is called by
+     * `checkSkipReceiver` whenever the target process is warm; a false answer
+     * means the broadcast is skipped. Its main rejection is
+     * `SecurityManagerInternal#calleeAliveMatchBlackRule(...)`, which the module
+     * cannot see from any existing counter.
+     *
+     * Return value is passed through untouched. The gate is hot (every warm
+     * broadcast of every package), so the action string is compared before any
+     * counter is touched and details are capped at
+     * [HookerSupport.WAKE_PATH_DETAIL_LIMIT]; volume rides the 30-minute
+     * broadcast-gate summary.
+     */
+    internal fun probeReceiverAppDealBroadcast(
+        module: XposedInterface,
+        classLoader: ClassLoader,
+        hookE: (Executable) -> XposedInterface.HookBuilder,
+        logSkipOtherGeneration: (String) -> Unit
+    ) {
+        val clazz = try {
+            classLoader.loadClass("com.android.server.am.BroadcastQueueModernStubImpl")
+        } catch (e: ClassNotFoundException) {
+            logSkipOtherGeneration("BroadcastQueueModernStubImpl (receiver-skip probe)")
+            return
+        }
+        val method = clazz.declaredMethods.firstOrNull { m ->
+            m.name == "checkReceiverAppDealBroadcast" &&
+                m.parameterCount == 4 &&
+                m.returnType == Boolean::class.javaPrimitiveType
+        }
+        if (method == null) {
+            logSkipOtherGeneration("checkReceiverAppDealBroadcast (receiver-skip probe)")
+            return
+        }
+        val recordClass = try {
+            classLoader.loadClass("com.android.server.am.BroadcastRecord")
+        } catch (e: ClassNotFoundException) {
+            logSkipOtherGeneration("BroadcastRecord (receiver-skip probe)")
+            return
+        }
+        val intentField = try {
+            recordClass.getDeclaredField("intent").also { it.isAccessible = true }
+        } catch (t: Throwable) {
+            logSkipOtherGeneration("BroadcastRecord#intent (receiver-skip probe)")
+            null
+        }
+        val callerField = try {
+            recordClass.getDeclaredField("callerPackage").also { it.isAccessible = true }
+        } catch (t: Throwable) {
+            null
+        }
+        method.isAccessible = true
+        hookE(method).intercept { chain: XposedInterface.Chain ->
+            val result = chain.proceed()
+            try {
+                val reached = ++receiverSkipReachedCount
+                val record = chain.getArg(1)
+                val intent = if (record != null && intentField != null) {
+                    intentField.get(record) as? Intent
+                } else {
+                    null
+                }
+                val action = intent?.action
+                val caller = if (record != null && callerField != null) {
+                    callerField.get(record) as? String
+                } else {
+                    null
+                } ?: "?"
+                val callee = intent?.let { HookerSupport.targetPackageOf(it) } ?: "?"
+                val skipped = java.lang.Boolean.FALSE == result
+                if (reached == 1) {
+                    module.logGated(
+                        Log.INFO, HookerSupport.TAG,
+                        "receiver-skip probe: first reach (action=$action caller=$caller " +
+                            "callee=$callee verdict=${if (skipped) "skipped" else "allowed"})"
+                    )
+                }
+                if (HookerSupport.ACTION_REMOTE_INTENT == action) {
+                    val c2dm = ++receiverSkipC2dmCount
+                    if (skipped) {
+                        receiverSkipC2dmDeniedCount++
+                    }
+                    if (c2dm <= HookerSupport.WAKE_PATH_DETAIL_LIMIT) {
+                        module.logGated(
+                            Log.INFO, HookerSupport.TAG,
+                            "receiver-skip probe: c2dm reached the warm gate #$c2dm " +
+                                "(caller=$caller callee=$callee " +
+                                "verdict=${if (skipped) "skipped" else "allowed"})"
+                        )
+                    }
+                }
+            } catch (t: Throwable) {
+                module.logGated(
+                    Log.ERROR, HookerSupport.TAG, "Failed to evaluate receiver-skip probe", t
+                )
+            }
+            result
+        }
+        module.deoptimize(method)
+        module.logGated(
+            Log.INFO, HookerSupport.TAG,
+            "receiver-skip probe: checkReceiverAppDealBroadcast hooked (read-only); " +
                 "counter rides the 30min broadcast-gate summary"
         )
     }

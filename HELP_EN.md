@@ -29,7 +29,7 @@ Removes HyperOS restrictions on broadcasts related to Google push connections.
 
 HyperOS's power-saving policies restrict broadcasts and networking for background apps. Google push (FCM) relies on Google Play services to broadcast a wake-up call to the target app; once that broadcast is deferred or blocked, notifications stop arriving.
 
-This module rewrites those checks inside the framework: it lets Google push and reconnect broadcasts through, keeps GMS from being cut off from the network, frozen or blacklisted, grants the target app a roughly 2-second temporary battery exemption on each push (allowlist-based), and lets the app receive the broadcast even in the "stopped" state.
+This module rewrites those checks inside the framework: it lets Google push and reconnect broadcasts through, keeps GMS from being cut off from the network, frozen or blacklisted, and lets the app receive the broadcast even in the "stopped" state.
 
 > The trade-off: allowing push reconnects means apps can be woken by pushes, and battery use may go up with the module enabled. That is inherent to what the module does.
 
@@ -61,7 +61,7 @@ HyperOS layers several gates on this chain; the module handles them gate by gate
 | App is frozen | `isRestrictReceiver` (greeze broadcast gate) | Let through, replaying the stock unfreeze |
 | Broadcast deferred | `isNeedCachedBroadcast`, `deferBroadcast` | See [Known limitations](#9-known-limitations) |
 | Alarm blocked | `checkAlarmIsAllowedSend` (the MIUI alarm delivery gate) | If an alarm belonging to GMS is judged blocked, it is let through instead |
-| Power/network limits | PowerKeeper profiles, AppStandby, greeze's `isRestrictNet`, network restrictions | GMS is written into the no-restrict list; on delivery, the target app gets a ~2 s exemption |
+| Power/network limits | PowerKeeper profiles, AppStandby, greeze's `isRestrictNet`, network restrictions | GMS is written into the no-restrict list |
 | Force stop | `isForceStopEnable` | Applies to selected apps (that declare FCM components) only |
 
 The hooked system services include `ActivityManagerService`, the alarm delivery gate (`AlarmManagerServiceStubImpl`), greeze (`GreezeManagerService`, `AurogonImmobulusMode`, the policy managers `DomesticPolicyManager` / `InternationalPolicyManager`), PowerKeeper's `AppStandbyController`, the process policy tables, and more.
@@ -89,7 +89,6 @@ Selected apps gain extra privileges:
 
 - The autostart check lets them through directly
 - They can be woken by this push even in the "stopped" state
-- Each push earns them a ~2-second battery exemption
 - When the app is frozen, the push broadcast is delivered directly instead of being cached
 - Google push broadcasts are allowed through (`isAllowBroadcast`)
 - Swiping them away from Recents does not force-stop them (`isForceStopEnable`; only apps that declare Google push components)
@@ -122,7 +121,6 @@ Summarized by dimension ("AOSP equivalent" = what stock Android does in that dim
 | Dimension | Means | Nature | AOSP equivalent |
 |---|---|---|---|
 | Delivery to stopped apps | Adds the "include stopped packages" flag to Google push broadcasts | In-memory, per-broadcast, reversible | Restores: stock push broadcasts carry the flag natively |
-| Temporary push-time exemption | Requests a ~2 s temporary battery exemption for the target app | In-memory, short window | Restores: the equivalent window stock Android gives a push cold start |
 | Broadcast autostart gate | Push broadcasts pass the system's autostart entry directly | In-memory | Neutralizes: a broadcast gate HyperOS added |
 | Power-saving policy | No-restrict list, profile forced to "Unrestricted", background control write-back | In-memory + config write-back | Neutralizes: no such layer in stock |
 | Freezing and network limits | Fast freeze skips Google services, network restrictions turned off | In-memory | Neutralizes: no such layer in stock |
@@ -132,7 +130,7 @@ Summarized by dimension ("AOSP equivalent" = what stock Android does in that dim
 
 The GMS protections above are always on; they do not depend on selection.
 
-The allowlist decides whether the target app gets the wake-up privileges — autostart wake-ups, "stopped" wake-ups and the ~2 s battery exemption — and whether "allow Google push broadcasts" and "protection from force-stop" apply to it. Force-stop protection only covers apps that declare Google push components.
+The allowlist decides whether the target app gets the wake-up privileges — autostart wake-ups and "stopped" wake-ups — and whether "allow Google push broadcasts" and "protection from force-stop" apply to it. Force-stop protection only covers apps that declare Google push components.
 
 ---
 
@@ -147,6 +145,25 @@ The allowlist decides whether the target app gets the wake-up privileges — aut
 | Select all / deselect all | Applies to the current list in multi-select mode |
 | More options (top right) | Exclude MiPush apps, show system apps, Settings |
 | FCM diagnostics | Opens GMS's built-in diagnostics screen; falls back to GMS's app details page when unavailable |
+
+### Records page (Records tab)
+
+Brings GMS's own diagnostic content into the app, so you no longer have to open FCM Diagnostics. The module reads it inside the system process and hands it back to the app — **no root, no shell**. The price is that **the module has to be active**: while it is not, the page shows only a locked card plus whatever archive the last active period left.
+
+Two tabs inside:
+
+| Tab | Content |
+| --- | --- |
+| Status | Five blocks — connection / network / heartbeat / push / errors — e.g. connection state (connected, connecting, disconnected), endpoint, connected for, last connection duration, last close, current network, adaptive heartbeat, queued messages, the most recent delivery delay, failed logins and backoff |
+| Events | Event history, filtered by All / Connection / Heartbeat / Push / Sleep / Errors |
+
+**Rows appear only when there is something to say.** The system prints those fields only when it has a value (no queued messages means no queue row), so a missing row is not a fault, and the page never pads a row with zeros or placeholders. The dot in front of each event is a severity: green normal, amber worth a look, red abnormal, grey unknown.
+
+- Pull down to refresh now; while the Records tab is on screen it samples once a minute
+- The archive keeps 500 rows by default (200 / 300 / 500 / 800 / 1200 in Settings) and only the last 7 days, whichever limit comes first
+- The upload icon in the bar **exports the diagnostic text**: device, system version, Android version, manager version, module version, the hook-install summary, current FCM status and the event history, all in one txt
+
+> The "hook install" row is what the module itself reports after it finishes installing inside the system process (`N hook(s) installed, M target(s) absent`). When you report a problem, that one row decides whether there is anything to investigate at all.
 
 ### Settings page
 
@@ -211,7 +228,7 @@ Flipping a switch takes effect immediately: no reboot, no module reload.
 
 > Three kinds of lists are not the same thing, here and throughout: **this app's "FCM wake-up allowlist"**, the Security app's "battery saver policy", and AOSP "battery optimization".
 
-For exactly where these switches intervene in the system, which behaviors the module deliberately leaves alone, and which conclusions are not yet backed by real-device measurements, see [the technical docs, §6.3 (Chinese)](HOOKS_AND_DIAGNOSTICS.md).
+For exactly where these switches intervene in the system, which behaviors the module deliberately leaves alone, and which conclusions are not yet backed by real-device measurements, see [the technical docs, §8.2 (Chinese)](FCM_HOOK_TECH_DOC.md).
 
 ### Autostart
 
@@ -363,23 +380,26 @@ Privacy commitment: no personal data is collected or uploaded; the allowlist and
 
 ### Confirm the module is loaded
 
-On every successful load the module leaves one summary line in the log:
+On every successful load the module leaves one summary line:
 
 ```
 HyperFCMLive active in <host>: N hook(s) installed, M target(s) absent
 ```
 
-View it with (`N` = hooks installed, `M` = targets absent on the current ROM):
+**Preferred**: open the Records tab → upload icon → export the diagnostic text. That line is the "hook install" row there, together with the device, the system version and the recent events — no separate log capture needed. (`N` = hooks installed, `M` = targets absent on the current ROM; the `cross-generation` part is the expected OS 3 / OS 4 split.)
+
+**Fallback** (when the Records page says the module did not answer the query, the module is not running and only the log has the line): first turn on **debug logging** under Settings → Experimental, then run
 
 ```bash
 adb logcat -d | grep "HyperFCMLive active in"
 ```
 
+> The module emits warnings and worse by default. That line is INFO, so it does not exist unless debug logging is on — which is why the command in the old guide found nothing on a default install. The Records export has no such precondition.
 > Enlarge the log buffer in Developer options, or early-boot entries may be missing. Wait for `sys.boot_completed=1` before capturing.
 > The `/sdcard/Download/.../log/modules_*.log` files LSPosed exports are more complete than a logcat snapshot — prefer them.
 
 ### Feedback
 
 - Source: <https://github.com/iamqwert/HyperOS_FCM_Live>
-- When filing an issue, please attach: device model, system version (Android / HyperOS), module version, and the summary line above
+- File issues through the repository's issue template and attach the **exported diagnostic text**; the template asks for device, system version, module version, LSPosed version, reproduction steps, and whether the target app is checked
 - Released under the GNU GPL-3.0 license

@@ -156,17 +156,36 @@ internal class InstallBookkeeping(private val module: XposedModule) {
         // flushed at the end of the install pass (`hookSystemServer` /
         // `hookPackage`), which is the only place guaranteed to run — see the
         // note there about the hot-reload path skipping this function.
+        val line = summaryLine(process)
+        // Retained for the records bridge: the same sentence the log carries, so
+        // a diagnostics export can state whether the hooks installed without the
+        // reporter having to produce a logcat. Written here (and only here) so it
+        // cannot claim a pass that has not finished.
+        lastSummary = line
+        module.logGated(Log.INFO, HookerSupport.TAG, line)
+    }
+
+    /**
+     * The end-of-install sentence, kept once built.
+     *
+     * Null until an install pass has reported, which is the honest reading for
+     * a hot reload: that path does not call [logSummary], so this keeps the last
+     * pass's verdict rather than inventing one.
+     */
+    @Volatile
+    internal var lastSummary: String? = null
+        private set
+
+    private fun summaryLine(process: String): String {
         val crossGeneration = hookTargetsAbsentOtherGeneration
-        module.logGated(
-            Log.INFO, HookerSupport.TAG, "HyperFCMLive active in $process: " +
-                "$hooksInstalled hook(s) installed, " +
-                "$hookTargetsAbsent target(s) absent on this ROM" +
-                if (crossGeneration == 0) {
-                    ""
-                } else {
-                    ", $crossGeneration cross-generation (expected)"
-                }
-        )
+        return "HyperFCMLive active in $process: " +
+            "$hooksInstalled hook(s) installed, " +
+            "$hookTargetsAbsent target(s) absent on this ROM" +
+            if (crossGeneration == 0) {
+                ""
+            } else {
+                ", $crossGeneration cross-generation (expected)"
+            }
     }
 
     /** Runs one group; a throw inside it cannot reach the groups behind it. */

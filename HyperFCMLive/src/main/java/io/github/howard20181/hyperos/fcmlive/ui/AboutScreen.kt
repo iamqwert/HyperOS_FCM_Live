@@ -333,7 +333,11 @@ fun AboutTabScreen(
                 { scrollProgress }
             } else {
                 null
-            }
+            },
+            // The compact bar itself — without this the scaffold would keep the
+            // standard large title even with a travel supplied (the records
+            // page's shape; see PageScaffold.compactBar).
+            compactBar = miuix
         ) { innerPadding ->
             val barTop = innerPadding.calculateTopPadding()
             Box(modifier = Modifier.fillMaxSize()) {

@@ -135,6 +135,14 @@ internal object GreezeHooks {
     @Volatile
     private var noNetworkBlacklistMismatchLogged = false
 
+    /** One-shot: the frozen-process wake-lock gate answered "allowed" for GMS. */
+    @Volatile
+    private var gmsWakeUpListAllowedLogged = false
+
+    /** One-shot: a due GMS alarm was kept out of the Aurogon freeze cache. */
+    @Volatile
+    private var gmsAlarmCacheSkippedLogged = false
+
     /**
      * greeze (`com.miui.server.greeze.GreezeManagerService`): the ROM's freeze /
      * broadcast-policy engine, and this module's largest system_server surface.
@@ -162,7 +170,7 @@ internal object GreezeHooks {
      *   letter on this ROM — dnsproxyd answers `500 Command not recognized` — and
      *   is intercepted only as an OTA hedge.
      *
-     * A quiet night proves nothing on its own; HOOKS_AND_DIAGNOSTICS.md §6.4
+     * A quiet night proves nothing on its own; FCM_HOOK_TECH_DOC.md §6.9
      * fixes the wording for that case ("not observed in this window", never
      * "not needed").
      */
@@ -932,11 +940,142 @@ internal object GreezeHooks {
             }
             result
         }
+        module.deoptimize(getWhiteListMethod)
     }
 
     private fun addIfAbsent(list: MutableList<Any?>, value: String) {
         if (!list.contains(value)) {
             list.add(value)
+        }
+    }
+
+    /**
+     * P5 (defence): keep GMS out of the ROM's frozen-process wake-lock gate.
+     *
+     * `PowerManagerService#setWakeLockDisabledStateLocked` disables a cached
+     * process's partial wakelocks unless
+     * `PowerManagerServiceStub#isAllowWakeUpList(uid)` answers true; the stub
+     * forwards to `GreezeManagerService#isAllowWakeUpList(uid)`, which resolves
+     * the uid's packages and asks `AurogonImmobulusMode#isAllowWakeUpList(pkg)`
+     * against `mAllowWakeUpPackageNameList` (built from the `_wakeuplist`
+     * resource and refreshed by cloud). The module never injected GMS into that
+     * list.
+     *
+     * Device facts (2026-10-28, `dumpsys power`): `no_cached_wake_locks=true`
+     * and `disable_frozen_process_wakelocks=true (def)`, so the gate is live;
+     * `dumpsys greezer` still shows GMS never frozen, so this stays defence in
+     * depth rather than a claimed fix. Only the GMS uid is answered — every
+     * other uid proceeds untouched.
+     */
+    internal fun hookAllowWakeUpList(
+        module: XposedInterface,
+        classLoader: ClassLoader,
+        hookE: (Executable) -> XposedInterface.HookBuilder,
+        logSkip: (String) -> Unit,
+        isGmsUid: (Int) -> Boolean
+    ) {
+        try {
+            val greezeManagerServiceClass =
+                classLoader.loadClass("com.miui.server.greeze.GreezeManagerService")
+            val isAllowWakeUpListMethod = greezeManagerServiceClass.getDeclaredMethod(
+                "isAllowWakeUpList", Int::class.javaPrimitiveType
+            )
+            hookE(isAllowWakeUpListMethod).intercept { chain: XposedInterface.Chain ->
+                val result = chain.proceed()
+                try {
+                    val uid = chain.getArg(0)
+                    if (uid is Int && isGmsUid(uid) && java.lang.Boolean.FALSE == result) {
+                        // One-shot only when the ROM actually denied: a logged
+                        // "kept" claim on an already-allowed call would be a
+                        // sentinel that proves nothing.
+                        if (!gmsWakeUpListAllowedLogged) {
+                            gmsWakeUpListAllowedLogged = true
+                            module.logGated(
+                                Log.INFO, HookerSupport.TAG,
+                                "GreezeManagerService#isAllowWakeUpList: re-allowed GMS " +
+                                    "(uid $uid) after the ROM denied the wakelock"
+                            )
+                        }
+                        return@intercept true
+                    }
+                } catch (t: Throwable) {
+                    module.logGated(
+                        Log.ERROR, HookerSupport.TAG, "isAllowWakeUpList hook failed", t
+                    )
+                }
+                result
+            }
+            module.deoptimize(isAllowWakeUpListMethod)
+            module.logGated(
+                Log.INFO, HookerSupport.TAG,
+                "GreezeManagerService#isAllowWakeUpList hooked for GMS"
+            )
+        } catch (e: ClassNotFoundException) {
+            logSkip("GreezeManagerService class absent, isAllowWakeUpList skip")
+        } catch (e: NoSuchMethodException) {
+            logSkip("GreezeManagerService#isAllowWakeUpList absent, skip")
+        }
+    }
+
+    /**
+     * P6 (defence): do not park GMS alarms in the Aurogon freeze cache.
+     *
+     * `AlarmManagerService#triggerAlarmsLocked` asks
+     * `GreezeManagerService#isNeedCachedAlarmForAurogon(uid)` before delivering
+     * a due alarm; true means the alarm is parked and replayed after the uid
+     * thaws. It is the alarm-side twin of [hookGreezeBroadcastCache] and only
+     * applies to `FULLY_FROZEN` uids. GMS never enters that state on this
+     * device (`dumpsys greezer`), so like the other freeze-path hooks this is
+     * defence in depth. Only the GMS uid is answered false; every other alarm
+     * keeps the ROM's decision.
+     */
+    internal fun hookGreezeAlarmCache(
+        module: XposedInterface,
+        classLoader: ClassLoader,
+        hookE: (Executable) -> XposedInterface.HookBuilder,
+        logSkip: (String) -> Unit,
+        isGmsUid: (Int) -> Boolean
+    ) {
+        try {
+            val greezeManagerServiceClass =
+                classLoader.loadClass("com.miui.server.greeze.GreezeManagerService")
+            val isNeedCachedAlarmMethod = greezeManagerServiceClass.getDeclaredMethod(
+                "isNeedCachedAlarmForAurogon", Int::class.javaPrimitiveType
+            )
+            hookE(isNeedCachedAlarmMethod).intercept { chain: XposedInterface.Chain ->
+                val result = chain.proceed()
+                try {
+                    val uid = chain.getArg(0)
+                    if (uid is Int && isGmsUid(uid) && java.lang.Boolean.TRUE == result) {
+                        // One-shot only when the ROM actually wanted to park the
+                        // alarm; on the normal (not frozen) path the original
+                        // answer is already false and there is nothing to claim.
+                        if (!gmsAlarmCacheSkippedLogged) {
+                            gmsAlarmCacheSkippedLogged = true
+                            module.logGated(
+                                Log.INFO, HookerSupport.TAG,
+                                "GreezeManagerService#isNeedCachedAlarmForAurogon: " +
+                                    "overrode the cached GMS (uid $uid) alarm"
+                            )
+                        }
+                        return@intercept false
+                    }
+                } catch (t: Throwable) {
+                    module.logGated(
+                        Log.ERROR, HookerSupport.TAG, "isNeedCachedAlarmForAurogon hook failed", t
+                    )
+                }
+                result
+            }
+            module.deoptimize(isNeedCachedAlarmMethod)
+            module.logGated(
+                Log.INFO, HookerSupport.TAG,
+                "GreezeManagerService#isNeedCachedAlarmForAurogon hooked for GMS"
+            )
+        } catch (e: ClassNotFoundException) {
+            logSkip("GreezeManagerService class absent, isNeedCachedAlarmForAurogon skip")
+        } catch (e: NoSuchMethodException) {
+            logSkip("GreezeManagerService#isNeedCachedAlarmForAurogon absent, skip")
         }
     }
 

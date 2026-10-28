@@ -449,24 +449,24 @@ class RecordsTaxonomyTest {
     @Test
     fun networkTargetExtractionCoversEveryRawShape() {
         // The event text arrives prettified (`GcmNetwork{106 WiFi(1)}` already
-        // rewritten to `WiFi · 106`), which is the form these rows carry.
+        // rewritten to `WiFi 106`), which is the form these rows carry.
         assertEquals(
-            "WiFi · 106",
-            GcmDumpParser.parseNetworkTarget("Active network switched to WiFi · 106, was Cell · 103")
+            "WiFi 106",
+            GcmDumpParser.parseNetworkTarget("Active network switched to WiFi 106, was Cell 103")
                 ?.format()
         )
         assertEquals(
-            "WiFi · 104",
-            GcmDumpParser.parseNetworkTarget("Active network is now WiFi · 104")?.format()
+            "WiFi 104",
+            GcmDumpParser.parseNetworkTarget("Active network is now WiFi 104")?.format()
         )
         assertEquals(
-            "WiFi · 106",
-            GcmDumpParser.parseNetworkTarget("onGcmNetworkChanged: WiFi · 106")?.format()
+            "WiFi 106",
+            GcmDumpParser.parseNetworkTarget("onGcmNetworkChanged: WiFi 106")?.format()
         )
         assertEquals(
             "the `went away` shape names the network it lost",
-            "Cell · 103",
-            GcmDumpParser.parseNetworkTarget("Active network went away, was Cell · 103")?.format()
+            "Cell 103",
+            GcmDumpParser.parseNetworkTarget("Active network went away, was Cell 103")?.format()
         )
         assertNull(GcmDumpParser.parseNetworkTarget("some future GCM network line"))
     }
@@ -484,16 +484,16 @@ class RecordsTaxonomyTest {
                 "was GcmNetwork{105 Cell(0)}"
         )
         assertEquals(
-            "Active network switched to Cell · 103 (DISCONNECTED), was Cell · 105",
+            "Active network switched to Cell 103 (DISCONNECTED), was Cell 105",
             text
         )
         val target = GcmDumpParser.parseNetworkTarget(text)
-        assertEquals("Cell · 103 (DISCONNECTED)", target?.format())
+        assertEquals("Cell 103 (DISCONNECTED)", target?.format())
         assertEquals("103", target?.netId)
         assertTrue("the dump marks this one as gone", target!!.isDown)
         // Cell -> Cell is still a handover: the two netIds differ.
         val previous = GcmDumpParser.parseNetworkPrevious(text)
-        assertEquals("Cell · 105", previous?.format())
+        assertEquals("Cell 105", previous?.format())
         assertNotEquals(target.netId, previous?.netId)
     }
 
@@ -502,13 +502,13 @@ class RecordsTaxonomyTest {
         // A VPN object names the network it rides in brackets; the number in
         // there is a transport type id, not a netId, so it is dropped.
         assertEquals(
-            "Active network is now VPN · 104 [WiFi]",
+            "Active network is now VPN 104 [WiFi]",
             GcmDumpParser.prettifyEventText(
                 "Active network is now GcmNetwork{104 VPN(17) [WiFi(1)]}"
             )
         )
         assertEquals(
-            "Active network went away, was Cell · 103 (DISCONNECTED)",
+            "Active network went away, was Cell 103 (DISCONNECTED)",
             GcmDumpParser.prettifyEventText(
                 "Active network went away, was GcmNetwork{103 Cell(0) DISCONNECTED}"
             )
@@ -520,12 +520,12 @@ class RecordsTaxonomyTest {
         // `BYPASSABLE` / `RESTRICTED` / `CONSTRAINED` are properties of a
         // network, not something that happened to it. Taking the first cap
         // word as the state put an untranslated token in a row's title
-        // (`已变更为 VPN · 105（BYPASSABLE）`) and lengthened the line for
+        // (`已变更为 VPN 105（BYPASSABLE）`) and lengthened the line for
         // nothing; only `DISCONNECTED` survives now.
         val text = GcmDumpParser.prettifyEventText(
             "Active network is now GcmNetwork{105 VPN(17) [WiFi(1)] BYPASSABLE}"
         )
-        assertEquals("Active network is now VPN · 105 [WiFi]", text)
+        assertEquals("Active network is now VPN 105 [WiFi]", text)
         assertNull(GcmDumpParser.parseNetworkTarget(text)?.state)
     }
 
@@ -534,25 +534,25 @@ class RecordsTaxonomyTest {
         // The nested wrapper HyperOS 4 prints (see the McsConnection regex);
         // its inner object is a GcmNetwork token, braces and all.
         assertEquals(
-            "Cell · 100",
+            "Cell 100",
             GcmDumpParser.prettifyEventText("McsConnection{GcmNetwork{100 Cell(0)}, type=0}")
         )
     }
 
     @Test
     fun networkGoneIsOnlyTheVanishingShape() {
-        assertTrue(GcmDumpParser.isNetworkGone("Active network went away, was Cell · 103"))
-        assertFalse(GcmDumpParser.isNetworkGone("Active network switched to WiFi · 106, was Cell · 103"))
-        assertFalse(GcmDumpParser.isNetworkGone("Active network is now WiFi · 104"))
-        assertFalse(GcmDumpParser.isNetworkGone("onGcmNetworkChanged: WiFi · 106"))
+        assertTrue(GcmDumpParser.isNetworkGone("Active network went away, was Cell 103"))
+        assertFalse(GcmDumpParser.isNetworkGone("Active network switched to WiFi 106, was Cell 103"))
+        assertFalse(GcmDumpParser.isNetworkGone("Active network is now WiFi 104"))
+        assertFalse(GcmDumpParser.isNetworkGone("onGcmNetworkChanged: WiFi 106"))
     }
 
     @Test
     fun networkSwitchRegexTakesTheTargetNotThePreviousNetwork() {
         // A handover line names two networks; the title must carry the one the
         // client landed on.
-        val text = "Active network switched to WiFi · 106, was Cell · 103"
-        assertEquals("WiFi · 106", GcmDumpParser.parseNetworkTarget(text)?.format())
+        val text = "Active network switched to WiFi 106, was Cell 103"
+        assertEquals("WiFi 106", GcmDumpParser.parseNetworkTarget(text)?.format())
         assertFalse(GcmDumpParser.isNetworkGone(text))
     }
 
@@ -569,8 +569,8 @@ class RecordsTaxonomyTest {
         )
         val target = GcmDumpParser.parseNetworkTarget(text)
         val previous = GcmDumpParser.parseNetworkPrevious(text)
-        assertEquals("Cell · 107", target?.format())
-        assertEquals("Cell · 103", previous?.format())
+        assertEquals("Cell 107", target?.format())
+        assertEquals("Cell 103", previous?.format())
         assertFalse(
             "two cell networks with different netIds are two networks",
             target!!.sameAs(previous!!)
@@ -607,14 +607,14 @@ class RecordsTaxonomyTest {
         val events = GcmDumpParser.parseEventsForTest(dump)
         assertEquals(2, events.size)
         val callback = events.first { it.text.startsWith("onGcmNetworkChanged: ") }
-        assertEquals("Cell · 103", GcmDumpParser.parseNetworkTarget(callback.text)?.format())
+        assertEquals("Cell 103", GcmDumpParser.parseNetworkTarget(callback.text)?.format())
         assertEquals(
             "the callback line now knows the network it came from",
-            "Cell · 101",
+            "Cell 101",
             callback.previousNetwork?.format()
         )
         val handover = events.first { it.text.startsWith("Active network switched to ") }
-        assertEquals("Cell · 101", handover.previousNetwork?.format())
+        assertEquals("Cell 101", handover.previousNetwork?.format())
     }
 
     @Test

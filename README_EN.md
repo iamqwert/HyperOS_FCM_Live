@@ -6,7 +6,7 @@ Removes HyperOS restrictions on broadcasts related to Google push connections, k
 
 **This module is built with AI assistance**
 
-[User guide](HELP_EN.md) · [Technical docs (Chinese)](HOOKS_AND_DIAGNOSTICS.md) · [Changelog (Chinese)](CHANGELOG.md) · [Downloads](https://github.com/iamqwert/HyperOS_FCM_Live/releases)
+[User guide](HELP_EN.md) · [Technical docs (Chinese)](FCM_HOOK_TECH_DOC.md) · [Changelog (Chinese)](CHANGELOG.md) · [Downloads](https://github.com/iamqwert/HyperOS_FCM_Live/releases)
 
 ---
 
@@ -14,7 +14,7 @@ Removes HyperOS restrictions on broadcasts related to Google push connections, k
 
 HyperOS's power-saving policies restrict broadcasts and networking for background apps. Google push (FCM) relies on Google Play services to broadcast a wake-up call to the target app; once that broadcast is deferred or blocked, notifications stop arriving.
 
-This module rewrites those checks at the framework level (`system_server` and `com.miui.powerkeeper`): it lets Google push and reconnect broadcasts through, keeps GMS from being cut off from the network, frozen or blacklisted, grants the target app a roughly 2-second temporary battery exemption on each push (allowlist-based), and lets the app receive the broadcast even in the "stopped" state.
+This module rewrites those checks at the framework level (`system_server` and `com.miui.powerkeeper`): it lets Google push and reconnect broadcasts through, keeps GMS from being cut off from the network, frozen or blacklisted, and lets the app receive the broadcast even in the "stopped" state.
 
 It does **not** keep FCM apps alive, does **not** stop the system from reclaiming their processes, and does **not** touch GMS's push-handling logic.
 
@@ -26,11 +26,12 @@ It does **not** keep FCM apps alive, does **not** stop the system from reclaimin
 
 | Category | What it does |
 |---|---|
-| Push fix | Lets c2dm delivery and reconnect broadcasts through, re-adds `FLAG_INCLUDE_STOPPED_PACKAGES`, passes the greeze autostart and freeze gates, ~2 s battery exemption on delivery |
+| Push fix | Lets c2dm delivery and reconnect broadcasts through, re-adds `FLAG_INCLUDE_STOPPED_PACKAGES`, passes the greeze autostart and freeze gates |
 | GMS protection | Adds GMS to the no-restrict list, forces its power-saving profile to "Unrestricted", skips fast freezing, turns off network restrictions; whether the network is cut during sleep mode is left to the system by default |
 | Allowlist | The module's only narrowing mechanism: decides which apps get the "woken by push" privileges; multi-select batch add/remove, search, select all |
 | List filters | Only apps that declare push components (Android 11+ package visibility, no permission needed), exclude MiPush apps (on by default), show system apps |
 | Tools | Opens GMS's built-in diagnostics screen, allowlist export/import, update check |
+| Records | Current FCM status and event history without opening FCM Diagnostics, filed in six classes, plus a one-tap export of the diagnostic text (device, system version and the hook-install summary included) |
 | Display & appearance | Language (Simplified Chinese / English), theme mode, dynamic color, palette style, color spec, hide launcher icon |
 | Experimental | Three-tier chained autostart release, weak-signal switching relief, network while frozen, Smart Power (OS3 only); WeChat battery optimization and sleep keep-alive live on the Settings page |
 | Entries | Shortcuts to Settings, Help and FCM diagnostics |

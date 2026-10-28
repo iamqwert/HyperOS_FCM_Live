@@ -138,7 +138,7 @@ class GcmDumpParserTest {
         assertEquals("OFF", snapshot.reconnectAlarm)
         assertEquals("PT4.026S", snapshot.globalBackoff)
         assertEquals(
-            listOf(NetworkBackoff(network = "Cell · 100", duration = "PT12S")),
+            listOf(NetworkBackoff(network = "Cell 100", duration = "PT12S")),
             snapshot.networkBackoffs
         )
         assertEquals("FALLBACK_NONE", snapshot.fallbackMode)
@@ -146,10 +146,10 @@ class GcmDumpParserTest {
 
     @Test
     fun networkStatus() {
-        assertEquals("WiFi · 102", snapshot.network.active)
-        assertEquals("WiFi · 102", snapshot.network.preferred)
-        assertEquals("WiFi · 102", snapshot.network.inUse)
-        assertEquals(listOf("Cell · 100", "WiFi · 102"), snapshot.network.available)
+        assertEquals("WiFi 102", snapshot.network.active)
+        assertEquals("WiFi 102", snapshot.network.preferred)
+        assertEquals("WiFi 102", snapshot.network.inUse)
+        assertEquals(listOf("Cell 100", "WiFi 102"), snapshot.network.available)
     }
 
     @Test

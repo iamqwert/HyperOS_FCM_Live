@@ -1,0 +1,42 @@
+name: 功能建议
+description: 新的放行点、新的开关，或对现有行为的调整
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        本模块的取舍是「宁可少改，也不要猜」：没有被运行时确认过的行为改动不会合入。
+        所以一条建议能不能落地，多半取决于它有没有可指认的系统门控与可复现的观测方式。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 现在的问题
+      description: 具体现象，不是「希望能更好用」
+      placeholder: 锁屏 1 小时后，某应用的消息要等到下次亮屏才到达
+    validations:
+      required: true
+
+  - type: textarea
+    id: gate
+    attributes:
+      label: 想改的系统行为
+      description: 如果知道是哪层门控（比如某个 `is*` 判定方法），写在这里；不知道就写清现象
+    validations:
+      required: false
+
+  - type: textarea
+    id: why_not_now
+    attributes:
+      label: 现有开关为什么解决不了
+      description: 说明已经试过哪些开关、结果如何
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 可提供的证据
+      description: 诊断文本、`dumpsys greezer` 片段、日志或反编译结果。没有证据也可以提，但会一直停在讨论阶段
+    validations:
+      required: false
