@@ -86,27 +86,14 @@ internal object GmsSupport {
             } catch (e: NoSuchMethodException) {
                 logSkipOtherGeneration("NetdExecutor#initGmsChain")
             }
-            // Present on both generations, but dead on OS4: the method exists
-            // (so this never reports absent) yet no dex in the OS4 ROM invokes
-            // it — only OS3's NetdExecutor does. Kept because a hook that
-            // resolves is free, and the polarity (false) is the safe direction
-            // regardless of whether anything still calls it.
-            try {
-                val setGmsDnsBlockerStateMethod = NetdExecutorClass.getDeclaredMethod(
-                    "setGmsDnsBlockerState",
-                    Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType
-                )
-                hookE(setGmsDnsBlockerStateMethod).intercept { chain: XposedInterface.Chain ->
-                    val args = chain.args.toTypedArray()
-                    if (args.size > 1) {
-                        args[1] = false
-                    }
-                    chain.proceed(args)
-                }
-                module.deoptimize(setGmsDnsBlockerStateMethod)
-            } catch (e: NoSuchMethodException) {
-                logSkip("NetdExecutor#setGmsDnsBlockerState absent, skip")
-            }
+            // P2 (`NetdExecutor#setGmsDnsBlockerState` → false) was removed on
+            // 2026-10-30. The method still resolves on OS4, but a full-dex scan
+            // of PowerKeeper finds **no caller at all** — and no reflective
+            // lookup either (the name appears in no string pool entry), so the
+            // old "dead on OS4, kept because resolving is free" note was
+            // describing a hook that could never execute. `NetdExecutor#execute`
+            // below still covers the DNS half for any generation that does call
+            // it, because `setuiddnsrule` for the GMS uid is rewritten there.
             // OS3-only (cross-generation): the gms_wall chain toggle has no
             // OS4 counterpart, so this reports absent there via
             // logSkipOtherGeneration (DEBUG). See hookGmsObserver's header.
@@ -119,7 +106,7 @@ internal object GmsSupport {
                     val args = chain.args.toTypedArray()
                     // NetdExecutor.setGmsChainState(chain, enable): enable==true 下发
                     // "set_chain_state <chain> enable"，配合 initGmsChain(gms_wall, uid, "REJECT")
-                    // 即 true=开墙阻断 GMS；与 setGmsDnsBlockerState(true→"deny") 一致。
+                    // 即 true=开墙阻断 GMS（与已删除的 P2 `setGmsDnsBlockerState` 同极性）。
                     if (args.size > 1) {
                         args[1] = false
                     }
@@ -144,14 +131,16 @@ internal object GmsSupport {
                         @Suppress("UNCHECKED_CAST")
                         val cmdArgs = args[3] as Array<Any?>
                         if ("setuiddnsrule" == cmd && cmdArgs.size >= 2) {
-                            // Gate by uid, never rewrite blind. On this ROM the
-                            // only PowerKeeper caller is the GMS-only wrapper
-                            // setGmsDnsBlockerState(IZ), so the gate is pure
-                            // future-proofing: a ROM generation that adds
-                            // callers for other uids passes through untouched
-                            // instead of having its rule silently flipped to
-                            // "allow". Unparseable uid also passes through —
-                            // never rewrite what cannot be proven to be GMS.
+                            // Gate by uid, never rewrite blind. On OS4 no
+                            // PowerKeeper code sends `setuiddnsrule` at all (the
+                            // old GMS-only wrapper `setGmsDnsBlockerState(IZ)`
+                            // had no caller and its hook was removed); this
+                            // branch is the generation-proof fallback for a ROM
+                            // that does send it. Gating keeps a future caller
+                            // for other uids passing through untouched instead
+                            // of having its rule silently flipped to "allow".
+                            // Unparseable uid also passes through — never
+                            // rewrite what cannot be proven to be GMS.
                             val uid = cmdArgs[0]?.toString()?.toIntOrNull() ?: -1
                             if (isGmsUid(uid)) {
                                 val rewritten = cmdArgs.copyOf()
@@ -201,9 +190,13 @@ internal object GmsSupport {
             )) {
                 forceBooleanArg(GmsObserverClass, legacyName, false, "GmsObserver", Log.DEBUG)
             }
-            // OS3-only (cross-generation): the hard "disable GMS" entries.
-            // Absent on OS4, which has no local state machine to gate them.
-            for (alwaysSkip in arrayOf("disableGms", "disableGmsApps")) {
+            // OS3-only (cross-generation): the hard "disable GMS" entry.
+            // Absent on OS4, which has no local state machine to gate it.
+            // `disableGmsApps` was dropped on 2026-10-30 after the OS3 dump:
+            // the method exists on neither supported generation (the OS3 dex
+            // and the OS4 dex both lack it), so its hook could never have
+            // installed anywhere.
+            for (alwaysSkip in arrayOf("disableGms")) {
                 try {
                     val disableMethod = GmsObserverClass.getDeclaredMethod(alwaysSkip)
                     hookE(disableMethod).intercept { _: XposedInterface.Chain -> null }
@@ -217,63 +210,31 @@ internal object GmsSupport {
             for (limitFlag in arrayOf("updateGmsEnabled", "updateGmsState", "updateGmsInstalled")) {
                 forceBooleanArg(GmsObserverClass, limitFlag, false, "GmsObserver", Log.DEBUG)
             }
-            // OS4's live limit exit, and the reason this whole function still
-            // earns its place on the test generation: OS4 routes the sole GMS
-            // network limit through here (reflection into greeze), not through
-            // any of the OS3 methods above. INFO (not DEBUG) on purpose — this
-            // one is load-bearing, so a miss on the current generation must be
-            // visible in the install summary.
-            forceBooleanArg(
-                GmsObserverClass, "updateFrameworkGmsNetStatus", false, "GmsObserver", Log.INFO
-            )
-            // OS4 reachability callback, pinned to "reachable".
+            // OS4's limit path (`updateFrameworkGmsNetStatus` → greeze
+            // `updateGmsNetStatus`) is deliberately NOT hooked here any more
+            // (2026-10-30). The same call is pinned to false on the system_server
+            // side by S5 (`GreezeManagerService#updateGmsNetStatus`), which is the
+            // end every caller funnels through — PowerKeeper's reflection hop, the
+            // handler route, all of them. Hooking both ends bought nothing but a
+            // second layer for one effect. If S5 ever reports absent on a
+            // generation that still limits GMS, the install summary says so
+            // (INFO) — that is the signal to bring this hook back.
+            //
+            // P9 stays on both generations: the reachability callback is pinned to
+            // "reachable". On OS4 that is idempotent with S5 (its only outward
+            // effect is the updateGmsNetStatus argument S5 pins), but on OS3 the
+            // limit path is the local state machine (P5/P6/P7) and this callback is
+            // the only thing keeping GMS's reachability true. Deleting it on
+            // OS4-only evidence would be wrong: OS3 shares this exact target.
+            //
+            // P10/P11 remain removed: `c`'s only call edge is this callback, and
+            // googleNetworkDisconnect's callback ends in the same place, so P9
+            // covers both.
             forceBooleanArg(
                 GmsObserverClass, "onGoogleReachabilityChanged", true, "GmsObserver", Log.INFO
             )
-            try {
-                val bridgeMethod = GmsObserverClass.getDeclaredMethod(
-                    "c", GmsObserverClass, Boolean::class.javaPrimitiveType
-                )
-                hookE(bridgeMethod).intercept { chain: XposedInterface.Chain ->
-                    val args = chain.args.toTypedArray()
-                    args[1] = true
-                    chain.proceed(args)
-                }
-                module.deoptimize(bridgeMethod)
-                // Install confirmation on purpose: "c" is an obfuscated name
-                // that drifts across ROM generations, and a silent failure here
-                // would look identical to the hook working. This line is the
-                // drift alarm — its absence after a ROM update is a finding.
-                module.logGated(
-                    Log.INFO, HookerSupport.TAG,
-                    "GmsObserver#c (obfuscated connected-bridge) hooked, forced connected=true"
-                )
-            } catch (ignored: NoSuchMethodException) {
-                logSkip("GmsObserver#c (obfuscated connected-bridge) absent, skip")
-            }
         } catch (e: ClassNotFoundException) {
             module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook GmsObserver", e)
-        }
-        var disconnectHooked = false
-        for (i in 1..8) {
-            if (disconnectHooked) break
-            val listenerName = "com.miui.powerkeeper.utils.GmsObserver\$$i"
-            try {
-                val GmsObserverListenerClass = classLoader.loadClass(listenerName)
-                try {
-                    val disconnectMethod =
-                        GmsObserverListenerClass.getDeclaredMethod("googleNetworkDisconnect")
-                    hookE(disconnectMethod).intercept { _: XposedInterface.Chain -> null }
-                    module.deoptimize(disconnectMethod)
-                    disconnectHooked = true
-                    module.logGated(Log.INFO, HookerSupport.TAG, listenerName + "#googleNetworkDisconnect hooked")
-                } catch (ignored: NoSuchMethodException) {
-                }
-            } catch (ignored: ClassNotFoundException) {
-            }
-        }
-        if (!disconnectHooked) {
-            logSkip("GmsObserver\$*#googleNetworkDisconnect absent, skip disconnect rewrite")
         }
     }
 
@@ -290,6 +251,13 @@ internal object GmsSupport {
      * "noRestrict" scenario that a normal app gets when the user selects
      * "Unrestricted", aligning UI / AOSP DeviceIdle / private policy state.
      *
+     * **This one is a consistency fix, nothing more, and that is settled.**
+     * There is no user-visible symptom it repairs and no measurable gain to
+     * report, so it must not be counted as a deliverable improvement, offered as
+     * evidence that GMS is unrestricted, or re-opened for "does it actually do
+     * anything" — the answer is "it makes three states agree", and that is the
+     * whole scope.
+     *
      * Field layout (verified from OS3/OS4 PowerKeeper DEX):
      *   PowerKeeperAppConfigure.pkg : String
      *   PowerKeeperAppConfigure.scenario : int
@@ -298,6 +266,9 @@ internal object GmsSupport {
      *   UserConfigureHelper,String,List,List)V
      * OS4 adds a trailing Map parameter.
      */
+    @Volatile
+    private var sScenarioAlignedLogged = false
+
     internal fun hookScenarioCompiler(
         module: XposedInterface,
         classLoader: ClassLoader,
@@ -338,6 +309,13 @@ internal object GmsSupport {
                             Log.INFO, HookerSupport.TAG,
                             "P3: rewrote GMS scenario ${HookerSupport.SCENARIO_MUI_AUTO_GMS} → ${HookerSupport.SCENARIO_NO_RESTRICT}"
                         )
+                    } else if (scenario == HookerSupport.SCENARIO_NO_RESTRICT && !sScenarioAlignedLogged) {
+                        sScenarioAlignedLogged = true
+                        module.logGated(
+                            Log.INFO, HookerSupport.TAG,
+                            "P3: GMS scenario already ${HookerSupport.SCENARIO_NO_RESTRICT} " +
+                                "(the compiler reaches this hook; no rewrite needed)"
+                        )
                     }
                     try {
                         ensureGmsUserTableBgControl(module, getSystemContext)
@@ -368,6 +346,12 @@ internal object GmsSupport {
      * hooked — only the framework-side freeze policy is told to treat GMS as
      * no-restrict.
      */
+    @Volatile
+    private var sFreezeGateAnsweredLogged = false
+
+    @Volatile
+    private var sFreezeableAnsweredLogged = false
+
     internal fun hookGreezerNoRestrict(
         module: XposedInterface,
         classLoader: ClassLoader,
@@ -390,6 +374,14 @@ internal object GmsSupport {
                 hookE(isNoRestrictAppMethod).intercept { chain: XposedInterface.Chain ->
                     val pkg = chain.getArg(0)
                     if (HookerSupport.GMS_PACKAGE_NAME == pkg) {
+                        if (!sFreezeGateAnsweredLogged) {
+                            sFreezeGateAnsweredLogged = true
+                            module.logGated(
+                                Log.INFO, HookerSupport.TAG,
+                                "no-restrict chain: isNoRestrictApp(GMS) answered true " +
+                                    "(freeze path consulted the module and skipped GMS)"
+                            )
+                        }
                         return@intercept true
                     }
                     chain.proceed()
@@ -407,6 +399,14 @@ internal object GmsSupport {
                 hookE(isNoRestrictFreezeableMethod).intercept { chain: XposedInterface.Chain ->
                     val pkg = chain.getArg(0)
                     if (HookerSupport.GMS_PACKAGE_NAME == pkg) {
+                        if (!sFreezeableAnsweredLogged) {
+                            sFreezeableAnsweredLogged = true
+                            module.logGated(
+                                Log.INFO, HookerSupport.TAG,
+                                "no-restrict chain: isNoRestrictFreezeable(GMS) answered false " +
+                                    "(the OS4 freezeable branch consulted the module)"
+                            )
+                        }
                         return@intercept false
                     }
                     chain.proceed()
@@ -494,10 +494,10 @@ internal object GmsSupport {
      *     without it. The module never touches that file.
      *
      * The earlier "five places" count was wrong and is retired: it still listed
-     * the autostart `10053` switch-op backfill, which 4.2.0 deleted (autostart
-     * is read-only now — [AutostartGate]), and the fifth entry was never
-     * identified by anyone. Three is the whole surface; a fourth would have to
-     * be a new write, and it has to justify itself against this list.
+     * the autostart `10053` switch-op backfill, which 4.2.0 deleted, and the
+     * fifth entry was never identified by anyone. Three is the whole surface;
+     * a fourth would have to be a new write, and it has to justify itself
+     * against this list.
      *
      * All three widen a restriction; none can blacklist an app, and there is no
      * path that leaves an app worse off after uninstalling the module than it
@@ -505,6 +505,9 @@ internal object GmsSupport {
      * uid injections, netd/DNS rule rewrites, in-memory hook answers — are
      * deliberately not counted here: this list tracks what persists.
      */
+    @Volatile
+    private var sMilletPresentLogged = false
+
     internal fun ensureGmsInMilletSetting(
         module: XposedInterface,
         getSystemContext: () -> Context?
@@ -515,7 +518,16 @@ internal object GmsSupport {
         val raw = android.provider.Settings.System.getString(resolver, HookerSupport.MILLET_NO_RESTRICT_APP_KEY)
             ?: ""
         val entries = raw.split(',').map { it.trim() }.filter { it.isNotEmpty() }
-        if (entries.contains(HookerSupport.GMS_PACKAGE_NAME)) return
+        if (entries.contains(HookerSupport.GMS_PACKAGE_NAME)) {
+            if (!sMilletPresentLogged) {
+                sMilletPresentLogged = true
+                module.logGated(
+                    Log.INFO, HookerSupport.TAG,
+                    "MILLET_NO_RESTRICT_APP: GMS already present (${entries.size} entries)"
+                )
+            }
+            return
+        }
         val updated = if (entries.isEmpty()) {
             HookerSupport.GMS_PACKAGE_NAME
         } else {
@@ -613,6 +625,15 @@ internal object GmsSupport {
      * alongside GMS and is included as a target.
      */
     internal fun recoverGmsConnection(module: XposedInterface, context: Context) {
+        sendRecoveryBroadcasts(module, context)
+        queryChimera(module, context)
+    }
+
+    /**
+     * The broadcast half of P4, split out because the two halves have different
+     * cost: this one returns immediately, [queryChimera] blocks.
+     */
+    internal fun sendRecoveryBroadcasts(module: XposedInterface, context: Context) {
         for (target in arrayOf(HookerSupport.GMS_PACKAGE_NAME, HookerSupport.GSF_PACKAGE_NAME)) {
             for (action in HookerSupport.RECOVERY_BROADCAST_ACTIONS) {
                 try {
@@ -625,6 +646,14 @@ internal object GmsSupport {
             }
         }
         module.logGated(Log.INFO, HookerSupport.TAG, "P4: recovery broadcasts sent to GMS+GSF")
+    }
+
+    /**
+     * The provider half of P4. Separate from the broadcasts because it is the
+     * blocking call of the pair: callers that must not block (a hook chain) run it
+     * on their own thread.
+     */
+    internal fun queryChimera(module: XposedInterface, context: Context) {
         try {
             val uri = android.net.Uri.parse(HookerSupport.CHIMERA_PROVIDER_URI)
             val cursor = context.contentResolver.query(uri, null, null, null, null)

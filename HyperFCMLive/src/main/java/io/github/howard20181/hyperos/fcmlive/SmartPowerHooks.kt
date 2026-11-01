@@ -51,10 +51,6 @@ internal object SmartPowerHooks {
     private const val BROADCAST_METHOD = "shouldInterceptBroadcast"
     private const val SERVICE_METHOD = "shouldInterceptService"
 
-    /** 开关放行的拦截次数（广播 + 服务合计），由 [Hooker] 的汇总行读出。 */
-    @Volatile
-    internal var smartPowerReleaseCount = 0
-
     internal fun hookSmartPowerIntercept(
         module: XposedInterface,
         classLoader: ClassLoader,
@@ -122,7 +118,6 @@ internal object SmartPowerHooks {
                                 module, systemContext, targetPackage
                             )
                         ) {
-                            smartPowerReleaseCount++
                             return@intercept false
                         }
                     }
@@ -181,7 +176,6 @@ internal object SmartPowerHooks {
                                 module, systemContext, packageName
                             )
                         ) {
-                            smartPowerReleaseCount++
                             return@intercept false
                         }
                     }

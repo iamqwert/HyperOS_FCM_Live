@@ -15,10 +15,10 @@ import java.lang.reflect.Method
  * [hookGreezeManagerService], [hookDomesticPolicyManager] (with the
  * `isRestrictNet` defence), [hookUdpPackageRestrict], [hookListAppsManager],
  * [hookBroadcastQueueModernStubImpl] (with the warm-receiver gate),
- * [hookGreezeBroadcastCache], [hookProcessPolicy] and [hookAwareResourceControl].
+ * [hookProcessPolicy] and [hookAwareResourceControl].
  *
  * `Hooker`'s instance capabilities are injected at the call sites, the same way
- * [GmsSupport] and [AutostartGate] receive theirs: `module` is the
+ * [GmsSupport] receives them: `module` is the
  * [XposedInterface] the module entry object is (`log` / `deoptimize` /
  * `getInvoker`), `hookE` is `Hooker#hookE` (the counted, `setId`-deduplicated
  * hook builder — its `hooksInstalled` counter feeds the end-of-install summary
@@ -32,63 +32,15 @@ import java.lang.reflect.Method
  * `Hooker`'s allowlist state, and `systemContext` feeds
  * [AllowlistGate.moduleAppliesTo].
  *
- * The broadcast-gate counters ([broadcastGateAllowedCount] and friends) are
- * read back by `Hooker`'s [Hooker.broadcastGateSummary], which is why they are
- * `internal` here and not private.
+ * Observability policy (2026-10-30): this file carries **one-shot** lines only.
+ * A hook that fired prints once, per process; silence means the branch was
+ * never taken. The per-tick counters and the 30-min broadcast-gate summary were
+ * removed with the probe layer — nothing consumed them, and the counters made
+ * every hook look like an observation post instead of a fix.
  */
 internal object GreezeHooks {
 
-    /**
-     * P0/P1 broadcast-gate counters (2026-10-02).
-     *
-     * One-shot booleans alone cannot answer "did the change take effect": a
-     * legitimately-never-taken branch looks identical to a broken hook. These
-     * counters are printed together once per traffic-probe tick
-     * (see `Hooker#broadcastGateSummary`), so a night's log shows the split even
-     * when every count is zero.
-     */
-    @Volatile
-    internal var broadcastGateAllowedCount = 0
-
-    /** Subset of [broadcastGateAllowedCount] decided by callerUid, not callerPkg. */
-    @Volatile
-    internal var broadcastGateAllowedByUidCount = 0
-
-    /** c2dm from GMS with the callee off the allowlist: handed back to the ROM. */
-    @Volatile
-    internal var broadcastGateSkippedCount = 0
-
-    /** GMS-internal reconnect actions allowed through the same gate. */
-    @Volatile
-    internal var broadcastGateCnActionCount = 0
-
-    /**
-     * `BroadcastQueueModernStubImpl#checkApplicationAutoStart` answered allow at
-     * method entry (caller=GMS + c2dm + allowlisted callee).
-     *
-     * Blind-spot closure (2026-10-13): this hook used to be the module's only
-     * checkpoint that answered without leaving a trace — the greeze freeze gate
-     * (`isAllowBroadcast`) is never asked for a non-frozen callee, and this very
-     * early return short-circuits the downstream wake-path probe, so a night of
-     * live c2dm traffic read as `c2dm allowed=0, wake-path c2dm=0`. The
-     * GcmService dump proved the hop carries FCM traffic; these counters are
-     * what make that visible going forward.
-     */
-    @Volatile
-    internal var broadcastGateAutostartAllowedCount = 0
-
-    /**
-     * c2dm from GMS reaching this checkpoint with the callee off the allowlist:
-     * handed back to the ROM.
-     */
-    @Volatile
-    internal var broadcastGateAutostartSkippedCount = 0
-
-    /** c2dm that reached `DomesticPolicyManager#deferBroadcast` unsuppressed. */
-    @Volatile
-    internal var deferC2dmPassthroughCount = 0
-
-    /** One-shot: first c2dm allow decided by the isAllowBroadcast gate. */
+    /** One-shot: first c2dm allow decided by the isRestrictReceiver gate. */
     @Volatile
     private var broadcastGateAllowedLogged = false
 
@@ -99,19 +51,6 @@ internal object GreezeHooks {
     /** One-shot: first c2dm deliberately left to the ROM policy (P0 behaviour). */
     @Volatile
     private var broadcastGateSkippedLogged = false
-
-    /** One-shot: first c2dm arriving at `DomesticPolicyManager#deferBroadcast`. */
-    @Volatile
-    private var deferC2dmPassthroughLogged = false
-
-    /**
-     * Greeze net release: freeze-time network restrictions skipped for checked
-     * apps. Not an autostart verdict at all — it rides the greeze hook — so it
-     * lives in its own number and its own summary word (`net-released`), never
-     * mixing into the autostart gate's `released=` group.
-     */
-    @Volatile
-    internal var greezeNetReleaseCount = 0
 
     /** Uids whose first net-release already produced a detail line. */
     private val greezeNetReleaseLoggedUids = HashSet<Int>()
@@ -124,10 +63,6 @@ internal object GreezeHooks {
     @Volatile
     private var gmsUdpFilterLogged = false
 
-    /** One-shot: confirms the ListAppsManager system-blacklist prune actually ran. */
-    @Volatile
-    private var listAppsBlacklistPruneLogged = false
-
     /** One-shot: confirms the ListAppsManager use-data whitelist add actually ran. */
     @Volatile
     private var listAppsUseDataAddLogged = false
@@ -138,10 +73,6 @@ internal object GreezeHooks {
     /** One-shot: the frozen-process wake-lock gate answered "allowed" for GMS. */
     @Volatile
     private var gmsWakeUpListAllowedLogged = false
-
-    /** One-shot: a due GMS alarm was kept out of the Aurogon freeze cache. */
-    @Volatile
-    private var gmsAlarmCacheSkippedLogged = false
 
     /**
      * greeze (`com.miui.server.greeze.GreezeManagerService`): the ROM's freeze /
@@ -156,14 +87,19 @@ internal object GreezeHooks {
      *   greeze history, **and the real contents of `mBroadcastTargetWhiteList`**
      *   — 8 entries on this device, all Tencent / Feishu / Rimet. GMS is not one
      *   of them, which is the whole reason the broadcast gates below exist.
-     * - Policy dispatch is Domestic here (`mCurrentCNPolicy: 1`, region CN), so
-     *   `InternationalPolicyManager#isPushApp` is dead code on this device, and
-     *   `isPushApp == true` means *restrict* that app's network — the opposite of
-     *   what the name suggests.
+     * - Policy dispatch is Domestic here (`mCurrentCNPolicy: 1`, region CN).
+     *   `isPushApp` is declared **only** in `InternationalPolicyManager` (not in
+     *   the `PolicyManager` interface, not in `DomesticPolicyManager`), and that
+     *   class is never instantiated here — the hook on it was removed on
+     *   2026-10-30 rather than kept "for international ROMs": those do not need
+     *   this module at all, so there is no machine on which it could ever run.
      * - GMS does not enter the freeze path at all: per-uid accounting reads
      *   `uid=10133 frozen=0s` after 15h and `noControl` reports
      *   `no_freeze:invisible`. The network hooks in this file are therefore
-     *   defence in depth, not the fix — see [hookDomesticRestrictNet].
+     *   dormant, not the fix — but they are load-bearing peers of the freeze
+     *   chain, not redundancy: S12 answers at the chain's first gate (see the
+     *   reason map in [hookDomesticRestrictNet]), and the moment a caller
+     *   bypasses PolicyMaker, these are what keep GMS's network alive.
      * - The real MIUI network engine is netd's
      *   `OemNetdListener.setMiuiFirewallRule` (0 rules installed at runtime
      *   here). The older `enablemiuistandby enable` standby chain is a dead
@@ -247,27 +183,17 @@ internal object GreezeHooks {
                         val callerUidIsGms = callerUid is Int && isGmsUid(callerUid)
                         val calleeIsGms = HookerSupport.GMS_PACKAGE_NAME == calleePkgName ||
                             HookerSupport.GMS_PERSISTENT_PROCESS_NAME == calleePkgName
-                        if (HookerSupport.ACTION_REMOTE_INTENT == action &&
-                            (callerPkgIsGms || callerUidIsGms) &&
-                            AllowlistGate.moduleAppliesTo(module, systemContext, calleePkgName)
-                        ) {
-                            broadcastGateAllowedCount++
-                            if (!callerPkgIsGms) {
-                                broadcastGateAllowedByUidCount++
-                            }
-                            if (!broadcastGateAllowedLogged) {
-                                broadcastGateAllowedLogged = true
-                                module.logGated(
-                                    Log.INFO, HookerSupport.TAG,
-                                    "isAllowBroadcast: c2dm allowed for callee=$calleePkgName " +
-                                        "(callerUid=$callerUid, callerPkg=$callerPkg, " +
-                                        "matchedBy=${if (callerPkgIsGms) "callerPkg" else "callerUid"})"
-                                )
-                            }
-                            return@intercept true
-                        }
+                        // The c2dm allow lives in isRestrictReceiver (S10). The
+                        // fallback that used to sit here was removed on
+                        // 2026-10-30 after the OS3 dump settled S10's targets:
+                        // `isRestrictReceiver(Intent,int,String,int,String)` and
+                        // `thawUidAsync(int,int,String)` exist with identical
+                        // signatures in both supported dexes, so S10 installs on
+                        // every generation this module supports. If it ever
+                        // fails, it reports through the install summary and the
+                        // ROM's freeze policy takes over, as on a device
+                        // without this module.
                         if (calleeIsGms && HookerSupport.CN_DEFER_BROADCAST.contains(action)) {
-                            broadcastGateCnActionCount++
                             return@intercept true
                         }
                         if (HookerSupport.ACTION_REMOTE_INTENT == action &&
@@ -278,7 +204,6 @@ internal object GreezeHooks {
                             // exactly like a phone without the module" is an
                             // observation rather than a claim — this is the path P0
                             // hands back to the ROM.
-                            broadcastGateSkippedCount++
                             if (!broadcastGateSkippedLogged) {
                                 broadcastGateSkippedLogged = true
                                 module.logGated(
@@ -295,67 +220,42 @@ internal object GreezeHooks {
                 module.deoptimize(isAllowBroadcastMethod)
                 module.logGated(
                     Log.INFO, HookerSupport.TAG,
-                    "P1: isAllowBroadcast hooked; caller-uid fallback armed (arg0=callerUid)"
+                    "P1: isAllowBroadcast hooked for GMS-internal reconnect actions only; " +
+                        "the c2dm allow lives in isRestrictReceiver (S10)"
                 )
             }
         } catch (e: Exception) {
             module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook GreezeManagerService#isAllowBroadcast", e)
         }
-        try {
-            val deferBroadcastForMiuiMethod = GreezeManagerServiceClass.getDeclaredMethod(
-                "deferBroadcastForMiui", String::class.java
-            )
-            hookE(deferBroadcastForMiuiMethod).intercept { chain: XposedInterface.Chain ->
-                if ((chain.getArg(0) as? String)?.let { HookerSupport.CN_DEFER_BROADCAST.contains(it) } == true) {
-                    return@intercept false
-                }
-                chain.proceed()
-            }
-            module.deoptimize(deferBroadcastForMiuiMethod)
-        } catch (e: Exception) {
-            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook GreezeManagerService#deferBroadcastForMiui", e)
-        }
-        // ponytail: mGmsLimitEnabled is cleared on every call, never once at
-        //   install. It is pure runtime state — constructor-initialised to true,
-        //   and the dump command is its only writer — so every system_server
-        //   restart resets it and a one-shot clean-up would be silently undone
-        //   (independently corroborated by hyperos-fcm-fix's greeze notes).
-        //   Cost: one Unsafe write per call. Condition to drop it: proof on this
-        //   generation that the field is never read after boot.
-        val triggerGMSLimitActionMethod: Method
-        try {
-            triggerGMSLimitActionMethod = try {
-                GreezeManagerServiceClass.getDeclaredMethod(
-                    "triggerGMSLimitAction", Boolean::class.javaPrimitiveType
-                )
-            } catch (ignored: NoSuchMethodException) {
-                GreezeManagerServiceClass.getDeclaredMethod("triggerGMSLimitAction")
-            }
-            hookE(triggerGMSLimitActionMethod).intercept { chain: XposedInterface.Chain ->
-                if (chain.args.isNotEmpty()) {
-                    val args = chain.args.toTypedArray()
-                    args[0] = false
-                    return@intercept chain.proceed(args)
-                }
-                try {
-                    val mGmsLimitEnabled =
-                        GreezeManagerServiceClass.getDeclaredField("mGmsLimitEnabled")
-                    UnsafeUtils.setBooleanField(mGmsLimitEnabled, chain.thisObject, false)
-                } catch (t: Throwable) {
-                    module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to clear mGmsLimitEnabled", t)
-                }
-                chain.proceed()
-            }
-            module.deoptimize(triggerGMSLimitActionMethod)
-        } catch (e: Throwable) {
-            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook GreezeManagerService#triggerGMSLimitAction", e)
-        }
+        // S3 (`deferBroadcastForMiui` → false for CN actions) was removed on
+        // 2026-10-30. Reachability on OS4 needs three things at once: the callee
+        // FULLY_FROZEN (isRestrictReceiver is the only caller of isAllowBroadcast),
+        // the cloud list `mAllowBroadcast` (or an important-app callee) admitting
+        // the action, and — for the GMS callee case that matters here — a pass
+        // through the frame where S2 already answers the same four actions at
+        // isAllowBroadcast's entry. No sample ever existed; the residual face is
+        // cloud-gated, which is the module's own exemption rule for keeping a hook.
+
+        // S4 (`triggerGMSLimitAction` → false / clear `mGmsLimitEnabled`) was
+        // removed on 2026-10-30 (second pass). OS4 dex: the class carries only
+        // the no-arg overload (miui-services idx 7120, no (Z) form), and its
+        // three callers are lambda$updateGmsNetStatus$3 (posts only on
+        // status==true, which the S5 pin below makes unreachable), H#handleMessage
+        // what=10 (no sender in this dex) and handleDumpGMS — the manual
+        // `dumpsys greezer gms limit` debug command. With the automatic face
+        // dead, the hook's only live trigger was that command. S5 is the layer
+        // that actually holds; if it ever reports absent (INFO in the install
+        // summary), re-evaluate bringing S4 back.
+        // S5's target is OS4-only: the OS3 dex has no `updateGmsNetStatus`
+        // (verified 2026-10-30), so a miss there is a cross-generation fact,
+        // not a same-generation gap — hence DEBUG, which keeps the OS3 install
+        // summary's "absent on this ROM" count honest.
         forceBooleanArg(
             GreezeManagerServiceClass,
             "updateGmsNetStatus",
             false,
             "GreezeManagerService",
-            Log.INFO
+            Log.DEBUG
         )
     }
 
@@ -370,78 +270,11 @@ internal object GreezeHooks {
     ) {
         val DomesticPolicyManagerClass =
             classLoader.loadClass("com.miui.server.greeze.DomesticPolicyManager")
-        val deferBroadcastMethod = DomesticPolicyManagerClass.getDeclaredMethod(
-            "deferBroadcast", String::class.java
-        )
-        hookE(deferBroadcastMethod).intercept { chain: XposedInterface.Chain ->
-            // P0 (2026-10-02): the c2dm branch that used to sit here is gone.
-            //
-            // It rested on the belief that c2dm never reaches this method on a CN
-            // build ("structural dead end"). Runtime evidence disproves it: the
-            // module's own sentinel fired at 2026-10-02T07:55:54. The disassembly
-            // agrees, and the exact chain in
-            // `GreezeManagerService#isAllowBroadcast` is:
-            //
-            //   009a  PolicyManager.isCnModel()
-            //   009e  if-nez v0, 00bc   ; isCnModel() != 0 (CN) => branch to 00bc,
-            //                          ; skipping the whole short-circuit block
-            //   00a0  InternationalPolicyManager.enableNewStrategy()
-            //   00a4  if-eqz v0, 00bc   ; false => also branch to 00bc
-            //   00a6..00bb             ; only non-CN + new strategy: answers true
-            //                          ; (allowed) for isAutoStartRestrict or c2dm
-            //   00d9  deferBroadcastForMiui(action)
-            //
-            // So c2dm is short-circuited at 00bb on **non-CN builds only**; on a CN
-            // build it always falls through to 00d9. enableNewStrategy() is just
-            // `sget-boolean InternationalPolicyManager.mNewController`, and
-            // isCnModel() is `PolicyManagerConfig.sCnModel`. This device reports
-            // region CN and `dumpsys greezer` shows mCurrentCNPolicy=1, so the
-            // 009a/009e pair alone settles the branch — which is why the runtime
-            // sample and the static derivation agree. Note that
-            // `persist.sys.greeze.oversea` plays no part here: it is folded into
-            // mNewController, and mNewController is read only *after* the CN test.
-            //
-            // deferBroadcastForMiui then needs `mMiuiDeferBroadcast` (this ROM:
-            // android.intent.action.BATTERY_CHANGED only) to miss, and its
-            // `000c if-nez mScreenOn, 001b` shows `PolicyManager#deferBroadcast`
-            // is reached only while the screen is ON — so the sentinel sample
-            // implies the screen was on at 07:55:54.
-            //
-            // This signature carries the action and nothing else, so the old
-            // branch exempted c2dm for *every* caller — including deliveries to
-            // apps the user never selected, which quietly defeated the allowlist.
-            // The decision now belongs solely to
-            // `GreezeManagerService#isAllowBroadcast`, which sees callerUid,
-            // callerPkgName, calleeUid and calleePkgName at once. Here only the
-            // GMS-internal reconnect actions stay exempt.
-            val action = chain.getArg(0) as? String
-            if (action != null && HookerSupport.CN_DEFER_BROADCAST.contains(action)) {
-                return@intercept false
-            }
-            if (HookerSupport.ACTION_REMOTE_INTENT == action) {
-                // Success-path counter for the tightened behaviour: a c2dm
-                // broadcast that the isAllowBroadcast gate did not consume is
-                // genuinely handed back to the ROM's deferral policy. Zero here
-                // is not a failure — it means every c2dm was already allowed
-                // upstream (every callee involved was on the list).
-                deferC2dmPassthroughCount++
-                if (!deferC2dmPassthroughLogged) {
-                    deferC2dmPassthroughLogged = true
-                    module.logGated(
-                        Log.INFO, HookerSupport.TAG,
-                        "deferBroadcast: c2dm reached the ROM policy " +
-                            "(P0: no longer bypassed here)"
-                    )
-                }
-            }
-            chain.proceed()
-        }
-        module.deoptimize(deferBroadcastMethod)
-        module.logGated(
-            Log.INFO, HookerSupport.TAG,
-            "P0: DomesticPolicyManager#deferBroadcast hooked; c2dm bypass removed, " +
-                "CN reconnect actions only"
-        )
+        // S6 (`DomesticPolicyManager#deferBroadcast` counter) was removed on
+        // 2026-10-30: a c2dm reaching the ROM deferral policy is already visible
+        // as "not allowed upstream", and the counter had no consumer after the
+        // broadcast-gate summary went away.
+
         hookDomesticRestrictNet(
             module, DomesticPolicyManagerClass, hookE, logSkip,
             isGmsUid, netReleaseEnabled, allowlistPackageForUid
@@ -467,9 +300,27 @@ internal object GreezeHooks {
      * So true really means "restrict this uid's network", and GMS — being absent
      * from the exempt list — would get its sockets torn if it were ever frozen.
      *
-     * Currently inert: greezer history shows GMS never enters the freeze path on
-     * this device (E7-3 closed, negative). Shipped as defence: if a future ROM or
-     * state freezes GMS, this keeps the network restriction off.
+     * Not applicable today: `dumpsys greezer` shows GMS never entering the freeze
+     * path on this device (E7-3 closed, negative), so the hook does not fire in
+     * normal use. Settled 2026-10-30 — where S12 actually answers inside
+     * `AurogonFilterManager#filter` (the `0x40` bit) and where it does not:
+     *
+     *   0x40 SET   PolicyMaker#checkFilterWhitelist   0x20026a40  ← isAllowFreeze
+     *              main chain, FIRST gate (S13 pins isAllowFreeze above it, and
+     *              CANNOT_FREEZE=0, so the pin is correct)
+     *   0x40 SET   BigData…triggerHighCpuLoadFreeze   0x237eafa
+     *   0x40 SET   GMS#triggerIdleAppAction           0x23feefe
+     *   no 0x40    GMS#freezeAction (both gates)      0x50000000 / 0x20000000
+     *   no 0x40    PolicyMaker#checkStatePolicy       0x2000004  (second gate,
+     *              only reached when the first said FREEZE_ABLE)
+     *   no 0x40    GMS#preCheckInterest               0x1521c00 (+0x20|0x200|0x2000
+     *              when the screen is on)
+     *   no 0x40    BgCpuHighLoadManager#checkAllExemptions 0x378ab2
+     *
+     * So S12 stops GMS at the first gate of the main freeze chain; the branches
+     * below only matter for callers that bypass PolicyMaker. This hook shares
+     * the freeze path's fate: if GMS ever freezes, this is what keeps its
+     * network alive.
      *
      * Experiment branch (`greeze_net_release`, default off): the same `false`
      * for a uid whose package is on the FCM wake allowlist. An empty allowlist
@@ -497,8 +348,8 @@ internal object GreezeHooks {
             hookE(isRestrictNetMethod).intercept { chain: XposedInterface.Chain ->
                 val uid = chain.getArg(0)
                 if (uid is Int && isGmsUid(uid)) {
-                    // Dedicated one-shot: `restrictNetMatchLogged` belongs to the
-                    // isPushApp stack-walk branch and must not be consumed here.
+                    // Dedicated one-shot: this fires once per boot, and it is the
+                    // only evidence that the Domestic restrict-net branch is real.
                     if (!gmsRestrictNetLogged) {
                         gmsRestrictNetLogged = true
                         module.logGated(
@@ -511,7 +362,6 @@ internal object GreezeHooks {
                 if (uid is Int && netReleaseEnabled()) {
                     val checkedPkg = allowlistPackageForUid(uid)
                     if (checkedPkg != null) {
-                        greezeNetReleaseCount++
                         // Detail budget: one line per uid, ever — the summary
                         // tick carries the volume, so repeating the same names
                         // each freeze would only spend log bytes.
@@ -563,8 +413,11 @@ internal object GreezeHooks {
      * Only the `allow=true` direction is skipped. Skipping `allow=false` too would
      * strand an already-installed filter and leave GMS permanently filtered.
      *
-     * Still inert today: E7-3 shows GMS never enters the freeze path, so this never
-     * fires in normal use. Shipped as defence, and no benefit is claimed.
+     * Not applicable today: E7-3 shows GMS never entering the freeze path, so
+     * this does not fire in normal use. It shares the freeze path's fate; S12's
+     * answer point inside `filter` is mapped in [hookDomesticRestrictNet]
+     * (0x40 set on the main chain's first gate, absent from `freezeAction`'s
+     * own two gates).
      */
     internal fun hookUdpPackageRestrict(
         module: XposedInterface,
@@ -613,102 +466,113 @@ internal object GreezeHooks {
     ) {
         val ListAppsManagerClass =
             classLoader.loadClass("com.miui.server.greeze.power.ListAppsManager")
-        var mSystemBlackListField: Field? = null
-        try {
-            mSystemBlackListField = ListAppsManagerClass.getDeclaredField("mSystemBlackList")
-        } catch (e: NoSuchFieldException) {
-            try {
-                mSystemBlackListField = ListAppsManagerClass.getDeclaredField("SYSTEM_BLACK_LIST")
-            } catch (ex: NoSuchFieldException) {
-                module.logGated(
-                    Log.ERROR, HookerSupport.TAG,
-                    "Failed to find ListAppsManager.mSystemBlackList or ListAppsManager.SYSTEM_BLACK_LIST",
-                    e
-                )
-            }
+        // SYSTEM_BLACK_LIST is deliberately NOT touched any more (2026-10-30).
+        // The OS4 dex settles the polarity the earlier revision could only
+        // guess at:
+        //
+        //   ListAppsManager.<init>  → SYSTEM_BLACK_LIST.addAll(array/greezer_power_black_list)
+        //                             if (!PolicyManager.isCnModel()) SYSTEM_BLACK_LIST.remove("com.google.android.gms")
+        //   PolicyMaker#checkStatePolicy      → isIncludeSystemBlack && plugged → CANNOT_FREEZE ("systemblack")
+        //   PolicyMaker#preCheckSystemApp     → isIncludeSystemBlack && plugged → "sysblack_plugged"
+        //
+        // So the set is an *exemption* list, and the ROM removes GMS from it only
+        // on non-CN builds — on this CN device `com.google.android.gms` is in
+        // `greezer_power_black_list` on purpose. Pruning it was the opposite of
+        // the module's goal (it removed a charging-time freeze exemption).
+        val useDataField = findFirstField(
+            ListAppsManagerClass, "mUseDataWhiteList", "USE_DATA_WHITE_LIST"
+        )
+        if (useDataField == null) {
+            module.logGated(
+                Log.ERROR, HookerSupport.TAG,
+                "Failed to find ListAppsManager.mUseDataWhiteList or ListAppsManager.USE_DATA_WHITE_LIST"
+            )
         }
-        if (mSystemBlackListField != null) {
-            mSystemBlackListField.isAccessible = true
-            val constructors = ListAppsManagerClass.declaredConstructors
-            for (constructor in constructors) {
-                val field = mSystemBlackListField
+        // The use-data set is what `PolicyMaker#preCheckSystemApp` reads for the
+        // "whiteapp" exemption, and the ROM does not seed GMS into it on CN.
+        // The edit is idempotent, so one post-construction hook suffices.
+        // The use-data half used to sit on isInWhiteList, i.e. on every use-data
+        // query for every package: the set is process-wide and the entry only
+        // ever has to appear once, so a reflective field read per query bought
+        // nothing after the first call.
+        if (useDataField != null) {
+            for (constructor in ListAppsManagerClass.declaredConstructors) {
                 hookE(constructor).intercept { chain: XposedInterface.Chain ->
                     try {
                         chain.proceed()
                     } finally {
                         try {
-                            @Suppress("UNCHECKED_CAST")
-                            val mSystemBlackList =
-                                field.get(chain.thisObject) as MutableList<String>?
-                            // One-shot confirmation: this constructor fires during
-                            // system_server startup and used to mutate silently, so
-                            // "hook installed" and "mutation actually happened" were
-                            // indistinguishable in the logs.
-                            val removed = mSystemBlackList?.remove(HookerSupport.GMS_PACKAGE_NAME)
-                            if (removed != null && !listAppsBlacklistPruneLogged) {
-                                listAppsBlacklistPruneLogged = true
-                                module.logGated(
-                                    Log.INFO, HookerSupport.TAG,
-                                    "ListAppsManager: pruned GMS from system blacklist " +
-                                        "(was present=$removed)"
-                                )
-                            }
-                        } catch (e: Exception) {
-                            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to modify system blacklist", e)
+                            addGmsToUseDataWhiteList(module, useDataField, chain.thisObject)
+                        } catch (t: Throwable) {
+                            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to modify use data whitelist", t)
                         }
                     }
                 }
                 module.deoptimize(constructor)
             }
         }
-        try {
-            val isInWhiteListMethod = ListAppsManagerClass.getDeclaredMethod(
-                "isInWhiteList", String::class.java
-            )
-            var mUseDataWhiteListField: Field? = null
+        // The isInWhiteList re-add backstop was removed on 2026-10-30 (second
+        // pass). OS4 dex: the only mutators of USE_DATA_WHITE_LIST are
+        // updateSleepMode(Z) — removeAll/addAll of SLEEP_MODE_CTRL_LIST, whose
+        // seed resource `greezer_sleep_mode_control_list` (0x1103013e) holds
+        // seven Xiaomi packages and never GMS — and dealCloudWhiteList(String),
+        // which only adds. Nothing on this generation can remove GMS from the
+        // set after the constructor injection above, so a per-query re-add hook
+        // had no reachable trigger. If a future ROM adds GMS to that resource,
+        // re-check here; the constructor hook alone does not survive a
+        // updateSleepMode(true) sweep in that case.
+    }
+
+    /** First declared field that exists, made accessible. Both ROM spellings are tried. */
+    private fun findFirstField(owner: Class<*>, vararg names: String): Field? {
+        for (name in names) {
             try {
-                mUseDataWhiteListField = ListAppsManagerClass.getDeclaredField("mUseDataWhiteList")
-            } catch (e: NoSuchFieldException) {
-                try {
-                    mUseDataWhiteListField =
-                        ListAppsManagerClass.getDeclaredField("USE_DATA_WHITE_LIST")
-                } catch (ex: NoSuchFieldException) {
-                    module.logGated(
-                        Log.ERROR, HookerSupport.TAG,
-                        "Failed to find ListAppsManager.mUseDataWhiteList or ListAppsManager.USE_DATA_WHITE_LIST",
-                        e
-                    )
-                }
+                return owner.getDeclaredField(name).also { it.isAccessible = true }
+            } catch (ignored: NoSuchFieldException) {
             }
-            if (mUseDataWhiteListField != null) {
-                mUseDataWhiteListField.isAccessible = true
-                val field = mUseDataWhiteListField
-                hookE(isInWhiteListMethod).intercept { chain: XposedInterface.Chain ->
-                    try {
-                        @Suppress("UNCHECKED_CAST")
-                        val mUseDataWhiteList =
-                            field.get(chain.thisObject) as MutableSet<String>?
-                        val added = mUseDataWhiteList?.add(HookerSupport.GMS_PACKAGE_NAME)
-                        // isInWhiteList is a hot query path: confirm the mutation
-                        // once, then stay silent — the fixed per-line log cost
-                        // dwarfs the message body, and this hook runs on every
-                        // use-data query for every package.
-                        if (added != null && !listAppsUseDataAddLogged) {
-                            listAppsUseDataAddLogged = true
-                            module.logGated(
-                                Log.INFO, HookerSupport.TAG,
-                                "ListAppsManager: added GMS to use-data whitelist " +
-                                    "(was absent=$added)"
-                            )
-                        }
-                    } catch (e: Exception) {
-                        module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to modify use data whitelist", e)
-                    }
-                    chain.proceed()
-                }
+        }
+        return null
+    }
+
+    private fun addGmsToUseDataWhiteList(module: XposedInterface, field: Field, owner: Any) {
+        val set = useDataWhiteListOf(field, owner) ?: return
+        val added = set.add(HookerSupport.GMS_PACKAGE_NAME)
+        if (!listAppsUseDataAddLogged) {
+            listAppsUseDataAddLogged = true
+            module.logGated(
+                Log.INFO, HookerSupport.TAG,
+                "ListAppsManager: added GMS to use-data whitelist (was absent=$added)"
+            )
+        }
+    }
+
+    /**
+     * The use-data set, resolved once when the field is static (it is on OS4:
+     * `USE_DATA_WHITE_LIST`), read per instance otherwise. Cached so the hot
+     * query path stops paying a reflective field read for a set that only ever
+     * needs one membership answer.
+     */
+    @Volatile
+    private var useDataWhiteListCache: MutableSet<String>? = null
+
+    @Suppress("UNCHECKED_CAST")
+    private fun useDataWhiteListOf(field: Field, owner: Any?): MutableSet<String>? {
+        if (java.lang.reflect.Modifier.isStatic(field.modifiers)) {
+            useDataWhiteListCache?.let { return it }
+            val resolved = try {
+                field.get(null) as? MutableSet<String>
+            } catch (t: Throwable) {
+                null
             }
-        } catch (e: NoSuchMethodException) {
-            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook ListAppsManager#isInWhiteList", e)
+            if (resolved != null) {
+                useDataWhiteListCache = resolved
+            }
+            return resolved
+        }
+        return try {
+            field.get(owner) as? MutableSet<String>
+        } catch (t: Throwable) {
+            null
         }
     }
 
@@ -717,7 +581,8 @@ internal object GreezeHooks {
         classLoader: ClassLoader,
         hookE: (Executable) -> XposedInterface.HookBuilder,
         logSkip: (String) -> Unit,
-        systemContext: () -> android.content.Context?
+        systemContext: () -> android.content.Context?,
+        isGmsUid: (Int) -> Boolean
     ) {
         val BroadcastQueueModernStubImplClass =
             classLoader.loadClass("com.android.server.am.BroadcastQueueModernStubImpl")
@@ -746,7 +611,6 @@ internal object GreezeHooks {
                     targetPackage != null &&
                     AllowlistGate.moduleAppliesTo(module, systemContext, targetPackage)
                 ) {
-                    ++broadcastGateAutostartAllowedCount
                     if (!broadcastGateAutostartAllowedLogged) {
                         broadcastGateAutostartAllowedLogged = true
                         module.logGated(
@@ -757,19 +621,8 @@ internal object GreezeHooks {
                     }
                     return@intercept true
                 }
-                if (callerPackage != null &&
-                    HookerSupport.GMS_PACKAGE_NAME == callerPackage &&
-                    intent != null &&
-                    HookerSupport.ACTION_REMOTE_INTENT == intent.action
-                ) {
-                    // Reachable with the callee off the user's list (or a target the
-                    // intent alone cannot name). Counted for the same reason as the
-                    // isAllowBroadcast skip path: an unselected app must stay an
-                    // observation, not an assumption.
-                    ++broadcastGateAutostartSkippedCount
-                }
-                // The branch above is the only autostart gate this module
-                // answers. A second branch used to drop its caller restriction
+                // The only autostart gate this module answers is the branch
+                // above. A second branch used to drop its caller restriction
                 // and answer any push broadcast from the intent alone, the way
                 // the two reference modules do; it is gone because it never ran
                 // on anything the shipped GMS→c2dm hop had not answered already
@@ -822,16 +675,38 @@ internal object GreezeHooks {
             hookE(isRestrictReceiverMethod).intercept { chain: XposedInterface.Chain ->
                 try {
                     val intent = chain.getArg(0) as? Intent
+                    val callerUid = chain.getArg(1)
                     val callerPackage = chain.getArg(2) as? String
                     val calleeUid = chain.getArg(3) as Int
                     val calleePackage = chain.getArg(4) as? String
-                    if (HookerSupport.GMS_PACKAGE_NAME == callerPackage &&
+                    // Two caller keys on purpose: callerPkgName is not always
+                    // populated on this hop, callerUid always is. This branch is
+                    // now the module's only c2dm allow (the isAllowBroadcast
+                    // duplicate was removed), so the uid fallback lives here —
+                    // without it a c2dm whose caller package string came through
+                    // empty would fall through to the ROM's freeze policy.
+                    val callerPkgIsGms = HookerSupport.GMS_PACKAGE_NAME == callerPackage
+                    val callerUidIsGms = callerUid is Int && isGmsUid(callerUid)
+                    if ((callerPkgIsGms || callerUidIsGms) &&
                         intent != null &&
                         HookerSupport.ACTION_REMOTE_INTENT == intent.action &&
                         AllowlistGate.moduleAppliesTo(module, systemContext, calleePackage)
                     ) {
-                        // Same reason string and caller uid the native pass-through
-                        // path uses, so greeze bookkeeping stays consistent.
+                        if (!broadcastGateAllowedLogged) {
+                            broadcastGateAllowedLogged = true
+                            module.logGated(
+                                Log.INFO, HookerSupport.TAG,
+                                "isRestrictReceiver: c2dm allowed for callee=$calleePackage " +
+                                    "(callerUid=$callerUid, callerPkg=$callerPackage, " +
+                                    "matchedBy=${if (callerPkgIsGms) "callerPkg" else "callerUid"})"
+                            )
+                        }
+                        // Caller uid 1000 and a reason string follow the ROM's own
+                        // thawUidAsync calls. The native allowed path thaws with
+                        // "broadcast"; this hook deliberately keeps "bc_action"
+                        // (what the ROM's cached-broadcast early exits use) so a
+                        // module-triggered thaw stays distinguishable in greeze
+                        // history from a native one.
                         thawUidAsyncMethod.invoke(chain.thisObject, calleeUid, 1000, "bc_action")
                         return@intercept false
                     }
@@ -851,59 +726,15 @@ internal object GreezeHooks {
         }
     }
 
-    /**
-     * Stops greeze from parking a c2dm broadcast instead of delivering it.
-     *
-     * GreezeManagerService#isNeedCachedBroadcast(Intent, int uid, String pkg) runs after
-     * the receiver has been found frozen and returns true to mean "cache this broadcast
-     * and replay it once the target thaws". That is the mechanism behind a broadcast
-     * showing up as delivered in the AMS log while the app stays silent until the next
-     * unlock. Answering false for c2dm keeps the normal delivery path.
-     *
-     * The uid argument is deliberately unused: it identifies the frozen receiver, and the
-     * allowlist the user configured is expressed in package names.
-     */
-    internal fun hookGreezeBroadcastCache(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        systemContext: () -> android.content.Context?
-    ) {
-        try {
-            val GreezeManagerServiceClass =
-                classLoader.loadClass("com.miui.server.greeze.GreezeManagerService")
-            val isNeedCachedBroadcastMethod = GreezeManagerServiceClass.getDeclaredMethod(
-                "isNeedCachedBroadcast",
-                Intent::class.java,
-                Int::class.javaPrimitiveType,
-                String::class.java
-            )
-            hookE(isNeedCachedBroadcastMethod).intercept { chain: XposedInterface.Chain ->
-                try {
-                    val intent = chain.getArg(0) as? Intent
-                    val packageName = chain.getArg(2) as? String
-                    if (intent != null &&
-                        HookerSupport.ACTION_REMOTE_INTENT == intent.action &&
-                        AllowlistGate.moduleAppliesTo(module, systemContext, packageName)
-                    ) {
-                        return@intercept false
-                    }
-                } catch (e: Exception) {
-                    module.logGated(
-                        Log.ERROR, HookerSupport.TAG,
-                        "Failed to modify GreezeManagerService#isNeedCachedBroadcast", e
-                    )
-                }
-                chain.proceed()
-            }
-            module.deoptimize(isNeedCachedBroadcastMethod)
-        } catch (e: ClassNotFoundException) {
-            logSkip("GreezeManagerService absent, broadcast cache not hooked")
-        } catch (e: NoSuchMethodException) {
-            logSkip("GreezeManagerService#isNeedCachedBroadcast absent, skip")
-        }
-    }
+    // S11 (`isNeedCachedBroadcast` → false for c2dm) was removed on 2026-10-30.
+    // It was shadowed end to end: the only caller of that method is
+    // isRestrictReceiver's `else` branch, reached only when isAllowBroadcast
+    // answered "restricted" — and the S10 hook answers the same c2dm question at
+    // that method's entry, so the call site no longer runs. Its remaining face
+    // was "c2dm from a caller that is not GMS", which the FCM hop never produces.
+    // The trade is one layer instead of two: if S10 ever fails to install it
+    // reports ERROR, and the ROM's freeze policy takes over as it does on a
+    // device without this module.
 
     // ponytail: GMS is only ever APPENDED to the returned list, never removed
     //   from a ROM-side list. Comparable external modules remove GMS from
@@ -913,6 +744,14 @@ internal object GreezeHooks {
     //   loosening. Cost: the entry is rebuilt per query instead of persisted.
     //   Condition to revisit: bytecode or runtime proof of a list's polarity on
     //   this generation — and even then, prefer appending over removing.
+    //
+    // OS4 status (2026-10-30 second pass): the static seed already carries GMS —
+    // `systemReady` loads sStaticWhiteList from framework-ext-res
+    // `package_static_white_list_base` (0x110300ad, 33 entries, GMS included) —
+    // so the append below is a no-op on this generation and the hook stays as an
+    // OS3 hedge only. The `gms.persistent` append was removed with it: that is a
+    // process name, not a package, and can never match an entry of a package
+    // list.
     internal fun hookProcessPolicy(
         module: XposedInterface,
         classLoader: ClassLoader,
@@ -927,12 +766,12 @@ internal object GreezeHooks {
             try {
                 val flags = chain.getArg(0)
                 if (flags is Int && (flags and 1) != 0 && result is List<*>) {
-                    val source = result
-                    val whiteList = ArrayList<Any?>(source)
+                    // Only the returned copy is extended: getWhiteList builds a
+                    // fresh ArrayList on every call (verified against the OS4
+                    // miui-services dex), so an in-place add on `source` would
+                    // have no observer — that write used to sit here.
+                    val whiteList = ArrayList<Any?>(result)
                     addIfAbsent(whiteList, HookerSupport.GMS_PACKAGE_NAME)
-                    addIfAbsent(whiteList, HookerSupport.GMS_PERSISTENT_PROCESS_NAME)
-                    HookerSupport.addIfAbsentInPlace(source, HookerSupport.GMS_PACKAGE_NAME)
-                    HookerSupport.addIfAbsentInPlace(source, HookerSupport.GMS_PERSISTENT_PROCESS_NAME)
                     return@intercept whiteList
                 }
             } catch (t: Throwable) {
@@ -1017,73 +856,25 @@ internal object GreezeHooks {
         }
     }
 
-    /**
-     * P6 (defence): do not park GMS alarms in the Aurogon freeze cache.
-     *
-     * `AlarmManagerService#triggerAlarmsLocked` asks
-     * `GreezeManagerService#isNeedCachedAlarmForAurogon(uid)` before delivering
-     * a due alarm; true means the alarm is parked and replayed after the uid
-     * thaws. It is the alarm-side twin of [hookGreezeBroadcastCache] and only
-     * applies to `FULLY_FROZEN` uids. GMS never enters that state on this
-     * device (`dumpsys greezer`), so like the other freeze-path hooks this is
-     * defence in depth. Only the GMS uid is answered false; every other alarm
-     * keeps the ROM's decision.
-     */
-    internal fun hookGreezeAlarmCache(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        isGmsUid: (Int) -> Boolean
-    ) {
-        try {
-            val greezeManagerServiceClass =
-                classLoader.loadClass("com.miui.server.greeze.GreezeManagerService")
-            val isNeedCachedAlarmMethod = greezeManagerServiceClass.getDeclaredMethod(
-                "isNeedCachedAlarmForAurogon", Int::class.javaPrimitiveType
-            )
-            hookE(isNeedCachedAlarmMethod).intercept { chain: XposedInterface.Chain ->
-                val result = chain.proceed()
-                try {
-                    val uid = chain.getArg(0)
-                    if (uid is Int && isGmsUid(uid) && java.lang.Boolean.TRUE == result) {
-                        // One-shot only when the ROM actually wanted to park the
-                        // alarm; on the normal (not frozen) path the original
-                        // answer is already false and there is nothing to claim.
-                        if (!gmsAlarmCacheSkippedLogged) {
-                            gmsAlarmCacheSkippedLogged = true
-                            module.logGated(
-                                Log.INFO, HookerSupport.TAG,
-                                "GreezeManagerService#isNeedCachedAlarmForAurogon: " +
-                                    "overrode the cached GMS (uid $uid) alarm"
-                            )
-                        }
-                        return@intercept false
-                    }
-                } catch (t: Throwable) {
-                    module.logGated(
-                        Log.ERROR, HookerSupport.TAG, "isNeedCachedAlarmForAurogon hook failed", t
-                    )
-                }
-                result
-            }
-            module.deoptimize(isNeedCachedAlarmMethod)
-            module.logGated(
-                Log.INFO, HookerSupport.TAG,
-                "GreezeManagerService#isNeedCachedAlarmForAurogon hooked for GMS"
-            )
-        } catch (e: ClassNotFoundException) {
-            logSkip("GreezeManagerService class absent, isNeedCachedAlarmForAurogon skip")
-        } catch (e: NoSuchMethodException) {
-            logSkip("GreezeManagerService#isNeedCachedAlarmForAurogon absent, skip")
-        }
-    }
+    // S31 (`isNeedCachedAlarmForAurogon` → false for GMS) was removed on
+    // 2026-10-30, after the OS4 dex ruled it out end to end:
+    //
+    //   isNeedCachedAlarmForAurogonInner(uid)
+    //     getFreezeState(uid) != FULLY_FROZEN → false
+    //     isApp(uid) == false                → false
+    //     !pkg.contains("xiaomi")            → false      ← GMS dies here
+    //     …then mAurogonAlarmAllowList / ForbidList decide
+    //
+    // `com.google.android.gms` contains neither "xiaomi" nor "miui", so the ROM
+    // answers false for the GMS uid before any policy list is consulted — the
+    // hook's "true → false" branch had no input to act on, frozen or not. The
+    // caller (`AlarmManagerService#triggerAlarmsLocked`) additionally requires
+    // `isUidFrozen(creatorUid)`, which GMS never is on this device.
 
     internal fun hookAwareResourceControl(
         module: XposedInterface,
         classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        gmsUid: () -> Int?
+        hookE: (Executable) -> XposedInterface.HookBuilder
     ) {
         val AwareResourceControlClass =
             classLoader.loadClass("com.miui.server.greeze.power.AwareResourceControl")
@@ -1096,7 +887,7 @@ internal object GreezeHooks {
                     chain.proceed()
                 } finally {
                     try {
-                        pruneGmsFromNoNetworkBlacklist(module, mNoNetworkBlackUidsField, chain.thisObject, gmsUid)
+                        pruneGmsFromNoNetworkBlacklist(module, mNoNetworkBlackUidsField, chain.thisObject)
                     } catch (t: Throwable) {
                         module.logGated(
                             Log.ERROR, HookerSupport.TAG,
@@ -1112,8 +903,7 @@ internal object GreezeHooks {
     private fun pruneGmsFromNoNetworkBlacklist(
         module: XposedInterface,
         blacklistField: Field,
-        awareResourceControl: Any,
-        gmsUid: () -> Int?
+        awareResourceControl: Any
     ) {
         val raw = blacklistField.get(awareResourceControl)
         if (raw !is Collection<*>) {
@@ -1121,20 +911,20 @@ internal object GreezeHooks {
         }
         @Suppress("UNCHECKED_CAST")
         val blacklist = raw as MutableCollection<Any?>
-        val removedByName = blacklist.remove(HookerSupport.GMS_PACKAGE_NAME)
-        val uid = gmsUid()
-        val removedByUid = uid != null && blacklist.remove(uid)
-        if (removedByUid || removedByName) {
+        // Name only: the OS4 field is List<String> seeded with package names, so a
+        // uid can never be an element and remove(uid) was a guaranteed false that
+        // additionally paid a PackageManager lookup on every construction.
+        val removed = blacklist.remove(HookerSupport.GMS_PACKAGE_NAME)
+        if (removed) {
             module.logGated(
-                Log.INFO, HookerSupport.TAG, "Removed GMS from NoNetworkBlackUids (by " +
-                    (if (removedByUid) "uid $uid" else "package name") + ")"
+                Log.INFO, HookerSupport.TAG,
+                "Removed GMS from NoNetworkBlackUids (by package name)"
             )
         } else if (!noNetworkBlacklistMismatchLogged) {
             noNetworkBlacklistMismatchLogged = true
             module.logGated(
                 Log.INFO, HookerSupport.TAG, "NoNetworkBlackUids (size=" + blacklist.size +
-                    ") matched neither the GMS package name nor its uid" +
-                    (if (uid == null) " (uid not resolvable yet)" else "")
+                    ") did not contain the GMS package name"
             )
         }
     }

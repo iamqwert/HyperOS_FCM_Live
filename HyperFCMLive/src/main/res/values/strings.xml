@@ -70,6 +70,8 @@
     <!-- Settings include module switches and appearance, hence two counts. -->
     <string name="config_export_done">Backed up %1$d apps and %2$d settings</string>
     <string name="config_import_done">Imported %1$d apps and %2$d settings</string>
+    <string name="config_import_too_new">This backup comes from a newer version and can\'t be imported</string>
+    <string name="config_import_done_skipped">Imported %1$d apps and %2$d settings; %3$d skipped (unsupported here or unknown)</string>
     <string name="update_found">New version available: %1$s</string>
     <string name="update_found_title">Update Available</string>
     <!-- The badge is colour only; a screen reader needs words on its node -->
@@ -458,14 +460,12 @@
     <string name="experiment_sleep_keepalive_data">Keep Mobile Data Connected</string>
     <string name="experiment_sleep_keepalive_data_desc">Keeps mobile data on so push notifications keep coming through</string>
 
-    <!-- 自启动单列一节：主开关在运行时放行，副档逐层扩大覆盖面，末行为管家自启动管理入口，默认全关 -->
+    <!-- A section of its own: two switches, one per ROM checkpoint, plus the manager entry -->
     <string name="experiment_section_autostart">Autostart</string>
-    <string name="experiment_autostart_gate_release">Allow Apps to Be Started</string>
-    <string name="experiment_autostart_gate_release_desc">Allows the app\'s services and processes to start</string>
-    <string name="experiment_autostart_restart_release">Turn Off App Freezing</string>
-    <string name="experiment_autostart_restart_release_desc">Lets apps restart normally after their process ends</string>
-    <string name="experiment_autostart_root_release">Allow All Autostart Checks</string>
-    <string name="experiment_autostart_root_release_desc">Every autostart check in the system is answered with \"allowed\"</string>
+    <string name="experiment_autostart_service_release">Service Bind Gate</string>
+    <string name="experiment_autostart_service_release_desc">A bind-service denial is re-answered as allowed for a checked app</string>
+    <string name="experiment_autostart_process_release">Process Restart Gate</string>
+    <string name="experiment_autostart_process_release_desc">A restart or preload denial for a checked app\'s killed process is re-answered as allowed</string>
     <string name="experiment_wake_autostart_write">Autostart Manager</string>
     <string name="experiment_wake_autostart_write_desc">Review and adjust each app\'s autostart switch</string>
     <string name="experiment_autostart_empty_list">The allowlist is empty. These switches only affect the apps you\'ve selected — set up the allowlist first</string>

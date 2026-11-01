@@ -61,8 +61,8 @@ android {
         targetSdkVersion 37
         // Fixed (bumped by hand each release) so LSPosed update checks never treat
         // this fork as older than upstream builds that inherit a low jgit commitCount.
-        versionCode 55
-        versionName "4.3.0"
+        versionCode 56
+        versionName "4.4.0"
 
         // HyperOS modules ship arm64 only; drop armv7a / x86 / x86_64 natives.
         ndk {
@@ -198,7 +198,7 @@ dependencies {
     // FloatingToolbar, MaterialShapes, MotionScheme.expressive() — but declares
     // them Kotlin-internal, so none of it compiles against. 1.5.0-alpha is the
     // first line that exposes them. Verified: compiles, and passes R8 release.
-    implementation 'androidx.compose.material3:material3:1.5.0-beta02'
+    implementation 'androidx.compose.material3:material3:1.5.0-beta01'
     // Icons are drawables under res/drawable (Material Symbols, see the red
     // line at the top of theme/ComposeTokens.kt), so the compose icon packs are
     // not needed at all — not even the core one. material3 stopped pulling them

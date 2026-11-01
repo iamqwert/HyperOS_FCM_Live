@@ -59,8 +59,6 @@ object ThemePrefs {
     private const val KEY_FLOATING_BAR = "miuix_floating_bar"
     /** Retired: the material row this key outlived; see [KEY_FLOATING_BAR]. */
     private const val KEY_BAR_MATERIAL = "miuix_bar_material"
-    /** Retired: the liquid refraction sub-switch, deleted with the Example alignment. */
-    private const val KEY_LIQUID_GLASS = "miuix_liquid_glass"
 
     private const val KEY_THEME_MODE = "theme_mode"
     private const val KEY_PALETTE_STYLE = "palette_style"

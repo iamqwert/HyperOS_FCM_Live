@@ -1,4 +1,4 @@
-﻿package io.github.howard20181.hyperos.fcmlive
+package io.github.howard20181.hyperos.fcmlive
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -151,11 +151,9 @@ class Hooker : XposedModule() {
                 this, classLoader, ::hookE, ::logSkip, ::isGmsUid
             )
         },
-        Group("hook", "greeze alarm cache") {
-            GreezeHooks.hookGreezeAlarmCache(
-                this, classLoader, ::hookE, ::logSkip, ::isGmsUid
-            )
-        },
+        // S31 (`isNeedCachedAlarmForAurogon`) was removed on 2026-10-30: the ROM
+        // answers false for any package whose name lacks "xiaomi", so the GMS
+        // uid never reached the hook's override. See GreezeHooks.
         Group("hook", "DomesticPolicyManager") {
             GreezeHooks.hookDomesticPolicyManager(
                 this, classLoader, ::hookE, ::logSkip, ::isGmsUid,
@@ -168,13 +166,7 @@ class Hooker : XposedModule() {
         Group("hook", "BroadcastQueueModernStubImpl") {
             GreezeHooks.hookBroadcastQueueModernStubImpl(
                 this, classLoader, ::hookE, ::logSkip,
-                ::getSystemContext
-            )
-        },
-        Group("hook", "greeze broadcast cache") {
-            GreezeHooks.hookGreezeBroadcastCache(
-                this, classLoader, ::hookE, ::logSkip,
-                ::getSystemContext
+                ::getSystemContext, ::isGmsUid
             )
         },
         Group("hook", "SmartPower intercept") {
@@ -187,12 +179,12 @@ class Hooker : XposedModule() {
             GreezeHooks.hookProcessPolicy(this, classLoader, ::hookE)
         },
         Group("hook", "AwareResourceControl") {
-            GreezeHooks.hookAwareResourceControl(this, classLoader, ::hookE, ::gmsUid)
+            GreezeHooks.hookAwareResourceControl(this, classLoader, ::hookE)
         },
         Group("hook", "sleep-mode network policy") {
             SleepModeGate.hookSleepModeNetworkPolicy(
                 this, classLoader, ::hookE, ::logSkip, ::logSkipOtherGeneration,
-                ::getSystemContext, ::gmsUid, ::broadcastGateSummary,
+                ::getSystemContext, ::gmsUid,
                 { GmsSupport.recoverGmsConnection(this, it) }
             )
         },
@@ -202,9 +194,6 @@ class Hooker : XposedModule() {
                 { cls, name, types -> findMethod(cls, name, *types) },
                 ::getSystemContext
             )
-        },
-        Group("hook", "InternationalPolicyManager") {
-            hookInternationalPolicyManager(classLoader)
         },
         Group("hook", "udpPackageRestrict") {
             GreezeHooks.hookUdpPackageRestrict(this, classLoader, ::hookE, ::logSkip, ::isGmsUid)
@@ -216,8 +205,10 @@ class Hooker : XposedModule() {
         },
         Group("hook", "autostart gate") {
             AutostartGate.hookAutostartGate(
-                this, classLoader, ::hookE, ::logSkipOtherGeneration,
-                ::getSystemContext
+                this, classLoader, ::hookE, ::logSkip, ::logSkipOtherGeneration,
+                ::getSystemContext,
+                ::isAutostartServiceReleaseEnabled,
+                ::isAutostartProcessReleaseEnabled
             )
         },
         Group("hook", "alarm gate") {
@@ -230,17 +221,6 @@ class Hooker : XposedModule() {
                 this, classLoader, ::hookE, ::logSkip, ::logSkipOtherGeneration
             )
         },
-        Group("install", "wake-path probe") {
-            WakePathProbe.probeWakePath(this, classLoader, ::hookE, ::logSkipOtherGeneration)
-        },
-        Group("install", "broadcast wake-path probe") {
-            WakePathProbe.probeBroadcastWakePath(this, classLoader, ::hookE, ::logSkipOtherGeneration)
-        },
-        Group("install", "receiver-skip probe") {
-            WakePathProbe.probeReceiverAppDealBroadcast(
-                this, classLoader, ::hookE, ::logSkipOtherGeneration
-            )
-        },
         Group("probe", "mMessageApp") {
             SystemProbes.probeGmsInMessageApp(this, classLoader, ::logSkip, ::recordProbe)
         },
@@ -249,14 +229,6 @@ class Hooker : XposedModule() {
         },
         Group("probe", "packet filter support") {
             SystemProbes.probePacketFilterSupport(this, classLoader, ::logSkip, ::recordProbe)
-        },
-        Group("install", "socket-teardown probe") {
-            SystemProbes.probeSocketTeardown(
-                this, classLoader, ::hookE, ::logSkip, ::recordProbe, ::isGmsUid
-            )
-        },
-        Group("start", "GMS traffic probe") {
-            TrafficProbe.startGmsTrafficProbe(this, ::gmsUid, ::broadcastGateSummary)
         },
         Group("start", "records bridge") {
             RecordsBridge.install(this, ::getSystemContext) { installBook.lastSummary }
@@ -317,9 +289,6 @@ class Hooker : XposedModule() {
                 PowerKeeperHooks.hookAppStandbyUidState(
                     this, packageName, classLoader, ::hookE, ::logSkip, ::isGmsUid
                 )
-            },
-            Group("hook", "GlobalFeatureConfigureHelper") {
-                SleepModeGate.hookGlobalFeatureConfigureHelper(this, classLoader, ::hookE, ::logSkip)
             },
             Group("hook", "NoRestrictList") {
                 PowerKeeperHooks.hookNoRestrictList(
@@ -502,102 +471,6 @@ class Hooker : XposedModule() {
     }
 
     /**
-     * P0/P1/P2 evidence, appended to every traffic-probe tick.
-     *
-     * Reading it:
-     *  - `allowed` counts c2dm the isAllowBroadcast gate admitted. `uid-fallback`
-     *    is the subset the *uid* carried rather than the caller package string
-     *    (P1) — a non-zero value means the fallback was load-bearing.
-     *  - `skipped` counts c2dm to callees the user did not select.
-     *    Those now fall through to the ROM policy, which is the P0 fix.
-     *  - `reached-defer` counts c2dm that actually arrived at
-     *    `DomesticPolicyManager#deferBroadcast` without being suppressed; a
-     *    non-zero value proves P0 is active on this ROM/branch.
-     * All four zero means the branch was never exercised this interval.
-     *
-     * `autostart gate` rides the same tick for the same reason: its detail lines
-     * only fire on a denial, so without this "never denied" and "never asked"
-     * would look identical. `service-denied` / `process-denied` non-zero is the
-     * ROM refusing a start the broadcast hook already waved through — the
-     * finding that says the autostart op, not the broadcast gate, is what
-     * decides delivery.
-     *
-     * `net-released` rides it too: the greeze net-release detail line fires
-     * once per uid, ever, so the counter is the only measure of how often
-     * freezes actually hit checked apps — and a steady zero with the switch
-     * on means greeze never froze a checked app this interval.
-     *
-     * The wake-path half is the P2 probe, and it rides this tick on purpose: the
-     * probe's own detailed lines only fire when its gate is actually reached, so
-     * without this tick "never reached" and "reached and always allowed" would
-     * look identical. `c2dm-denied` non-zero is the finding that would reopen the
-     * module's design.
-     *
-     * Returned rather than logged: the caller ([TrafficProbe.probeGmsTraffic]) appends it to
-     * the traffic line it shares a tick with.
-     */
-    internal fun broadcastGateSummary(): String {
-        // An idle tick is by far the common case — the counters sit at zero for
-        // days on a device where nothing is being gated. Every counter is still
-        // named, so "never exercised" stays greppable and distinguishable from
-        // "reached and always allowed".
-        val idle = GreezeHooks.broadcastGateAllowedCount == 0 &&
-            GreezeHooks.broadcastGateSkippedCount == 0 &&
-            GreezeHooks.deferC2dmPassthroughCount == 0 &&
-            GreezeHooks.broadcastGateCnActionCount == 0 &&
-            GreezeHooks.broadcastGateAutostartAllowedCount == 0 &&
-            GreezeHooks.broadcastGateAutostartSkippedCount == 0 &&
-            WakePathProbe.broadcastWakePathReachedCount == 0 &&
-            WakePathProbe.broadcastWakePathC2dmCount == 0 &&
-            WakePathProbe.broadcastWakePathDeniedCount == 0 &&
-            WakePathProbe.broadcastWakePathC2dmDeniedCount == 0 &&
-            WakePathProbe.receiverSkipReachedCount == 0 &&
-            WakePathProbe.receiverSkipC2dmCount == 0 &&
-            WakePathProbe.receiverSkipC2dmDeniedCount == 0 &&
-            AutostartGate.autostartGateServiceDeniedCount == 0 &&
-            AutostartGate.autostartGateProcessDeniedCount == 0 &&
-            AutostartGate.autostartGateRestartDeniedCount == 0 &&
-            AutostartGate.autostartGatePreStartDeniedCount == 0 &&
-            AutostartGate.autostartGateReleaseCount == 0 &&
-            AutostartGate.autostartGateRestartReleaseCount == 0 &&
-            AutostartGate.autostartRootReleaseCount == 0 &&
-            GreezeHooks.greezeNetReleaseCount == 0 &&
-            SmartPowerHooks.smartPowerReleaseCount == 0
-        if (idle) {
-            return "broadcast gate idle — c2dm " +
-                "allowed/skipped/reached-defer/cn-actions/autostart-allow/autostart-skipped = 0, " +
-                "wake-path reached/c2dm/denied/c2dm-denied = 0, " +
-                "receiver-skip reached/c2dm/c2dm-denied = 0, " +
-                "autostart gate service/process/restart/pre-start-denied, " +
-                "released, restart-released, root-released, net-released, " +
-                "smart-power-released = 0"
-        }
-        return "broadcast gate c2dm allowed=${GreezeHooks.broadcastGateAllowedCount} " +
-            "(uid-fallback=${GreezeHooks.broadcastGateAllowedByUidCount}), " +
-            "skipped=${GreezeHooks.broadcastGateSkippedCount}, " +
-            "reached-defer=${GreezeHooks.deferC2dmPassthroughCount}, " +
-            "cn-actions=${GreezeHooks.broadcastGateCnActionCount}, " +
-            "autostart-allow=${GreezeHooks.broadcastGateAutostartAllowedCount}, " +
-            "autostart-skipped=${GreezeHooks.broadcastGateAutostartSkippedCount}; " +
-            "wake-path reached=${WakePathProbe.broadcastWakePathReachedCount}, " +
-            "c2dm=${WakePathProbe.broadcastWakePathC2dmCount}, " +
-            "denied=${WakePathProbe.broadcastWakePathDeniedCount}, " +
-            "c2dm-denied=${WakePathProbe.broadcastWakePathC2dmDeniedCount}; " +
-            "receiver-skip reached=${WakePathProbe.receiverSkipReachedCount}, " +
-            "c2dm=${WakePathProbe.receiverSkipC2dmCount}, " +
-            "c2dm-denied=${WakePathProbe.receiverSkipC2dmDeniedCount}; " +
-            "autostart gate service-denied=${AutostartGate.autostartGateServiceDeniedCount}, " +
-                "process-denied=${AutostartGate.autostartGateProcessDeniedCount}, " +
-                "restart-denied=${AutostartGate.autostartGateRestartDeniedCount}, " +
-                "pre-start-denied=${AutostartGate.autostartGatePreStartDeniedCount}, " +
-                "released=${AutostartGate.autostartGateReleaseCount}, " +
-                "restart-released=${AutostartGate.autostartGateRestartReleaseCount}, " +
-                "root-released=${AutostartGate.autostartRootReleaseCount}, " +
-                "net-released=${GreezeHooks.greezeNetReleaseCount}, " +
-                "smart-power-released=${SmartPowerHooks.smartPowerReleaseCount}"
-    }
-
-    /**
      * Experiment switch: release OS3 SmartPower intercepts for checked apps.
      * Reads its **own** key — it answers the OS3-generation broadcast/service
      * interception, not the greeze gates, and must stay measurable on its own.
@@ -635,6 +508,32 @@ class Hooker : XposedModule() {
     }
 
     /**
+     * Experiment switch: answer one MIUI autostart checkpoint for a checked
+     * app (see [AutostartGate]). Reads its **own** key — each checkpoint is its
+     * own switch, so each can be measured alone.
+     *
+     * Fails to *disabled*: this answers a verdict the ROM owns.
+     */
+    private fun isAutostartRungEnabled(rungKey: String): Boolean {
+        return try {
+            val prefs = getRemotePreferences(Prefs.GROUP_CONFIG)
+            // The hook reads this per service start, i.e. on a path far
+            // busier than the freeze one, so the debug-log gate refreshes
+            // here as well.
+            HookLog.refresh(prefs)
+            prefs.getBoolean(rungKey, false)
+        } catch (ignored: Throwable) {
+            false
+        }
+    }
+
+    private fun isAutostartServiceReleaseEnabled(): Boolean =
+        isAutostartRungEnabled(Prefs.KEY_AUTOSTART_SERVICE_RELEASE)
+
+    private fun isAutostartProcessReleaseEnabled(): Boolean =
+        isAutostartRungEnabled(Prefs.KEY_AUTOSTART_PROCESS_RELEASE)
+
+    /**
      * The allowlisted package a uid belongs to, if any.
      *
      * A uid can host several packages (shared uid is rare but legal), so the
@@ -663,81 +562,5 @@ class Hooker : XposedModule() {
         return null
     }
 
-    @Volatile
-    private var restrictNetMatchLogged = false
-
-    /**
-     * `InternationalPolicyManager#isPushApp` — kept as is, and deliberately
-     * **not** mirrored with an International partner for P0 #1.
-     *
-     * Forensics (HyperOS V816), re-confirmed before this hook was left in place:
-     *
-     * - `com.miui.server.greeze.PolicyManager` is the interface both policy
-     *   implementations satisfy, and its method table declares `isRestrictNet`
-     *   **only** — there is no `isPushApp` slot. So no `invoke-interface` edge
-     *   into this method exists anywhere in system_server; its sole callers are
-     *   in-class `invoke-direct` self-calls inside `InternationalPolicyManager`.
-     * - This device selects the Domestic implementation
-     *   (`AurogonImmobulusMode#restorePolicyManager`; `dumpsys greezer` reports
-     *   `mCurrentCNPolicy: 1` with the force-CN flag false), so
-     *   `InternationalPolicyManager` is never instantiated here and this hook
-     *   is inert locally.
-     *
-     * Two consequences follow, and both are intentional:
-     *
-     * - No International counterpart for the P0 #1
-     *   `DomesticPolicyManager#isRestrictNet` hook is added. Nothing on this
-     *   device can execute it, so its behaviour could never be observed —
-     *   unverifiable risk in exchange for zero local benefit.
-     * - This hook stays. International ROMs do instantiate the class, and there
-     *   `isRestrictNet` still funnels through `isPushApp`.
-     */
-    private fun hookInternationalPolicyManager(classLoader: ClassLoader) {
-        val InternationalPolicyManagerClass =
-            classLoader.loadClass("com.miui.server.greeze.InternationalPolicyManager")
-        val isPushAppMethod = InternationalPolicyManagerClass.getDeclaredMethod(
-            "isPushApp", String::class.java
-        )
-        val restrictNetOwner = InternationalPolicyManagerClass.name
-        val systemServerCl = InternationalPolicyManagerClass.classLoader
-        hookE(isPushAppMethod).intercept { chain: XposedInterface.Chain ->
-            val pkg = chain.getArg(0) as? String
-            // The gate read is inside its own try so a preference or receiver
-            // failure can never escape the intercept (fail-open, §3.11): on
-            // error this hook answers nothing and the ROM verdict stands.
-            val applies = try {
-                AllowlistGate.moduleAppliesTo(this, ::getSystemContext, pkg)
-            } catch (t: Throwable) {
-                logGated(Log.ERROR, HookerSupport.TAG, "isPushApp: gate check failed", t)
-                false
-            }
-            if (applies) {
-                try {
-                    val fromRestrictNet = HookerSupport.STACK_WALKER.walk { frames ->
-                        frames.anyMatch { frame ->
-                            "isRestrictNet" == frame.methodName &&
-                                (restrictNetOwner == frame.className ||
-                                    (frame.declaringClass != null &&
-                                        frame.declaringClass.classLoader === systemServerCl))
-                        }
-                    }
-                    if (fromRestrictNet) {
-                        if (!restrictNetMatchLogged) {
-                            restrictNetMatchLogged = true
-                            logGated(
-                                Log.INFO, HookerSupport.TAG, "isPushApp: caller isRestrictNet matched;" +
-                                    " answering false"
-                            )
-                        }
-                        return@intercept false
-                    }
-                } catch (t: Throwable) {
-                    logGated(Log.ERROR, HookerSupport.TAG, "Stack inspection failed", t)
-                }
-            }
-            chain.proceed()
-        }
-        deoptimize(isPushAppMethod)
-    }
 
 }

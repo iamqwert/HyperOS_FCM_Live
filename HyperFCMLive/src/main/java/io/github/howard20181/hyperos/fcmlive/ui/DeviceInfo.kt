@@ -56,3 +56,17 @@ internal fun systemProperty(key: String): String = try {
 } catch (ignored: Throwable) {
     ""
 }
+
+/**
+ * 本机是否为 OS3 世代。
+ *
+ * 读 `ro.mi.os.version.name`（真机 OS4 实测返回 `OS4.0.0.33.XPMCNXM`），
+ * `OS3` 前缀才算命中；MIUI 时代该属性不存在，同样视为非 OS3。反射读
+ * SystemProperties：该类在 SDK 里不可见，但 `get(String)` 对所有进程开放。
+ *
+ * 这个判断只管 UI 显隐与配置备份的可用性，hook 侧从不做世代假设——目标方法
+ * 在不在决定装不装（见 SmartPowerHooks 的文档）。两个调用方共用这一份，
+ * 避免"页面隐藏了开关、备份却仍在恢复它"这类漂移。
+ */
+internal fun isOs3Generation(): Boolean =
+    systemProperty("ro.mi.os.version.name").startsWith("OS3")

@@ -108,5 +108,39 @@ class ConfigBackupTest {
         val parsed = ConfigBackup.parse("")
         assertTrue(parsed.packages.isEmpty())
         assertTrue(parsed.values.isEmpty())
+        assertTrue(parsed.headerVersion == null)
+    }
+
+    @Test
+    fun `the header version is read from the first non-empty line`() {
+        val parsed = ConfigBackup.parse(
+            """
+            # fcmlive-backup 2
+            # set sleep_keepalive=true
+            com.tencent.mm
+            """.trimIndent()
+        )
+        assertEquals(2, parsed.headerVersion)
+    }
+
+    @Test
+    fun `a pre-format allowlist carries no header version`() {
+        val parsed = ConfigBackup.parse("com.tencent.mm\ncom.google.android.gms")
+        assertTrue(parsed.headerVersion == null)
+    }
+
+    @Test
+    fun `a single word is not a package`() {
+        // Android requires at least two segments, and a text file picked by
+        // mistake is mostly words: without the dot requirement every English
+        // word would land in the allowlist.
+        val parsed = ConfigBackup.parse("hello\ntrue\n1234\ncom.tencent.mm")
+        assertEquals(setOf("com.tencent.mm"), parsed.packages)
+    }
+
+    @Test
+    fun `a trailing dot is not a package`() {
+        val parsed = ConfigBackup.parse("com.tencent.mm.\ncom.tencent.mm")
+        assertEquals(setOf("com.tencent.mm"), parsed.packages)
     }
 }

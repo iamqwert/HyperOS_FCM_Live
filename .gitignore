@@ -1,14 +1,9 @@
 *.iml
 .gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+/.idea/*
 .DS_Store
 /build
+/HyperFCMLive/build
 /captures
 .externalNativeBuild
 .cxx
@@ -16,18 +11,21 @@ local.properties
 *.jks
 *.keystore
 *.p12
-/.idea/*
 # Device logcat dumps (local debugging only)
 *.logcat
 
 # WorkBuddy local data (internal notes / scratch) - never publish
 .workbuddy/
+.zwork/
+.kotlin/
+# One-off agent capture logs (24 MB class, deleted after use; rule keeps them out if recreated)
+.workbuddy-t*-capture.log
 
 # Local pre-change backups (scratch, never publish)
 /.backup/
 
 # 技术分析报告 / 内部日志 / 敏感报告等内部材料 - 仅本地，禁止入库
-# （README、CHANGELOG、.github/release-notes 等公开文档不受影响）
+# （README、HELP、CHANGELOG、.github/release-notes 等公开文档不受影响）
 *分析报告*
 *内部日志*
 *敏感报告*
@@ -90,5 +88,19 @@ java_pid*.hprof
 /switch_log.txt
 /ui.xml
 
+# 旧解析器迁移参考（4.3.0 记录页重写时的一次性对照件，已从工作区删除，规则防回流）
+/old_parser*
+
 #agents
 AGENTS.md
+
+# ── Markdown 文档上传白名单（4.4.0 起口径）──────────────────────────
+# 允许入库的 markdown：帮助（HELP.md / HELP_EN.md）、README（zh/en）、
+# hook 与诊断技术文档（FCM_HOOK_TECH_DOC.md）、CHANGELOG.md，
+# 以及 .github/release-notes.md（发布说明模板）。
+# 其余一律本地：内部审计、对照表、检查清单等。
+/EVENT_DISPLAY_MAP.md
+/OTA_CHECKLIST.md
+/FCM_DIAGNOSTICS_FORMATS.md
+/FCM_OVERDEFENSE_AUDIT.md
+/PROJECT_COMPARISON.md

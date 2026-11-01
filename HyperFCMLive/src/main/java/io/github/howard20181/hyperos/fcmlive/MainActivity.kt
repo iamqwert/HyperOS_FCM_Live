@@ -1270,9 +1270,16 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // A shortcut relaunch names a home tab, and a tab is only reachable from
-        // the home — so a sub-page left open from last time goes first, rather
-        // than burying the tab the shortcut asked for.
+        // Only a shortcut relaunch names a home tab, and a tab is only reachable
+        // from the home — so a sub-page left open from last time goes first,
+        // rather than burying the tab the shortcut asked for.
+        //
+        // A plain MAIN intent is what the launcher delivers when it reuses this
+        // singleTask (e.g. returning from the desktop): it names no tab, so it
+        // must leave the page stack alone. Popping here on every intent was
+        // resetting an open 关于/许可/实验 page to 主页.
+        val action = intent.action
+        if (action != ACTION_FCM_DIAGNOSTICS && action != ACTION_OPEN_SETTINGS) return
         navigator?.popToMain()
         handleShortcutIntent(intent)
     }
@@ -1400,30 +1407,22 @@ class MainActivity : AppCompatActivity() {
                 this, prefs, Prefs.readLocalSleepKeepaliveData(this)
             )
         }
-        if (Prefs.hasPendingAutostartGateReleasePush(this)) {
-            // Same repair for the autostart-gate switch, which the experiment
-            // screen owns; without this a flip made before the service bound
-            // would be reverted here rather than pushed up.
-            Prefs.writeAutostartGateRelease(
-                this, prefs, Prefs.readLocalAutostartGateRelease(this)
-            )
-        }
-        if (Prefs.hasPendingAutostartRestartReleasePush(this)) {
-            // Same repair for the restart-gate rung.
-            Prefs.writeAutostartRestartRelease(
-                this, prefs, Prefs.readLocalAutostartRestartRelease(this)
-            )
-        }
-        if (Prefs.hasPendingAutostartRootReleasePush(this)) {
-            // Same repair for the AppOps root rung.
-            Prefs.writeAutostartRootRelease(
-                this, prefs, Prefs.readLocalAutostartRootRelease(this)
-            )
-        }
         if (Prefs.hasPendingGreezeNetReleasePush(this)) {
             // Same repair for the greeze net-release switch.
             Prefs.writeGreezeNetRelease(
                 this, prefs, Prefs.readLocalGreezeNetRelease(this)
+            )
+        }
+        if (Prefs.hasPendingAutostartServiceReleasePush(this)) {
+            // Same repair for the service-bind switch.
+            Prefs.writeAutostartServiceRelease(
+                this, prefs, Prefs.readLocalAutostartServiceRelease(this)
+            )
+        }
+        if (Prefs.hasPendingAutostartProcessReleasePush(this)) {
+            // And for its process (restart / preload) rung.
+            Prefs.writeAutostartProcessRelease(
+                this, prefs, Prefs.readLocalAutostartProcessRelease(this)
             )
         }
         if (Prefs.hasPendingDebugLogPush(this)) {

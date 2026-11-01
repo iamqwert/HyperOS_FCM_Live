@@ -186,20 +186,25 @@ internal object PowerKeeperHooks {
                 try {
                     if (result is MutableList<*>) {
                         @Suppress("UNCHECKED_CAST")
-                        addIfAbsent(result as MutableList<Any?>, HookerSupport.GMS_PACKAGE_NAME)
+                        val list = result as MutableList<Any?>
+                        val had = list.contains(HookerSupport.GMS_PACKAGE_NAME)
+                        addIfAbsent(list, HookerSupport.GMS_PACKAGE_NAME)
+                        noRestrictQueryVerdict(module, had, list.size)
                     } else if (result is List<*>) {
+                        val had = result.contains(HookerSupport.GMS_PACKAGE_NAME)
                         val copy = ArrayList<Any?>(result)
                         addIfAbsent(copy, HookerSupport.GMS_PACKAGE_NAME)
+                        noRestrictQueryVerdict(module, had, copy.size)
                         return@intercept copy
                     }
                 } catch (t: Throwable) {
                     module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to extend getNoRestrictApps", t)
                 }
-                try {
-                    GmsSupport.ensureGmsUserTableBgControl(module, systemContext)
-                } catch (t: Throwable) {
-                    module.logGated(Log.WARN, HookerSupport.TAG, "Failed to write back userTable.bgControl", t)
-                }
+                // No userTable write from here any more (2026-10-30): this is the
+                // query path, and a provider round-trip per call bought nothing
+                // once the returned answer is already extended above. The source
+                // rows stay aligned through the dealNoRestrictApp repair below
+                // (P16), which fires only when the projection is rebuilt.
                 result
             }
             module.deoptimize(getNoRestrictAppsMethod)
@@ -209,67 +214,19 @@ internal object PowerKeeperHooks {
             logSkip("UserConfigureHelper class absent, skip")
         }
 
-        // Any user-config writer can put GMS back to miuiAuto; force and re-assert.
-        try {
-            val writerClass =
-                classLoader.loadClass("com.miui.powerkeeper.provider.UserConfigureHelper")
-            // One line for the whole set, not one per method: these are N methods
-            // of a single class answering the same question ("which writer can put
-            // GMS back to miuiAuto"), and each line pays the ~161 B LSPosed prefix.
-            // An install check reads the hooked *set*, not which line installed
-            // which method.
-            val reAssertHooked = ArrayList<String>()
-            for (method in writerClass.declaredMethods) {
-                val name = method.name
-                val looksWriter =
-                    name.contains("update", ignoreCase = true) ||
-                        name.contains("save", ignoreCase = true) ||
-                        name.contains("insert", ignoreCase = true) ||
-                        name.contains("modify", ignoreCase = true) ||
-                        name.contains("setBg", ignoreCase = true)
-                if (!looksWriter || name.contains("get", ignoreCase = true)) continue
-                val isBgControlSetter = name.contains("setBgControl", ignoreCase = true)
-                hookE(method).intercept { chain: XposedInterface.Chain ->
-                    val rawArgs = chain.args
-                    var args: Array<Any?>? = null
-                    if (isBgControlSetter) {
-                        val copy = rawArgs.toTypedArray()
-                        val touchesGms = copy.any { it == HookerSupport.GMS_PACKAGE_NAME }
-                        if (touchesGms) {
-                            for (i in copy.indices) {
-                                val a = copy[i]
-                                if (a is String && a != HookerSupport.GMS_PACKAGE_NAME && a != HookerSupport.COL_BG_CONTROL) {
-                                    copy[i] = HookerSupport.BG_CONTROL_NO_RESTRICT
-                                    module.logGated(
-                                        Log.INFO, HookerSupport.TAG,
-                                        "setBgControl: forced GMS control $a -> ${HookerSupport.BG_CONTROL_NO_RESTRICT}"
-                                    )
-                                }
-                            }
-                            args = copy
-                        }
-                    }
-                    val result = if (args != null) chain.proceed(args) else chain.proceed()
-                    try {
-                        GmsSupport.ensureGmsUserTableBgControl(module, systemContext)
-                    } catch (t: Throwable) {
-                        module.logGated(Log.WARN, HookerSupport.TAG, "userTable re-assert after ${method.name} failed", t)
-                    }
-                    result
-                }
-                module.deoptimize(method)
-                reAssertHooked.add(method.name)
-            }
-            if (reAssertHooked.isNotEmpty()) {
-                module.logGated(
-                    Log.INFO, HookerSupport.TAG,
-                    "UserConfigureHelper#${reAssertHooked.joinToString("/")} " +
-                        "hooked for userTable re-assert"
-                )
-            }
-        } catch (e: ClassNotFoundException) {
-            // Already reported above when getNoRestrictApps was missing.
-        }
+        // P15 (the UserConfigureHelper writer heuristic: force setBgControl args
+        // and re-assert userTable after every writer call) was removed on
+        // 2026-10-30 (second pass). OS4 PowerKeeper 4.2.00: the heuristic matched
+        // exactly two methods — setBgControl(String) is an instance setter whose
+        // argument is the control value, never the package name, so the arg force
+        // could never fire; and updateToTable(Context, ContentValues), whose only
+        // caller is PowerSaveConfigureManager.setPowerSaveAppConfigure, so the
+        // re-assert paid a provider query on every config write. Both faces are
+        // covered by the two hooks that remain: the query-time injection above
+        // (P14) and the dealNoRestrictApp repair below (P16), whose
+        // ensureGmsInMilletSetting already writes the source row back. On a
+        // generation whose UserConfigureHelper exposes a static (pkg, control)
+        // setter shape, re-verify before assuming the same conclusion.
 
         // Belt-and-suspenders: after dealNoRestrictApp() writes the projection,
         // verify GMS is present and repair if a path bypassed getNoRestrictApps.
@@ -295,6 +252,31 @@ internal object PowerKeeperHooks {
         }
     }
 
+    /**
+     * One-shot verdict for the query half of the no-restrict chain: either the
+     * ROM's own answer already contains GMS (so the query hook is a spectator)
+     * or the module had to add it (so this hook is load-bearing). One line per
+     * process, either way — silence is not an option on a chain whose layers
+     * all look identical from the outside.
+     */
+    @Volatile
+    private var noRestrictQueryVerdictLogged = false
+
+    private fun noRestrictQueryVerdict(module: XposedInterface, hadGms: Boolean, size: Int) {
+        if (noRestrictQueryVerdictLogged) return
+        noRestrictQueryVerdictLogged = true
+        module.logGated(
+            Log.INFO, HookerSupport.TAG,
+            if (hadGms) {
+                "no-restrict chain: getNoRestrictApps already contains GMS (size $size) — " +
+                    "the query hook is a spectator on this build"
+            } else {
+                "no-restrict chain: getNoRestrictApps lacked GMS and the module injected it " +
+                    "(size $size) — the query hook is load-bearing"
+            }
+        )
+    }
+
     private fun addIfAbsent(list: MutableList<Any?>, value: String) {
         if (!list.contains(value)) {
             list.add(value)
@@ -305,6 +287,20 @@ internal object PowerKeeperHooks {
      * Experiment (default off): keep WeChat out of the AOSP battery-optimization
      * whitelist — the Doze "user" section Settings shows as 未优化, persisted
      * to /data/system/deviceidle.xml.
+     *
+     * **Why a push module ships this at all** (field experience from the Chinese
+     * community, recorded here because "why" is not derivable from the code):
+     * for a WeChat that is meant to keep receiving FCM, the wanted end state is
+     * **「优化」— not 「不优化」**. WeChat only enters the cached-process path and
+     * gets delivered through the ordinary FCM route when the system considers it
+     * optimizable; leaving it doze-exempt sends it down a different route and the
+     * push does not arrive. 澎湃（HyperOS 的国内版策略）默认、而且每次电源模式
+     * 变化都会把微信重新写成「不优化」, so the manual switch alone is not enough:
+     * the user must (1) turn this experiment on and (2) set WeChat to 「优化」
+     * themselves — this hook is what keeps step 2 from being undone. It reads
+     * "opposite to the module's goal" only if the goal is mis-stated as "make
+     * WeChat exempt"; the actual goal is "let WeChat be delivered", and on this
+     * ROM that means optimizable.
      *
      * ROM forensics (OS4 V816): `com.miui.powerkeeper.controller
      * .DeviceIdleController$1` hardcodes the domestic (non-international

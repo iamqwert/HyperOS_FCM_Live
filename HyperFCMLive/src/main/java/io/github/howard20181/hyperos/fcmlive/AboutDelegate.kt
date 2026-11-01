@@ -248,6 +248,13 @@ class AboutDelegate(
             showMessage(activity.getString(R.string.config_import_failed))
             return
         }
+        when (restored.rejection) {
+            ConfigBackup.Restored.Rejection.TOO_NEW -> {
+                showMessage(activity.getString(R.string.config_import_too_new))
+                return
+            }
+            null -> {}
+        }
         if (restored.isEmpty) {
             showMessage(activity.getString(R.string.config_import_empty))
             return
@@ -263,11 +270,23 @@ class AboutDelegate(
             applyAppearanceChange()
         }
         showMessage(
-            activity.getString(
-                R.string.config_import_done,
-                restored.packages.size,
-                restored.settings
-            )
+            if (restored.skipped > 0) {
+                // Names the count instead of silently reporting "restored": a
+                // value this build (or this device's generation) cannot hold
+                // is a real outcome the user should see, not a rounding error.
+                activity.getString(
+                    R.string.config_import_done_skipped,
+                    restored.packages.size,
+                    restored.settings,
+                    restored.skipped
+                )
+            } else {
+                activity.getString(
+                    R.string.config_import_done,
+                    restored.packages.size,
+                    restored.settings
+                )
+            }
         )
     }
 

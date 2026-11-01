@@ -6,6 +6,7 @@ import io.github.howard20181.hyperos.fcmlive.mcu.Scheme
 import io.github.howard20181.hyperos.fcmlive.theme.AppearanceState
 import io.github.howard20181.hyperos.fcmlive.theme.ThemeEngine
 import io.github.howard20181.hyperos.fcmlive.theme.ThemePrefs
+import io.github.howard20181.hyperos.fcmlive.ui.isOs3Generation
 import java.util.Locale
 
 /**
@@ -66,13 +67,33 @@ internal object ConfigBackup {
     /** Suggested name in the document picker; the reader accepts any file. */
     const val FILE_NAME = "fcmlive-config.txt"
 
-    private const val HEADER = "# fcmlive-backup 2"
-
     /** The one prefix an import reads a setting from. */
     private const val SETTING_PREFIX = "# set "
 
-    /** Package names only: what an edited file may legitimately contain. */
-    private val PACKAGE_NAME = Regex("[A-Za-z0-9._]+")
+    /**
+     * The file's identity line, `<HEADER_PREFIX> <version>`.
+     *
+     * The version is checked on import: a file written by a *newer* build is
+     * refused instead of guessed at, because a later format may give the same
+     * bare lines a different meaning. A file with no header at all is treated as
+     * a pre-format allowlist (packages only) — see [decode].
+     */
+    private const val HEADER_PREFIX = "# fcmlive-backup"
+
+    /** The version this build writes. Adding a key does not bump it; changing the shape does. */
+    private const val FORMAT_VERSION = 2
+
+    private const val HEADER = "$HEADER_PREFIX $FORMAT_VERSION"
+
+    /**
+     * Package names only: what an edited file may legitimately contain.
+     *
+     * At least one dot is required — Android rejects a single-segment package
+     * name, and the looseness this replaces (`[A-Za-z0-9._]+`) meant every
+     * English word in a mistakenly picked text file ("hello", "true") was
+     * imported into the allowlist.
+     */
+    private val PACKAGE_NAME = Regex("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+")
 
     /** What [encode] produced, plus the counts the confirmation message quotes. */
     class Snapshot(val text: String, val packages: Int, val settings: Int)
@@ -81,10 +102,24 @@ internal object ConfigBackup {
     class Restored(
         val packages: Set<String>,
         val settings: Int,
+        /**
+         * Settings the file carried but this run did not apply: keys this build
+         * does not know, values it refuses, and keys that do not exist on this
+         * device's generation.
+         */
+        val skipped: Int,
         /** True when a look-and-feel value moved, so the caller must re-skin. */
-        val appearanceChanged: Boolean
+        val appearanceChanged: Boolean,
+        /** Non-null when the file was refused outright and nothing was written. */
+        val rejection: Rejection? = null
     ) {
-        val isEmpty: Boolean get() = packages.isEmpty() && settings == 0
+        enum class Rejection {
+            /** The file declares a format version newer than this build understands. */
+            TOO_NEW
+        }
+
+        val isEmpty: Boolean
+            get() = rejection == null && packages.isEmpty() && settings == 0 && skipped == 0
     }
 
     /**
@@ -92,13 +127,20 @@ internal object ConfigBackup {
      * order of [settings] — sections in the order a reader would look for them,
      * keys in a fixed order so two backups of the same state are identical
      * files — then the package list, sorted.
+     *
+     * Settings whose target does not exist on this device's generation are left
+     * out entirely: writing them would put a value in the file that the source
+     * machine never acted on, and a later restore elsewhere would carry it
+     * silently (the Smart Power key is the case in hand).
      */
     fun encode(context: Context): Snapshot {
         val table = settings()
         val builder = StringBuilder()
         builder.append(HEADER).append('\n')
         var section: String? = null
+        var written = 0
         for (setting in table) {
+            if (!setting.available(context)) continue
             if (setting.section != section) {
                 section = setting.section
                 builder.append("# ").append(setting.section).append('\n')
@@ -108,6 +150,7 @@ internal object ConfigBackup {
                 .append('=')
                 .append(setting.read(context))
                 .append('\n')
+            written++
         }
 
         // The remote copy is the source of truth once the module service is
@@ -123,30 +166,58 @@ internal object ConfigBackup {
                 builder.append(pkg).append('\n')
             }
         }
-        return Snapshot(builder.toString(), sorted.size, table.size)
+        return Snapshot(builder.toString(), sorted.size, written)
     }
 
     /**
      * Applies [text] and reports what landed. Unknown keys are skipped, not
      * rejected: a file written by a newer build stays importable here, minus the
-     * settings this build has never heard of.
+     * settings this build has never heard of — and the count of those is
+     * reported, so the user is not told "restored" for values that went nowhere.
+     *
+     * A file with no `# fcmlive-backup` header is a pre-format allowlist (or not
+     * ours at all): only its package lines are honoured. Applying its `# set`
+     * lines would let any text file write module switches.
      */
     fun decode(context: Context, text: String): Restored {
         val parsed = parse(text)
-        val values = parsed.values
+        val version = parsed.headerVersion
+        if (version != null && version > FORMAT_VERSION) {
+            return Restored(
+                emptySet(), 0, 0, false,
+                Restored.Rejection.TOO_NEW
+            )
+        }
+        val values = if (version == null) emptyMap() else parsed.values
         val packages = parsed.packages
 
         var applied = 0
+        var skipped = 0
         var appearance = false
+        val table = settings()
+        val knownKeys = HashSet<String>(table.size)
         // Table order, not file order: `color_spec` can move `palette_style`
         // (it is that row's superior in the appearance page), and a hand-edited
         // file must not be able to change the outcome by reordering lines.
-        for (setting in settings()) {
+        for (setting in table) {
+            knownKeys.add(setting.key)
             val value = values[setting.key] ?: continue
-            if (!setting.write(context, value)) continue
+            // A value for a target this device does not carry (e.g. the
+            // OS3-only Smart Power switch restored on OS4) is skipped rather
+            // than written: writing it would create a setting the user can
+            // neither see nor turn off, and a later backup would carry it on.
+            if (!setting.available(context)) {
+                skipped++
+                continue
+            }
+            if (!setting.write(context, value)) {
+                skipped++
+                continue
+            }
             applied++
             if (setting.appearance) appearance = true
         }
+        skipped += values.keys.count { it !in knownKeys }
         if (appearance) {
             // The disk is authoritative and already written; this is the half
             // recomposition does not get for free — the Compose state every
@@ -154,13 +225,18 @@ internal object ConfigBackup {
             AppearanceState.hydrate(context)
             ThemeEngine.invalidate()
         }
-        return Restored(packages, applied, appearance)
+        return Restored(packages, applied, skipped, appearance)
     }
 
     /** What a file contained, before anything was written. */
     class Parsed(
         val values: Map<String, String>,
-        val packages: Set<String>
+        val packages: Set<String>,
+        /**
+         * The number after `# fcmlive-backup`, or null when the first non-empty
+         * line is not that header — the pre-format allowlist shape.
+         */
+        val headerVersion: Int?
     )
 
     /**
@@ -170,13 +246,24 @@ internal object ConfigBackup {
     fun parse(text: String): Parsed {
         val values = HashMap<String, String>()
         val packages = LinkedHashSet<String>()
+        var headerVersion: Int? = null
         var first = true
+        // The header is the first non-empty line and nowhere else: an import
+        // reads a `#` comment anywhere, so a hand-edited file that moves the
+        // marker lower would otherwise be judged by the comment it landed on.
+        var headerChecked = false
         for (raw in text.lineSequence()) {
             // A file round-tripped through a Windows editor can carry a BOM; it
             // would otherwise glue itself onto the header and the first package.
             val line = if (first) raw.removePrefix("\uFEFF").also { first = false } else raw
             val trimmed = line.trim()
             if (trimmed.isEmpty()) continue
+            if (!headerChecked) {
+                headerChecked = true
+                if (trimmed.startsWith(HEADER_PREFIX)) {
+                    headerVersion = trimmed.removePrefix(HEADER_PREFIX).trim().toIntOrNull()
+                }
+            }
             if (trimmed.startsWith(SETTING_PREFIX)) {
                 val body = trimmed.substring(SETTING_PREFIX.length)
                 val split = body.indexOf('=')
@@ -188,7 +275,7 @@ internal object ConfigBackup {
             if (trimmed.startsWith("#")) continue
             if (PACKAGE_NAME.matches(trimmed)) packages.add(trimmed)
         }
-        return Parsed(values, packages)
+        return Parsed(values, packages, headerVersion)
     }
 
     /** Resolves the incoming values against the tables' own rules. */
@@ -196,6 +283,12 @@ internal object ConfigBackup {
         val section: String,
         val key: String,
         val appearance: Boolean,
+        /**
+         * Whether this device's generation carries the setting at all. A
+         * generation-specific switch (Smart Power, OS3-only) answers false
+         * elsewhere, which keeps it out of both the backup and a restore.
+         */
+        val available: (Context) -> Boolean,
         val read: (Context) -> String,
         val write: (Context, String) -> Boolean
     )
@@ -205,11 +298,13 @@ internal object ConfigBackup {
         key: String,
         read: (Context) -> Boolean,
         appearance: Boolean = false,
+        available: (Context) -> Boolean = { true },
         write: (Context, Boolean) -> Unit
     ) = Setting(
         section = section,
         key = key,
         appearance = appearance,
+        available = available,
         read = { read(it).toString() },
         write = { context, raw ->
             val on = when (raw.lowercase(Locale.ROOT)) {
@@ -232,11 +327,13 @@ internal object ConfigBackup {
         read: (Context) -> Int,
         valid: (Int) -> Boolean = { true },
         appearance: Boolean = false,
+        available: (Context) -> Boolean = { true },
         write: (Context, Int) -> Unit
     ) = Setting(
         section = section,
         key = key,
         appearance = appearance,
+        available = available,
         read = { read(it).toString() },
         write = { context, raw ->
             val value = raw.toIntOrNull()
@@ -290,28 +387,28 @@ internal object ConfigBackup {
             ) { c, floor -> Prefs.writeWifiWeakSignalFloor(c, remote, floor) },
             toggle(
                 "Experiments",
-                Prefs.KEY_AUTOSTART_GATE_RELEASE,
-                Prefs::readLocalAutostartGateRelease
-            ) { c, on -> Prefs.writeAutostartGateRelease(c, remote, on) },
-            toggle(
-                "Experiments",
-                Prefs.KEY_AUTOSTART_RESTART_RELEASE,
-                Prefs::readLocalAutostartRestartRelease
-            ) { c, on -> Prefs.writeAutostartRestartRelease(c, remote, on) },
-            toggle(
-                "Experiments",
-                Prefs.KEY_AUTOSTART_ROOT_RELEASE,
-                Prefs::readLocalAutostartRootRelease
-            ) { c, on -> Prefs.writeAutostartRootRelease(c, remote, on) },
-            toggle(
-                "Experiments",
                 Prefs.KEY_GREEZE_NET_RELEASE,
                 Prefs::readLocalGreezeNetRelease
             ) { c, on -> Prefs.writeGreezeNetRelease(c, remote, on) },
             toggle(
                 "Experiments",
+                Prefs.KEY_AUTOSTART_SERVICE_RELEASE,
+                Prefs::readLocalAutostartServiceRelease
+            ) { c, on -> Prefs.writeAutostartServiceRelease(c, remote, on) },
+            toggle(
+                "Experiments",
+                Prefs.KEY_AUTOSTART_PROCESS_RELEASE,
+                Prefs::readLocalAutostartProcessRelease
+            ) { c, on -> Prefs.writeAutostartProcessRelease(c, remote, on) },
+            toggle(
+                "Experiments",
                 Prefs.KEY_SMARTPOWER_RELEASE,
-                Prefs::readLocalSmartPowerRelease
+                Prefs::readLocalSmartPowerRelease,
+                // OS3-only: the interception targets are absent on OS4, where the
+                // settings page hides this row. Keeping it out of the file means
+                // an OS3 backup cannot leave an invisible `true` behind on an
+                // OS4 device — a value the user could not see or turn off.
+                available = { isOs3Generation() }
             ) { c, on -> Prefs.writeSmartPowerRelease(c, remote, on) },
 
             toggle(

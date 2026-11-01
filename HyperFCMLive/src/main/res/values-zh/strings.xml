@@ -71,6 +71,8 @@
     <!-- 设置项含模块开关与外观，所以消息同时报两个数。 -->
     <string name="config_export_done">已备份 %1$d 个应用、%2$d 项设置</string>
     <string name="config_import_done">已导入 %1$d 个应用、%2$d 项设置</string>
+    <string name="config_import_too_new">该备份来自更新的版本，无法导入</string>
+    <string name="config_import_done_skipped">已导入 %1$d 个应用、%2$d 项设置（%3$d 项跳过：本机不支持或未知）</string>
     <string name="update_found">发现新版本 %1$s</string>
     <string name="update_found_title">发现新版本</string>
     <!-- 更新徽标只有颜色，读屏需要一句文字；挂在徽标节点上 -->
@@ -450,14 +452,12 @@
     <string name="experiment_sleep_keepalive_data">保护移动数据不断网</string>
     <string name="experiment_sleep_keepalive_data_desc">不断开移动数据以确保推送通畅</string>
 
-    <!-- 自启动单列一节：主开关在运行时放行，副档逐层扩大覆盖面，末行为管家自启动管理入口，默认全关 -->
+    <!-- 自启动单列一节：两档各对应一个 ROM 检查点，另有管家自启动管理入口 -->
     <string name="experiment_section_autostart">自启动</string>
-    <string name="experiment_autostart_gate_release">放行应用拉起</string>
-    <string name="experiment_autostart_gate_release_desc">放行应用的服务与进程启动</string>
-    <string name="experiment_autostart_restart_release">停用应用冻结</string>
-    <string name="experiment_autostart_restart_release_desc">应用进程结束后按正常路径重启</string>
-    <string name="experiment_autostart_root_release">放行自启动统一查询入口</string>
-    <string name="experiment_autostart_root_release_desc">系统所有自启动检查一律按允许答复</string>
+    <string name="experiment_autostart_service_release">服务绑定门</string>
+    <string name="experiment_autostart_service_release_desc">已勾选应用绑定服务被自启动检查拒绝时，改答允许</string>
+    <string name="experiment_autostart_process_release">进程重启门</string>
+    <string name="experiment_autostart_process_release_desc">已勾选应用的进程被杀后重启或预加载被拒时，改答允许</string>
     <string name="experiment_wake_autostart_write">自启动管理</string>
     <string name="experiment_wake_autostart_write_desc">查看与调整各应用的自启动开关</string>
     <string name="experiment_autostart_empty_list">当前白名单为空，开关只作用于已勾选应用，请先配置白名单</string>
