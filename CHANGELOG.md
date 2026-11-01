@@ -1,5 +1,85 @@
 # Changelog
 
+## 4.4.0 (56)
+
+#### 本版本大幅变动，重新评估部分功能定位
+
+***
+
+#### 修复
+
+- 记录页改善切页顿挫感；
+
+- 修复模块挂在后台时，关于页被重置回主页的问题；
+
+- 解决睡眠模式两处问题：
+
+  - 修复退出睡眠时的连接恢复广播可能会让 GMS 主动断开当前长连接去重建，导致收不到推送的问题。
+
+  - 睡眠保活链在缺少任一切网方法时，整组不装载并输出警告。
+
+- 解决备份导入三处问题：
+
+  - 备份文件自带格式版本，来自新版本的备份会拒绝导入旧版本的操作；
+
+  - 导入完成的提示区分「跳过」项数（本机不支持或未知），跳过不再一律报为成功；
+
+  - 包名校验要求至少含一个点，修复误选普通文本文件时把英文单词批量写进应用白名单的问题。
+
+#### 变更
+
+- 过度防御清理，删除「装上也永远不会执行」或「没有可观测消费者」的面：`NetdExecutor#setGmsDnsBlockerState`（OS4 全 dex 无任何调用方）、自启动 pre-start 探针（G1）、`isNeedCachedBroadcast`（唯一调用方分支已不再执行）、`Settings$Secure#getIntForUser` 读钩（PowerKeeper 每次安全设置读取的热路径，易随版本漂移）、`triggerGMSLimitAction` 钩（OS 3/4均无自动触发面）、`ListAppsManager#isInWhiteList` 多余兜底（OS 3/4均无移除路径）、PowerKeeper `UserConfigureHelper` 写者启发式钩（arg-force 结构性死代码）、`isAllowBroadcast` 的 c2dm fallback（OS3）、`GmsObserver#disableGmsApps`（OS 3/4 dex 均无此方法）；PowerKeeper 查询路径不再回写 userTable；`ProcessPolicy#getWhiteList` 不再追加 `gms.persistent`；`updateGmsNetStatus` 缺失降为跨代 DEBUG。OS3 待验证状态升级为已核存在（OS3 PowerKeeper 4.2.00 同有 `applySleepConfig` 切无线电）。逐条证据见技术文档 `FCM_HOOK_TECH_DOC.md`。
+
+- 变更实验「自启动」一节：
+
+  1. 删除重启门与根门：前者在 AOSP 下与 FCM 投递无关（`restart DENIED` 到处可见却不影响推送），后者几乎等同于直接打开手机管家自启动，均不符合模块「收窄」的定位。
+  2. 余下部分改为**两个独立开关**，一个检查点一个：**服务绑定门**（`isAllowStartService`，真实入口是绑定服务 / JobService / 重启判定）与**进程重启门**（`isAllowAutoStart`，覆盖被杀后的重启与预加载）。
+  3. 服务绑定门改为「先让 ROM 判定，只把它的拒绝改答为允许」：旧实现在方法入口直接答 true，会连带跳过 `BarrageListenerServiceStub#isAllowStartBarrage` 与 `10008` 的 `noteOp` 记账；命中日志改为一次性。
+  4. 旧的合并开关（`autostart_gate_release`）退休，升级后两档都是关的，需手动打开；
+
+- 删除探针层与一次性参考代码：`TrafficProbe` / `UnsafeUtils` / `WakePathProbe` 三个探针文件、广播闸门计数器与 30 分钟汇总日志（钩子日志改为每进程一次性输出——命中即打一行，沉默即未触发），以及从未接线的 `ui/liquid` 整包与 `SoftGlassBackdrop`。
+
+- 「开放源代码许可」页新增参考项目。
+
+- 构建脚本类路径强制 guava 33.7.2-jre（修复 CVE-2026-102554）。
+
+***
+
+#### Fixed
+
+- The Records tab now loads its archive asynchronously: the first composition no longer reads the file on the main thread (the synchronous read + JSON parse scaled with the archive into a tab-entry hitch). While loading, the established 正在加载 status line shows; the per-look row rendering (M3 / MIUIX / Soft Glass) is unchanged.
+
+- Two sleep-mode tightenings (both re-checked against the OS3 / OS4 dumps):
+
+  - The connection-recovery broadcast fired on sleep exit can only be sent when this boot actually observed sleep entry. It used to fire whenever the whitelist arming could not be confirmed, and that broadcast makes GMS drop and rebuild its current connection — manufacturing a window with no pushes.
+
+  - If any radio-cutoff method of the sleep keep-alive chain is missing, the whole chain refuses to install and logs a warning, instead of a half-fallback.
+
+- Backup import is stricter:
+
+  - Backup files carry a format version; a file written by a newer build is refused instead of guessed at.
+
+  - The completion message now reports skipped items (unsupported here or unknown) instead of claiming everything was imported.
+
+  - Package names must contain at least one dot, fixing the case where a mistakenly picked plain text file imported ordinary English words into the app allowlist.
+
+#### Changed
+
+- Over-defence cleanup (OS3 / OS4 dump double-generation re-check plus an OS4 full-dex caller scan), removing everything that could never execute or had no observable consumer: `NetdExecutor#setGmsDnsBlockerState` (P2 — no caller anywhere in the OS4 dexes), the autostart pre-start probe (G1), `isNeedCachedBroadcast` (S11 — its only call site no longer executes), the `Settings$Secure#getIntForUser` read hook (P21 — a hot path for every secure-settings read in PowerKeeper and the most generation-drift-prone interface), the `triggerGMSLimitAction` hook (no automatic trigger on either generation), the `ListAppsManager#isInWhiteList` re-add backstop (no removal path on either generation), the PowerKeeper `UserConfigureHelper` writer-heuristic hook (structurally dead arg force), the `isAllowBroadcast` c2dm fallback (the OS3 dump proves S10 installs on both generations), and `GmsObserver#disableGmsApps` (absent from both dexes); the PowerKeeper query path no longer writes userTable back; `ProcessPolicy#getWhiteList` no longer appends `gms.persistent`; a missing `updateGmsNetStatus` now reports as cross-generation DEBUG. P19/P20's OS3 status upgraded from unverified to verified-present (OS3 PowerKeeper 4.2.00 also cuts radios via `applySleepConfig`). Evidence per item in the tech doc, `FCM_HOOK_TECH_DOC.md`.
+
+- The probe layer and one-shot reference code are gone: the `TrafficProbe` / `UnsafeUtils` / `WakePathProbe` files, the broadcast-gate counters and the 30-minute summary log (hook logging is now one-shot per process — a hook that fired prints once; silence means the branch was never taken), plus the never-wired `ui/liquid` package (6 files left behind when the soft-glass tab bar replaced it) and `SoftGlassBackdrop`.
+
+- The experiment screen's autostart section changed:
+
+  1. The restart rung and the appop-root rung are gone: the former has no bearing on FCM delivery under AOSP (`restart DENIED` appears on every device without blocking pushes), and the latter amounts to turning the manager's own autostart switch on — both widened further than the module's "narrow" remit allows.
+  2. What remains is **two independent switches**, one per checkpoint: the **service-bind gate** (`isAllowStartService`, actually reached from the bind / JobService / restart verdicts) and the **process-restart gate** (`isAllowAutoStart`, covering restart and preload after a kill).&#x20;
+  3. The bind gate now runs the ROM's verdict first and only re-answers its denial. The old build answered `true` at method entry, which also skipped `BarrageListenerServiceStub#isAllowStartBarrage` and the `10008` usage note; its hit log is one-shot.
+  4. The old merged switch (`autostart_gate_release`) is retired, so an upgrade starts with both new switches off;&#x20;
+
+- The open-source licences page adds the reference project E3N-glotm/HyperOS-FCM-Unified-Guard (MIT); every dependency version was re-audited against the resolved graph with no drift.
+
+- Build chain: the buildscript classpath forces guava 33.7.2-jre (CVE-2026-102554, build-time only, never ships in the APK).
+
 ## 4.3.0 (55)
 
 ### 简体中文

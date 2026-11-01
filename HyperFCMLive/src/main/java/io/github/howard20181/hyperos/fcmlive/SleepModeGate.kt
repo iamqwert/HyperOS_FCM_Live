@@ -1,6 +1,5 @@
 package io.github.howard20181.hyperos.fcmlive
 
-import android.content.ContentResolver
 import android.content.Context
 import android.os.Bundle
 import android.telephony.TelephonyManager
@@ -18,9 +17,9 @@ import java.lang.reflect.Field
  * counter feeds the end-of-install summary that stays with `Hooker`),
  * `logSkip` / `logSkipOtherGeneration` are the two absent-target reports (the
  * counters and the merged cross-generation line live with `Hooker`), and
- * `getSystemContext` / `gmsUid` / `broadcastGateSummary` /
- * `recoverGmsConnection` are the suppliers of the sleep-exit P4 recovery
- * nudge — their lazy resolution and state stay with `Hooker`.
+ * `getSystemContext` / `gmsUid` / `recoverGmsConnection` are the suppliers of
+ * the sleep-exit P4 recovery nudge — their lazy resolution and state stay with
+ * `Hooker`.
  */
 internal object SleepModeGate {
 
@@ -31,8 +30,11 @@ internal object SleepModeGate {
      * When set, sleep exit skips the P4 recovery nudge: GMS stayed online all
      * night, so its MCS connection is healthy by construction and the recovery
      * broadcasts would only tear it down. Stays false when the whitelist path
-     * failed (old ROM fallback / uid unresolved / rules never ran), which is
-     * exactly the case the nudge was written for.
+     * failed (old ROM fallback / uid unresolved / rules never ran) — and that
+     * false alone is **not** enough to nudge: [sSleepEntrySeen] has to say this
+     * boot actually went through sleep entry, otherwise a failed whitelist arm
+     * would be mistaken for "the network was cut". See the exit branch in
+     * [armSleepModeChain] and FCM_HOOK_TECH_DOC.md §4.1（S16）.
      *
      * The step from "the uid rule was applied" to "the link stayed up" is a
      * generation assumption, not a measurement — see the exit branch in
@@ -58,6 +60,21 @@ internal object SleepModeGate {
     /** One-shot sentinel for [armSleepModeChain]; same job as its sibling above. */
     @Volatile
     private var sSleepChainPathFired = false
+
+    /**
+     * 本次开机是否真的观察到睡眠进入（`enableSleepModeChain(true)` 被执行过）。
+     *
+     * 退出分支的 nudge 需要它，因为 [sGmsKeptOnSleepWhitelist] 为 false 同时
+     * 代表三种完全不同的情况：白名单字段不可变、GMS uid 解析失败，以及最正常
+     * 的“这一次没进白名单”。后两种下网络其实没被切，却会照样发 P4 广播，而
+     * 该广播会让 GMS 主动丢掉当前 MCS。
+     *
+     * 只有“本次开机见过进入”才允许 nudge：用完清零，下一次进入重新置位。这样
+     * 白名单臂没装或字段不可变时不再盲发广播；而 V816 这类整条链都不运行的
+     * ROM，两个标志始终为 false，退出分支根本不会进入。
+     */
+    @Volatile
+    private var sSleepEntrySeen = false
 
     /**
      * The legacy MIUI sleep-mode network chain, in system_server's
@@ -100,7 +117,6 @@ internal object SleepModeGate {
         logSkipOtherGeneration: (String) -> Unit,
         getSystemContext: () -> Context?,
         gmsUid: () -> Int?,
-        broadcastGateSummary: () -> String,
         recoverGmsConnection: (Context) -> Unit
     ) {
         val serviceClass = try {
@@ -123,7 +139,7 @@ internal object SleepModeGate {
         )
         val chainArmed = armSleepModeChain(
             module, serviceClass, whitelistField, hookE, logSkipOtherGeneration,
-            getSystemContext, gmsUid, broadcastGateSummary, recoverGmsConnection
+            getSystemContext, gmsUid, recoverGmsConnection
         )
         // One install-time line for both arms, so "no sentinel fired" is never
         // the only evidence: the log states which arms exist on this ROM and
@@ -198,7 +214,6 @@ internal object SleepModeGate {
         logSkipOtherGeneration: (String) -> Unit,
         getSystemContext: () -> Context?,
         gmsUid: () -> Int?,
-        broadcastGateSummary: () -> String,
         recoverGmsConnection: (Context) -> Unit
     ): Boolean {
         val chainMethod = try {
@@ -215,6 +230,10 @@ internal object SleepModeGate {
         hookE(chainMethod).intercept { chain: XposedInterface.Chain ->
             val enabling = chain.getArg(0) == true
             if (enabling) {
+                // Matching entry for the exit branch's nudge gate: without this,
+                // "the whitelist arm never installed" and "the network was
+                // actually cut" both read as `sGmsKeptOnSleepWhitelist == false`.
+                sSleepEntrySeen = true
                 // Entering sleep used to be silent, which made "the callback never
                 // ran" and "it ran but the whitelist was empty" look identical in
                 // the logs. Record it, plus the size we are about to iterate over.
@@ -236,6 +255,8 @@ internal object SleepModeGate {
             }
             chain.proceed()
             if (!enabling) {
+                val entered = sSleepEntrySeen
+                sSleepEntrySeen = false
                 if (sGmsKeptOnSleepWhitelist) {
                     // GMS was on the sleep whitelist, so it stayed online and its
                     // MCS connection is healthy. The recovery broadcasts make GMS
@@ -257,7 +278,7 @@ internal object SleepModeGate {
                             "whitelist path means no radio was cut — on a ROM that " +
                             "also cuts them in PowerKeeper this skip is wrong)"
                     )
-                } else {
+                } else if (entered) {
                     module.logGated(
                         Log.INFO, HookerSupport.TAG,
                         "Sleep mode exited: GMS not whitelisted (network was cut), " +
@@ -265,23 +286,26 @@ internal object SleepModeGate {
                     )
                     val context = getSystemContext()
                     if (context != null) {
-                        // Sample before the nudge: those broadcasts make GMS drop its
-                        // current MCS connection, so the pre-nudge state is what tells
-                        // us whether the nudge broke a connection that was still alive.
-                        TrafficProbe.probeGmsTraffic(
-                            module, gmsUid, broadcastGateSummary, "before sleep-exit nudge"
-                        )
+                        // No throttle any more: the decision to send here is the
+                        // whitelist flag itself ("the network was actually cut"), and
+                        // the only path that reaches it runs once per sleep session.
+                        // It used to be delegated to ConnectionHealth, which owned a
+                        // cooldown/cap ladder for its own triggers; that subsystem was
+                        // removed on 2026-10-30 (see FCM_HOOK_TECH_DOC.md §5.8), so the
+                        // action belongs here, in the only place that still decides it.
                         Thread { recoverGmsConnection(context) }.start()
-                        TrafficProbe.probeBackgroundHandler().postDelayed(
-                            {
-                                TrafficProbe.probeGmsTraffic(
-                                    module, gmsUid, broadcastGateSummary,
-                                    "after sleep-exit nudge"
-                                )
-                            },
-                            HookerSupport.GMS_TRAFFIC_NUDGE_RESAMPLE_MS
-                        )
                     }
+                } else {
+                    // Exit with no entry seen this boot: `sGmsKeptOnSleepWhitelist`
+                    // being false here says nothing about the network (the whitelist
+                    // arm may be absent, the field immutable, or the uid unresolved),
+                    // so the nudge would be a shot in the dark that can tear down a
+                    // healthy MCS. Report it once per exit and leave GMS alone.
+                    module.logGated(
+                        Log.INFO, HookerSupport.TAG,
+                        "Sleep mode exited without a matching entry this boot; " +
+                            "no reconnect nudge (per-uid path not observed)"
+                    )
                 }
                 // Next session starts from a clean slate: the flag must reflect
                 // what happens in *that* session, not a stale previous one.
@@ -381,8 +405,11 @@ internal object SleepModeGate {
      * ## Why the cutoff calls are stopped here instead of skipped upstream
      *
      * `applySleepConfig` jumps over the whole cutoff block when
-     * `key_open_earthquake_warning` reads 1, and an earlier revision answered
-     * that read with 1 — the vendor's own "must stay reachable" escape hatch.
+     * `key_open_earthquake_warning` reads 1 — the vendor's own "must stay
+     * reachable" escape hatch. This module does **not** answer that read: a
+     * former degraded path did, and it was deleted on 2026-10-30 (see §5.8 of
+     * the tech doc), which is why the paragraph below is the reason the
+     * cutoff calls are hooked at all rather than the description of a fallback.
      * That shortcut is all-or-nothing: it skips `setDataEnabled(false)` and
      * `setWifiEnabled(false)` **and, with them, the
      * `SleepState.setPreviousEnable`/`writeToDb` calls that record which
@@ -423,22 +450,26 @@ internal object SleepModeGate {
      * chain, which this hook leaves alone.
      *
      * Two limits are stated here rather than left to be discovered:
-     *  - On the degraded path ([hookSleepModeEarthquakeFlag]) neither cutoff
-     *    interceptor runs at all — that branch skips the whole cutoff block.
-     *    It is only reachable when one of the two cutoff methods cannot be
-     *    hooked, and the install-time log says so outright.
+     *  - If **either** cutoff method cannot be hooked, this switch does not arm
+     *    at all: no hook is installed, the install log says outright which method
+     *    was missing, and the night runs the ROM's own policy. There is no
+     *    fallback. A half-hook is worse than none — cutting one radio while
+     *    leaving the other untouched would drift out of step with what
+     *    `SleepState` recorded, and stopping only the data call would be a
+     *    silently wrong version of "keep WiFi, let data go".
      *  - Both interceptors require the stack to carry
-     *    [SLEEP_CONTROLLER_CLASS]`#applySleepConfig` / `#restoreSleepConfig`
-     *    ([calledFromSleepApply] / [calledFromSleepConfig]), and that class is
-     *    the OS4/V816 home of sleep mode. On a ROM whose sleep mode lives
-     *    elsewhere — OS3 goes through system_server's per-uid chain, which is
-     *    what the legacy arms below exist for — the predicate can never match,
-     *    so this switch intercepts nothing and the radios are cut exactly as if
-     *    it were off. That is a **silent no-op, not a failure**: both hooks are
-     *    installed and the install log says so, so never read a healthy-looking
-     *    log as "the switch is doing something". Which side of the fork a
-     *    device is on comes from the `Sleep-mode legacy per-uid chain armed: …`
-     *    line and the two `legacy path FIRED` sentinels, not from this switch.
+     *    [SLEEP_CONTROLLER_CLASS]`#applySleepConfig` ([calledFromSleepApply]).
+     *    The OS3 dump (PowerKeeper 4.2.00) carries the same controller and it
+     *    drives the same cutoffs there, so the predicate is not OS4-only; what
+     *    stays device-dependent is whether OS3's sleep flow reaches it, since
+     *    OS3 also runs system_server's per-uid chain, which is what the legacy
+     *    arms below cover. If the predicate never matches, this switch
+     *    intercepts nothing and the radios are cut exactly as if it were off —
+     *    a **silent no-op, not a failure**: both hooks are installed and the
+     *    install log says so, so never read a healthy-looking log as "the
+     *    switch is doing something". Which mechanisms a device actually runs
+     *    comes from the `Sleep-mode legacy per-uid chain armed: …` line and
+     *    the two `legacy path FIRED` sentinels, not from this switch.
      */
     internal fun hookSleepModeNetworkKeepalive(
         module: XposedInterface,
@@ -466,17 +497,20 @@ internal object SleepModeGate {
         }
 
         if (wifiMethod == null || dataMethod == null) {
-            // Degrade rather than half-promise. Cutting a radio that
-            // SleepState never recorded would leave restoreSleepConfig with
-            // nothing to turn back on, so a hook that cannot stop both calls
-            // must not stop either: take the vendor's own no-cutoff branch
-            // instead, which keeps both radios up for the whole night.
-            hookSleepModeEarthquakeFlag(module, classLoader, hookE, logSkip)
+            // Nothing is armed and nothing pretends to be. Both targets exist on
+            // this ROM (checked against the shipped PowerKeeper APK and
+            // framework), so this branch is a guard against a future rename, not
+            // a mode that has ever run. It used to fall back to answering
+            // PowerKeeper's `key_open_earthquake_warning` read with 1, which
+            // skips the whole cutoff block — that fallback was deleted on
+            // 2026-10-30: it cannot express "keep one radio" (the entire point of
+            // the data sub-switch), it lies about a life-safety flag, and it
+            // hooked a framework-wide `Settings$Secure` int read to do it.
             module.logGated(
-                Log.INFO, HookerSupport.TAG,
-                "Sleep-mode network keepalive: cutoff hooks incomplete, degraded " +
-                    "to PowerKeeper's own no-cutoff branch (both radios stay up " +
-                    "for the whole night)"
+                Log.WARN, HookerSupport.TAG,
+                "Sleep-mode network keepalive NOT armed: a cutoff method is " +
+                    "missing, and there is no fallback (sleep mode will cut both " +
+                    "radios as the ROM intends)"
             )
             return
         }
@@ -559,81 +593,6 @@ internal object SleepModeGate {
         return false
     }
 
-    /** True when the stack is either sleep entry or exit; both must see the same flag. */
-    private fun calledFromSleepConfig(): Boolean {
-        for (frame in Thread.currentThread().stackTrace) {
-            if (HookerSupport.SLEEP_CONTROLLER_CLASS == frame.className &&
-                (HookerSupport.SLEEP_APPLY_METHOD == frame.methodName ||
-                    HookerSupport.SLEEP_RESTORE_METHOD == frame.methodName)
-            ) {
-                return true
-            }
-        }
-        return false
-    }
-
-    /**
-     * Makes sleep mode take its own "must stay reachable" path — the **degrade**
-     * path, armed only when [hookSleepModeNetworkKeepalive] cannot hook both
-     * cutoff calls.
-     *
-     * `applySleepConfig` reads `key_open_earthquake_warning` and, when it is 1,
-     * skips the entire block that calls `setDataEnabled(false)` and
-     * `setWifiEnabled(false)` — along with the `SleepState` bookkeeping inside
-     * it. That is exactly why this is no longer the normal path: it can keep
-     * both radios up, but it cannot keep **one** of them up and let the other
-     * go. As a fallback the gap does not matter — the only choice left there is
-     * between "both radios up" and "network gone, with nothing the user can do
-     * about it" — so it arms when **either** sleep switch is on and says so.
-     * (That is also why the experiment screen's two switches, which are peers
-     * here, cannot both be honoured on this path.)
-     *
-     * This answers the flag read and nothing else: the setting itself is
-     * untouched, so no earthquake feature is turned on and no other reader of
-     * the key sees a different value.
-     */
-    private fun hookSleepModeEarthquakeFlag(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit
-    ) {
-        val getIntForUser = try {
-            classLoader.loadClass("android.provider.Settings\$Secure")
-                .getDeclaredMethod(
-                    "getIntForUser",
-                    ContentResolver::class.java,
-                    String::class.java,
-                    Int::class.javaPrimitiveType,
-                    Int::class.javaPrimitiveType
-                )
-        } catch (t: Throwable) {
-            logSkip("Settings\$Secure#getIntForUser absent, sleep-keepalive flag skip")
-            null
-        }
-        if (getIntForUser == null) return
-        getIntForUser.isAccessible = true
-        hookE(getIntForUser).intercept { chain: XposedInterface.Chain ->
-            // Cheap rejection first: this runs for every Secure int read made
-            // by PowerKeeper, so the stack walk must stay off the fast path.
-            if (HookerSupport.SLEEP_EARTHQUAKE_KEY != chain.getArg(1)) {
-                return@intercept chain.proceed()
-            }
-            if ((!isSleepKeepaliveEnabled(module) && !isSleepKeepaliveDataEnabled(module)) ||
-                !calledFromSleepConfig()
-            ) {
-                return@intercept chain.proceed()
-            }
-            module.logGated(
-                Log.INFO, HookerSupport.TAG,
-                "sleep-mode: reported life-safety reachability on, " +
-                    "PowerKeeper will skip the network cutoff"
-            )
-            1
-        }
-        module.deoptimize(getIntForUser)
-    }
-
     /**
      * Keepalive switch, read lazily like the WeChat keepout's.
      *
@@ -676,82 +635,8 @@ internal object SleepModeGate {
         }
     }
 
-    /**
-     * doze-wl-sentinel observability. The hook itself only preserves the
-     * status quo (GMS is already in the doze whitelist on this device), so
-     * without these two signals the hook would be unverifiable: "reached"
-     * proves the hook is alive on every boot (PowerKeeperAppConfigure
-     * assembly always calls through), the inject counter proves the
-     * injection path works when the cloud ever drops GMS.
-     */
-    @Volatile
-    private var sDozeSentinelReachedLogged = false
-
-    @Volatile
-    private var sDozeSentinelInjectCount = 0
-
-    internal fun hookGlobalFeatureConfigureHelper(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit
-    ) {
-        try {
-            val GlobalFeatureConfigureHelperClass = classLoader.loadClass(
-                "com.miui.powerkeeper.provider.GlobalFeatureConfigureHelper"
-            )
-            for (argType in arrayOf(Bundle::class.java, Context::class.java)) {
-                try {
-                    val getDozeWhiteListAppsMethod =
-                        GlobalFeatureConfigureHelperClass.getDeclaredMethod(
-                            "getDozeWhiteListApps", argType
-                        )
-                    hookE(getDozeWhiteListAppsMethod).intercept { chain: XposedInterface.Chain ->
-                        val result = chain.proceed()
-                        try {
-                            if (result is List<*>) {
-                                val hasGms = result.contains(HookerSupport.GMS_PACKAGE_NAME)
-                                if (!sDozeSentinelReachedLogged) {
-                                    sDozeSentinelReachedLogged = true
-                                    module.logGated(
-                                        Log.INFO, HookerSupport.TAG,
-                                        "doze-wl-sentinel: reached (arg=${argType.simpleName}), " +
-                                            "size=${result.size}, hasGms=$hasGms"
-                                    )
-                                }
-                                if (!hasGms) {
-                                    sDozeSentinelInjectCount++
-                                    if (sDozeSentinelInjectCount == 1 ||
-                                        sDozeSentinelInjectCount % 10 == 0
-                                    ) {
-                                        module.logGated(
-                                            Log.INFO, HookerSupport.TAG,
-                                            "doze-wl-sentinel: GMS missing from doze whitelist, " +
-                                                "injected #$sDozeSentinelInjectCount (size ${result.size})"
-                                        )
-                                    }
-                                    val source = result
-                                    val whiteList = ArrayList<Any?>(source)
-                                    whiteList.add(HookerSupport.GMS_PACKAGE_NAME)
-                                    HookerSupport.addIfAbsentInPlace(source, HookerSupport.GMS_PACKAGE_NAME)
-                                    return@intercept whiteList
-                                }
-                            }
-                        } catch (t: Throwable) {
-                            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to extend doze white list", t)
-                        }
-                        result
-                    }
-                    module.deoptimize(getDozeWhiteListAppsMethod)
-                } catch (e: NoSuchMethodException) {
-                    logSkip(
-                        "GlobalFeatureConfigureHelper#getDozeWhiteListApps(" +
-                            argType.simpleName + ") absent, skip"
-                    )
-                }
-            }
-        } catch (e: ClassNotFoundException) {
-            module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook GlobalFeatureConfigureHelper", e)
-        }
-    }
+    // P13 (`GlobalFeatureConfigureHelper#getDozeWhiteListApps` → inject GMS) was
+    // removed on 2026-10-30: on this device GMS is already in all three doze
+    // whitelist sections (user / system / system-excidle), so the injection was
+    // a permanent no-op kept alive by a cloud scenario nobody had observed.
 }

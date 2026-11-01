@@ -156,6 +156,14 @@ object Prefs {
      * what persists /data/system/deviceidle.xml. This switch drops WeChat
      * from that call's argument list.
      *
+     * The intended end state is 「优化」, not 「不优化」: a WeChat pinned to the
+     * doze-exempt list does not go through the cached-process path the ordinary
+     * FCM delivery rides on. 澎湃 always writes it back to 「不优化」, so the
+     * user has to switch this on **and** set WeChat to 「优化」 by hand — this
+     * flag is what keeps that manual pick from being undone (community field
+     * experience; the "why" is spelled out in
+     * `PowerKeeperHooks.hookWechatDozeKeepout`).
+     *
      * Default **off**, like every other experiment: it overwrites where the
      * system puts WeChat, the effect outlives the process (the entry is not
      * written back until the switch is turned off), and the whitelist already
@@ -233,89 +241,6 @@ object Prefs {
     const val WIFI_WEAK_SIGNAL_FLOOR_DEFAULT = 45
 
     /**
-     * Remote + local: release the ROM's autostart verdict for a checked app.
-     *
-     * The retired write switch fixed the same thing by different means, and
-     * the difference is worth keeping straight because it is the whole reason
-     * this row exists. Writing the op changes a setting the user can see, and
-     * from then on the ROM allows *every* later start on its own — including
-     * the ones this module never sees. This switch answers two checkpoints in
-     * memory instead: the service start
-     * (`AutoStartManagerServiceStubImpl#isAllowStartService`) and the process
-     * start (`ProcessManagerService#isAllowAutoStart`). Nothing is written, so
-     * closing the row restores the ROM's own verdict at once, and nothing can
-     * drift out from under 手机管家.
-     *
-     * The pair is not redundant in the other direction either. The module's
-     * shipped hook answers the *broadcast* gate
-     * (`BroadcastQueueModernStubImpl#checkApplicationAutoStart`) at method
-     * entry, so on the GMS→c2dm hop the op is never read there — the two
-     * checkpoints above are read on their own, which is why the op has to be
-     * written or answered even though the broadcast gate is already open.
-     *
-     * Whether the app's process was cached or reaped decides which of the two
-     * is asked, not whether one is asked: a cached process still has to start
-     * its messaging service. Both read the same op, so the two paths do not
-     * need separate treatments.
-     *
-     * Default **off**, like every other experiment.
-     */
-    const val KEY_AUTOSTART_GATE_RELEASE = "autostart_gate_release"
-    /** UI-only: set while the mirror holds an autostart-gate change the module never saw. */
-    private const val KEY_AUTOSTART_GATE_RELEASE_PENDING_PUSH =
-        "autostart_gate_release_pending_push"
-
-    /**
-     * Remote + local: release the restart-after-death gate for a checked app.
-     *
-     * `AutoStartManagerServiceStubImpl#canRestartServiceLocked` is the one
-     * `10008` read whose verdict decides freezing directly: `false` sends the
-     * process to `KillProcessInfo` instead of a restart. Both overloads were
-     * probe-only until live samples showed the gate actually denying checked
-     * packages (2026-10-07: `restart DENIED` with `callee` naming a checked
-     * push target), which is the condition the probe was waiting for.
-     *
-     * Reads its own key **ANDed with the master** above it: the screen chains
-     * this row's visibility behind the master, and the hook honours the same
-     * chain, so a hidden row is also an inert one (the master/sub rule at the
-     * top of this file, rule 1).
-     *
-     * Default **off**, like every other experiment.
-     */
-    const val KEY_AUTOSTART_RESTART_RELEASE = "autostart_restart_release"
-    /** UI-only: set while the mirror holds a restart-gate change the module never saw. */
-    private const val KEY_AUTOSTART_RESTART_RELEASE_PENDING_PUSH =
-        "autostart_restart_release_pending_push"
-
-    /**
-     * Remote + local: answer the autostart op query itself for a checked app.
-     *
-     * Hooks the `AppOpsManager` client entry the ROM's own readers call —
-     * `checkOpNoThrow(op, uid, pkg)` and `noteOpNoThrow(op, uid, pkg, tag,
-     * message)` — and returns `MODE_ALLOWED` for op `10008` when the package
-     * is checked. One hook covers every system_server-side reader that funnels
-     * through these two calls, including ones no per-checkpoint hook names.
-     * Reads only in system_server, so the manager UI's own reads (another
-     * process) stay untouched — the display keeps telling the truth.
-     *
-     * Two consequences are accepted and documented rather than hidden: the
-     * pre-start punishment path reads the same query, so it is released too;
-     * and a faked `noteOp` return skips the usage note, so the manager's own
-     * autostart record can miss entries for checked apps.
-     *
-     * Reads its own key **ANDed with the whole chain above it** — the master
-     * and the freeze rung — matching the chained visibility on the screen:
-     * the row only shows when both ancestors are on, and only then does the
-     * hook answer.
-     *
-     * Default **off**, like every other experiment.
-     */
-    const val KEY_AUTOSTART_ROOT_RELEASE = "autostart_root_release"
-    /** UI-only: set while the mirror holds a root-gate change the module never saw. */
-    private const val KEY_AUTOSTART_ROOT_RELEASE_PENDING_PUSH =
-        "autostart_root_release_pending_push"
-
-    /**
      * Remote + local: keep a checked app's network up across a greeze freeze.
      *
      * `DomesticPolicyManager#isRestrictNet(uid)` is the one verdict behind the
@@ -334,6 +259,48 @@ object Prefs {
     /** UI-only: set while the mirror holds a net-release change the module never saw. */
     private const val KEY_GREEZE_NET_RELEASE_PENDING_PUSH =
         "greeze_net_release_pending_push"
+
+    /**
+     * Experiment: answer the MIUI **service-bind** autostart checkpoint for a
+     * checked app (`AutoStartManagerServiceStubImpl#isAllowStartService`, whose
+     * record is the same entry `MIUIOP 10008` gates at the root).
+     *
+     * The name says "start", but the 3-arg overload is reached from
+     * `ActiveServiceManagementImpl#canBindService` (the other outside callers
+     * are the JobService / restart verdicts); `startServiceLocked` has no MIUI
+     * call edge, so this is not the `startService` gate.
+     *
+     * One switch per checkpoint (2026-11-01): this row and
+     * [KEY_AUTOSTART_PROCESS_RELEASE] were one switch before, which forced a
+     * single description to cover two different ROM questions and gave the
+     * reader no way to turn either off.
+     *
+     * Nothing is written to the ROM's own state. The switch only exists while
+     * the module is loaded.
+     *
+     * Default **off**, like every other experiment.
+     */
+    const val KEY_AUTOSTART_SERVICE_RELEASE = "autostart_service_release"
+    /** UI-only: set while the mirror holds a service-rung change the module never saw. */
+    private const val KEY_AUTOSTART_SERVICE_RELEASE_PENDING_PUSH =
+        "autostart_service_release_pending_push"
+
+    /**
+     * Experiment: answer the MIUI **process** autostart checkpoint for a
+     * checked app (`ProcessManagerService#isAllowAutoStart`, whose body is
+     * exactly `checkOpNoThrow(10008)`).
+     *
+     * Named for what it covers — the **restart / preload** verdict (its callers
+     * are `ProcessStarter`'s restart paths, `isForceStopEnable` and
+     * `isFastBootEnable`). A c2dm broadcast bringing a dead process up goes
+     * through S9/S10 on the broadcast path, not through this switch.
+     *
+     * Default **off**, like every other experiment.
+     */
+    const val KEY_AUTOSTART_PROCESS_RELEASE = "autostart_process_release"
+    /** UI-only: set while the mirror holds a process-rung change the module never saw. */
+    private const val KEY_AUTOSTART_PROCESS_RELEASE_PENDING_PUSH =
+        "autostart_process_release_pending_push"
 
     /**
      * Remote + local: "show debug logs".
@@ -765,145 +732,6 @@ object Prefs {
         }
     }
 
-    /** Autostart-gate switch value as the UI last left it. */
-    @JvmStatic
-    fun readLocalAutostartGateRelease(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_AUTOSTART_GATE_RELEASE, false)
-    }
-
-    /** Autostart-gate counterpart of [hasPendingPush]. */
-    @JvmStatic
-    fun hasPendingAutostartGateReleasePush(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_AUTOSTART_GATE_RELEASE_PENDING_PUSH, false)
-    }
-
-    /**
-     * Write the autostart-gate switch and make it live.
-     *
-     * Same shape as the other experiment writers. Unlike the retired write
-     * switch there is nothing to apply up front: the hook answers a gate the
-     * ROM asks about at the moment of the start, so the value takes effect on
-     * the next one without an apply broadcast.
-     */
-    @JvmStatic
-    fun writeAutostartGateRelease(
-        context: Context,
-        remotePrefs: SharedPreferences?,
-        enabled: Boolean
-    ) {
-        val app = appContext(context)
-        localPrefs(app).edit().putBoolean(KEY_AUTOSTART_GATE_RELEASE, enabled).apply()
-        if (remotePrefs == null) {
-            localPrefs(app).edit()
-                .putBoolean(KEY_AUTOSTART_GATE_RELEASE_PENDING_PUSH, true).apply()
-            broadcastAllowlistChanged(app)
-            return
-        }
-        localPrefs(app).edit()
-            .putBoolean(KEY_AUTOSTART_GATE_RELEASE_PENDING_PUSH, false).apply()
-        WRITER.execute {
-            try {
-                remotePrefs.edit().putBoolean(KEY_AUTOSTART_GATE_RELEASE, enabled).commit()
-            } catch (t: Throwable) {
-                localPrefs(app).edit()
-                    .putBoolean(KEY_AUTOSTART_GATE_RELEASE_PENDING_PUSH, true).apply()
-            }
-            broadcastAllowlistChanged(app)
-        }
-    }
-
-    /** Restart-gate switch value as the UI last left it. */
-    @JvmStatic
-    fun readLocalAutostartRestartRelease(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_AUTOSTART_RESTART_RELEASE, false)
-    }
-
-    /** Restart-gate counterpart of [hasPendingPush]. */
-    @JvmStatic
-    fun hasPendingAutostartRestartReleasePush(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_AUTOSTART_RESTART_RELEASE_PENDING_PUSH, false)
-    }
-
-    /**
-     * Write the restart-gate switch and make it live.
-     *
-     * Same shape as [writeAutostartGateRelease]: the hook answers a gate the
-     * ROM asks about at the moment of the decision, so the value takes effect
-     * on the next one without an apply broadcast.
-     */
-    @JvmStatic
-    fun writeAutostartRestartRelease(
-        context: Context,
-        remotePrefs: SharedPreferences?,
-        enabled: Boolean
-    ) {
-        val app = appContext(context)
-        localPrefs(app).edit().putBoolean(KEY_AUTOSTART_RESTART_RELEASE, enabled).apply()
-        if (remotePrefs == null) {
-            localPrefs(app).edit()
-                .putBoolean(KEY_AUTOSTART_RESTART_RELEASE_PENDING_PUSH, true).apply()
-            broadcastAllowlistChanged(app)
-            return
-        }
-        localPrefs(app).edit()
-            .putBoolean(KEY_AUTOSTART_RESTART_RELEASE_PENDING_PUSH, false).apply()
-        WRITER.execute {
-            try {
-                remotePrefs.edit().putBoolean(KEY_AUTOSTART_RESTART_RELEASE, enabled).commit()
-            } catch (t: Throwable) {
-                localPrefs(app).edit()
-                    .putBoolean(KEY_AUTOSTART_RESTART_RELEASE_PENDING_PUSH, true).apply()
-            }
-            broadcastAllowlistChanged(app)
-        }
-    }
-
-    /** Root-gate switch value as the UI last left it. */
-    @JvmStatic
-    fun readLocalAutostartRootRelease(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_AUTOSTART_ROOT_RELEASE, false)
-    }
-
-    /** Root-gate counterpart of [hasPendingPush]. */
-    @JvmStatic
-    fun hasPendingAutostartRootReleasePush(context: Context): Boolean {
-        return localPrefs(context).getBoolean(KEY_AUTOSTART_ROOT_RELEASE_PENDING_PUSH, false)
-    }
-
-    /**
-     * Write the root-gate switch and make it live.
-     *
-     * Same shape as [writeAutostartGateRelease]: the hook answers a query the
-     * ROM makes at the moment of the read, so the value takes effect on the
-     * next one without an apply broadcast.
-     */
-    @JvmStatic
-    fun writeAutostartRootRelease(
-        context: Context,
-        remotePrefs: SharedPreferences?,
-        enabled: Boolean
-    ) {
-        val app = appContext(context)
-        localPrefs(app).edit().putBoolean(KEY_AUTOSTART_ROOT_RELEASE, enabled).apply()
-        if (remotePrefs == null) {
-            localPrefs(app).edit()
-                .putBoolean(KEY_AUTOSTART_ROOT_RELEASE_PENDING_PUSH, true).apply()
-            broadcastAllowlistChanged(app)
-            return
-        }
-        localPrefs(app).edit()
-            .putBoolean(KEY_AUTOSTART_ROOT_RELEASE_PENDING_PUSH, false).apply()
-        WRITER.execute {
-            try {
-                remotePrefs.edit().putBoolean(KEY_AUTOSTART_ROOT_RELEASE, enabled).commit()
-            } catch (t: Throwable) {
-                localPrefs(app).edit()
-                    .putBoolean(KEY_AUTOSTART_ROOT_RELEASE_PENDING_PUSH, true).apply()
-            }
-            broadcastAllowlistChanged(app)
-        }
-    }
-
     /** Net-release switch value as the UI last left it. */
     @JvmStatic
     fun readLocalGreezeNetRelease(context: Context): Boolean {
@@ -919,7 +747,7 @@ object Prefs {
     /**
      * Write the net-release switch and make it live.
      *
-     * Same shape as [writeAutostartGateRelease]: the hook reads the key at the
+     * Same shape as the other experiment writers: the hook reads the key at the
      * moment the ROM asks its verdict, so the value takes effect on the next
      * freeze without an apply broadcast.
      */
@@ -945,6 +773,93 @@ object Prefs {
             } catch (t: Throwable) {
                 localPrefs(app).edit()
                     .putBoolean(KEY_GREEZE_NET_RELEASE_PENDING_PUSH, true).apply()
+            }
+            broadcastAllowlistChanged(app)
+        }
+    }
+
+    /** Service-rung value as the UI last left it. */
+    @JvmStatic
+    fun readLocalAutostartServiceRelease(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_AUTOSTART_SERVICE_RELEASE, false)
+    }
+
+    /** Service-rung counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingAutostartServiceReleasePush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(
+            KEY_AUTOSTART_SERVICE_RELEASE_PENDING_PUSH, false
+        )
+    }
+
+    @JvmStatic
+    fun writeAutostartServiceRelease(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean
+    ) {
+        writeAutostartRung(
+            context, remotePrefs,
+            KEY_AUTOSTART_SERVICE_RELEASE,
+            KEY_AUTOSTART_SERVICE_RELEASE_PENDING_PUSH,
+            enabled
+        )
+    }
+
+    /** Process-rung value as the UI last left it. */
+    @JvmStatic
+    fun readLocalAutostartProcessRelease(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_AUTOSTART_PROCESS_RELEASE, false)
+    }
+
+    /** Process-rung counterpart of [hasPendingPush]. */
+    @JvmStatic
+    fun hasPendingAutostartProcessReleasePush(context: Context): Boolean {
+        return localPrefs(context).getBoolean(
+            KEY_AUTOSTART_PROCESS_RELEASE_PENDING_PUSH, false
+        )
+    }
+
+    @JvmStatic
+    fun writeAutostartProcessRelease(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        enabled: Boolean
+    ) {
+        writeAutostartRung(
+            context, remotePrefs,
+            KEY_AUTOSTART_PROCESS_RELEASE,
+            KEY_AUTOSTART_PROCESS_RELEASE_PENDING_PUSH,
+            enabled
+        )
+    }
+
+    /**
+     * Shared body of the two autostart switches: mirror the value locally, push
+     * it into the remote group the hooks read, and keep the pending marker the
+     * next service bind repairs ([MainActivity]) — the shape every other
+     * experiment switch in this file uses.
+     */
+    private fun writeAutostartRung(
+        context: Context,
+        remotePrefs: SharedPreferences?,
+        key: String,
+        pendingKey: String,
+        enabled: Boolean
+    ) {
+        val app = appContext(context)
+        localPrefs(app).edit().putBoolean(key, enabled).apply()
+        if (remotePrefs == null) {
+            localPrefs(app).edit().putBoolean(pendingKey, true).apply()
+            broadcastAllowlistChanged(app)
+            return
+        }
+        localPrefs(app).edit().putBoolean(pendingKey, false).apply()
+        WRITER.execute {
+            try {
+                remotePrefs.edit().putBoolean(key, enabled).commit()
+            } catch (t: Throwable) {
+                localPrefs(app).edit().putBoolean(pendingKey, true).apply()
             }
             broadcastAllowlistChanged(app)
         }
@@ -1242,6 +1157,24 @@ object Prefs {
      * by the ops' state on disk, not by the switch's value, so dropping the
      * key loses nothing.
      *
+     * The restart and root autostart-release rungs
+     * (`autostart_restart_release`, `autostart_root_release`) were retired on
+     * 2026-10-31: they only ever changed a verdict in memory at the moment the
+     * ROM asked, so no system setting was written and dropping the keys leaves
+     * a user who had them on with the ROM's own behaviour — there is nothing to
+     * carry over or undo. `restart DENIED` is observed on every device unless
+     * the user grants `MIUIOP 10008` themselves, yet those devices deliver
+     * pushes with the rungs off, which is the evidence that the checkpoints do
+     * not sit on the delivery path.
+     *
+     * The old merged autostart switch (`autostart_gate_release`) was brought back
+     * on 2026-11-01 and then retired again the same day, when the section became
+     * two peer switches — one per ROM checkpoint
+     * ([KEY_AUTOSTART_SERVICE_RELEASE], [KEY_AUTOSTART_PROCESS_RELEASE]) — with
+     * no master above them. Its value is dropped rather than copied into
+     * either new key: one old flag covered two checkpoints, so there is no
+     * honest way to split it, and both new switches start off.
+     *
      * Add to this list when a switch is removed. There is no expiry: the entry
      * has to outlast every version that could still read the key.
      */
@@ -1261,7 +1194,15 @@ object Prefs {
         "gcm_reconnect_fix",
         "gcm_reconnect_fix_pending_push",
         "wake_write_autostart",
-        "wake_write_autostart_pending_push"
+        "wake_write_autostart_pending_push",
+        "autostart_restart_release",
+        "autostart_restart_release_pending_push",
+        "autostart_root_release",
+        "autostart_root_release_pending_push",
+        // The merged service+process switch, retired when the section became
+        // two per-checkpoint switches on 2026-11-01.
+        "autostart_gate_release",
+        "autostart_gate_release_pending_push"
     )
 
     /**

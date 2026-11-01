@@ -233,9 +233,21 @@ fun RecordsScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var archive by remember { mutableStateOf(RecordsStore.load(context)) }
+    // The archive starts EMPTY and arrives on IO: the effect below re-reads the
+    // file from Dispatchers.IO on its first line, so a synchronous
+    // `RecordsStore.load(context)` here only duplicated that read on the main
+    // thread — a tab-entry hitch sized by the archive (JSON parse of up to the
+    // row cap). While it runs the page shows its established loading state:
+    // the null-snapshot branch renders the 正在加载 status line, exactly the
+    // shape the 清空 path produces.
+    var archive by remember {
+        mutableStateOf(RecordsStore.Archive(snapshot = null, fetchedAt = 0L, events = emptyList()))
+    }
     var problem by remember { mutableStateOf<Int?>(null) }
-    var loading by remember { mutableStateOf(false) }
+    // Loading until the first read lands: both the disk reload and the dump
+    // read sit inside the effect below, so the initial frame must not present
+    // the empty archive as 从未 — it is loading, not empty.
+    var loading by remember { mutableStateOf(true) }
     var refreshKey by remember { mutableIntStateOf(0) }
     var pageTabIndex by rememberSaveable { mutableIntStateOf(0) }
     var eventTabIndex by rememberSaveable { mutableIntStateOf(0) }

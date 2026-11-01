@@ -125,17 +125,17 @@ private fun ExperimentBody(
     val floorLabels = Prefs.WIFI_WEAK_SIGNAL_FLOORS.map {
         stringResource(R.string.experiment_wifi_weak_signal_floor_item, it)
     }
-    var autostartGateRelease by remember {
-        mutableStateOf(Prefs.readLocalAutostartGateRelease(context))
-    }
-    var autostartRestartRelease by remember {
-        mutableStateOf(Prefs.readLocalAutostartRestartRelease(context))
-    }
-    var autostartRootRelease by remember {
-        mutableStateOf(Prefs.readLocalAutostartRootRelease(context))
-    }
     var greezeNetRelease by remember {
         mutableStateOf(Prefs.readLocalGreezeNetRelease(context))
+    }
+    // The two autostart checkpoints, each its own switch (2026-11-01): service
+    // start and the restart / preload verdict. No master above them — either
+    // half is independent, which is why they were split.
+    var autostartServiceRelease by remember {
+        mutableStateOf(Prefs.readLocalAutostartServiceRelease(context))
+    }
+    var autostartProcessRelease by remember {
+        mutableStateOf(Prefs.readLocalAutostartProcessRelease(context))
     }
     var smartPowerRelease by remember {
         mutableStateOf(Prefs.readLocalSmartPowerRelease(context))
@@ -144,15 +144,11 @@ private fun ExperimentBody(
     // 找不到），所以整节按世代隐藏，而不是显示一个永远无效的开关。读一次即
     // 可：系统属性在进程生命周期内不变。
     val os3Generation = remember { isOs3Generation() }
-    // The runtime rungs hide under the master: they answer ROM gates in memory
-    // only, so with the master off nothing they control is in force. Nothing
-    // here writes any more — the write switch is retired, and its row is now a
-    // plain entry into 手机管家's autostart management, always on screen.
-    // Both autostart rows do nothing on an empty FCM wake allowlist, and an
-    // empty list means "no app" — the same as everywhere else now that the
-    // allowlist is the sole control. Read once, like the switch values above,
-    // and shown in both switch positions because the row does the same nothing
-    // either way.
+    // The remaining experiment rows that answer a per-app gate do nothing on an
+    // empty FCM wake allowlist, and an empty list means "no app" — the same as
+    // everywhere else now that the allowlist is the sole control. Read once,
+    // like the switch values above, and shown in both switch positions because
+    // the row does the same nothing either way.
     val emptyAllowlist = remember { Prefs.readLocalAllowlist(context).isEmpty() }
     val emptyAllowlistHint = if (emptyAllowlist) {
         stringResource(R.string.experiment_autostart_empty_list)
@@ -242,118 +238,53 @@ private fun ExperimentBody(
         item {
             // A section of its own: every row here works on the MIUI autostart
             // verdict, which is a different ROM mechanism from the AOSP stopped
-            // state the shipped GMS→c2dm hop opens in memory. The runtime
-            // switches that used to share this screen — one answering the
-            // stopped gate, one the autostart gate, both for broadcasts the
-            // module intercepted — are gone: every real FCM broadcast is the
-            // shipped hop, so neither could change an FCM outcome.
+            // state the shipped GMS→c2dm hop opens in memory.
             //
-            // The rows form a chain, widest first: answer the service/process
-            // checkpoints in memory, then the freeze gate, then the op query
-            // itself. Each rung only shows once the rung above it is on, and
-            // the hooks honour the same chain (the rung's read is its own key
-            // ANDed with its ancestors), so what is hidden is also inert. With
-            // everything off the section shows just the master and the manager
-            // entry. The write switch that used to close the ladder is
-            // retired — the section ends with a plain entry into 手机管家's
-            // own autostart management, where the state the ops are in is both
-            // visible and user-controlled.
+            // One switch per ROM checkpoint (2026-11-01): the service-bind
+            // verdict and the restart / preload verdict. They were one switch
+            // before, which forced a single description to cover two different
+            // ROM questions and gave the reader no way to turn either off.
+            //
+            // [SettingsGroup] keeps the section one card: the two switch rows
+            // share it and the manager entry closes it. Lone cards on a zero
+            // gap cut a lens of page colour at the seam their opposing corners
+            // leave, which is what the group container exists to prevent.
             SectionTitle(R.string.experiment_section_autostart)
-            // Same animated-seam layout as the network section above, one rung
-            // deeper: seams between two always-visible rows stay outside
-            // (master ↔ manager), seams that belong to a collapsible rung sit
-            // inside its AnimatedVisibility so they shrink with it.
-            Column {
+            SettingsGroup {
                 SettingsSwitchCard(
-                    iconRes = R.drawable.ic_autostart_release,
-                    title = stringResource(R.string.experiment_autostart_gate_release),
-                    description = stringResource(R.string.experiment_autostart_gate_release_desc),
-                    checked = autostartGateRelease,
+                    iconRes = R.drawable.ic_door_open,
+                    title = stringResource(R.string.experiment_autostart_service_release),
+                    description = stringResource(
+                        R.string.experiment_autostart_service_release_desc
+                    ),
+                    checked = autostartServiceRelease,
                     onCheckedChange = { checked ->
-                        Prefs.writeAutostartGateRelease(context, Prefs.remote(), checked)
-                        autostartGateRelease = checked
+                        Prefs.writeAutostartServiceRelease(context, Prefs.remote(), checked)
+                        autostartServiceRelease = checked
                     },
+                    // Inert until at least one app is checked; the hint text is
+                    // generic and never says "autostart".
                     stateLine = emptyAllowlistHint,
                     stateLineOff = emptyAllowlistHint,
                     first = true,
-                    // The manager entry below is always on screen, so the master is
-                    // never the visible group's last row.
                     last = false
                 )
-                GroupRowGap()
-                AnimatedVisibility(
-                    visible = autostartGateRelease,
-                    enter = expandVertically(
-                        expandFrom = Alignment.Top,
-                        animationSpec = motion.defaultSpatialSpec()
-                    ) + fadeIn(animationSpec = motion.defaultEffectsSpec()),
-                    exit = shrinkVertically(
-                        shrinkTowards = Alignment.Top,
-                        animationSpec = motion.defaultSpatialSpec()
-                    ) + fadeOut(animationSpec = motion.defaultEffectsSpec())
-                ) {
-                    Column {
-                        SettingsSwitchCard(
-                            iconRes = R.drawable.ic_restart_release,
-                            title = stringResource(R.string.experiment_autostart_restart_release),
-                            description = stringResource(
-                                R.string.experiment_autostart_restart_release_desc
-                            ),
-                            checked = autostartRestartRelease,
-                            onCheckedChange = { checked ->
-                                Prefs.writeAutostartRestartRelease(
-                                    context, Prefs.remote(), checked
-                                )
-                                autostartRestartRelease = checked
-                            },
-                            stateLine = emptyAllowlistHint,
-                            stateLineOff = emptyAllowlistHint,
-                            first = false,
-                            // The root rung chains behind this one, so it is on
-                            // screen right below when it shows at all.
-                            last = false
-                        )
-                        AnimatedVisibility(
-                            visible = autostartRestartRelease,
-                            enter = expandVertically(
-                                expandFrom = Alignment.Top,
-                                animationSpec = motion.defaultSpatialSpec()
-                            ) + fadeIn(animationSpec = motion.defaultEffectsSpec()),
-                            exit = shrinkVertically(
-                                shrinkTowards = Alignment.Top,
-                                animationSpec = motion.defaultSpatialSpec()
-                            ) + fadeOut(animationSpec = motion.defaultEffectsSpec())
-                        ) {
-                            Column {
-                                GroupRowGap()
-                                SettingsSwitchCard(
-                                    iconRes = R.drawable.ic_root_release,
-                                    title = stringResource(
-                                        R.string.experiment_autostart_root_release
-                                    ),
-                                    description = stringResource(
-                                        R.string.experiment_autostart_root_release_desc
-                                    ),
-                                    checked = autostartRootRelease,
-                                    onCheckedChange = { checked ->
-                                        Prefs.writeAutostartRootRelease(
-                                            context, Prefs.remote(), checked
-                                        )
-                                        autostartRootRelease = checked
-                                    },
-                                    stateLine = emptyAllowlistHint,
-                                    stateLineOff = emptyAllowlistHint,
-                                    first = false,
-                                    // The manager entry below is always on screen,
-                                    // so this row is never the visible group's
-                                    // last either.
-                                    last = false
-                                )
-                            }
-                        }
-                        GroupRowGap()
-                    }
-                }
+                SettingsSwitchCard(
+                    iconRes = R.drawable.ic_power_settings_new,
+                    title = stringResource(R.string.experiment_autostart_process_release),
+                    description = stringResource(
+                        R.string.experiment_autostart_process_release_desc
+                    ),
+                    checked = autostartProcessRelease,
+                    onCheckedChange = { checked ->
+                        Prefs.writeAutostartProcessRelease(context, Prefs.remote(), checked)
+                        autostartProcessRelease = checked
+                    },
+                    stateLine = emptyAllowlistHint,
+                    stateLineOff = emptyAllowlistHint,
+                    first = false,
+                    last = false
+                )
                 NavCard(
                     iconRes = R.drawable.ic_autostart_manage,
                     title = stringResource(R.string.experiment_wake_autostart_write),
@@ -374,6 +305,7 @@ private fun ExperimentBody(
                             ).show()
                         }
                     },
+                    // The entry closes the group the switch rows opened.
                     first = false,
                     last = true
                 )
@@ -442,22 +374,4 @@ private fun ExperimentScreenPreview() {
             ExperimentScreen(onBack = {})
         }
     }
-}
-
-/**
- * 本机是否为 OS3 世代。
- *
- * 读 `ro.mi.os.version.name`（真机 OS4 实测返回 `OS4.0.0.33.XPMCNXM`），
- * `OS3` 前缀才算命中；MIUI 时代该属性不存在，同样视为非 OS3。反射读
- * SystemProperties：该类在 SDK 里不可见，但 `get(String)` 对所有进程开放。
- *
- * 这个判断只管 UI 显隐。hook 侧从不做世代假设——目标方法在不在决定装不装，
- * 两边各用最省的机制（见 SmartPowerHooks 的文档）。
- */
-private fun isOs3Generation(): Boolean = try {
-    val get = Class.forName("android.os.SystemProperties")
-        .getDeclaredMethod("get", String::class.java)
-    (get.invoke(null, "ro.mi.os.version.name") as? String)?.startsWith("OS3") == true
-} catch (ignored: Throwable) {
-    false
 }

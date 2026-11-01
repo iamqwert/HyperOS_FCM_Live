@@ -7,9 +7,10 @@ import java.lang.reflect.Executable
 /**
  * The read-only system_server probes, extracted verbatim from `Hooker`
  * (zero-behaviour refactor): [probeSleepModeUidRule] (gate A3),
- * [probePacketFilterSupport] (action list 3.6), [probeSocketTeardown] (the 3.2
- * socket-teardown chain, with the counting [hookSocketTeardown] helper and
- * [reportWhetstoneClasses]) and [probeGmsInMessageApp] (gate R).
+ * [probePacketFilterSupport] (action list 3.6) and [probeGmsInMessageApp]
+ * (gate R). All three are install-time, hookless ROM-fact reads printed once;
+ * the socket-teardown probe (R6) went away with the observation layer on
+ * 2026-10-30.
  *
  * `Hooker`'s instance capabilities are injected at the call sites, the same
  * way [GreezeHooks] and [AlarmGate] receive theirs: `module` is the
@@ -23,9 +24,6 @@ import java.lang.reflect.Executable
  */
 internal object SystemProbes {
 
-    /** 3.2 gate: how many times the ROM really asked netd to destroy sockets. */
-    @Volatile
-    private var socketTeardownCount = 0
 
     /**
      * Read-only probe for gate A3 (action list 2.2).
@@ -164,133 +162,10 @@ internal object SystemProbes {
      * **not** dead code. Only sustained zero-traffic over a much longer window
      * justifies downgrading — never a `invoke-*` count.
      */
-    internal fun probeSocketTeardown(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        recordProbe: (String) -> Unit,
-        isGmsUid: (Int) -> Boolean
-    ) {
-        reportWhetstoneClasses(module, classLoader, recordProbe)
-        val layers = ArrayList<String>(3)
-        hookSocketTeardown(
-            module, classLoader, hookE, logSkip, isGmsUid,
-            "com.miui.whetstone.WhetstoneActivityManager",
-            "doDesSocketForUid",
-            "client",
-            layers
-        )
-        hookSocketTeardown(
-            module, classLoader, hookE, logSkip, isGmsUid,
-            "com.miui.whetstone.server.WhetstoneActivityManagerService",
-            "doDesSocketForUid",
-            "server",
-            layers
-        )
-        hookSocketTeardown(
-            module, classLoader, hookE, logSkip, isGmsUid,
-            "com.android.server.net.MiuiNetworkManagementService",
-            "doDesSocketForUid",
-            "impl",
-            layers
-        )
-        // A layer that failed to install reported itself through logSkip above;
-        // only the layers that did install are folded into the merged line.
-        if (layers.isNotEmpty()) {
-            recordProbe("socket-teardown=${layers.joinToString("+")}")
-        }
-    }
-
-    @Suppress("TooGenericExceptionCaught")
-    private fun hookSocketTeardown(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        isGmsUid: (Int) -> Boolean,
-        className: String,
-        methodName: String,
-        label: String,
-        installedLayers: MutableList<String>
-    ) {
-        val clazz = try {
-            classLoader.loadClass(className)
-        } catch (e: ClassNotFoundException) {
-            logSkip("$className absent, socket-teardown probe ($label) skip")
-            return
-        }
-        val method = clazz.declaredMethods.firstOrNull { m ->
-            m.name == methodName &&
-                m.parameterTypes.contentEquals(
-                    arrayOf(
-                        String::class.java,
-                        IntArray::class.java,
-                        Boolean::class.javaPrimitiveType
-                    )
-                )
-        }
-        if (method == null) {
-            logSkip("$className#$methodName/3 absent, socket-teardown probe ($label) skip")
-            return
-        }
-        method.isAccessible = true
-        hookE(method).intercept { chain: XposedInterface.Chain ->
-            val result = chain.proceed()
-            try {
-                val n = ++socketTeardownCount
-                val pkg = chain.getArg(0) as? String
-                val uids = chain.getArg(1) as? IntArray
-                val all = chain.getArg(2) as? Boolean
-                val gmsHit = uids?.any { isGmsUid(it) } ?: false
-                if (gmsHit || n <= 10) {
-                    module.logGated(
-                        Log.INFO, HookerSupport.TAG,
-                        "socket-teardown probe[$label]: $methodName #$n " +
-                            "(pkg=$pkg uids=${uids?.contentToString()} all=$all gmsHit=$gmsHit)"
-                    )
-                }
-            } catch (t: Throwable) {
-                module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to inspect socket-teardown args ($label)", t)
-            }
-            result
-        }
-        module.deoptimize(method)
-        installedLayers.add(label)
-    }
-
-    /**
-     * Reports whether each half of the Whetstone pair resolves in system_server,
-     * and whether it declares the entry point.
-     *
-     * The normal reading is folded into the merged probe line as a pair of
-     * counts. A half that stops resolving is *not*: it keeps its own line,
-     * because a counter cannot say which half went missing.
-     */
-    private fun reportWhetstoneClasses(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        recordProbe: (String) -> Unit
-    ) {
-        var resolvable = 0
-        var declaring = 0
-        for (name in arrayOf(
-            "com.miui.whetstone.WhetstoneActivityManager",
-            "com.miui.whetstone.server.WhetstoneActivityManagerService"
-        )) {
-            val clazz = try {
-                classLoader.loadClass(name)
-            } catch (t: Throwable) {
-                module.logGated(Log.INFO, HookerSupport.TAG, "whetstone probe: $name NOT resolvable here")
-                continue
-            }
-            resolvable++
-            if (clazz.declaredMethods.any { it.name == "doDesSocketForUid" }) {
-                declaring++
-            }
-        }
-        recordProbe("whetstone=res:$resolvable/2,decl:$declaring/2")
-    }
+    // The socket-teardown probe (R6, three `doDesSocketForUid` layers) was
+    // removed on 2026-10-30 with the observation layer: its own doc said "0 hits
+    // ≠ dead code" because binder transport is invisible statically — an
+    // instrument that cannot decide anything, on a hot path, for no consumer.
 
     /**
      * Read-only probe for Gate-R (action list 2.1).

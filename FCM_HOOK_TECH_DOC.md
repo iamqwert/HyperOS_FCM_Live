@@ -2,7 +2,7 @@
 
 > **本文是仓库内唯一的技术文档**（原 `HOOKS_AND_DIAGNOSTICS.md` 已并入本文并删除）。内容只基于当前仓库源码、构建配置、`META-INF/xposed` 清单、资源字符串与现有工程记录；如与源码冲突，以源码为准。
 >
-> **文档版本**：1.0　**更新日期**：2026-10-22　**适用模块**：`4.2.0 (54)`　**证据口径**：见 §1（标记表）
+> **文档版本**：1.5　**更新日期**：2026-11-01　**适用模块**：`4.4.0 (56)`　**证据口径**：见 §1（标记表）
 
 ---
 
@@ -12,7 +12,7 @@
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 模块改了什么 | 只在 `system`（system_server）与 `com.miui.powerkeeper` 两个进程挂 hook，放行 HyperOS 对 **GMS/FCM 推送链路**的冻结、广播、自启动、Alarm、睡眠断网等限制；不注入 GMS，不调用 `su`，不改 SELinux。                              |
 | 核心机制     | 在 `com.miui.server.greeze.*`、`com.miui.powerkeeper.*`、AOSP `ActivityManagerService`、`AlarmManagerService`、`AppOpsManager`、`ProcessCleanerBase` 等目标上做**返回值改写、参数改写、字段/集合注入、构造后剪除、只读探针**。 |
-| 用户效果     | 勾选应用的 FCM 推送在后台/睡眠/被清理时更稳；另有默认关闭的实验开关（睡眠保 WiFi/数据、自启动放行、弱 WiFi 保持、微信 doze、自动勾选等）。                                                                                     |
+| 用户效果     | 勾选应用的 FCM 推送在后台/睡眠/被清理时更稳；另有默认关闭的实验开关（睡眠保 WiFi/数据、弱 WiFi 保持、微信 doze、自动勾选等）。                                                                                     |
 | 怎么确认生效 | 日志 tag `HyperGreeze`；开「显示调试日志」后看 `HyperFCMLive active in …: N hook(s) installed, M target(s) absent…`；每 30 分钟一行 `gms probe` 带计数器。                                                                     |
 | 失败语义     | **fail-open**：判定异常只记日志并 `chain.proceed()`，不阻断 ROM。目标缺失分两级：`logSkip`（INFO，本代应有）与 `logSkipOtherGeneration`（DEBUG，另一代才有）。                                                                 |
 | 最大风险     | 钩点强依赖 HyperOS 代次；**OS3 与 OS4 符号差异极大**。ROM OTA / PowerKeeper 更新 / GMS 更新后必须重新验证。                                                                                                                    |
@@ -43,7 +43,7 @@ HyperOS 可能在以下位置影响 FCM 送达（根据源码注释中的真机/
 
 | 机制                 | 可能行为                                        | 模块对应干预                                                                                                   |
 | -------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| greeze 冻结/广播策略 | 冻结 GMS 或将 c2dm 广播缓存到解锁后             | `GreezeManagerService#isAllowBroadcast`、`isNeedCachedBroadcast`、`isRestrictReceiver`                         |
+| greeze 冻结/广播策略 | 冻结 GMS 或将 c2dm 广播缓存到解锁后             | `GreezeManagerService#isAllowBroadcast`、`isRestrictReceiver`                         |
 | 自启动               | 服务/进程启动检查读取 `MIUIOP 10008`            | `checkApplicationAutoStart`、`isAllowStartService`、`isAllowAutoStart`、`canRestartServiceLocked`、AppOps 根闸 |
 | 清理/force-stop      | `ProcessCleanerBase#isForceStopEnable` 允许清理 | 对白名单内 FCM 客户端返回 false                                                                                |
 | 睡眠模式             | OS4 在 PowerKeeper 直接关 WiFi/移动数据         | `SleepModeGate.hookSleepModeNetworkKeepalive`                                                                  |
@@ -57,7 +57,7 @@ HyperOS 可能在以下位置影响 FCM 送达（根据源码注释中的真机/
 - **不保活**：不会无条件维持应用进程；只放行特定系统检查点。
 - **不绕过全部限制**：应用被 force-stop、网络被物理切断、ROM 走了未覆盖的新路径时，仍可能收不到。
 - **不改善 WiFi 质量**：弱信号开关只是减少 WiFi/移动数据切换。
-- **不清理已存在的微信电池优化条目**：只阻止下一次写回，需用户手动把微信设为“优化”。
+- **不清理已存在的微信电池优化条目**：只阻止下一次写回，需用户手动把微信设为“优化”。目标状态是「优化」而不是「不优化」——微信被判为可优化才走缓存进程那条常规 FCM 投递路径，被钉在免优化名单里反而收不到；澎湃默认且每次电源模式变化都会把它写回「不优化」，所以要先开开关、再手动设优化。
 - **不写自启动 AppOp**：`10008` 行为 op 与 `10053` 手机管家开关 op 都只读（4.2.0 删掉了 `10053` 的开机回填）。
 - **不 hook GMS**：GMS 侧钩族已在 4.1.1 退役，避免热更新完整性判定。
 - **不支持 Android 14 及以下**：`minSdk 35`。
@@ -96,7 +96,7 @@ HyperOS 可能在以下位置影响 FCM 送达（根据源码注释中的真机/
 | [WifiWeakSignalSwitch.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/WifiWeakSignalSwitch.kt)                                                                                                                                                                                             | 弱 WiFi 保持                                        |
 | [SmartPowerHooks.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/SmartPowerHooks.kt)                                                                                                                                                                                                       | OS3 SmartPower                                      |
 | [PowerKeeperHooks.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/PowerKeeperHooks.kt)                                                                                                                                                                                                     | AppStandby/NoRestrict/微信 doze                     |
-| [WakePathProbe.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/WakePathProbe.kt)、[SystemProbes.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/SystemProbes.kt)、[TrafficProbe.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/TrafficProbe.kt) | 只读探针/流量                                       |
+| [SystemProbes.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/SystemProbes.kt)                                                                                                                                                                                                             | 只读探针（存在性）                                         |
 | [HookerSupport.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/HookerSupport.kt)                                                                                                                                                                                                           | 常量、hidden-API 反射、集合工具                     |
 | [Prefs.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/Prefs.kt)                                                                                                                                                                                                                           | 配置键、主/子开关规则、remote/local 镜像            |
 
@@ -210,7 +210,7 @@ com.miui.powerkeeper 进程
 - `gmsUid()` 失败返回 null；调用者按“不匹配/跳过”处理。
 - **不**在 hook 中 `su`/`exec su`、不改 SELinux、不读 `/proc/net/tcp`（SELinux 不可读且语义错误）。
 
-> 已补齐（2026-10-26）：`ProcessPolicy#getWhiteList`、`InternationalPolicyManager#isPushApp`、`ProcessCleanerBase#isForceStopEnable`、`GlobalFeatureConfigureHelper#getDozeWhiteListApps` 四处此前漏掉的显式 `deoptimize` 调用已全部补上，符合“所有被 hook 的方法都配套 deoptimize”的约定（见 §7.14）。
+> 已补齐（2026-10-26）：`ProcessPolicy#getWhiteList`、`ProcessCleanerBase#isForceStopEnable`、`GlobalFeatureConfigureHelper#getDozeWhiteListApps` 三处此前漏掉的显式 `deoptimize` 调用已全部补上，符合“所有被 hook 的方法都配套 deoptimize”的约定（见 §7.14）。`InternationalPolicyManager#isPushApp` 曾在这份清单里，该钩子已于 2026-10-30 删除（见 §5.8）。
 
 ### 3.7 日志门与级别
 
@@ -246,7 +246,7 @@ com.miui.powerkeeper 进程
 | `fcmlive-wifi-scorer`                        | WiFi 评分器解析重试                   | 40×3s；daemon                                |
 | `fcmlive-probe` HandlerThread                | 30min 流量探针、睡眠退出后 15s 复采样 | 只读，避免占用系统线程                       |
 | 临时 `Thread`                                | 睡眠退出恢复广播                      | 短任务，不阻塞睡眠退出                       |
-| 栈探查                                       | `isPushApp` / 睡眠 keepalive 判定     | 先做廉价条件再走栈，避免热路径开销           |
+| 栈探查（历史）                              | 曾用于 `isPushApp` / 睡眠 keepalive 判定 | 已无栈探查钩子（2026-10-30 删 `isPushApp`）；日后若再加，先做廉价条件再走栈 |
 
 ### 3.10 去重/计数
 
@@ -279,16 +279,17 @@ flowchart TD
   FLAG --> APP["目标应用接收"]
 ```
 
+> 图中 G1/G3 的先后是绘制顺序，不是调用顺序：`isAllowBroadcast` 的唯一调用者是 `isRestrictReceiver`，c2dm 在后者入口就已作答（2026-10-30 起 c2dm 放行只在 `isRestrictReceiver`，`isAllowBroadcast` 仅保留 `CN_DEFER_BROADCAST` 分支）。
+
 ### 3.12 关键判定矩阵
 
 | 条件                                                                                                        | 模块答案                                            | 结果                                             |
 | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------ |
-| `callerPkg == com.google.android.gms` 且 action=`com.google.android.c2dm.intent.RECEIVE` 且 callee 在允许集 | `isAllowBroadcast` 返回 true                        | 解冻/投递                                        |
+| `callerPkg == com.google.android.gms` 或 callerUid 是 GMS，且 action=`com.google.android.c2dm.intent.RECEIVE` 且 callee 在允许集 | `isRestrictReceiver` 先 `thawUidAsync` 再返回 false | 解冻/投递                                        |
 | 同上但 callee 不在允许集                                                                                    | `chain.proceed()`                                   | 交回 ROM；计入 `broadcastGateSkippedCount`       |
-| callee 是 GMS/GMS persistent 且 action 属于 `CN_DEFER_BROADCAST`                                            | `isAllowBroadcast` / `deferBroadcast` 返回 false    | GMS 内部重连广播不被延迟                         |
+| callee 是 GMS/GMS persistent 且 action 属于 `CN_DEFER_BROADCAST`                                            | `isAllowBroadcast` 返回 true、`deferBroadcastForMiui` 返回 false | GMS 内部重连广播不被延迟                         |
 | `callerPackage == GMS` + c2dm + 目标允许                                                                    | `checkApplicationAutoStart` 返回 true               | 自启动门放行                                     |
-| 目标被冻结、caller=GMS、c2dm、目标允许                                                                      | `isRestrictReceiver` 返回 false 并先 `thawUidAsync` | 冻住的接收器被解冻                               |
-| c2dm + 目标允许                                                                                             | `isNeedCachedBroadcast` 返回 false                  | 不缓存                                           |
+| c2dm + 目标允许                                                                                             | ROM 原生 `isNeedCachedBroadcast` 返回 false（模块不再 hook） | 不缓存                                           |
 | GMS uid 进入 `isRestrictNet`                                                                                | 返回 false                                          | 不给 GMS 断网                                    |
 | c2dm 到 `DomesticPolicyManager#deferBroadcast`                                                              | 不在此处绕过，`proceed`                             | 由 `isAllowBroadcast` 决定；计入 `reached-defer` |
 
@@ -308,63 +309,63 @@ flowchart TD
 | #   | 目标版本              | 类                                                        | 方法/字段签名                                                                                                                 | Hook 类型              | 注入时机            | 修改内容（前→后）                                                                         | 目的                             | 预期效果                                  | 影响范围           | 失败表现                            | 兼容备注                                                                                        |
 | --- | --------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------------------- | ----------------------------------------------------------------------------------------- | -------------------------------- | ----------------------------------------- | ------------------ | ----------------------------------- | ----------------------------------------------------------------------------------------------- |
 | S1  | OS3/OS4               | `AllowlistGate`（模块自身）                               | remote prefs `config` + `ACTION_ALLOWLIST_CHANGED`                                                                            | 接收器/配置            | 安装 pass，异步注册 | 启动读白名单；收到广播后后台重读；包安装/替换触发 auto-check 扫描                         | 让 hook 侧拿到 UI 写入的白名单   | 改白名单无需重启；日志 `allowlist loaded` | 仅模块配置         | 注册失败 WARN；外部发送者 WARN      | ✅ 源码；`RECEIVER_EXPORTED` + sender 校验                                                       |
-| S2  | OS3/OS4               | `com.miui.server.greeze.GreezeManagerService`             | `isAllowBroadcast(int, String, int, String, String)`                                                                          | 替换返回值             | system_server 安装  | GMS+c2dm+callee 允许 → `true`；否则 `proceed`                                             | 放行 GMS 推送广播                | c2dm 不被冻结/缓存                        | 仅 c2dm 接收方     | 缺失 ERROR；判定异常 `proceed`      | ✅ 参数序来自反汇编：arg0=callerUid、arg1=callerPkg、arg2=calleeUid、arg3=calleePkg、arg4=action |
-| S3  | OS3/OS4               | `GreezeManagerService`                                    | `deferBroadcastForMiui(String)`                                                                                               | 替换返回值             | system_server 安装  | `CN_DEFER_BROADCAST` 命中 → `false`                                                       | 免 GMS 内部重连被延迟            | GCM_RECONNECT 等即时投递                  | 仅 GMS 内部 action | 缺失 ERROR；异常 `proceed`          | ✅ `CN_DEFER_BROADCAST` 含 GCM_RECONNECT / DISCONNECTED / CONNECTED / HEARTBEAT_ALARM            |
-| S4  | OS3/OS4               | `GreezeManagerService`                                    | `triggerGMSLimitAction(boolean)` 或无参重载；字段 `mGmsLimitEnabled`                                                          | 改写参数/字段          | system_server 安装  | 有参数 → 置 false；无参 → `Unsafe` 写字段 false                                           | 关 GMS 限额                      | 避免限额触发网络限制                      | 仅 GMS             | 字段写入失败 ERROR；异常 `proceed`  | ✅ 字段每次调用都清，不只在安装时清                                                              |
-| S5  | OS3/OS4               | `GreezeManagerService`                                    | `updateGmsNetStatus(boolean)`                                                                                                 | 改写参数               | system_server 安装  | 参数强制 false                                                                            | 保持 GMS 网络状态                | —                                         | 仅 GMS             | 缺失 INFO；异常 `proceed`           | ✅ 走 `forceBooleanArg`                                                                          |
-| S6  | OS3/OS4               | `com.miui.server.greeze.DomesticPolicyManager`            | `deferBroadcast(String)`                                                                                                      | 方法后置/返回值        | system_server 安装  | `CN_DEFER_BROADCAST` → false；c2dm 只计数后 `proceed`                                     | 源码 P0：c2dm 不再在此绕过白名单 | 未勾选应用交回 ROM                        | 所有 c2dm          | 计数 `deferC2dmPassthroughCount`    | ✅ 2026-10-02 改；此前 c2dm 分支会绕白名单                                                       |
-| S7  | OS3/OS4               | `DomesticPolicyManager`                                   | `isRestrictNet(int)`                                                                                                          | 替换返回值             | system_server 安装  | GMS uid → false；实验开且白名单包 → false                                                 | 防止冻结期断网                   | GMS/勾选应用不被断网                      | GMS/白名单包       | 缺失 INFO `logSkip`                 | ✅ **极性**：`isRestrictNet == !mMessageApp.contains`，true=限制                                 |
-| S8  | OS3/OS4               | `com.miui.server.greeze.power.ListAppsManager`            | 构造器；`isInWhiteList(String)`；字段 `mSystemBlackList`/`SYSTEM_BLACK_LIST`、`mUseDataWhiteList`/`USE_DATA_WHITE_LIST`       | 构造后置/集合修改      | 目标类构造时/查询时 | 构造后从系统黑名单移除 GMS；查询时把 GMS 加入 use-data 白名单                             | 防御性集合修正                   | GMS 不在错误黑名单                        | GMS                | 字段缺失/类型不符 ERROR；异常 ERROR | ✅ 两种字段名都尝试                                                                              |
+| S2  | OS3/OS4               | `com.miui.server.greeze.GreezeManagerService`             | `isAllowBroadcast(int, String, int, String, String)`                                                                          | 替换返回值             | system_server 安装  | callee 是 GMS 且 action ∈ `CN_DEFER_BROADCAST` → `true`；其余 `proceed`                    | 放行 GMS 自身重连广播            | GCM_RECONNECT 等不被延迟                  | 仅 GMS 内部 action | 缺失 ERROR；判定异常 `proceed`      | ✅ 参数序来自反汇编：arg0=callerUid、arg1=callerPkg、arg2=calleeUid、arg3=calleePkg、arg4=action；**2026-10-30** c2dm 放行改由 S10 承担；**OS3 dump 复核后 fallback 已删**：两代 dex 的 `isRestrictReceiver`/`thawUidAsync` 签名一致 ⇒ S10 两代必装，fallback 无可达面（S10 失败会在安装摘要报缺失，ROM 冻结策略接管） |
+| S3  | OS3/OS4               | `GreezeManagerService`                                    | `deferBroadcastForMiui(String)`                                                                                               | 替换返回值             | system_server 安装  | `CN_DEFER_BROADCAST` 命中 → `false`，并计 `cnDeferSuppressedCount`                        | 免 GMS 内部重连被延迟            | **待观测**：GMS callee 永不进入（S2 在同帧上一层已作答） | 仅 GMS 内部 action | 缺失 ERROR；异常 `proceed`          | ⚠️ 2026-10-30 静态复核：`isAllowBroadcast` 是唯一调用者，且 `isRestrictReceiver` 先要求 callee `FULLY_FROZEN`；进入前还要 `isSystemOrMiuiImportantApp(callee)` 或**云控** `mAllowBroadcast.contains(action)`。旧表述「屏灭短路」写反了——屏亮才直接 `return false`。计数恒 0 不构成删除依据，判据改为「`dumpsys greezer` 的 `mAllowBroadcast` 是否含 CN action」  **已删除（2026-10-30 体检）**：需 callee `FULLY_FROZEN` + 云控 `mAllowBroadcast` 命中，GMS callee 处 S2 已作答；零样本、零收益，观察层一并撤除 |
+| S4  | OS3/OS4               | `GreezeManagerService`                                    | ~~`triggerGMSLimitAction(boolean)` 或无参重载~~；~~字段 `mGmsLimitEnabled`~~                                                  | ~~改写参数/字段~~      | ~~system_server 安装~~  | **已删除（2026-10-30 二遍体检）**：本代只有无参重载（idx 7120，无 (Z) 形态）；三个调用方 = `lambda$updateGmsNetStatus$3`（仅 status==true 时 post，S5 已钉 false ⇒ 不可达）+ `H#handleMessage` what=10（本 dex 无发送者）+ `handleDumpGMS`（`dumpsys greezer gms limit` 手动调试命令） | 关 GMS 限额（残余=手动命令）     | —                              | 仅 GMS             | —                                   | 已删除：自动面由 S5 封死后，残余触发面只有手动调试命令，为它常驻 hook + Unsafe 写不成立；S5 保留，absent（INFO）时再评估恢复。UnsafeUtils 随之删除（无其他用例）  **OS3 复核（2026-10-30）**：OS3 同样只有无参形态、无 `updateGmsNetStatus`，what=10 无发送者（init=3/registerMonitor=3/binderDied=3/onAlarm=4），`mGmsLimitEnabled` 初值同为 true；且 OS3 的方法体会 `triggerQuickFreeze(GMS)`，但触发面仍仅手动 dump ⇒ 删除成立 |
+| S5  | OS4（OS3 无此方法）   | `GreezeManagerService`                                    | `updateGmsNetStatus(boolean)`                                                                                                 | 改写参数               | system_server 安装  | 参数强制 false                                                                            | 保持 GMS 网络状态                | —                                         | 仅 GMS             | 缺失跨代 DEBUG；异常 `proceed`     | ✅ 走 `forceBooleanArg`  **2026-10-30 OS3 dump 实证：OS3 无此方法** ⇒ 缺失级别由 INFO 改为跨代 DEBUG，不污染 OS3 的「本代缺失」计数 |
+| S6  | OS3/OS4               | `com.miui.server.greeze.DomesticPolicyManager`            | `deferBroadcast(String)`                                                                                                      | 方法后置/返回值        | system_server 安装  | **只计数**，不再改返回值                                                                   | 遥测：c2dm 是否落到 ROM 延迟策略 | 未勾选应用交回 ROM                        | 所有 c2dm          | 计数 `deferC2dmPassthroughCount`    | ✅ 2026-10-30 删除 CN 分支：唯一调用方 `deferBroadcastForMiui` 已在入口（S3）答过同一组 action  **已删除（2026-10-30 体检）**：纯计数钩，唯一消费者是已撤的 30min 汇总 |
+| S7  | OS3/OS4               | `DomesticPolicyManager`                                   | `isRestrictNet(int)`                                                                                                          | 替换返回值             | system_server 安装  | GMS uid → false；实验开且白名单包 → false                                                 | 防止冻结期断网                   | GMS/勾选应用不被断网                      | GMS/白名单包       | 缺失 INFO `logSkip`                 | ✅ **极性**：`isRestrictNet == !mMessageApp.contains`，true=限制。唯一调用点是 `freezeUids`。**S12 参与点已定（2026-10-30）**：`filter` 的 `0x40` 位（`isNoRestrictApp`/`isNoRestrictFreezeable`）在冻结主链第一道 `isAllowFreeze→checkCannotFreezePolicy→checkFilterWhitelist(0x20026a40)` 上为**置位**，另见 `triggerHighCpuLoadFreeze(0x237eafa)`、`triggerIdleAppAction(0x23feefe)`；`freezeAction` 两道（0x50000000/0x20000000）、`checkStatePolicy(0x2000004)`、`preCheckInterest(0x1521c00)`、`checkAllExemptions(0x378ab2)` 不含。S13 钉 `isAllowFreeze` 的 0 = `CANNOT_FREEZE`，极性正确 |
+| S8  | OS3/OS4               | `com.miui.server.greeze.power.ListAppsManager`            | 构造器；字段 `mUseDataWhiteList`/`USE_DATA_WHITE_LIST`       | 构造后置/集合修改      | 目标类构造时        | 构造后把 GMS 加入 use-data 白名单（`SYSTEM_BLACK_LIST` 不再改动）                          | 拿到 `preCheckSystemApp` 的 `whiteapp` 豁免 | GMS 不被冻结                              | GMS                | 字段缺失 ERROR；异常 ERROR          | ✅ 2026-10-30 去掉系统黑名单剪除：`greezer_power_black_list` 含 GMS，ROM 只在**非 CN** 时自己 remove，而 `checkStatePolicy`/`preCheckSystemApp` 把它当**免冻结**理由（`systemblack` / `sysblack_plugged`，充电时生效）⇒ 剪除方向相反  **`isInWhiteList` 兜底已删除（2026-10-30 二遍体检）**：本代能变更 `USE_DATA_WHITE_LIST` 的只有 `updateSleepMode`（removeAll 的种子资源 `greezer_sleep_mode_control_list` 0x1103013e 共 7 项、均非 GMS）与 `dealCloudWhiteList`（只增）⇒ GMS 无移除路径  **OS3 复核（2026-10-30）**：`mUseDataWhiteList`（静态）同形，`SLEEP_MODE_LIST` 硬编码 10 项均非 GMS，`dealCloudWhiteList` 只增 ⇒ 删除成立 |
 | S9  | OS3/OS4               | `BroadcastQueueModernStubImpl`                            | `checkApplicationAutoStart(BroadcastQueue, BroadcastRecord, ResolveInfo)`；字段 `callerPackage`、`intent`                     | 替换返回值             | system_server 安装  | GMS+c2dm+目标允许 → 入口 `true`；否则 `proceed`                                           | 广播自启动门                     | 目标进程/服务被放行                       | 仅 GMS→c2dm        | 异常 ERROR；`proceed`               | ✅ 只看 callerPackage=GMS，不放开其他 caller                                                     |
 | S10 | OS3/OS4               | `GreezeManagerService`                                    | `isRestrictReceiver(Intent, int, String, int, String)`；`thawUidAsync(int, int, String)`                                      | 替换返回值 + 显式调用  | system_server 安装  | 命中：先 `thawUidAsync(calleeUid,1000,"bc_action")`，再返回 false                         | 温接收器冻结路径                 | 冻住的接收器被解冻后投递                  | 仅 GMS→c2dm        | 缺失 INFO/ERROR；异常 `proceed`     | ✅ 刻意不短接 `checkReceiverIfRestricted`                                                        |
-| S11 | OS3/OS4               | `GreezeManagerService`                                    | `isNeedCachedBroadcast(Intent, int, String)`                                                                                  | 替换返回值             | system_server 安装  | c2dm+允许 → false                                                                         | 防广播缓存到解锁                 | 立即投递                                  | 仅 c2dm 目标       | 缺失 INFO；异常 `proceed`           | ✅ uid 参数刻意不用，白名单是包名                                                                |
+| S11 | OS3/OS4               | `GreezeManagerService`                                    | `isNeedCachedBroadcast(Intent, int, String)`                                                                                  | ~~替换返回值~~         | ~~system_server 安装~~ | **已删除（2026-10-30）**：被 S10 全遮盖                                                        | 防广播缓存到解锁                 | —                                         | —                 | —                                   | 已删除：唯一调用方是 `isRestrictReceiver` 的 `else` 分支，S10 已在入口 return，调用点不再执行；且 CN 策略下 c2dm 不在 `NEED_CACHED_BROADCAST`，返回 false 与 ROM 原生同值，即使被调用也是空操作 |
 | S12 | OS3/OS4               | `AurogonImmobulusMode`                                    | `isNoRestrictApp(String)`、`isNoRestrictFreezeable(String,int)`、`triggerQuickFreeze(int,int)`                                | 替换返回值             | system_server 安装  | GMS → true / false / skip                                                                 | 冻结路径安全网                   | GMS 不被冻结                              | GMS                | 缺失 INFO 或跨代 DEBUG              | ✅ `isNoRestrictFreezeable` 为 OS4 额外方法                                                      |
 | S13 | OS3/OS4               | `PolicyMaker`                                             | `isAllowFreeze(int)`（int）                                                                                                   | 替换返回值             | system_server 安装  | GMS uid → `skipValueFor(int)=0`                                                           | 关闭 PowerStrategyMode 冻结窗口  | —                                         | GMS                | 缺失 INFO                           | ✅ 返回 int，不是 boolean                                                                        |
-| S14 | OS3/OS4               | `ProcessPolicy`                                           | `getWhiteList(int)`                                                                                                           | 方法后置/返回值        | system_server 安装  | flags bit0 命中：在返回列表中补 GMS / persistent                                          | 白名单扩展                       | GMS 不被策略排除                          | GMS                | 异常 ERROR；`proceed`               | ✅ 已补 `deoptimize`（2026-10-26）                                                               |
-| S15 | OS3/OS4               | `AwareResourceControl`                                    | 构造器；字段 `mNoNetworkBlackUids`                                                                                            | 构造后置/集合修改      | 目标类构造时        | 构造后移除 GMS 包名/UID                                                                   | 防 GMS 被列入无网黑名单          | —                                         | GMS                | 字段读取异常 ERROR；不匹配 INFO     | ✅ 有 mismatch 日志；不匹配不等于失败                                                            |
-| S16 | OS3/OS4               | `MiuiNetworkPolicyManagerService`                         | `setSleepModeWhitelistUidRules()`、`enableSleepModeChain(boolean)`；字段 `mSleepModeWhitelistUids`                            | 方法前/后置 + sentinel | system_server 安装  | 进入睡眠前把 GMS 注入白名单；链入口/出口打 sentinel                                       | 旧代睡眠链保护                   | GMS 睡眠期不被断                          | GMS                | 缺失跨代 DEBUG                      | 🟡 OS4/V816 此路径实际不跑；sentinel FIRED = ROM 换代                                            |
+| S14 | OS3/OS4               | `ProcessPolicy`                                           | `getWhiteList(int)`                                                                                                           | 方法后置/返回值        | system_server 安装  | flags bit0 命中：在返回列表中补 GMS（`gms.persistent` 行已删）                            | 白名单扩展                       | GMS 不被策略排除                          | GMS                | 异常 ERROR；`proceed`               | ✅ 已补 `deoptimize`（2026-10-26）  **OS4 已确认 no-op（2026-10-30 二遍体检）**：`sStaticWhiteList` 种子资源 `package_static_white_list_base`（0x110300ad，33 项）本身含 GMS ⇒ append 恒命中已有项，钩保留作 OS3 保险；`gms.persistent` 是进程名非包名，追加无语义，已删 |
+| S15 | OS3/OS4               | `AwareResourceControl`                                    | 构造器；字段 `mNoNetworkBlackUids`                                                                                            | 构造后置/集合修改      | 目标类构造时        | 构造后按包名移除 GMS（字段是 `List<String>`，无 uid 元素）                                                                   | 防 GMS 被列入无网黑名单          | —                                         | GMS                | 字段读取异常 ERROR；不匹配 INFO     | ✅ 有 mismatch 日志；不匹配不等于失败                                                            |
+| S16 | OS3/OS4               | `MiuiNetworkPolicyManagerService`                         | `setSleepModeWhitelistUidRules()`、`enableSleepModeChain(boolean)`；字段 `mSleepModeWhitelistUids`                            | 方法前/后置 + sentinel | system_server 安装  | 进入睡眠前把 GMS 注入白名单；链入口/出口打 sentinel                                       | 旧代睡眠链保护                   | GMS 睡眠期不被断                          | GMS                | 缺失跨代 DEBUG                      | 🟡 OS4/V816 此路径实际不跑；sentinel FIRED = ROM 换代。退出 nudge 另需本次开机观察到进入（`sSleepEntrySeen`），见 §5.6 末尾  **2026-10-30 OS3 dump**：OS3 PowerKeeper 4.2.00 亦有 `applySleepConfig(SleepState)` 且调 `setDataEnabled`/`setWifiEnabled` 切无线电 ⇒ OS3 的睡眠断网是「per-uid 链 + PowerKeeper 切无线电」双机制并存，运行时组合待真机验证 |
 | S17 | OS3/OS4               | `ActivityManagerService`                                  | `broadcastIntentWithFeature`（多签名）/`broadcastIntent`；`ProcessRecord.info`；`getRecordForAppLOSP/Locked` | 方法后置/字段修改      | system_server 安装  | GMS+c2dm+允许：只加 `FLAG_INCLUDE_STOPPED_PACKAGES`                                       | 停止应用可收                     | 推送越过 stopped 状态                     | 仅 GMS→c2dm        | 找不到方法 ERROR；异常 `proceed`    | ✅ 2026-10-28 移除直接 2s 豁免：GMS 自带 10s/type0 或 20s/type4；reason 102 默认映射 type1，且 DeviceIdle 覆盖写会截断更长条目 |
-| S18 | OS3/OS4               | `InternationalPolicyManager`                              | `isPushApp(String)` + StackWalker                                                                                             | 替换返回值             | system_server 安装  | caller 来自 `isRestrictNet` 且白名单命中 → false                                          | 国际 ROM 覆盖                    | —（国内 inert）                           | 白名单包           | 栈失败 ERROR；`proceed`             | ⚠️ 本机 Domestic，此钩 inert；已补 deoptimize（2026-10-26）                                      |
-| S19 | OS3/OS4               | `GreezeManagerService`                                    | `udpPackageRestrict(int, boolean)`                                                                                            | 替换返回值             | system_server 安装  | GMS uid + allow=true → null（跳过）                                                       | 3.6 UDP 过滤防御                 | GMS 不被加过滤                            | GMS                | 缺失 INFO                           | ✅ 只跳 true，避免卡死已装过滤                                                                   |
+| S19 | OS3/OS4               | `GreezeManagerService`                                    | `udpPackageRestrict(int, boolean)`                                                                                            | 替换返回值             | system_server 安装  | GMS uid + allow=true → null（跳过）                                                       | 3.6 UDP 过滤防御                 | GMS 不被加过滤                            | GMS                | 缺失 INFO                           | ✅ 只跳 true，避免卡死已装过滤。触发点同 S7：`updateAurogonUidRule` 的 `allow=true` 只来自 freeze 路径；S12 在主链第一道答题（见 S7 备注），绕过 PolicyMaker 的调用方靠本钩兜住 |
 | S20 | OS3/OS4               | `ProcessCleanerBase`                                      | `isForceStopEnable(ProcessRecord, int, ProcessManagerService)`；`ProcessRecord.getApplicationInfo()`                          | 替换返回值             | system_server 安装  | 白名单 + FCM 客户端 + policy≠13 → false                                                   | 防误清理                         | 应用不被 force-stop                       | 白名单包           | 异常 ERROR；`proceed`               | ✅ 已补 `deoptimize`（2026-10-26）；FCM 规则见 §2.6                                              |
 | S21 | OS3/OS4               | `AlarmManagerServiceStubImpl` / `AlarmManagerServiceStub` | `checkAlarmIsAllowedSend(Context, Alarm)`；`Alarm.creatorUid`                                                                 | 方法后置/替换          | system_server 安装  | ROM 判 false 且 uid=GMS → true                                                            | Alarm 投递                       | GMS alarm 不被丢                          | GMS/GSF            | 缺失跨代 DEBUG                      | ✅ Impl 覆盖 Stub，先找 Impl                                                                     |
 | S22 | OS4（OS3 待验证）     | `AmlMiuiThirdPartScorer`                                  | `notifyScoreAndIsUsable()`；字段 `mLegacyIntScore`                                                                            | 方法前后置/字段        | 安装 + 异步重试     | 开关开且 50 > score ≥ floor：临时设 51，调用后还原                                        | 弱 WiFi 保持                     | 不切移动数据                              | 设备网络           | 解析失败跨代 DEBUG；缺失 INFO       | ⚠️ 类在 `miui-wifi-service.jar`，主 loader 不可达；OS3 未验证                                    |
 | S23 | OS3                   | `SmartPowerService` / `SmartPowerPolicyManager`           | `shouldInterceptBroadcast(ProcessRecord,BroadcastRecord)`、`shouldInterceptService(Intent,CallerInfo,ServiceInfo)`            | 替换返回值             | system_server 安装  | 开关开 + GMS+c2dm/白名单 → false                                                          | OS3 SmartPower 放行              | 广播/服务不被拦                           | 白名单包           | OS4 跨代 DEBUG / 类缺失 INFO        | ⚠️ OS4 零命中，整段死代码                                                                        |
-| S24 | OS3/OS4（OS4 已确认） | `AutoStartManagerServiceStubImpl`                         | `isAllowStartService`（含 Intent 的重载）                                                                                     | 方法后置/替换          | system_server 安装  | 读穿；白名单内被拒计数；实验开改答 true                                                   | 服务启动检查点                   | 服务可启动                                | 白名单包           | 缺失跨代 DEBUG                      | ✅ 类名不是 `...Stub`；按签名+Intent 位匹配                                                      |
-| S25 | OS3/OS4（OS4 已确认） | `ProcessManagerService`                                   | `isAllowAutoStart(String,int)`                                                                                                | 方法后置/替换          | system_server 安装  | 同 S24                                                                                    | 进程启动检查点                   | 进程可启动                                | 白名单包           | 缺失跨代 DEBUG                      | ✅ 参数 pkg,int                                                                                  |
-| S26 | OS3/OS4（OS4 已确认） | `AutoStartManagerServiceStubImpl`                         | `canRestartServiceLocked`（两重载）                                                                                           | 方法后置/替换          | system_server 安装  | 白名单内被拒计数；实验开改答 true                                                         | 服务重启门                       | 死服务可重启                              | 白名单包           | 缺失跨代 DEBUG                      | ✅ 曾纯 probe，2026-10-07 出真样本后放开                                                         |
-| S27 | OS3/OS4（OS4 已确认） | `PreStartFeedbackImpl`                                    | `isAutoStart(String,int)`                                                                                                     | 只读探针               | system_server 安装  | 只计数，不改值                                                                            | 观察预启动惩罚                   | 计数 `pre-start-denied`                   | 白名单包           | 缺失跨代 DEBUG                      | ✅ 只读，不释放                                                                                  |
-| S28 | OS3/OS4               | `AppOpsManager`                                           | `checkOpNoThrow(int,int,String)`、`noteOpNoThrow(int,int,String,String,String)`                                               | 替换返回值             | system_server 安装  | op=10008 + 白名单 + 根开关 → `MODE_ALLOWED`                                               | 自启动统一查询口                 | 所有 AppOps 读者被放行                    | 白名单包           | 异常 ERROR；`proceed`               | ⚠️ 会跳过 usage note；迁移读时用 ThreadLocal 绕开                                                |
-| S29 | OS3/OS4               | `TrafficProbe`                                            | 无 hook                                                                                                                       | 只读定时               | 安装即启动          | 每 30min 读 `TrafficStats.getUidRxBytes/TxBytes`                                          | 判断 GMS 是否通信                | `gms probe` 摘要                          | GMS                | uid 未解析 → 文本提示               | ✅ `/proc/net/tcp` 已移除，SELinux 不可读且语义错误                                              |
-| S30 | OS3/OS4（OS4 已确认） | `GreezeManagerService`                                    | `isAllowWakeUpList(int uid)`                                                                                                  | 替换返回值             | system_server 安装  | GMS uid → true                                                                            | 冻结/缓存进程的 wakelock 门      | GMS 取 partial wakelock 不被禁            | GMS                | 缺失 INFO                           | ✅ 2026-10-28；`PowerManagerService#setWakeLockDisabledStateLocked` 调用；本机 `no_cached_wake_locks=true`，但 GMS 未冻结，属防御 |
-| S31 | OS3/OS4（OS4 已确认） | `GreezeManagerService`                                    | `isNeedCachedAlarmForAurogon(int uid)`                                                                                        | 替换返回值             | system_server 安装  | GMS uid → false                                                                           | 冻结期 alarm 不被缓存            | GMS 到期 alarm 不被推迟到解冻              | GMS                | 缺失 INFO                           | ✅ 2026-10-28；`AlarmManagerService#triggerAlarmsLocked` 调用；仅 `FULLY_FROZEN` 生效，本机 GMS 未冻结 |
+| S24 | OS3/OS4（OS4 已确认） | `AutoStartManagerServiceStubImpl`                         | `isAllowStartService`（3 参 / 4 参重载，返回 boolean）                                                                        | 方法后置/替换          | system_server 安装  | `autostart_service_release` 开 + 白名单包 + **ROM 判 `false`** → `true`（先 `proceed()`，只改答拒绝）；其余原值                                                   | 服务绑定检查点                   | 勾选应用绑定服务时不被拦                  | 白名单包           | 类缺失跨代 DEBUG；缺失/命中 INFO     | ✅ **2026-11-01 从退休档单独恢复这一处**：3/4 参重载全挂，Intent 按类型取参而非位置；白名单为空时开关无效  **同日收窄（2026-11-01）**：OS4 dex 解码出 4 参体依次为 `resolveService` → `BarrageListenerServiceStub#isAllowStartBarrage(pkg)`（false ⇒ `MiBarrage: Disallowing to start service` + 拒绝）→ `AppOpsManager#noteOpNoThrow(10008, uid, pkg, …)`（非 MODE_ALLOWED ⇒ `MIUILOG- Reject service` + 拒绝）。入口即返回 `true` 会把弹幕门与 `10008` 记账一起跳过，故改为"ROM 先判、只改答它的拒绝"；命中日志改一次性。**同日拆分开关**：本节改为"一个检查点一个开关"，本行只读 `autostart_service_release`。**命名与真实入口（2026-11-01 复核）**：名字虽为 `isAllowStartService`，但 3 参重载唯一外部入口是 `ActiveServiceManagementImpl#canBindService`（一句转发），其余调用方为 `JobServiceContextImpl#checkIfCancelJob`、`canRestartServiceLocked`、`SecurityManagerService`；`ActiveServices#startServiceLocked` 的调用边中没有任何 `%miui%` 目标 ⇒ 它不在 `startService`/FGS 链上，界面因此改称「服务绑定门」 |
+| S25 | OS3/OS4（OS4 已确认） | `ProcessManagerService`                                   | `isAllowAutoStart(String,int)`                                                                                                | 方法后置/替换          | system_server 安装  | **先 `proceed()`；**仅当 ROM 判 `false` 且 `autostart_process_release` 开 + 白名单包 → `true`                                  | 进程重启/预加载检查点                   | 勾选应用被杀后重启不被拦               | 白名单包           | 缺失 INFO；异常 `proceed`            | ✅ **2026-11-01 按合法性恢复**（非样本）：方法体整个就是 `AppOpsManager#checkOpNoThrow(10008, uid, pkg)`（`0x2718`），即手机管家自启动开关本身，AOSP 无对应概念。调用方为 `ProcessStarter#isAllowRestartProcessLock` / `restartDiedAppOrNot` / `xmsf`、`ProcessManagerService#isForceStopEnable`、`ProcessPolicy#isFastBootEnable` ⇒ 它覆盖**重启/预加载**，不是 c2dm 冷启动（后者走 S9/S10），故按包名作答（与 ROM 同键）。仍**不**恢复 S28（appop 根门）与 S26（`restart DENIED` 不影响投递） |
+| S26 | OS3/OS4（OS4 已确认） | `AutoStartManagerServiceStubImpl`                         | `canRestartServiceLocked`（两重载）                                                                                           | ~~方法后置/替换~~        | ~~system_server 安装~~ | **已删除（2026-10-31）**：服务重启门的改答随自启动实验档撤除         | —                                          | —                                          | —                  | —                                   | 已删除：`restart DENIED` 在所有真机上稳定出现、且不影响投递，说明该门不在主链上 |
+| S27 | OS3/OS4（OS4 已确认） | `PreStartFeedbackImpl`                                    | `isAutoStart(String,int)`                                                                                                     | 只读探针               | system_server 安装  | 只计数，不改值                                                                            | 观察预启动惩罚                   | 计数 `pre-start-denied`                   | 白名单包           | 缺失跨代 DEBUG                      | ✅ 只读，不释放                                                                                   **已删除（2026-10-30 体检）**：只读探针，无处置、无消费者，随观察层撤除 |
+| S28 | OS3/OS4               | `AppOpsManager`                                           | `checkOpNoThrow(int,int,String)`、`noteOpNoThrow(int,int,String,String,String)`                                               | ~~替换返回值~~        | ~~system_server 安装~~ | **已删除（2026-10-31）**：自启动统一查询口的改答随自启动实验档撤除      | —                                          | —                                          | —                  | —                                   | 已删除：随自启动放行三档一并撤除；模块不再改答 `MIUIOP 10008`，用户需手动在手机管家开启 |
+| S29 | OS3/OS4               | `TrafficProbe`                                            | 无 hook                                                                                                                       | 只读定时               | 安装即启动          | 每 30min 读 `TrafficStats.getUidRxBytes/TxBytes`                                          | 判断 GMS 是否通信                | `gms probe` 摘要                          | GMS                | uid 未解析 → 文本提示               | ✅ `/proc/net/tcp` 已移除，SELinux 不可读且语义错误                                               **已删除（2026-10-30 体检）**：`dumpsys activity service com.google.android.gms/.gcm.GcmService` 信息严格更多 |
+| S30 | OS3/OS4（OS4 已确认） | `GreezeManagerService`                                    | `isAllowWakeUpList(int uid)`                                                                                                  | 替换返回值             | system_server 安装  | GMS uid → true                                                                            | 冻结/缓存进程的 wakelock 门      | GMS 取 partial wakelock 不被禁            | GMS                | 缺失 INFO                           | ✅ 2026-10-30 复核**不是**冻结路径专属：`setWakeLockDisabledStateLocked` 在 `isAttributedUidCached` / `isFrozenLocked` 两条前置 return 之后，只要 `NO_CACHED_WAKE_LOCKS` 为真且是 app partial wakelock 就会问这个门 |
+| S31 | OS3/OS4（OS4 已确认） | `GreezeManagerService`                                    | `isNeedCachedAlarmForAurogon(int uid)`                                                                                        | ~~替换返回值~~         | ~~system_server 安装~~ | **已删除（2026-10-30）**：实体对非 xiaomi 包名恒返回 false，GMS 无输入 | 冻结期 alarm 不被缓存            | —                                          | —                  | —                                   | 已删除：`isNeedCachedAlarmForAurogonInner` 依次判 `FULLY_FROZEN` → `isApp` → `pkg.contains("xiaomi")`，`com.google.android.gms` 不含 xiaomi 即返回 false，allow/forbid 名单都到不了；调用方还要求 `isUidFrozen` |
 
 ### 4.2 PowerKeeper 核心修改点
 
 | #   | 目标版本              | 类                                        | 方法/字段签名                                                                                    | Hook 类型         | 注入时机                 | 修改内容（前→后）                                                             | 目的                              | 预期效果               | 影响范围 | 失败表现                  | 兼容备注                                          |
 | --- | --------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------- | ------------------------ | ----------------------------------------------------------------------------- | --------------------------------- | ---------------------- | -------- | ------------------------- | ------------------------------------------------- |
 | P1  | OS3                   | `com.miui.powerkeeper.utils.NetdExecutor` | `initGmsChain(String,int,String)`                                                                | 改写参数          | PowerKeeper 安装         | 第三个参数 → `"ACCEPT"`                                                       | 中和 OS3 `gms_wall` REJECT 链     | —                      | GMS      | 跨代 DEBUG                | ⚠️ OS3-only；OS4 目标缺失                          |
-| P2  | OS3/OS4               | `NetdExecutor`                            | `setGmsDnsBlockerState(int, boolean)`                                                            | 改写参数          | PowerKeeper 安装         | 第二参数 → false                                                              | 关闭 DNS blocker                  | —                      | GMS      | 缺失 INFO                 | ✅ OS4 方法存在但无人调用（源码注释）              |
+| P2  | OS3/OS4               | `NetdExecutor`                            | `setGmsDnsBlockerState(int, boolean)`                                                            | ~~改写参数~~      | ~~PowerKeeper 安装~~     | **已删除（2026-10-30）**：方法存在但全 dex 零调用，字符串池也无该名（排除反射） | 关闭 DNS blocker                  | —                      | —        | —                         | 已删除：OS4 上不可能执行；`NetdExecutor#execute` 的 `setuiddnsrule` 分支仍按 GMS uid 兜底  **OS3 复核（2026-10-30）**：`setGmsDnsBlockerState` 在 OS3 有调用方（`GmsObserver.updateGmsNetWork`），其效果由 P5 钉参 + P4 execute 改写双层覆盖，删除仍成立 |
 | P3  | OS3                   | `NetdExecutor`                            | `setGmsChainState(String, boolean)`                                                              | 改写参数          | PowerKeeper 安装         | 第二参数 → false                                                              | 关闭 gms_wall                     | —                      | GMS      | 跨代 DEBUG                | ⚠️ OS3-only                                        |
 | P4  | OS3/OS4               | `NetdExecutor`                            | `execute(int, String, String, Object[])`                                                         | 改写参数/替换返回 | PowerKeeper 安装         | `setuiddnsrule` + GMS uid → 参数改 `allow`；`enablemiuistandby enable` → 跳过 | GMS DNS/standby 防火墙            | GMS 不被断             | GMS      | 缺失 INFO；异常 `proceed` | ✅ 只对可证明是 GMS 的 uid 改写                    |
 | P5  | OS3                   | `GmsObserver`                             | `updateGmsAlarm(boolean)`、`updateGmsNetWork(boolean)`、`updateGoogleReletivesWakelock(boolean)` | 改写参数          | PowerKeeper 安装         | 参数 → false                                                                  | OS3 本地状态机                    | —                      | GMS      | 跨代 DEBUG                | ⚠️ OS4 已移除状态机                                |
-| P6  | OS3                   | `GmsObserver`                             | `disableGms()`、`disableGmsApps()`                                                               | 替换返回值        | PowerKeeper 安装         | 返回 null                                                                     | 阻止硬禁用 GMS                    | —                      | GMS      | 跨代 DEBUG                | ⚠️ OS3-only                                        |
+| P6  | OS3                   | `GmsObserver`                             | `disableGms()`（`disableGmsApps()` 已删）                                                       | 替换返回值        | PowerKeeper 安装         | 返回 null                                                                     | 阻止硬禁用 GMS                    | —                      | GMS      | 跨代 DEBUG                | ⚠️ OS3-only；`disableGmsApps` 于 2026-10-30 删除——**两代 dex 均无此方法**（OS3 dump 实证），钩无处可装 |
 | P7  | OS3                   | `GmsObserver`                             | `updateGmsEnabled(boolean)`、`updateGmsState(boolean)`、`updateGmsInstalled(boolean)`            | 改写参数          | PowerKeeper 安装         | 参数 → false                                                                  | OS3 状态机                        | —                      | GMS      | 跨代 DEBUG                | ⚠️ OS3-only                                        |
-| P8  | OS4                   | `GmsObserver`                             | `updateFrameworkGmsNetStatus(boolean)`                                                           | 改写参数          | PowerKeeper 安装         | 参数 → false                                                                  | **OS4 唯一 GMS 限流出口**         | 关掉框架侧 GMS 限流    | GMS      | 缺失 INFO（关键）         | ✅ OS4 load-bearing；必须可见                      |
-| P9  | OS3/OS4               | `GmsObserver`                             | `onGoogleReachabilityChanged(boolean)`                                                           | 改写参数          | PowerKeeper 安装         | 参数 → true                                                                   | 保持 reachable                    | GMS 认为可达           | GMS      | 缺失 INFO                 | ✅ 强制 connected                                  |
-| P10 | OS3/OS4               | `GmsObserver`                             | `c(GmsObserver, boolean)`                                                                        | 改写参数          | PowerKeeper 安装         | 第二参数 → true                                                               | 混淆连接桥                        | GMS 保持连接           | GMS      | 缺失 INFO                 | ⚠️ 混淆名 `c`；安装成功有 INFO 行，缺失即漂移报警  |
-| P11 | OS3/OS4               | `GmsObserver$1..$8`                       | `googleNetworkDisconnect()`                                                                      | 替换返回值        | PowerKeeper 安装         | 返回 null                                                                     | 阻止断开回调                      | —                      | GMS      | 8 个类都找不到 → INFO     | ✅ 找到第一个就停                                  |
+| P8  | OS4                   | `GmsObserver`                             | `updateFrameworkGmsNetStatus(boolean)`                                                           | ~~改写参数~~          | ~~PowerKeeper 安装~~     | **已删除（2026-10-30）**：由 S5 在 system_server 端承担                                        | 关掉框架侧 GMS 限流              | —                      | —        | —                         | 已删除：同一条 binder 链的两端做同一件事；S5 `updateGmsNetStatus` 是所有调用者的必经点。OS3 不走此路（P5/P6/P7 + P9）。S5 若报 absent 再恢复 |
+| P9  | OS3/OS4               | `GmsObserver`                             | `onGoogleReachabilityChanged(boolean)`                                                           | 改写参数          | PowerKeeper 安装         | 参数 → true                                                                   | 保持 reachable                    | GMS 认为可达           | GMS      | 缺失 INFO                 | ✅ 强制 connected；**保留**：OS4 与 S5 幂等，OS3 上是可达性的唯一实现                                  |
+| P10 | OS3/OS4               | `GmsObserver`                             | `c(GmsObserver, boolean)`                                                                        | 改写参数          | PowerKeeper 安装         | 第二参数 → true                                                               | 混淆连接桥                        | GMS 保持连接           | GMS      | 缺失 INFO                 | ⚠️ 混淆名 `c`；**2026-10-30 已删除**（唯一调用边是 P9，效果同 P8）  **OS3 复核**：OS3 的 `c` 是 1 参不同方法（返回 ICloudFunctionListener），(GmsObserver, boolean) 形态两代仅 OS4 有过，删除无碍  |
+| P11 | OS3/OS4               | `GmsObserver$1..$8`                       | `googleNetworkDisconnect()`                                                                      | 替换返回值        | PowerKeeper 安装         | 返回 null                                                                     | 阻止断开回调                      | —                      | GMS      | 8 个类都找不到 → INFO     | ✅ 找到第一个就停；**2026-10-30 已删除**（断连回调最终仍落到 P8）  |
 | P12 | OS3/OS4               | `AppStandbyController`                    | `setUidState(int, boolean)`                                                                      | 改写参数          | PowerKeeper 安装         | GMS uid 且参数≠true → true                                                    | GMS 允许重断言                    | GMS 不被 standby 限制  | GMS      | 缺失 INFO                 | ✅ 只改参数，不预置缓存；注意同名方法在 4 个类     |
-| P13 | OS3/OS4               | `GlobalFeatureConfigureHelper`            | `getDozeWhiteListApps(Bundle)`、`(Context)`                                                      | 方法后置/返回值   | PowerKeeper 安装         | 结果缺 GMS → 注入                                                             | doze 白名单                       | GMS 留在 doze 白名单   | GMS      | 缺失 INFO；异常 ERROR     | ✅ 两个重载都试，且已补 `deoptimize`（2026-10-26） |
-| P14 | OS3/OS4               | `UserConfigureHelper`                     | `getNoRestrictApps(Context)`                                                                     | 方法后置/返回值   | PowerKeeper 安装         | 结果注入 GMS                                                                  | 源码 P1：noRestrict 投影          | GMS 不被限制           | GMS      | 缺失 INFO                 | ✅ 只注入查询结果，不持久化                        |
-| P15 | OS3/OS4               | `UserConfigureHelper`                     | 名称含 update/save/insert/modify/setBg 的写者（排除 get）                                        | 方法后置/参数     | PowerKeeper 安装         | `setBgControl` 触及 GMS 时强改 `noRestrict`；写后 re-assert userTable         | 防止写回 miuiAuto                 | GMS 保持 noRestrict    | GMS      | 异常 WARN                 | ⚠️ 启发式匹配，方法集可能随 ROM 变化               |
+| P13 | OS3/OS4               | `GlobalFeatureConfigureHelper`            | `getDozeWhiteListApps(Bundle)`、`(Context)`                                                      | 方法后置/返回值   | PowerKeeper 安装         | 结果缺 GMS → 注入                                                             | doze 白名单                       | GMS 留在 doze 白名单   | GMS      | 缺失 INFO；异常 ERROR     | ✅ 两个重载都试，且已补 `deoptimize`（2026-10-26）  **已删除（2026-10-30 体检）**：本机 GMS 已在 doze 三处白名单，注入恒 no-op |
+| P14 | OS3/OS4               | `UserConfigureHelper`                     | `getNoRestrictApps(Context)`                                                                     | 方法后置/返回值   | PowerKeeper 安装         | 结果注入 GMS（**不再在查询里写 userTable**）                                  | 源码 P1：noRestrict 投影          | GMS 不被限制           | GMS      | 缺失 INFO                 | ✅ 只注入查询结果；2026-10-30 移除查询路径的 provider 写回，源表由 P15/P16 负责                   |
+| P15 | OS3/OS4               | `UserConfigureHelper`                     | ~~名称含 update/save/insert/modify/setBg 的写者（排除 get）~~                                    | ~~方法后置/参数~~ | ~~PowerKeeper 安装~~     | **已删除（2026-10-30 二遍体检）**：OS4 4.2.00 命中仅 2 方法——`setBgControl(String)` 是实例 setter、参数是控制值非包名 ⇒ arg-force 永不触发；`updateToTable` 唯一调用方 `PowerSaveConfigureManager.setPowerSaveAppConfigure` ⇒ 每次配置写都付一次 provider 查询 | 防止写回 miuiAuto（已由 P14/P16 覆盖） | —                      | GMS      | —                         | 已删除：P14 查询注入 + P16 重建修复（内含源行写回）已构成闭环；OS3 若存在 (pkg, control) 形状静态 setter，需重查后再恢复  **OS3 复核（2026-10-30）**：`UserConfigureHelper` 方法集与 OS4 完全一致（同形状实例 setter）⇒ 删除成立 |
 | P16 | OS3/OS4               | `ActiveStateController`                   | `dealNoRestrictApp()`                                                                            | 方法后置          | PowerKeeper 安装         | 之后 `ensureGmsInMilletSetting`                                               | 兜底修复 `MILLET_NO_RESTRICT_APP` | GMS 留在设置里         | GMS      | 缺失 INFO；写失败 WARN    | ✅ 只在 GMS 缺项时写                               |
 | P17 | OS3/OS4               | `PowerKeeperAppConfigure`                 | `fillScenarioContent`（7 参 OS3 / 8 参 OS4）；字段 `pkg`、`scenario`                             | 方法后置/字段     | PowerKeeper 安装         | GMS scenario 0→8                                                              | 源码 P3：编译场景对齐 noRestrict  | UI/DeviceIdle/策略一致 | GMS      | 缺失跨代 DEBUG            | ✅ 按参数个数找；OS4 多一个 Map                    |
 | P18 | OS3/OS4（OS4 已记录） | `CommonAdapter`                           | `addPowerSaveWhitelistApps`（2 参）                                                              | 改写参数          | PowerKeeper 安装         | 实验开：从 `String[]` 去掉微信                                                | 微信 doze 免优化                  | 微信不被写回白名单     | 微信     | 缺失 INFO                 | ⚠️ 默认关；不清已存条目                            |
-| P19 | OS4（OS3 待验证）     | `WifiManager`                             | `setWifiEnabled(boolean)`                                                                        | 替换返回值        | PowerKeeper 安装         | 睡眠进入 + 开关开 + 栈含 `applySleepConfig`：返回 true                        | 睡眠保 WiFi                       | WiFi 不断              | 设备级   | 缺失 INFO；degraded 分支  | 🟡 OS4/V816 路径；栈判定避免误伤手动开关           |
-| P20 | OS4（OS3 待验证）     | `CommonAdapter`                           | `setDataEnabled(TelephonyManager, boolean)`                                                      | 替换返回值        | PowerKeeper 安装         | 同上，返回 null                                                               | 睡眠保移动数据                    | 数据不断               | 设备级   | 缺失 INFO；degraded 分支  | 🟡 与 P19 为对等开关                               |
-| P21 | OS4（OS3 待验证）     | `Settings$Secure`                         | `getIntForUser(ContentResolver,String,int,int)`                                                  | 替换返回值        | PowerKeeper 安装（退路） | 地震旗标 + 睡眠栈 + 任一开关 → 1                                              | degrade 路径                      | 两个无线电全保         | 设备级   | 缺失 INFO                 | 🟡 仅当 P19/P20 无法同时 hook 时启用               |
+| P19 | OS3/OS4（OS3 已核存在） | `WifiManager`                             | `setWifiEnabled(boolean)`                                                                        | 替换返回值        | PowerKeeper 安装         | 睡眠进入 + 开关开 + 栈含 `applySleepConfig`：返回 true                        | 睡眠保 WiFi                       | WiFi 不断              | 设备级   | 缺失 INFO；degraded 分支  | ✅ 2026-10-30 OS3 dump：PowerKeeper 4.2.00 同有 `applySleepConfig(SleepState)` 且调 `setDataEnabled`/`setWifiEnabled`；OS3 运行时是否走到待真机验证 |
+| P20 | OS3/OS4（OS3 已核存在） | `CommonAdapter`                           | `setDataEnabled(TelephonyManager, boolean)`                                                      | 替换返回值        | PowerKeeper 安装         | 同上，返回 null                                                               | 睡眠保移动数据                    | 数据不断               | 设备级   | 缺失 INFO；degraded 分支  | ✅ 与 P19 同源；OS3 的 `restoreSleepConfig` 亦在，恢复路径完整 |
 | P22 | OS3/OS4               | `GmsSupport`                              | `recoverGmsConnection(Context)`                                                                  | 非 hook           | 睡眠退出/修复            | 向 GMS/GSF 发 GCM/GTALK/MCS 心跳 + query Chimera                              | 源码 P4：恢复                     | GMS 重连               | GMS/GSF  | 发送失败 WARN             | ✅ outbound IPC，不注入 GMS                        |
+
+> **2026-10-30 只删 P10/P11，P9 保留**：`c` 的唯一调用边是 `onGoogleReachabilityChanged`，`googleNetworkDisconnect` 的断连回调终点也是它，所以 P9 一层覆盖两者。P9 标的是 OS3/OS4——OS4 上与 S5 幂等，OS3 上它是“GMS 认为可达”的唯一实现，最初按 OS4-only 证据连带删除是错的，已恢复。P8（OS4 专属）删除，由 S5 承担；OS3 的限额链是 P5/P6/P7 + P9，不经过 P8。
 
 ### 4.3 实验开关修改点
 
@@ -376,10 +377,9 @@ flowchart TD
 | 微信 doze 免优化   | `wechat_doze_keepout`             | 关   | 从白名单写回参数移除微信           | P18           | 微信可能更耗电                          | 需手动把微信设为“优化” |
 | 弱 WiFi 保持       | `wifi_weak_signal_switch_relaxed` | 关   | 分数 50 > score ≥ floor → clamp 51 | S22           | 停留在弱链路，QoS 下降                  | floor 子项             |
 | 弱 WiFi 阈值       | `wifi_weak_signal_floor`          | 45   | 选择 45/40/35/30                   | S22           | 越低越激进                              | 主开关                 |
-| 自启动放行（主）   | `autostart_gate_release`          | 关   | 服务/进程启动被拒时改答允许        | S24/S25       | 放宽 ROM 自启动                         | 白名单                 |
-| 停用应用冻结       | `autostart_restart_release`       | 关   | 重启被拒时改答允许                 | S26           | 死服务更易复活                          | 主开关                 |
-| 放行自启动统一查询 | `autostart_root_release`          | 关   | AppOps 10008 查询直接答允许        | S28           | **最宽**，含预启动惩罚；跳过 usage note | 主开关 + 停用冻结      |
 | 冻结期联网         | `greeze_net_release`              | 关   | 白名单包冻结时不被断网             | S7            | 后台流量/耗电                           | 白名单                 |
+| 服务绑定门         | `autostart_service_release`       | 关   | 绑定服务被拒时改答允许                      | S24           | 放宽绑定判定                       | 白名单                 |
+| 进程重启门         | `autostart_process_release`       | 关   | 进程重启/预加载被拒时改答允许（**不是** c2dm 冷启动门，那走 S9/S10） | S25 | 放宽重启判定 | 白名单 |
 | Smart Power 放行   | `smartpower_release`              | 关   | OS3 广播/服务拦截放行              | S23           | OS4 无效                                | OS3                    |
 | 自动勾选新装       | `auto_check_new_apps`             | 关   | 白名单 ∪ (扫描 − baseline)         | AllowlistGate | 自动扩宽放行范围                        | baseline 必须存在      |
 
@@ -389,15 +389,15 @@ flowchart TD
 
 | #   | 目标                                                                                                                                                | 类型 | 观测内容                       | 日志/计数器                                                   | 预期                                     |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------------------------------ | ------------------------------------------------------------- | ---------------------------------------- |
-| R1  | `ActivityManagerServiceImpl#checkWakePath`（7 参，boolean）                                                                                         | 只读 | 服务/活动唤醒路径是否拒绝      | `wake-path probe: heartbeat …`、`DENIED #N`、`denied summary` | 心跳证明门活跃；`c2dm-denied` 是重点     |
-| R2  | `WakePathChecker#checkBroadcastWakePath`（5 参，boolean）                                                                                           | 只读 | 广播唤醒路径是否拒绝           | `broadcast gate first reach`、`c2dm reached #N`、`DENIED #N`  | 首次到达一次性行；计数器进 30min 摘要    |
+| R1  | `ActivityManagerServiceImpl#checkWakePath`（7 参，boolean）                                                                                         | 只读 | 服务/活动唤醒路径是否拒绝      | `wake-path probe: heartbeat …`、`DENIED #N`、`denied summary` | 心跳证明门活跃；`c2dm-denied` 是重点      **已删除（2026-10-30 体检）**：只读探针，与 R2/R9 结论重复，且无处置动作 |
+| R2  | `WakePathChecker#checkBroadcastWakePath`（5 参，boolean）                                                                                           | 只读 | 广播唤醒路径是否拒绝           | `broadcast gate first reach`、`c2dm reached #N`、`DENIED #N`  | 首次到达一次性行；计数器进 30min 摘要     **已删除（2026-10-30 体检）**：只读探针，无消费者；`c2dm-denied` 若真出现再按样本补 |
 | R3  | `AurogonImmobulusMode.mMessageApp`（静态字段）                                                                                                      | 只读 | GMS 是否在消息豁免列表         | `probe: mMessageApp=size,gms=...`                             | GMS 不在列表 → `isRestrictNet` 会为 true |
 | R4  | `ConnectivityManager#updateSleepModeUidRule(int,boolean)`、`enableSleepModeChain(boolean)`                                                          | 只读 | 反射 trampoline 是否存在       | `probe: ConnectivityManager#...=present/ABSENT`               | 判断 OS3 睡眠链是否可走                  |
 | R5  | `FilterEnablePolicy#isSupportPacketFilter()`                                                                                                        | 只读 | 包过滤能力                     | `probe: packet-filter=...`                                    | 决定 UDP 过滤是否可能生效                |
-| R6  | `WhetstoneActivityManager#doDesSocketForUid`、`WhetstoneActivityManagerService#doDesSocketForUid`、`MiuiNetworkManagementService#doDesSocketForUid` | 只读 | socket teardown 三层是否被调用 | `socket-teardown probe[label] #N …`                           | 0 次 ≠ 死代码；binder 传输静态不可见     |
-| R7  | GMS uid 流量                                                                                                                                        | 只读 | `TrafficStats` Rx/Tx 增量      | `gms probe [...]: uid=… rx=+…B tx=+…B`                        | 增量增长 = GMS 仍在通信                  |
+| R6  | `WhetstoneActivityManager#doDesSocketForUid`、`WhetstoneActivityManagerService#doDesSocketForUid`、`MiuiNetworkManagementService#doDesSocketForUid` | 只读 | socket teardown 三层是否被调用 | `socket-teardown probe[label] #N …`                           | 0 次 ≠ 死代码；binder 传输静态不可见      **已删除（2026-10-30 体检）**：0 次≠死代码，本就没有判决力 |
+| R7  | GMS uid 流量                                                                                                                                        | 只读 | `TrafficStats` Rx/Tx 增量      | `gms probe [...]: uid=… rx=+…B tx=+…B`                        | 增量增长 = GMS 仍在通信                   **已删除（2026-10-30 体检）**：`dumpsys activity service …GcmService` 与 GMS 自报连接状态信息更全 |
 | R8  | `AppOpsManager` 10008                                                                                                                               | 只读 | 白名单包的行为 op 取值         | `wake: autostart on startup over N …`（旧版回填迁移已删）     | 全链只读，`10008`/`10053` 都不写         |
-| R9  | `BroadcastQueueModernStubImpl#checkReceiverAppDealBroadcast`（4 参，boolean）                                                                       | 只读 | 温进程广播是否被 ROM 跳过      | `receiver-skip probe: first reach`、`c2dm reached #N`         | `c2dm-denied` 非零 = 推送在模块门之前被丢；计数器进 30min 摘要 |
+| R9  | `BroadcastQueueModernStubImpl#checkReceiverAppDealBroadcast`（4 参，boolean）                                                                       | 只读 | 温进程广播是否被 ROM 跳过      | `receiver-skip probe: first reach`、`c2dm reached #N`         | `c2dm-denied` 非零 = 推送在模块门之前被丢；计数器进 30min 摘要  **已删除（2026-10-30 体检）**：只读探针；模块在温进程路径本就无处置，观测无后续 |
 
 ### 4.5 持久化写点审计
 
@@ -406,7 +406,7 @@ flowchart TD
 | 写点                          | 目标                                                 | 内容                                        | 触发                            | 可逆性                           | 风险                          |
 | ----------------------------- | ---------------------------------------------------- | ------------------------------------------- | ------------------------------- | -------------------------------- | ----------------------------- |
 | `ensureGmsInMilletSetting`    | `Settings.System.MILLET_NO_RESTRICT_APP`             | 追加 GMS                                    | GMS 缺项/`dealNoRestrictApp` 后 | 手动改回设置                     | 卸载后仍保留，但只放宽 GMS    |
-| `ensureGmsUserTableBgControl` | `content://com.miui.powerkeeper.configure/userTable` | GMS 行 `bgControl=noRestrict`；无行则插入   | 首次/写后 re-assert             | 需 provider 支持改回；【待确认】 | 只改 GMS 行，不改其他包       |
+| `ensureGmsUserTableBgControl` | `content://com.miui.powerkeeper.configure/userTable` | GMS 行 `bgControl=noRestrict`；无行则插入   | 首次 / P3 场景编译后 / P16 修复后（P15 re-assert 已删） | 需 provider 支持改回；【待确认】 | 只改 GMS 行，不改其他包       |
 | 微信 doze keepout             | AOSP deviceidle 白名单（**间接**：模块只改参数，落盘的是 ROM） | 从 `addPowerSaveWhitelistApps` 参数移除微信 | 开关开时                        | 手动把微信设回“优化”             | 不会移除已存条目              |
 
 **明确的“不写”**：
@@ -426,10 +426,38 @@ flowchart TD
 | c2dm 投递给被停止应用             | 可能被拒              | 加 stopped flag（临时豁免由 GMS 自带） |
 | 弱 WiFi（score < 50）             | 切移动数据            | 开关开时 clamp 到 51                |
 | GMS 到期 alarm                    | 可能被丢              | GMS uid 改答允许                    |
-| 自启动被拒                        | 服务/进程起不来       | 读穿 + 实验开关可改答               |
+| 自启动被拒                        | 服务/进程起不来       | 实验开关可改答服务门与进程门（仅改拒绝） |
 | OS3 SmartPower 拦截               | 广播/服务被丢         | 实验开关放行（仅 OS3）              |
 | 睡眠断网                          | 整夜无网络            | 实验开关保 WiFi/数据                |
 | 微信被写回“未优化”                | 每次电源模式变化重加  | 实验开关阻止下一次写回              |
+
+### 4.7 AOSP FCM 放行机制对照（换 ROM 复查清单）
+
+> 2026-11-01 核查：把 AOSP/FCM 放行机制表逐行对上本 ROM 的真实门（`services.jar` + `miui-services.jar` DexSQL 解码，GMS 侧取自 `rom-dump\gms-diagnostics-26.41.62\FCM_BEHAVIOR_EVIDENCE.md`）。用途是 **OTA 后按这张表复查**：行内"实门"一旦在 dex 里消失或改名，对应钩子才该重估；"判定=不干预"的行，不要因为推送仍慢就往这里加钩。
+
+| 机制（High / Normal） | 本 ROM 实门（已核） | 模块干预 | 判定 |
+| --- | --- | --- | --- |
+| FCM 广播投递（及时 / 允许） | `BroadcastQueueModernStubImpl#checkApplicationAutoStart`（国际版对 c2dm **直接 true**；CN 才走 wake-path / 首启屏蔽）+ `GreezeManagerService#isRestrictReceiver` + AMS stopped 标志 | S9 / S10 / S17：GMS 调用方 + c2dm + 勾选包 | 恰当 |
+| 休眠设备唤醒（可以 / 不保证） | `DeviceIdleController#addPowerSaveTempWhitelistAppDirectInternal`；豁免由 **GMS 替目标 App** 申请 | 无 | 不干预（见下"不拓展"） |
+| 应用进程启动（允许 / 允许但延迟） | `ProcessManagerService#isAllowAutoStart` = `AppOpsManager#checkOpNoThrow(10008)`（即 MIUIOP 10008 本身） | S25 的 `autostart_process_release` 档（独立开关）；S28 仍删 | 已恢复（合法性依据，非样本）；只覆盖重启/预加载，不写 appop |
+| Temporary Allowlist（有 / 无 FCM 专属豁免） | GMS `BroadcastOptions.setTemporaryAppAllowlist`：`type0` 10 s（reason 101/102）、`type4` 20 s（reason 105） | S17 只加 stopped flag | 恰当 |
+| 普通后台 Service 启动（临时允许 / 受限） | `startServiceLocked` 上**没有 MIUI 调用边**（AOSP 自行处理）；MIUI 的 `isAllowStartService` 实为 bind/JobService/重启判定：`BarrageListenerServiceStub#isAllowStartBarrage` → `noteOpNoThrow(10008)` → 拒绝 | S24 服务绑定门（实验，默认关） | `startService`/FGS 由 AOSP + GMS 的 `type0` 处理；S24 改答的是 bind 等旁的判定 |
+| Foreground Service 启动（符合条件 / 不享有） | **只有 AOSP**：`ActiveServices#setFgsRestrictionLocked`（7/8 参），体内只调 AOSP helper（`shouldAllowFgsWhileInUsePermissionLocked` 等），无 MIUI 注入；HP 的 `type0` = `FOREGROUND_SERVICE_ALLOWED` | 无 | 不挂：没有可"恢复"的小米门，AOSP 已实现文档中的 HP 豁免 |
+| Doze 网络访问（有限 / 维护窗口） | temp allowlist + deviceidle 三白名单 + netd；greeze `isRestrictNet`、`AwareResourceControl.mNoNetworkBlackUids` | S7 / S15（GMS）+ 实验 `greeze_net_release` | 恰当 |
+| App Standby / Doze 状态（临时豁免 / 原调度） | PowerKeeper `AppStandbyController#setUidState`、userTable `bgControl`、`MILLET_NO_RESTRICT_APP` | P12 / P14 / P16 / P17（GMS） | 恰当 |
+| Partial WakeLock（消息处理期间） | `GreezeManagerService#isAllowWakeUpList` → `AurogonImmobulusMode#isAllowWakeUpList(pkg)`（**按包名**名单） | S30（GMS） | 恰当；扩到勾选包需真机样本 |
+| JobScheduler / WorkManager（加急配额 / 普通） | **MIUI 有门**：`services.jar` 的 `FreezeStatusRestriction#isJobRestricted(JobStatus,uid)` → `GreezeManagerStub#isJobRestrict(uid)` → `GreezeManagerService#isJobRestrict`（`mPowerMilletEnable` → `disableJobForScene` → CN 分支 `isInFgBinder` 豁免 / `policy.isJobRestrict && isUidFrozen` / 非系统非小米重要应用且非 launch·immobulus 模式）；高优配额另在 GMS 设备侧 `gcm_high_priority_quotas`=`30,20,40,5`，按 standby bucket 计 | 无 | 不干预：运行态 `dumpsys jobscheduler` 中 GMS 的 job 为 `Restricted due to: none.`、`!restricted=true`；且 FCM 不走 JobScheduler |
+| AlarmManager（无通用豁免） | `AlarmManagerServiceStubImpl#checkAlarmIsAllowedSend` | S21（GMS，仅 false→true） | 恰当 |
+
+**不拓展的理由（不要重复论证）**：
+
+1. **Temp allowlist / 唤醒 / Doze 网络**：GMS 已替目标 App 申请；`addPowerSaveTempWhitelistAppDirectInternal` 对同 appId 的 `endTime` 是**覆盖写**（不是 max），模块再补短豁免只会截断 GMS 的更长条目——"拓展"等于缩短。
+2. **进程启动门**：`isAllowAutoStart` 就是 `10008` 的 `checkOpNoThrow`，模块不写 appop（S28 删除依据成立）。
+3. **JobScheduler**：**不是"AOSP 原样"**——MIUI 在 `FreezeStatusRestriction` 里注入 greeze 的 `isJobRestrict(uid)`，CN 分支判据比"是否冻结"更宽。不挂的理由是运行态证据：本机 `dumpsys jobscheduler` 中 GMS 的 job 为 `Restricted due to: none.`、`readyNotRestrictedInBg: true`；且 `gcm` 包不直接调 JobScheduler，高优配额由 GMS 按 standby bucket 算。若将来出现"GMS job 被 `RESTRICTED`/`SSRU` 挡住并影响重连"的样本，最窄钩点是 `FreezeStatusRestriction#isJobRestricted` 对 GMS/勾选 uid 答 false。
+4. **FGS 启动**：HP 的"符合条件时允许"就是 `type0`，已是 GMS 正式机制，模块没有同语义的合法门。
+
+**未闭合**：`BarrageListenerServiceStub#isAllowStartBarrage` 在 `services.jar`/`miui-services.jar` 里只有 abstract（`access_flags=0x401`, 零 opcode），实现不在两代 jar 内；只能从调用点确认 `true=允许`，无法静态判定它在什么条件下返回 false。
+
 
 ---
 
@@ -440,7 +468,6 @@ flowchart TD
 | 效果                                   | 依赖                  | 未生效时                  |
 | -------------------------------------- | --------------------- | ------------------------- |
 | 勾选应用在后台/睡眠/被清理时仍收到 FCM | 核心钩点 + 白名单     | 推送延迟到解锁/下一次心跳 |
-| 自启动放行                             | 实验开关 + 白名单     | 服务/进程被 ROM 拒        |
 | 睡眠保 WiFi/数据                       | 实验开关              | 睡眠期断网                |
 | 弱 WiFi 不切换                         | 实验开关 + floor      | 切移动数据                |
 | 微信不被写回未优化                     | 实验开关 + 手动设优化 | 微信被系统加回白名单      |
@@ -449,28 +476,21 @@ flowchart TD
 
 ### 5.2 可观测指标
 
-`Hooker.broadcastGateSummary()` 把计数器串成一行，随 30min `gms probe` 输出：
+**2026-10-30 体检后：观察层整体撤除。** 计数器与 30min `gms probe` 汇总已删，判读改成**一次性哨兵行**（tag `HyperGreeze`，调试日志开启时可见，每进程一行、要么不打）：
 
-```text
-broadcast gate c2dm allowed=<n> (uid-fallback=<n>), skipped=<n>, reached-defer=<n>, cn-actions=<n>, autostart-allow=<n>, autostart-skipped=<n>;
-wake-path reached=<n>, c2dm=<n>, denied=<n>, c2dm-denied=<n>;
-autostart gate service-denied=<n>, process-denied=<n>, restart-denied=<n>, pre-start-denied=<n>, released=<n>, restart-released=<n>, root-released=<n>, net-released=<n>, smart-power-released=<n>
-```
+| 一次性行 | 含义 | 没出现意味着 |
+| --- | --- | --- |
+| `isRestrictReceiver: c2dm allowed for callee=…` | S10 真的放行过一条真实推送 | 本窗口没有 c2dm 走到门，或门没装上 |
+| `checkApplicationAutoStart: c2dm allowed …` | S9 冷启动门真的答过 | 同上 |
+| `autostart gate: re-allowed … after the ROM denied the service start` | S24 真的被 ROM 拒绝过一次 | 开关关、白名单为空，或 ROM 从未拒绝 |
+| `autostart gate: re-allowed … after the ROM denied the process start` | S25 真的被 ROM 拒绝过一次 | 同上 |
+| `no-restrict chain: isNoRestrictApp(GMS) answered true` | 冻结路径问过模块，GMS 被跳过 | GMS 未被问（未进冻结路径）或 S12 未装 |
+| `no-restrict chain: getNoRestrictApps lacked GMS … injected / already contains GMS` | P14 查询层是承重还是旁观 | P14 未装或 PowerKeeper 未查询 |
+| `MILLET_NO_RESTRICT_APP: GMS already present / appended` | 设置层现状 | P16 未触发 |
+| `ListAppsManager: … use-data whitelist` | S8 use-data 层现状 | 构造期未跑 |
+| `Removed GMS from NoNetworkBlackUids` | S15 承重（ROM 硬编码表里有 GMS） | 该表换代后不再含 GMS |
 
-| 指标                      | 含义                                    | 健康读法                  | 异常信号                                  |
-| ------------------------- | --------------------------------------- | ------------------------- | ----------------------------------------- |
-| `allowed`                 | `isAllowBroadcast` 放过的 c2dm 数       | >0 说明 S2 在跑           | 持续 0 且 `reached-defer=0` → 广播没到门  |
-| `uid-fallback`            | 由 callerUid 而非 callerPkg 决定的子集  | 非零说明兜底是必要的      | —                                         |
-| `skipped`                 | c2dm 到未勾选 callee，交回 ROM          | 说明白名单收窄生效        | 与用户预期不符时查白名单                  |
-| `reached-defer`           | c2dm 真到 `deferBroadcast` 未被拦       | >0 证明 P0 行为生效（S6） | 持续 0 且 `allowed=0` → 上游被卡          |
-| `cn-actions`              | GMS 内部重连 action 放行数              | —                         | —                                         |
-| `autostart-allow/skipped` | `checkApplicationAutoStart` 的放行/交回 | —                         | —                                         |
-| `wake-path c2dm-denied`   | ROM 在模块门前拒 GMS 推送               | 应为 0                    | **非零 = 高危，重开设计**                 |
-| `autostart *-denied`      | ROM 对勾选应用的服务/进程/重启拒绝      | 有值说明门真实存在        | 有值但 `released=0` → 开关没开/链路未 AND |
-| `net-released`            | greeze 冻结期保住的白名单包数           | 开关开时应增长            | 开关开持续 0 → greeze 从未冻结勾选包      |
-| `smart-power-released`    | OS3 SmartPower 放行数                   | 仅 OS3                    | OS4 应恒 0                                |
-| `gms probe rx/tx`         | GMS 流量增量                            | 增长 = GMS 在通信         | 持续 0 且网络正常 → GMS 可能被限          |
-
+规则：**无声 = 该分支没被走到**；这正是把观察层删掉后想要的读法。
 ### 5.3 验证步骤
 
 ```text
@@ -503,7 +523,7 @@ probe: ConnectivityManager#updateSleepModeUidRule=present ... whetstone=res:2/2,
 **放行成功（INFO）**：
 
 ```text
-isAllowBroadcast: c2dm allowed for callee=<pkg> (callerUid=<uid>, callerPkg=com.google.android.gms, matchedBy=callerPkg)
+isRestrictReceiver: c2dm allowed for callee=<pkg> (callerUid=<uid>, callerPkg=com.google.android.gms, matchedBy=callerPkg)
 checkApplicationAutoStart: c2dm allowed for callee=<pkg> (answered at method entry, before MIUIOP 10008 is read)
 deferBroadcast: c2dm reached the ROM policy (P0: no longer bypassed here)
 autostart gate: service start DENIED #1 -> released (callee=<pkg>, ServiceName, caller-uid=<uid>)
@@ -534,7 +554,7 @@ cross-generation target(s) absent (10), skip: NetdExecutor#initGmsChain, NetdExe
 | ----------- | -------------------- | --------------------------------------- | ------------------------------------------------------------------- | -------------------------- |
 | 冷启动安装  | 模块启用、作用域正确 | 重启设备                                | 两个进程各一行 `HyperFCMLive active …`                              | 无行 → 未加载/未开调试     |
 | 白名单刷新  | 模块运行             | 勾选应用或发 `ACTION_ALLOWLIST_CHANGED` | `allowlist loaded: selected=true`                                   | 无变化 → 接收器/发送者问题 |
-| 真实推送    | GMS 正常、应用被勾选 | Firebase 后端发消息                     | `isAllowBroadcast: c2dm allowed …` 或 `checkApplicationAutoStart …` | 只有手工 adb 广播不算      |
+| 真实推送    | GMS 正常、应用被勾选 | Firebase 后端发消息                     | `isRestrictReceiver: c2dm allowed …` 或 `checkApplicationAutoStart …` | 只有手工 adb 广播不算      |
 | 自启动被拒  | 白名单包、ROM 拒绝   | 冷启动应用/服务                         | `autostart gate: … DENIED …`                                        | 无行 → 门未命中或未勾选    |
 | 睡眠保 WiFi | 开关开               | 进入睡眠                                | `sleep-mode: kept WiFi on`                                          | 无行 → 开关/栈/ROM 路径    |
 | 弱 WiFi     | 开关开、低分环境     | 等待评分更新                            | `wifi-weak-signal: reported …`                                      | 无行 → 类未解析/开关关     |
@@ -549,17 +569,28 @@ cross-generation target(s) absent (10), skip: NetdExecutor#initGmsChain, NetdExe
 | ----------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | `AurogonImmobulusMode#triggerQuickFreeze` / `PolicyMaker#isAllowFreeze` | 测试设备上 GMS 从未进入冻结路径（`dumpsys greezer` 显示 frozen=0s） | 否；防御性钩                                                               |
 | `DomesticPolicyManager#isRestrictNet` 的 GMS 分支                       | 同上                                                                | 否                                                                         |
-| `InternationalPolicyManager#isPushApp`                                  | 本机 `mCurrentCNPolicy=1`，Domestic 实现，类不实例化                | 否；国际 ROM 才有意义                                                      |
+| `InternationalPolicyManager#isPushApp`                                  | 本机 `mCurrentCNPolicy=1`，Domestic 实现，类不实例化；该方法只在 International 类里声明（`PolicyManager` 接口与 `DomesticPolicyManager` 都没有） | 否；钩子已于 2026-10-30 删除（国际版 FCM 不受限、不需要本模块），见 §5.8 |
 | `sleep-mode sentinel: legacy path FIRED`                                | OS4/V816 睡眠断网在 PowerKeeper，不在此链                           | 否；FIRED 才要重估                                                         |
 | OS3 `GmsObserver` 状态机、`NetdExecutor#initGmsChain`                   | OS4 已移除                                                          | 否；跨代 DEBUG                                                             |
 | OS3 SmartPower 两个拦截点                                               | OS4 零命中                                                          | 否；跨代 DEBUG                                                             |
 | `AlarmGate` 改答                                                        | ROM 可能一直允许 GMS alarm                                          | 否；看 `re-allowed denied GMS alarm` / `GMS alarm allowed by ROM` 一次性行 |
 | `ProcessCleaner` 返回 false                                             | 没有发生 force-stop                                                 | 否；看应用是否真的被清理                                                   |
 | `isNeedCachedBroadcast` 返回 false                                      | 接收器可能从未被冻结                                                | 否；看冻结状态                                                             |
-| `isAllowWakeUpList` 改答（S30）                                         | GMS 未冻结/未缓存时，ROM 的 wakelock 禁用在别的分支就结束了         | 否；看 `re-allowed GMS ... after the ROM denied` 一次性行                   |
-| `isNeedCachedAlarmForAurogon` 返回 false（S31）                          | 只有 `FULLY_FROZEN` 的 uid 才进入该分支；本机 GMS 从未冻结          | 否；看 `overrode the cached GMS ... alarm` 一次性行                         |
+| `isAllowWakeUpList` 改答（S30）                                         | 该门在每次 app partial wakelock 拿锁时都会问（`NO_CACHED_WAKE_LOCKS` 为真），但 ROM 只在 `mActive=false` 或 procState 变差时才真的禁锁 | 否；看 `re-allowed GMS ... after the ROM denied` 一次性行 |
 | `receiver-skip probe` 的 `c2dm`                                         | 只有温进程走 `checkReceiverAppDealBroadcast`；冷进程走模块已答的门   | 否；`c2dm-denied` 非零才是发现                                             |
 | `WifiWeakSignal` clamp                                                  | 信号一直高于 50                                                     | 否；看 skip 行                                                             |
+
+**睡眠退出 nudge 的判据（S16，2026-10-30 收紧）**
+
+`sGmsKeptOnSleepWhitelist == false` 是一个**三合一**的 false，它同时代表三种完全不同的情况：
+
+1. `mSleepModeWhitelistUids` 不可变（字段类型不符）；
+2. GMS uid 解析失败（`gmsUid()` 返回 null）；
+3. 最正常的一种——本次会话 GMS 确实没进白名单，网络可能真被切了。
+
+前两种情况下网络根本没被切，而 P4 广播会让 GMS **主动断开当前 MCS**，等于用一次无害的失败换一次无谓的断连。因此退出分支现在要求第二个条件 `sSleepEntrySeen`：只有本次开机确实观察到 `enableSleepModeChain(true)` 被执行（进入分支置位、退出后清零），才允许 nudge；白名单臂失败、或整条链不运行（V816）时只打一行 `Sleep mode exited without a matching entry this boot; no reconnect nudge (per-uid path not observed)`，不触碰 GMS。
+
+这条判据仍然只是**世代假设**：它证明的是"进入了睡眠模式"，不证明"无线电被切了"。若某代 ROM 走 per-uid 链却并未真的断网，仍会发一次 P4；该风险与 §8.2 记录的跨代缺口同源，只能靠 `sleep-mode sentinel: legacy path FIRED` 与实机 GCM dump 一起判读。
 
 ---
 
@@ -725,8 +756,11 @@ adb shell settings get global wifi_idle_ms        # ⇒ null
 | **按 uid 把 GMS 注入睡眠白名单作为现役保护**                                                                                               | 降级为 OTA 防御位 + 哨兵                     | 结论 1、2：V816 不走这条链；在无新的运行时命中证据前不得当作有效保护                                                                                                                                                                                                                                                                                                                                 |
 | **「仅在充电时才不断网」子开关**（`sleep_keepalive_charging`）                                                                              | 已删除                                  | ① 纯收窄，上限就是主开关单独开启的样子，不可能带来正向收益；② 充电夜开与关不可区分（S6 无 cutoff）；③ 唯一能产生差异的场景恰是最需要保活的一夜，而它在那里主动放弃保活；④ `readChargingState()` 三态读不到时 fail-closed，会让用户静默失去保活；⑤ 立项前提"充电 ⇒ PowerKeeper 否决入睡"已被推翻（真正让设备不睡的是 USB/adb 活动使其保持 Awake）                                                                                                                                                    |
 | **`wechat_battery_shield`**（拦 ROM 的省电策略自动升格写）                                                                               | 3.5.3 之后移除                           | 该升格的熔断跨重启持久、手动改回走 `set` 不 touch 集合、覆盖安装不摘标记 ⇒ 对已装微信而言升格只发生一次，开关挡的是"一次已被消耗的机会"。保留 AOSP 侧 `wechat_doze_keepout`                                                                                                                                                                                                                                                          |
+| **P7「连接层健康检查」**（30 分钟采样 + 字节量 + 闹钟节奏 → 重放 / P4 广播）                                                                     | 2026-10-30 删除                            | ① **没有样本**：立项理由是“另一个项目有 `FCM 连接恢复`”，全程没拿到过一次“网络与 DNS 都正常、GMS 既不轮询也不重连”的现场；② 判据是一条几乎不可满足的与门（`alarmOverdue` 常为 `false`），三条动作入口（周期、睡眠退出、手动）全部不可达；③ 温和档实测不留痕迹，升级档会主动拆 MCS，证据等级不匹配。教训与遗留取证见 §7.15 |
+| **`InternationalPolicyManager#isPushApp`（S18）** | 2026-10-30 删除 | 该方法只在 `InternationalPolicyManager` 里声明（`PolicyManager` 接口与 `DomesticPolicyManager` 都没有），本机 `mCurrentCNPolicy: 1` 走 Domestic、该类不实例化 ⇒ 本机永远执行不到；而国际版 ROM 的 FCM 本就不受限、不需要本模块 ⇒ 没有任何机器能执行它。原先“留给国际版”的理由因此不成立 |
+| **P21「睡眠保活退路」（答 `key_open_earthquake_warning` = 1）** | 2026-10-30 删除 | 它是 P19/P20 的**降级分支**，唯一入口是 `if (wifiMethod == null || dataMethod == null)`：两者的目标方法在本机都存在（`WifiManager#setWifiEnabled` 在 `miui-framework.jar`、`CommonAdapter#setDataEnabled` 在 PowerKeeper APK，静态核过），install 摘要 powerkeeper 侧 0 absent ⇒ 该分支在本机**结构性不可达**，从未运行过。代价却一直在：它为读一个 flag 去 hook `Settings$Secure#getIntForUser`——PowerKeeper 进程里每一次 Secure int 读都要过这条链，而 `Settings$Secure` 正是最容易随代次漂移的接口。而且它的语义是“两个无线电全保”，与两个对等开关（只保其一）矛盾；真触发时是在一个已经坏掉的环境里给出错误行为。故删除：缺方法时不再退让，直接不装并 WARN |
 | **自建 netd 链 + 仅 allow GMS**                                                                                                 | 否决，不实施                               | 系统本就有两层 uid 收口（netd dozable 链、netpolicy 策略），实测 GMS 在两层均已放行（见 §8.2）                                                                                                                                                                                                                                                                                                      |
-| **在 `deferBroadcast` 上给 c2dm 无条件豁免**                                                                                        | 已移除（P0 修正）                           | 该签名只有 action 没有包名，无法按目标应用守门，与"未勾选应用应与未装模块时一致"的承诺有偏差。守门职责整体上移到 `isAllowBroadcast`（同时持有 callerUid / callerPkgName / calleeUid / calleePkgName）                                                                                                                                                                                                                           |
+| **在 `deferBroadcast` 上给 c2dm 无条件豁免**                                                                                        | 已移除（P0 修正）                           | 该签名只有 action 没有包名，无法按目标应用守门，与"未勾选应用应与未装模块时一致"的承诺有偏差。守门职责整体上移到 `isRestrictReceiver`（同时持有 callerUid / callerPkgName / calleeUid / calleePkgName；2026-10-30 前曾先落在 `isAllowBroadcast`，而后者只被前者调用）                                                                                                                                                                                                                           |
 | **逐条拦截切换理由码**（`BY_LOW_RSSI` / `BY_POOR_QUALITY`）                                                                            | 否决，改为掐出口                             | 两条理由共用 `mLegacyIntScore < 50` 同一出口；逐条拦会漏。S8 正面确认                                                                                                                                                                                                                                                                                                                       |
 | **把 WiFi 分数钳到恰好 50**                                                                                                        | 已修，改为 `WIFI_SCORE_CLAMP_TARGET = 51` | 钳到 50 依赖 ROM 用严格 `<`；若某代改成 `<= 50` 会当场失效且不报错（日志照打"reported as usable instead"）                                                                                                                                                                                                                                                                                         |
 | **扩展 P4 恢复的触发面**（模块装载 / 亮屏 / c2dm 投递时）                                                                                      | 评估后不实施                               | ① P4 广播会让 GMS **主动断开当前 MCS**，属破坏性修复，只在"连接已死且 GMS 不会自愈"有先验证据时才正当；② 三类诱因均可由 GMS 自愈（见 3.10）；③ c2dm 正在投递恰好**证明** MCS 活着，投递前预检在语义上是反的                                                                                                                                                                                                                                       |
@@ -818,10 +852,9 @@ adb logcat -v time -s HyperGreeze | grep -E "allowlist loaded|auto-check|Allowli
 | 摘要行缺失但功能正常    | 热重载后不打印摘要                         | 确认是否刚热重载                                                 | 看安装行/计数器，不要以摘要为准 |
 | `target(s) absent` 偏多 | OTA/换代，本代符号丢失                     | 看 INFO `logSkip` 的具体目标                                     | 重新定位签名，补兼容分支        |
 | `cross-generation` 很多 | OS4 上 OS3-only 钩缺失                     | 对照 §4.1 的目标版本                                               | 正常；不要删除                  |
-| 推送延迟到解锁          | greeze 缓存/冻结、睡眠断网、自启动拒       | 看 `isNeedCachedBroadcast`、`sleep-mode`、`autostart *-denied`   | 开对应开关/补钩点               |
+| 推送延迟到解锁          | greeze 缓存/冻结、睡眠断网                   | 看 `isNeedCachedBroadcast`、`sleep-mode`                                    | 开对应开关/补钩点               |
 | 手工 adb 广播无效       | caller 不是 GMS，模块按 caller 判定        | 看源码 S2/S9 的 caller 条件                                      | 用真实 FCM 后端测试             |
 | 勾选应用仍收不到        | 应用被 force-stop/网络切断/ROM 新路径      | 查应用状态、网络、`dumpsys greezer`                              | 逐层排查，必要时补 hook         |
-| 自启动放行无效          | 主/子开关链未全开；系统包被跳过            | 查三个开关、日志 `root-released`                                 | 打开整条链；系统包需用系统 UI   |
 | 睡眠保 WiFi 无效        | 开关关/栈不匹配/ROM 换代                   | 查 `sleep-mode` 行、`sleep-mode sentinel`                        | 开开关；换代重估                |
 | 弱 WiFi 仍切换          | 开关关/分数低于 floor/其他策略 1003        | 查 `wifi-weak-signal` 行、`notifySwitchNetworkByOtherStrategies` | 调整 floor；认领未覆盖路径      |
 | 微信仍被写回            | 已存条目未清/开关关                        | 查 `doze-keepout` 行、deviceidle                                 | 手动设优化后开开关              |
@@ -946,7 +979,7 @@ adb logcat -v time -s HyperGreeze | grep -E "allowlist loaded|auto-check|Allowli
 ### 7.6 线程与主线程阻塞
 
 - hook 回调可能运行在 binder 线程/系统关键线程；**禁止** sleep、网络、磁盘、长循环、协程切换。
-- 栈探查（`isPushApp`、睡眠 keepalive）要先做廉价参数判断，再走栈。
+- 栈探查（曾用于 `isPushApp`、睡眠 keepalive）要先做廉价参数判断，再走栈。目前已无栈探查钩子，这条留作日后新增时的约束。
 - 日志要节流：WiFi clamp 30s、wake-path 心跳 30min、autostart 详情按小时预算。
 - 集合遍历/反射写要短；不要在 hook 内做大规模扫描。
 
@@ -1002,7 +1035,7 @@ adb logcat -v time -s HyperGreeze | grep -E "allowlist loaded|auto-check|Allowli
 
 - 先关实验开关；再移除作用域；最后卸载。
 - 卸载后检查持久化写点（§4.5）。
-- 如果 WiFi/数据 cutoff hook 不完整，代码会退化到 `key_open_earthquake_warning` 分支（两个无线电全保），见 P21。
+- 如果 WiFi/数据 cutoff hook 不完整，睡眠保活整组不装载（不装半个）；日志打 `NOT armed` WARN，当晚按 ROM 原策略切断两个无线电。原先“退到 `key_open_earthquake_warning` 分支”的退路已于 2026-10-30 删除，理由见 §5.8。
 - 如果 ClassLoader 解析失败，对应 hook 不安装；不要假设“没日志就是生效”。
 - 如果 GMS uid 解析失败，GMS 特定动作会跳过；看 `Gms uid unresolved`/相关日志。
 
@@ -1023,15 +1056,55 @@ adb logcat -v time -s HyperGreeze | grep -E "allowlist loaded|auto-check|Allowli
 
 | 点                                 | 说明                                                                                                                                                                                                                          |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 四处 hook 未见显式 `deoptimize`    | 已补齐（2026-10-26）：`ProcessPolicy#getWhiteList`、`InternationalPolicyManager#isPushApp`、`ProcessCleanerBase#isForceStopEnable`、`GlobalFeatureConfigureHelper#getDozeWhiteListApps` 现在都在 hook 安装后显式 `deoptimize` |
+| 四处 hook 未见显式 `deoptimize`    | 已补齐（2026-10-26）：`ProcessPolicy#getWhiteList`、`ProcessCleanerBase#isForceStopEnable`、`GlobalFeatureConfigureHelper#getDozeWhiteListApps` 三处现在都在 hook 安装后显式 `deoptimize`；第四处 `InternationalPolicyManager#isPushApp` 随钩子于 2026-10-30 删除 |
 | ~~“五处持久化写点”~~               | **已闭合（2026-10-26）**：实为三处（§4.5）。原注释的第四项「`10053` 回填」随 4.2.0 删除，第五项从未存在；源码已改成三处并写明取证方式                                                                                                                                                      |
 | `setId` 仅 API ≥102                | API 101 依赖 hot reload 的 unhook；需确认低版本 LSPosed 行为                                                                                                                                                                  |
 | `onHotReloaded` 不打印摘要         | 设计使然；诊断时勿误判                                                                                                                                                                                                        |
 | `onPackageReady` 只处理首个包      | 多包/多进程 PowerKeeper 需确认                                                                                                                                                                                                |
-| `mGmsLimitEnabled` 每次调用清      | 用 Unsafe 写；需确认长期稳定性                                                                                                                                                                                                |
-| `ProcessPolicy` 同时改原列表与副本 | 可能产生重复项；需确认 ROM 是否去重                                                                                                                                                                                           |
+| ~~`triggerGMSLimitAction` 跳过方法体~~ | **已闭合（2026-10-30 二遍体检）**：S4 已删除，该方法不再被 hook；自动面由 S5（`updateGmsNetStatus`→false）承担                                                                        |
+| ~~`ProcessPolicy` 同时改原列表与副本~~ | **已闭合（2026-10-30）**：`getWhiteList` 每次新建列表，原地写无观察者，已删除                                                                                                                                              |
 | WiFi 评分器晚到日志                | 安装 pass 结束后才解析成功时，跨代 `logSkipOtherGeneration` 会单独打印，不参与合并                                                                                                                                            |
-| `GmsObserver#c` 混淆名             | 换代可能改名；安装行缺失是漂移信号                                                                                                                                                                                            |
+| ~~`GmsObserver#c` 混淆名~~         | **已闭合（2026-10-30）**：P10 已删除，效果由 P9 承担（P9 是其唯一调用边），不再依赖混淆名                                                                                                                                      |
+
+### 7.15 已删除：P7「连接层健康检查」（2026-10-29 建，2026-10-30 删）
+
+> 编号提醒：本节 P7 是**子系统**编号；§4.2 钩点表里的 P7 是 `GmsObserver#updateGmsEnabled`，两者无关。
+
+**为什么建**：另一个项目（HyperOS FCM Unified Guard）有「FCM 连接恢复」，本模块当时没有对等的主动修复能力。也就是说，它是**看别人有才做的**，不是从现场样本里长出来的需求。
+
+**为什么删**：从立项到收口约两天，期间**没有拿到任何一个**「网络正常、DNS 正常、GMS 既不轮询也不重连」的现场样本；而它的三条动作入口**全部不可达**：
+
+| 入口 | 不可达的原因 |
+| --- | --- |
+| 30 分钟周期 + 连续两次 `STARVED` | 要求 `alarmOverdue == true`，而 `ACTION_CHECK_QUEUE` 约 3 分钟一次 ⇒ 该门在正常情况下恒为 `false` |
+| 睡眠退出 nudge | 挂在本机 `legacy path FIRED` 计数为 0 的那条链上 |
+| 手动触发 | UI 里从来没有入口 |
+
+判据本身还有两处硬伤：20 秒窗口的字节量分不清「空闲」与「卡死」（实测健康切换只有 6.1 s、几 KB）；温和档（重放 `ACTION_CHECK_QUEUE`）实测**不留任何痕迹**（`累计连接` 仍为 1、无 Close 事件），与「什么都没做」不可区分。留着的唯一后果，是让读代码的人（包括后来的自己）以为连接问题已经被兜住。
+
+**什么时候值得重做**：先有样本，再用**可直接观测**的判据（如 root 侧的 `ss` / `/proc/net`，或 GMS 自报的连接状态），而不是从字节量和闹钟节奏反推。
+
+**保留下来的三条可复用教训**（与 P7 无关也成立）：
+
+1. **零命中的钩要删掉，不要当“防御”留着。** 它只会虚增安装摘要里的 `N hook(s) installed`，和 `AlarmGate` 对 Impl/Stub 的取舍是同一条纪律（§7.14）。
+2. **“类/方法存在”不等于“钩能装上并能进去”。** 同一个目标上撞过四次，全是这条的变体：
+
+| 现象 | 结论 |
+| --- | --- |
+| `Class.forName("com.android.server.alarm.AlarmStore")` 抛 `ClassNotFoundException` | 模块 classloader 不解析 boot classpath 成员；找 `com.android.server.*` 必须走 host 的 `classLoader.loadClass` |
+| 钩 `AlarmStore#add` 抛 `IllegalArgumentException: Cannot hook abstract methods` | OS4 上它是接口，唯一实现是 `LazyAlarmStore` |
+| 钩 `LazyAlarmStore#add` 与 `#addAll` 均零命中 | 该 ROM 的闹钟不走这个类，`AlarmStore` 不是写路径 |
+| `AlarmManagerService` 无 `mAlarms` | 排期表不在 service 字段上（只有 `mAlarmStore` / `mPendingAlarmsByAurogon` / `mLastAlarmSnapshot`） |
+
+3. **多个静默返回会制造假故障。** 首版在周期 tick 与采样里有六处无日志的 `return`，“屏幕灭 / 已有检查在飞 / 拿不到 ctx / uid 解析失败”四种原因在日志里长得完全一样，只能靠猜（并且猜错过一次）。另一条同类隐患：`postDelayed` 的 lambda 未加保护时，一次抛异常就会让共享的 probe 线程退出、状态位永久卡住，功能静默停摆到下次重启。
+
+**仍然有效的取证结论**（实现删了，知识留着；任何闹钟相关工作先看这几条）：
+
+- `dumpsys alarm` 按 **statsTag** 检索（`GCM_CONN_ALARM` / `GCM_HB_ALARM`），action 名在 dump 里 grep 不到。
+- 重连/心跳闹钟是 **listener 排期**（`AlarmManager#setPrioritized(…, tag, Executor, OnAlarmListener)`），`Alarm.operation` 为 null，身份只在 `Alarm.listenerTag`；`statsTag` = `*walarm*:` + `listenerTag`。
+- 带 `PendingIntent` 的只有 `ACTION_CHECK_QUEUE`：约 3 分钟一次，但断网时会被 ROM 整体推后 3 天（§8.5 W5）。
+- `MCS_HEARTBEAT` 从不作为 action 出现（全库只有接收侧 `addAction` 与字符串比对）。
+- 断网后 `GCM_CONN_ALARM` 只投递一次（实测 6 秒内），不是持续重排。
 
 ---
 
@@ -1070,12 +1143,15 @@ adb logcat -v time -s HyperGreeze | grep -E "allowlist loaded|auto-check|Allowli
 - **`notifySwitchNetworkByOtherStrategies type=1003`**：ROM 可绕过 WiFi 评分通道；源码注释记录“观察到 27 次未导致切换”，属 watch item。
 - **`checkReceiverIfRestricted`**：刻意不短接，因为会跳过 `thawUidAsync`；只 hook `isRestrictReceiver`。
 - **`PreStartFeedbackImpl#isAutoStart`**：只读 probe，不释放。
-- **`isPushApp`**：国内/Domestic 设备不实例化，钩 inert。
+- **`isPushApp`（已删除，2026-10-30）**：方法只在 `InternationalPolicyManager` 里声明（`PolicyManager` 接口与 `DomesticPolicyManager` 都没有），本机走 Domestic、该类不实例化；国际版 ROM 的 FCM 不受限、不需要本模块，因此这条钩子没有任何机器能执行到。
 - **GMS 冻结/断网钩**：测试设备上 GMS 从未冻结，属防御性，不声称“修复”。
-- **S30/S31（冻结期 wakelock / alarm 缓存）**：同上，GMS 未冻结时不会触发；只对 GMS uid 生效。
+- **S30（wakelock 门）**：不是冻结专属，每次 app partial wakelock 拿锁都会问；只有 ROM 真的禁锁时才改写。
+- **S31（alarm 缓存）已删除（2026-10-30）**：实体对非 xiaomi 包名恒返回 false，GMS 永远拿不到 true。
 - **R9（温接收器黑名单探针）**：只读，不释放；`c2dm-denied` 非零才说明 ROM 在模块门之前丢了推送。
 - **GMS 进程**：不注入，避免影响设备完整性。
 - **`/proc/net/tcp`**：system_server SELinux 不可读，且不能反映 DNS/防火墙导致的“假连接”；已改用 TrafficStats。
+- **`AlarmStore` 排期表**：OS4 的 `AlarmStore` 是接口，唯一实现 `LazyAlarmStore` 不是这条 ROM 的写路径（钩 `add`/`addAll` 零命中）；“重连闹钟是否在排期”不可判定，只能按 statsTag / `listenerTag` 从投递面观察（§7.15）。
+- **`Class.forName` 找系统类**：模块 classloader 不解析 boot 成员；找 `com.android.server.*` 一律走 host 的 `classLoader.loadClass`，否则得到假的“类不存在”。
 - **force-stop / 物理断网**：不保证推送。
 
 **源码注释记录的本机事实（🟡，非本次复测）**：
@@ -1086,7 +1162,7 @@ adb logcat -v time -s HyperGreeze | grep -E "allowlist loaded|auto-check|Allowli
 | `mBroadcastTargetWhiteList` | 约 8 项，GMS 不在其中                         | 广播门存在的原因                                |
 | GMS 冻结统计                | `frozen=0s`、`noControl: no_freeze:invisible` | 冻结/断网钩当前 inert，属防御                   |
 | `mMessageApp`               | 约 544 项，GMS 不在                           | 若 GMS 被冻结，`isRestrictNet` 会为 true        |
-| `mGmsLimitEnabled`          | 构造默认 true，dump 是唯一写者                | 每次 `triggerGMSLimitAction` 都要清             |
+| `mGmsLimitEnabled`          | 构造默认 true，dump 是唯一写者                | S4 已删（2026-10-30 二遍）：自动面由 S5 钉死，字段仅剩 dump 展示语义      |
 | netd `OemNetdListener`      | 0 条规则                                      | 网络引擎未实际下发                              |
 | 旧 standby 链               | dnsproxyd 返回 `500 Command not recognized`   | 旧链是死信，只作 OTA hedge                      |
 | 睡眠断网测量                | 01:38→07:08，GCM `net=-1`                     | OS4 在 PowerKeeper 关 radios                    |
@@ -1115,7 +1191,7 @@ adb logcat -v time -s HyperGreeze | grep -E "allowlist loaded|auto-check|Allowli
 - **fail-open**：单个 hook 失败不影响 ROM 原逻辑。
 - **组隔离**：单组失败不阻止其他组。
 - **开关默认关**：实验功能不影响日常。
-- **WiFi/数据 cutoff 不完整**：退到 `key_open_earthquake_warning` 分支（两个无线电全保）。
+- **WiFi/数据 cutoff 不完整**：睡眠保活整组不装（无退路），日志 WARN 说明缺哪个方法；当晚按 ROM 原策略断网。
 - **ClassLoader 失败**：对应 hook 不装，日志说明；不影响其他 hook。
 - **GMS uid/Context 失败**：相关动作跳过，日志 WARN/INFO。
 - **作用域移除**：最彻底的运行时降级。
@@ -1124,17 +1200,22 @@ adb logcat -v time -s HyperGreeze | grep -E "allowlist loaded|auto-check|Allowli
 
 > 判定口径：模块只恢复 FCM 在 AOSP 下的行为，不做保活。下表是 2026-10-28 评估后**没有落代码**的项；除“再评估条件”出现外不再处理。
 > H1/H4 的 GMS-only 版本、H3 温接收器探针、2 s 直接豁免的删除均已在当日完成，不在本表。
+> 表中“Hn”是早期候选钩点编号，承载它的文档（`HOOKS_AND_DIAGNOSTICS.md`）已删，现在只作历史标签，正文里没有对应章节。
+> W4/W6/W8 这三项不是“待实现功能”，是“厂商开关当前关着”，复查命令已写进本地 `OTA_CHECKLIST.md` 第 8 节（该文件不入库，故不做链接）。
+> 2026-10-29 复核：W2 已由“语义未确认”改为**已证伪**——该方法返回值在全部调用点被丢弃，不是门；保留在表内是为了不让同一条建议被重新提出。
+> 2026-10-30 复核：W5 的再评估条件已由真机实测命中（`power_pending` 出现 +3 天整偏移），机制定位完毕，结论是**不做**；同时 §7.15 里“`ACTION_CHECK_QUEUE` 与连接好坏无关”一句被同一次实测推翻并已改写。同日新增 W9：三条“广播 action 放行不全”的质疑，被静态取证与未解锁实测同时否决。
 
 | # | 未做项 | 现状 / 依据 | 再评估条件 |
 |---|---|---|---|
-| W1 | H1 非 GMS：把勾选应用加入 `mAllowWakeUpPackageNameList` | AOSP `no_cached_wake_locks=true` 本身就禁用缓存进程的 partial wakelock；加入该名单是 AOSP 没有的特权；投递窗口已由 GMS 的 type0/type4 豁免覆盖 | 默认不做；除非定位改变，且能证明勾选应用仅因该 wakelock 被禁而中断推送处理 |
-| W2 | H2 后台组件门：释放 `isRestrictBackgroundAction`（含只读计数） | 返回极性/调用方语义未逐位确认；AOSP 本身有后台启动限制；正确做法是按广播实际携带的 AOSP 豁免类型（type0/type4/无）差分放行，而不是按白名单一律答允许 | 真机样本：GMS 高优广播（type0）已到达，`realStartServiceLocked` / `ContentProviderHelper#getContentProviderImpl` 仍被拒；届时先补只读计数 |
-| W3 | H4 非 GMS：勾选应用 alarm 不进 greeze 缓存 | 与 FCM 投递无关；会让 App 的所有 alarm 绕过厂商冻结，属额外唤醒与耗电 | 默认不做 |
+| W1 | H1 非 GMS：把勾选应用加入 `mAllowWakeUpPackageNameList` | AOSP `no_cached_wake_locks=true` 本身就禁用缓存进程的 partial wakelock；加入该名单是 AOSP 没有的特权；投递窗口已由 GMS 的 type0/type4 豁免覆盖 | 三条**同时**成立才重估：① 「广播已放行」有实测读数且在增长（4.4.0 已删探针，需先重建观测点）；② 该 App 收到消息后进程仍未处理；③ `dumpsys batterystats <pkg>` 里有该 App 的 wakelock 被系统拒绝的记录。缺一条就说明不是 wakelock 的问题，不动 |
+| W2 | H2 后台组件门：释放 `isRestrictBackgroundAction`（含只读计数） | **已证伪（2026-10-29）：它不是门。** `services.jar` 中该方法仅 4 个调用点（`ActiveServices#realStartServiceLocked`、`#requestServiceBindingLocked`、`ContentProviderHelper#getContentProviderImpl` 两处），**四处返回值全部丢弃**（`invoke` 之后无 `move-result`）：两处 provider 调用在拿到 holder 之后，service 那处在 `scheduleCreateService` 之后，结构上无法用于拒绝。语义是解冻决策——`GreezeManagerService` 主干为 `thawUidAsync(calleeUid,1000,action)`，对 Google 应用的例外是“跳过解冻”而非“拒绝启动”。AMS 侧传入的 action 为 `startservice`/`bindservice`（**无下划线**），命不中 greeze 的 `start_service`/`bind_service` 分支，只有 `provider` 能进；本机 GMS 未冻结（S12），第一分支 `if (!isUidFrozen(calleeUid)) return true` 即返回。广播放行后的服务/Provider 两条腿另由 S9 覆盖（服务启动检查点 S24 已于 2026-11-01 作为单一实验档恢复，默认关），Provider 取用路径无厂商拒绝门 | 需同时满足：`dumpsys` 出现 GMS 服务起不来或 provider 取不到，**且**排除 S9 的计数与白名单。实现方式限定为不短接 chain——「替换返回值」无收益，短接会切断 `thawUidAsync` 副作用，等于自造断点 |
+| W3 | H4 非 GMS：勾选应用 alarm 不进 greeze 缓存 | 与 FCM 投递无关；会让 App 的所有 alarm 绕过厂商冻结，属额外唤醒与耗电 | 只有给出**同一时段的重合证据**才重估：该 App 的 FCM 处理停摆窗口内，其 alarm 出现 `power_pending` 偏移，且该偏移不是 W5 已覆盖的全系统 `adjustAlarmLocked` 分支。否则不做 |
 | W4 | H5 闹钟对齐 `alignAlarmLocked` | `PowerKeeperPolicy.mAlignEnable` 默认 false、由云控开；真机当前未对齐（`policyWhenElapsed` 与 `requester` 一致）；GMS 漂移无样本 | `dumpsys alarm` 中 `GCM_HB_ALARM` 出现 `policyWhenElapsed != requester`，且心跳漂移可复现 |
-| W5 | H6 普通闹钟 +3 天 `adjustAlarmLocked` | 真机 GMS 闹钟 `power_pending=--`，该路径当前未套用 | `dumpsys alarm` 中 GMS 的 `ACTION_CHECK_QUEUE` / `TRIGGER_IDLE` 出现 `power_pending` 的 3 天类偏移 |
+| W5 | H6 普通闹钟 +3 天 `adjustAlarmLocked` | **已观察（2026-10-30 实测），评估后不做。** 落点是 `AlarmManagerServiceStubImpl#adjustAlarmLocked`（`miui-services.jar`，system_server 内，无需新宿主）：对 `flags&0xf == 0`、无 `alarmClock`、非 `isTimeTickAlarm`、不在 `isAlarmAllowedByTag`（只豁免 `com.miui.powerinsight`）与 `ADJUST_WHITE_LIST` 的闹钟执行 `setPolicyElapsed(5, requested + 0xf731400)`——常量即 259 200 000 ms，dump 显示为 `power_pending`。清除条件为“屏亮 **且** 联网都成立”，批量重算由网络状态变化触发的 `mAdjustTask` 驱动。真机三态：亮屏+联网 `--`；亮屏+断网 **`+3d`**（12 min 窗口零投递，恢复联网后 28 s 内清空并补投一次）；熄屏+联网 `--`（GMS 自己把轮询间隔拉到 45 min，非本策略）。影响面是全系统普通闹钟，`a_t1` 中 12 条 `+3d`，小红书、vending、finsky、百度均在列，不是 GMS 专属 | 不做。四条理由：① 触发条件是“无网络”，此时队列轮询本无意义，推后与 AOSP 行为一致，不是特权剥夺；② 联网后自动清除，不构成持续断点；③ 策略全系统生效，只放行 GMS 属新增特权（同 W1/W3 口径）；④ 放行只会让 GMS 在断网时被无效唤醒。**新的再评估条件**：若 `mNetAvailable` 取 VALIDATED 语义，“有链路但无验证”（门户认证、VPN 断流）可能长期为 false 而导致持续 `+3d`，且只在亮屏+联网时才清；届时先加只读计数，仍不直接放行。另：熄屏 + 断网组合未单独实测（代码路径预测会推），它和 §7.15 的过夜可达触发缺口同源 |
 | W6 | H7 SSRU `isExemptFromSsru` | GMS 心跳 `flags=0x9` + doze 白名单已豁免，dump 中 `ssru` 为负值 | 心跳/重连 alarm 出现正向 `ssru`，或投递因预算被丢弃 |
 | W7 | H8 Job 冻结限制 `isJobRestrict` | FCM 投递不依赖 GMS 或目标 App 的 Job；与投递链无关 | 仅在确认某个 App 的 FCM 处理完全依赖 Job 且被冻结期拦截时重估（大概率不做） |
 | W8 | H9 LPS 放行 `LowPowerStandbyController#isAllowed` | 设备 `mIsEnabled=false`、`Allowed UIDs=[]`；LPS 是 AOSP 自带功能而非厂商门，放行属新增特权 | 设备 OTA/配置启用 LPS，且 GMS 因 `isAllowedInLowPowerStandby=false` 停止连接；届时先只读探针 |
+| W9 | H10 放宽广播放行的 action 集合（`MESSAGING_EVENT` / `INSTANCE_ID_EVENT` / `RECEIVE_DIRECT_BOOT`） | **不做（2026-10-30，静态 + 未解锁实测双重否决）。** 放行条件只认 `c2dm.intent.RECEIVE` 是对的，另三个 action 到不了第三方 App：① `com.google.firebase.MESSAGING_EVENT` 在 `gms-base.apk` 中字符串**不存在**，它只是 App 侧 `FirebaseMessagingService` 的 filter；② `com.google.firebase.INSTANCE_ID_EVENT` 存在，但全 GMS 仅两处引用——`GcmInternalReceiverIntentOperation#onHandleIntent` 用 `setClassName(...GmsIntentOperationService$PersistentInternalReceiver)` + `sendBroadcast` 发**给自己包内的显式广播**，`SyncIntentOperation#onHandleIntent` 只做 `String.equals` 比对，无一处对外发送；③ `com.google.firebase.messaging.RECEIVE_DIRECT_BOOT` 是 `Lcnyc;->a` 的未解锁分支，但重启后 `RUNNING_LOCKED` 状态下 `cmd package query-receivers` 只返回 1 个接收者——GMS 自己的 `PersistentInternalReceiver` 且 `exported=false`，**无第三方 direct-boot-aware 接收者**，广播没有投递目标。同一次查询中 `c2dm.intent.RECEIVE` 的唯一第三方接收者是 `com.xiaomi.finddevice` 的 `FirebaseInstanceIdReceiver`，走的正是已放行的 action。模块内这两个常量只用于客户端识别（`FcmAppScan.queryMarkers` 的 `byIidReceiver` / `byMessagingEvent`），不在任何门 | locked 用户下 `cmd package query-receivers -a com.google.firebase.messaging.RECEIVE_DIRECT_BOOT` 返回非 GMS 条目（出现 directBootAware 的第三方接收者），或 GMS 版本变更后 `INSTANCE_ID_EVENT` 出现新的 `sendBroadcast` 调用点。届时先加只读计数，不直接放行 |
 
 ---
 
@@ -1182,9 +1263,7 @@ adb logcat -v time -s HyperGreeze | grep -E "allowlist loaded|auto-check|Allowli
 | [WifiWeakSignalSwitch.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/WifiWeakSignalSwitch.kt)                                                                                                                    | 弱 WiFi                                         |
 | [SmartPowerHooks.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/SmartPowerHooks.kt)                                                                                                                              | OS3 SmartPower                                  |
 | [PowerKeeperHooks.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/PowerKeeperHooks.kt)                                                                                                                            | AppStandby/NoRestrict/微信                      |
-| [WakePathProbe.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/WakePathProbe.kt)                                                                                                                                  | 唤醒路径探针                                    |
 | [SystemProbes.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/SystemProbes.kt)                                                                                                                                    | 存在性探针                                      |
-| [TrafficProbe.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/TrafficProbe.kt)                                                                                                                                    | GMS 流量探针                                    |
 | [HookerSupport.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/HookerSupport.kt)                                                                                                                                  | 常量/hidden API                                 |
 | [Prefs.kt](HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive/Prefs.kt)                                                                                                                                                  | 配置键/主从规则                                 |
 | [module.prop](HyperFCMLive/src/main/resources/META-INF/xposed/module.prop)、[scope.list](HyperFCMLive/src/main/resources/META-INF/xposed/scope.list)、[java_init.list](HyperFCMLive/src/main/resources/META-INF/xposed/java_init.list) | Xposed 清单                                     |
@@ -1206,7 +1285,7 @@ adb logcat -v time -s HyperGreeze | grep -E "allowlist loaded|auto-check|Allowli
 9. 【待确认】崩溃/ANR/watchdog 记录与复现步骤。
 10. 【待确认】与其他 FCM/保活模块的兼容性。
 11. 【待确认】多用户/工作资料场景的 UID 解析与包可见性。
-12. 【已流程化】OS4 OTA 后 `rom-dump` 失效范围与重拉步骤：见项目内部的 OTA 检查清单（`OTA_CHECKLIST.md`，不随仓库发布），共七步，含拉取命令与换代判定。
+12. 【已流程化】OS4 OTA 后 `rom-dump` 失效范围与重拉步骤：见项目内部的 OTA 检查清单（`OTA_CHECKLIST.md`，不随仓库发布），共九节（原有七步流程 + 厂商闹钟策略复查 + OTA 台账），含拉取命令与换代判定。
 13. 【待确认】PowerKeeper `4.2.00` 实际 dex hash（OS3/OS4 各一份）。
 
 ---

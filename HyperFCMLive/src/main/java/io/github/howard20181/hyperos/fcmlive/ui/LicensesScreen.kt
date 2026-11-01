@@ -441,6 +441,7 @@ internal fun licenseRawFor(name: String, licenseLabel: String): Int = when {
     name == "Kr328/HyperOSFCMFix" -> R.raw.license_mit_hyperosfcmfix
     name == "ReedGAOOO/FCMGuard-HyperOS" -> R.raw.license_mit_fcmguard
     name == "1812z/HyperIsland" -> R.raw.license_mit_hyperisland
+    name == "E3N-glotm/HyperOS-FCM-Unified-Guard" -> R.raw.license_mit_unifiedguard
     licenseLabel.contains("Apache") -> R.raw.license_apache2
     licenseLabel.contains("GPL") -> R.raw.license_gpl3
     licenseLabel.contains("MIT") -> R.raw.license_mit
@@ -571,6 +572,11 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  * Nothing else moved: every other row still resolves to the version it states.
  * ConstraintLayout's surviving-class count is 55 now — the 3 recorded above was
  * a reading of a thinner graph, and the reason that row exists has not changed.
+ *
+ * The 2026-10-30 pass (4.4.0) re-audited the resolved graph against
+ * `releaseRuntimeClasspath`: no drift, and no rows added or removed — every
+ * row still resolves to the version it states, and nothing new reached the
+ * graph beyond what the rows above already attribute.
  */
 private val DEPS = arrayOf(
     arrayOf("AndroidX Activity", "1.13.0", "Apache License 2.0", ANDROIDX_URL),
@@ -685,6 +691,17 @@ private val REFERENCES = arrayOf(
     // itself like the other unlicensed rows.
     arrayOf("ByteJuno/fcmfix-coloros", "—", "https://github.com/ByteJuno/fcmfix-coloros"),
     arrayOf("dingwen07/hyperos-fcm-fix", "GPL-3.0", "https://github.com/dingwen07/hyperos-fcm-fix"),
+    // The sibling implementation P7 was measured against: the same delivery chain,
+    // repaired without LSPosed — static patches on services/miui-services plus a
+    // shell-side connection guard (DNS-aware probing, soft reconnect, a Box port
+    // exception). Reading it is what produced this module's alarm-cadence verdict,
+    // and the parts it can do that a hook cannot — iptables and dumpsys — are
+    // recorded here as the boundary rather than attempted.
+    arrayOf(
+        "E3N-glotm/HyperOS-FCM-Unified-Guard",
+        "MIT License",
+        "https://github.com/E3N-glotm/HyperOS-FCM-Unified-Guard"
+    ),
     arrayOf(
         "google/material-design-icons",
         "Apache License 2.0",

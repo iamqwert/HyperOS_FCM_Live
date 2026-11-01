@@ -40,7 +40,7 @@ internal object AlarmGate {
      * i.e. the alarm delivery main path. The Impl shows zero in-class callers
      * only because it overrides `AlarmManagerServiceStub` — overridden methods
      * have to be counted at the base type (forensics rule 11), which is exactly
-     * why this one was nearly mis-filed as dead code alongside `isPushApp`.
+     * why this one was nearly mis-filed as dead code.
      *
      * Body (OS4 miui-services dexdump, 40 code units):
      *   if (alarm != null && alarm.operation != null)

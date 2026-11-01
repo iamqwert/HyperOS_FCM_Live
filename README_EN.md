@@ -32,6 +32,7 @@ It does **not** keep FCM apps alive, does **not** stop the system from reclaimin
 | List filters | Only apps that declare push components (Android 11+ package visibility, no permission needed), exclude MiPush apps (on by default), show system apps |
 | Tools | Opens GMS's built-in diagnostics screen, allowlist export/import, update check |
 | Records | Current FCM status and event history without opening FCM Diagnostics, filed in six classes, plus a one-tap export of the diagnostic text (device, system version and the hook-install summary included) |
+| Connection recovery | While the screen is on, samples GMS traffic and DNS on the existing cycle; reconnects only after two consecutive starved windows. 5-minute cooldown, at most 5 actions per boot, never retried, never restarts GMS. The verdict rests on GMS's own alarm cadence (~3 min; a gap over 10 min counts as abnormal), and network changes are recorded but never acted on |
 | Display & appearance | Language (Simplified Chinese / English), theme mode, dynamic color, palette style, color spec, hide launcher icon |
 | Experimental | Three-tier chained autostart release, weak-signal switching relief, network while frozen, Smart Power (OS3 only); WeChat battery optimization and sleep keep-alive live on the Settings page |
 | Entries | Shortcuts to Settings, Help and FCM diagnostics |
@@ -108,6 +109,7 @@ Verified devices:
 - **Sleep mode cuts the network device-wide.** On entering sleep, the system turns off Wi-Fi and mobile data outright, without per-app handling; to stay connected overnight, enable the keep-alive options under "Sleep mode" on the Settings page — keep Wi-Fi, keep mobile data, or both.
 - **Target apps are not added to the freeze-exempt set.** After being woken by a push they become cached processes and may later be reclaimed or frozen — that is normal and does not affect the next push.
 - **Under heavy memory pressure, memory cleanup may drop GMS briefly** — about 3 seconds; it reconnects immediately.
+- **Proxies and transparent proxies are outside this module's reach.** The FCM long connection uses TCP 5228-5230; if a proxy does not route GMS or those ports directly, the connection is severed at the proxy layer. The module has no `iptables` access and never runs `su`, so it cannot change routing rules — and it cannot see the proxy at all.
 
 ---
 

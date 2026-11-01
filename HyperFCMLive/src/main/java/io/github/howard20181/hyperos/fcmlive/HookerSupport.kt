@@ -42,46 +42,17 @@ internal object HookerSupport {
     internal const val WECHAT_PACKAGE_NAME = "com.tencent.mm"
 
     /**
-     * OS4/V816 sleep mode lives here, in the PowerKeeper process — not in
-     * system_server's MiuiNetworkPolicyManagerService, which is why
-     * hooking that service's sleep whitelist never fired.
+     * Sleep mode's radio cutoff lives here, in the PowerKeeper process — not in
+     * system_server's MiuiNetworkPolicyManagerService, which is why hooking
+     * that service's sleep whitelist never fired on OS4/V816. Verified in the
+     * OS3 dump as well (PowerKeeper 4.2.00): `applySleepConfig(SleepState)`
+     * exists there too and drives the same `setDataEnabled` / `setWifiEnabled`
+     * cutoffs, so this predicate also matches on OS3 — whether OS3's sleep
+     * flow reaches it at runtime is a device question, alongside the legacy
+     * per-uid chain that S16's arms cover.
      */
     internal const val SLEEP_CONTROLLER_CLASS =
         "com.miui.powerkeeper.statemachine.PhoneSleepModeController"
-
-    /**
-     * MIUI's autostart AppOp — `com.miui.internal.os.MiuiHooks.OP_AUTO_START`.
-     * Not an AOSP op: the MIUI range starts at 10000.
-     *
-     * **This one is the behaviour; `10053` is only the switch the Security
-     * Centre UI shows.** Confirmed on V816 by opening autostart for a
-     * package and watching both ops: the ROM writes and reverts the pair
-     * together, but writing `10008` alone is already enough to change what
-     * the ROM does. The module's write switch used to write `10008` alone,
-     * which left packages at `10008=allow / 10053=ignore` — functionally
-     * allowed, only the manager row lying. Nothing in the module writes `10008`
-     * any more, and the `10053` backfill that used to reconcile the pair was
-     * removed in 4.2.0 (autostart is read-only now) — the current build writes
-     * neither op, so the two-step revert corollary applies to nothing here.
-     *
-     * **Why this op decides delivery although the module already answers
-     * the broadcast gate.** The hook on
-     * `BroadcastQueueModernStubImpl#checkApplicationAutoStart` short-circuits
-     * at method entry for caller=GMS + c2dm, so on the FCM hop the op is
-     * never even read there. The op is read by the *other* checkpoints
-     * (see FCM_HOOK_TECH_DOC.md §4.1（S9、S24–S28 自启动检查点）):
-     * service start/bind (`AutoStartManagerServiceStubImpl#isAllowStartService`
-     * and friends) and process start (`ProcessManagerService#isAllowAutoStart`).
-     * A message whose process is cached still has to start the messaging
-     * service; one whose process was reaped has to start the process. Both
-     * read this op, which is why the same write fixes both and why whether
-     * the process was dead does not change the outcome.
-     *
-     * Rejection shows up in logcat as `MIUILOG-AutoStart, Service/Provider/
-     * Broadcast Reject …`; the service/activity sibling family is what the
-     * read-only `checkWakePath` probe logs as `checkWakePath DENIED`.
-     */
-    internal const val MIUIOP_AUTO_START = 10008
 
     /**
      * WiFi scorer behind the relaxed weak-signal switch.
@@ -130,102 +101,6 @@ internal object HookerSupport {
         "MiuiNetPathOptimizerService"
     )
     internal const val SLEEP_APPLY_METHOD = "applySleepConfig"
-    internal const val SLEEP_RESTORE_METHOD = "restoreSleepConfig"
-
-    /**
-     * Total cutoff switch PowerKeeper itself refuses to bypass: when this
-     * reads 1 the whole "turn WiFi and mobile data off" block inside
-     * applySleepConfig is jumped over, because the ROM would otherwise
-     * break delivery of life-safety messages. Reporting 1 for this one
-     * read — and nothing else — reuses that vendor-designed escape hatch
-     * instead of fighting the calls further downstream.
-     */
-    internal const val SLEEP_EARTHQUAKE_KEY = "key_open_earthquake_warning"
-    internal const val GMS_TRAFFIC_PROBE_INTERVAL_MS = 30 * 60_000L
-    internal const val GMS_TRAFFIC_NUDGE_RESAMPLE_MS = 15_000L
-
-    /** java.util.System property key holding the latest probe chain generation. */
-    internal const val TRAFFIC_PROBE_GENERATION_KEY = "hyperfcmlive.trafficProbe.generation"
-
-    /**
-     * Gate-W heartbeat floor. The gate is reached thousands of times a night,
-     * and a fixed every-Nth log buries everything else in modules_*.log.
-     * Time-throttling keeps the "the gate was reached" evidence while cutting
-     * the volume by roughly an order of magnitude.
-     */
-    internal const val WAKE_PATH_HEARTBEAT_MIN_MS = 30 * 60_000L
-
-    /** Gate-W / Gate-B: detailed probe lines before falling back to plain counters. */
-    internal const val WAKE_PATH_DETAIL_LIMIT = 10
-
-    /**
-     * Autostart gate: detailed lines, budgeted **per callee and per hour**
-     * rather than once per process.
-     *
-     * The budget used to be a single process-lifetime allowance of 20 shared
-     * by both gates. An evening of normal phone use spent it before
-     * midnight, so the quiet hours — the only stretch in which a denial is
-     * interesting — were left with counters and no detail. "Nothing to
-     * read" is precisely the case the detail exists for, and the budget was
-     * the reason for it.
-     *
-     * Per callee so one chatty package cannot spend every other package's
-     * allowance, and hourly so a burst cannot spend the rest of the night's.
-     * The hourly total is a volume backstop for the case where many distinct
-     * checked packages are all being denied at once.
-     */
-    internal const val AUTOSTART_GATE_DETAIL_PER_CALLEE = 4
-    internal const val AUTOSTART_GATE_DETAIL_PER_HOUR = 40
-    internal const val AUTOSTART_GATE_DETAIL_WINDOW_MS = 60 * 60_000L
-
-    // OS4 (myron) symbols, confirmed against `miui-services` dex: the class is
-    // `AutoStartManagerServiceStubImpl`, not the `…Stub` the diagnostics doc
-    // used to quote — `loadClass` on the shorter name finds nothing.
-    internal const val AUTOSTART_STUB_CLASS =
-        "com.android.server.am.AutoStartManagerServiceStubImpl"
-    internal const val AUTOSTART_SERVICE_METHOD = "isAllowStartService"
-    internal const val AUTOSTART_PROCESS_METHOD = "isAllowAutoStart"
-    /**
-     * Restart-after-death. Same class as the two above, and the only
-     * autostart checkpoint on the "service was killed and is being
-     * scheduled back" path — `ActiveServices.scheduleServiceRestartLocked`.
-     * Two overloads exist; both take the callee package as parameter 0.
-     */
-    internal const val AUTOSTART_RESTART_METHOD = "canRestartServiceLocked"
-
-    /**
-     * MIUI's pre-start feedback: the fourth place in this ROM that reads
-     * `10008`, and the only one outside `am`'s autostart family.
-     *
-     * `PreStartFeedbackImpl#isAutoStart(String, int)` is the read itself — a
-     * private helper returning `true` when the op is `MODE_ALLOWED`. Its
-     * callers are the pre-start *punishments*: `isProhibitShowWindow` (block
-     * a window), `isTempDeniedNotificationForPreStart` (withhold a
-     * notification) and `reportProcStartedLocked` (track a cached process
-     * for kill). So an app that starts in the background without autostart
-     * is not merely refused — the ROM also takes its window and its
-     * notification away, which is a delivery-side effect the other three
-     * checkpoints cannot produce.
-     *
-     * Probed read-only: whether these paths are even enabled on this build
-     * is a static ROM flag, not something the module may assume.
-     */
-    internal const val AUTOSTART_PRE_START_CLASS =
-        "com.android.server.am.PreStartFeedbackImpl"
-    internal const val AUTOSTART_PRE_START_METHOD = "isAutoStart"
-
-    internal const val AUTOSTART_GATE_SERVICE = "service"
-    internal const val AUTOSTART_GATE_PROCESS = "process"
-    internal const val AUTOSTART_GATE_RESTART = "restart"
-    internal const val AUTOSTART_GATE_PRE_START = "pre-start"
-
-    /**
-     * Detail-bucket key for the root choke. Not a gate the ROM can deny —
-     * the choke answers before the ROM's own logic runs — so it never
-     * appears in a `DENIED` line; it only borrows the detail budget so one
-     * active package cannot flood the log with per-query lines.
-     */
-    internal const val AUTOSTART_GATE_ROOT = "root"
 
     /**
      * §5 alarm gate: the Impl overrides the Stub, so the Impl is the live
@@ -269,9 +144,6 @@ internal object HookerSupport {
     internal const val FCM_CACHE_TTL_MS = 5L * 60L * 1000L
     internal const val FCM_CACHE_MAX = 256
 
-    internal val STACK_WALKER: StackWalker =
-        StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE)
-
     internal fun targetPackageOf(intent: Intent): String? {
         val pkg = intent.getPackage()
         if (pkg != null) {
@@ -279,16 +151,5 @@ internal object HookerSupport {
         }
         val component = intent.component
         return component?.packageName
-    }
-
-    internal fun addIfAbsentInPlace(target: List<*>?, value: String) {
-        if (target == null || target.contains(value)) {
-            return
-        }
-        try {
-            @Suppress("UNCHECKED_CAST")
-            (target as MutableList<Any?>).add(value)
-        } catch (ignored: Throwable) {
-        }
     }
 }
