@@ -22,4 +22,3 @@ dependencyResolutionManagement {
 }
 rootProject.name = "HyperFCMLive"
 include ':HyperFCMLive'
-include ':hiddenapi:stubs'
