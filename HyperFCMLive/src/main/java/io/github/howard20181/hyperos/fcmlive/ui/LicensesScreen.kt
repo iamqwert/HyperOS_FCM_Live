@@ -469,7 +469,6 @@ private fun LicensesScreenPreview() {
 }
 
 private const val ANDROIDX_URL = "https://github.com/androidx/androidx"
-private const val AOSP_URL = "https://android.googlesource.com/platform/frameworks/base"
 private const val MCU_URL = "https://github.com/material-foundation/material-color-utilities"
 
 /**
@@ -489,9 +488,9 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  * dependency-management patches (`compose-bom`, `kotlin-bom`, the kotlinx
  * ones), and `com.google.guava:listenablefuture` — an empty marker artifact
  * with no classes to attribute (confirmed: no `com.google.guava` class is
- * defined in the APK at all). `libxposed api`, the AOSP stubs and Material
- * Color Utilities are compile-time or vendored, so they are never on the
- * runtime classpath and are listed for attribution.
+ * defined in the APK at all). `libxposed api` and Material Color Utilities
+ * are compile-time or vendored, so they are never on the runtime classpath
+ * and are listed for attribution.
  *
  * Re-audited again on 2026-10-09, this time against **both** the resolved
  * graph and the surviving classes in `mapping/release/mapping.txt`. Four rows
@@ -601,8 +600,6 @@ private val DEPS = arrayOf(
     // in the APK, 12 classes of it (window + window-core), verified against the
     // R8 mapping.
     arrayOf("AndroidX Window", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
-    // Build-only stubs vendored under hiddenapi/stubs; kept for attribution.
-    arrayOf("AOSP Framework Annotations", "", "Apache License 2.0", AOSP_URL),
     // The title-bar glass's blur engine (the constant-radius, alpha-masked
     // treatment the stain reports drove us to) — haze + haze-blur.
     arrayOf(

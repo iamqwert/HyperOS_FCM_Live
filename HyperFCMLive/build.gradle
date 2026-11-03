@@ -277,8 +277,6 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
-    // Compile-time hidden-API signatures (not packaged in the APK).
-    compileOnly project(":hiddenapi:stubs")
     // Coroutines: UpdateChecker's network check runs on Dispatchers.IO through a
     // scope (was a raw Thread), and the Compose side's rememberCoroutineScope /
     // LaunchedEffect land on the same artifacts. The Compose BOM resolves these
