@@ -253,7 +253,7 @@ dependencies {
     // over sharp content — no half-blurred state exists to read as dirt, and
     // the mask covers the tints too, so the scrim fades on the same ramp.
     // RenderEffect paths need API 31; this module is minSdk 35.
-    implementation 'dev.chrisbanes.haze:haze:2.0.1'
+    implementation 'dev.chrisbanes.haze:haze:2.1.0'
     implementation 'dev.chrisbanes.haze:haze-blur:2.0.1'
     // The navigation runtime the pages now run through: one Activity holding one
     // `NavDisplay`, every page an entry in its back stack.
