@@ -19,6 +19,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -147,6 +148,13 @@ fun SearchStatus.SearchPager(
     },
     searchBarTopPadding: () -> Dp = { 12.dp },
     collapsedCapsuleColor: Color? = null,
+    /**
+     * Room kept at the foot of the results: the search sheet covers the whole
+     * page, but the home's floating/docked bottom bar is composed OUTSIDE it
+     * and still paints over the sheet, so the last row would come to rest
+     * behind the chrome. The caller hands in [LocalFloatingBarClearance].
+     */
+    resultBottomPadding: Dp = 0.dp,
     result: LazyListScope.() -> Unit,
 ) {
     val searchStatus = this
@@ -279,7 +287,21 @@ fun SearchStatus.SearchPager(
                 SearchStatus.ResultStatus.SHOW -> LazyColumn(
                     Modifier
                         .fillMaxSize()
-                        .overScrollVertical(),
+                        // The library's spring overscroll, spelled out because
+                        // this list may be SHORTER than the viewport: the theme's
+                        // `MiuixOverscrollFactory` only fires once a scrollable
+                        // reaches a real boundary, so a three-result list would
+                        // sit dead under the finger.
+                        .overScrollVertical()
+                        .listScrollEndHaptic(),
+                    // As CONTENT padding, so the last result glides past the
+                    // bottom chrome on the way and comes to rest above it.
+                    contentPadding = PaddingValues(bottom = resultBottomPadding),
+                    // ...and the other half of that pair: the factory is already
+                    // mounted by MiuixTheme, so leaving it on here would run two
+                    // springs over one drag. The docs ask for exactly this
+                    // `overscrollEffect = null` whenever the modifier is used.
+                    overscrollEffect = null
                 ) {
                     result()
                 }
@@ -373,6 +395,15 @@ fun SearchBarFake(
     label: String,
     searchBarTopPadding: () -> Dp = { 12.dp },
     capsuleColor: Color? = null,
+    /**
+     * The field's inset from the screen edge. Zero when it is a list item of an
+     * already-inset [LazyColumn] — the list's own `contentPadding` supplies it,
+     * so the field lines up with the app cards instead of sitting a second
+     * inset inside them.
+     */
+    horizontalInset: Dp = MiuixMetrics.PageInset,
+    /** Gap below the field; zero when the list's item spacing owns that gap. */
+    bottomPadding: Dp = MiuixMetrics.ChromeBreath,
 ) {
     // The capsule is plain in every look, the soft-glass one included — the
     // style's glass is the bar's frost and the floating chrome, and the search
@@ -409,8 +440,13 @@ fun SearchBarFake(
     field(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .padding(bottom = 6.dp)
+            .padding(horizontal = horizontalInset)
+            // [MiuixMetrics.ChromeBreath] by default: while the field was
+            // pinned in the bar, the whole gap had to live INSIDE that slot —
+            // a gap on the list would have been hidden the moment it scrolled.
+            // Now that the field scrolls with the list, the caller zeroes this
+            // and lets the list's own item spacing own the gap.
+            .padding(bottom = bottomPadding)
             .topInset(searchBarTopPadding)
     )
 }

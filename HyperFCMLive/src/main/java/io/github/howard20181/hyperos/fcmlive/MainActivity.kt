@@ -10,6 +10,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
+import androidx.navigationevent.NavigationEventInfo
+import androidx.navigationevent.compose.NavigationBackHandler
+import androidx.navigationevent.compose.rememberNavigationEventState
 import androidx.appcompat.app.AppCompatActivity
 import android.content.Context
 import android.content.Intent
@@ -235,6 +238,17 @@ class MainActivity : AppCompatActivity() {
     private var homeTab by mutableStateOf(HomeTab.Modules)
 
     /**
+     * 预测性返回: whether a sub-page may be dragged back from the middle of the
+     * screen, the picture following the finger (see [Prefs.KEY_PREDICTIVE_BACK]).
+     *
+     * Compose state rather than a plain field because the reader is [AppPages]:
+     * the swipe direction is per-entry metadata on the `NavDisplay`, so flipping
+     * the switch has to re-stamp the entries. The switch writes the pref and
+     * hands the value here in one step; this field is what the display reads.
+     */
+    private var predictiveBack by mutableStateOf(true)
+
+    /**
      * The one write path for [homeTab]: the property AND the process-level
      * [retainedTab] holder, so a system-driven recreation in-place (language
      * switch) can re-enter on the tab the user was reading.
@@ -355,6 +369,9 @@ class MainActivity : AppCompatActivity() {
         // the GMS row with it, which is the one row the screen exists for.
         showSystemApps = getSharedPreferences(Prefs.LOCAL_PREFS, MODE_PRIVATE)
             .getBoolean(Prefs.KEY_SHOW_SYSTEM, false)
+        // The page stack's own gesture, read before the first composition: the
+        // entries are stamped with it as they are built (see [AppPages]).
+        predictiveBack = Prefs.readPredictiveBack(this)
 
         initXposedService()
 
@@ -458,11 +475,17 @@ class MainActivity : AppCompatActivity() {
             effects = NavDisplayEffects(
                 // KernelSU passes exactly this: the leading-edge clip at the
                 // device's own screen corner. The remaining switches stay at the
-                // library defaults — clip on, leading edge, 0.5 dim — except the
-                // two noted below.
+                // library defaults — clip on, leading edge, input open — except
+                // the two noted below.
                 cornerClipRadius = systemCorner,
                 blockInputDuringTransition = miuix,
                 backdropColor = backdrop,
+                // The library's default is 0.5, which dims the page underneath by
+                // half while the next one slides over it — heavier than the
+                // reference the nav guide prints (0.32) and heavier than what the
+                // unchanged surface underneath already reads as. The scrim only
+                // has to separate the two layers, not darken the screen.
+                dimAmount = 0.32f,
             ),
         ) {
             entry<Route.Main> { HomeRoot(pages) }
@@ -470,6 +493,33 @@ class MainActivity : AppCompatActivity() {
             entry<Route.Licenses> { LicensesScreen(onBack = { pages.pop() }) }
             entry<Route.Experiment> { ExperimentScreen(onBack = { pages.pop() }) }
         }
+        // 「预测性返回」开关只关这一件事：系统的返回手势还要不要**跟手预览**。
+        // NavDisplay 内部的 `PredictiveBackHandlerWithSessions(enabled =
+        // backStack.size > 1)` 是库写死的，没有参数能关；能改的只有「谁先拿到这次
+        // 手势」——navigationevent 的仲裁规则是「最后 compose 的启用 handler 优先」，
+        // 所以在 NavDisplay 之后（页面 content 之后）再挂一个普通 handler：关闭时它
+        // 站到最上面，库的 handler 收不到 started/progressed ⇒ 画面不跟手指走，
+        // 松手时它自己 pop / 退出，转场照常播。
+        //
+        // 根层也一并接管：那里「跟手」的对象是系统退到桌面的预览，同属这个开关该管的
+        // 范围；不接管就会出现「关了开关、在主页面按返回仍在跟手」的观感。
+        //
+        // 无条件调用是库的要求（条件调用会改变 compose 顺序，进而改变仲裁结果），
+        // 开关只通过 `isBackEnabled` 表达。分支顺序照抄 [handleBack]：多选 → 搜索 →
+        // 页面栈 → 退出应用。
+        val plainBackState = rememberNavigationEventState(NavigationEventInfo.None)
+        NavigationBackHandler(
+            state = plainBackState,
+            isBackEnabled = !predictiveBack,
+            onBackCompleted = {
+                when {
+                    multiSelectMode -> exitMultiSelect()
+                    searching -> exitSearch()
+                    backStack.size > 1 -> pages.pop()
+                    else -> finish()
+                }
+            }
+        )
     }
 
     /**
@@ -504,7 +554,7 @@ class MainActivity : AppCompatActivity() {
                     },
                     onCheckUpdate = aboutDelegate::checkForUpdates,
                     onUpdateOpen = aboutDelegate::openPendingUpdate,
-                    onRecheck = { recheckModuleActive() }
+                    onRecheck = { recheckModuleActive() },
                 )
                 HomeTab.Apps -> AppListTab()
                 HomeTab.Records -> RecordsScreen(
@@ -604,7 +654,10 @@ class MainActivity : AppCompatActivity() {
         onUpdateOpen = aboutDelegate::openPendingUpdate,
         versionLine = settingsVersionLine,
         versionTag = settingsVersionTag,
-        onAppearanceChange = aboutDelegate::applyAppearanceChange
+        onAppearanceChange = aboutDelegate::applyAppearanceChange,
+        // One write path: the switch has already persisted the pref; this only
+        // moves the live value the page stack reads (see [predictiveBack]).
+        onPredictiveBackChange = { enabled -> predictiveBack = enabled }
     )
 
     /**
@@ -631,7 +684,10 @@ class MainActivity : AppCompatActivity() {
                 onUpdateOpen = {},
                 versionLine = settingsVersionLine,
                 versionTag = settingsVersionTag,
-                onAppearanceChange = aboutDelegate::applyAppearanceChange
+                onAppearanceChange = aboutDelegate::applyAppearanceChange,
+                // The 预测性返回 row lives on the settings tab only, so this page
+                // (the 关于 route) has nothing to hand up.
+                onPredictiveBackChange = {}
             ),
             snackbarHostState = settingsSnackbarHostState
         )

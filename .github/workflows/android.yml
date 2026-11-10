@@ -95,6 +95,19 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      # A unit test that does not compile must fail the check, not the release.
+      # 3.5.3 once shipped with a test source set that silently stopped
+      # compiling; assembleRelease alone cannot see that. The doc check is in
+      # the same job because a stale hook name in README/HELP is a release-note
+      # defect too, and it needs no Android SDK.
+      - name: Validate docs
+        run: |
+          python3 scripts/check_docs.py
+          python3 scripts/check_hook_targets.py
+
+      - name: Run unit tests
+        run: ./gradlew --no-daemon :HyperFCMLive:testDebugUnitTest
+
       - name: Build with Gradle
         # 没有配签名 secret 时显式声明「允许 debug 签名」，否则发布构建会直接失败
         # （避免产出一个用公开 debug 密钥签名的正式包）。

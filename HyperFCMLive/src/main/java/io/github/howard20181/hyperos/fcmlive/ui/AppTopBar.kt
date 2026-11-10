@@ -37,10 +37,10 @@ import io.github.howard20181.hyperos.fcmlive.R
  * state is pixel-identical to the old one and only the resting state grows.
  *
  * Both states read as the page's own `background` tone, and the PAINT is the
- * bar's own: the M3 look wears no glass (the Haze treatment is the Miuix
- * branch's own — see `PageScaffold`), so the containers are pinned opaque to
- * the page background and rows that scroll under the bar are occluded, the
- * way the pre-glass treatment worked.
+ * bar's own: the M3 look wears no glass (the Miuix branch has its own bar —
+ * see `PageScaffold`), so the containers are pinned opaque to the page
+ * background and rows that scroll under the bar are occluded, the way the
+ * pre-glass treatment worked.
  *
  * The leading control is a **filled icon button** — `surfaceContainerHighest`
  * at [TOP_BAR_PLATE_ALPHA], and that is both reference apps to the letter:

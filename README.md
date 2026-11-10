@@ -48,14 +48,14 @@
 
 | 环节               | 系统侧门控                                               | 模块的处理                         |
 | ------------------ | -------------------------------------------------------- | ---------------------------------- |
-| 广播能否送达       | `GreezeManagerService#isAllowBroadcast`                  | 按白名单，未勾选应用交回系统       |
+| GMS 自身重连广播   | `GreezeManagerService#isAllowBroadcast`                  | 仅 `CN_DEFER_BROADCAST` 命中时放行   |
 | 应用处于「已停止」 | 「已停止」过滤                                           | 补 `FLAG_INCLUDE_STOPPED_PACKAGES` |
 | 自启动判定         | `BroadcastQueueModernStubImpl#checkApplicationAutoStart` | 按白名单放行                       |
 | 应用已被冻结       | `isRestrictReceiver`（greeze 广播门）                    | 放行并复现原生解冻                 |
 | 省电场景 / 待机    | `AppStandbyController#setUidState`                       | 改写为 allow                       |
 | 冻结策略           | `AurogonImmobulusMode#isNoRestrictApp` 等                | 对 GMS 返回豁免                    |
-| 广播被延后         | `isNeedCachedBroadcast`（greeze 广播缓存）               | 按白名单放行                       |
-| 重连/心跳被延后    | `deferBroadcastForMiui`                                  | 仅 GMS 重连类动作返回不放行        |
+| GMS 网络限额       | `updateGmsNetStatus`（OS4）                              | 参数强制 false                     |
+| 闹钟被拦下         | `checkAlarmIsAllowedSend`                                | GMS 的闹钟改判为放行               |
 | 强停               | `isForceStopEnable`                                      | 只对勾选的应用生效                 |
 
 被 hook 的宿主：主线钩点在 `system`（系统框架）与 `com.miui.powerkeeper`；模块不注入 `com.google.android.gms` 进程（原「GCM 重连修复」实验功能因 GMS 热更新加强完整性检测，已于 4.1.1 移除）

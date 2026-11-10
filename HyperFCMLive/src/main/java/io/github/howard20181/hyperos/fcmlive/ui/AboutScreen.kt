@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -170,7 +171,14 @@ data class AboutActions(
      * snapshot. The palette itself is invalidated by the [AppearanceState]
      * setters — this callback never touches it.
      */
-    val onAppearanceChange: () -> Unit
+    val onAppearanceChange: () -> Unit,
+    /**
+     * The 预测性返回 switch, carried up because the page stack it governs is
+     * the Activity's composition and not this screen's: the switch writes the
+     * pref (through [Prefs]) and this hands the new value to whatever owns the
+     * `NavDisplay`, which re-stamps the swipe direction on its entries.
+     */
+    val onPredictiveBackChange: (Boolean) -> Unit
 )
 
 /**
@@ -227,15 +235,30 @@ fun AboutScreen(
         // with the project rows; the Miuix branch never had a bar icon.
         actions = {}
     ) { innerPadding ->
+        // Hoisted out of [AboutBody] for the indicator: the bar has to ride the
+        // body box beside the list, and the box is this lambda's own scope.
+        val listState = rememberPageListState()
         AboutBody(
             actions = actions,
             snackbarHostState = snackbarHostState,
             showProjectSection = showProjectSection,
+            listState = listState,
             // The list spans the full body and takes the bar's height as
             // contentPadding, so rows scroll UNDER the title bar's glass
             // instead of stopping at its edge (see PageScaffold).
             topPadding = innerPadding.calculateTopPadding(),
             bottomPadding = innerPadding.calculateBottomPadding()
+        )
+        // The same indicator the about page wears — this page IS a settings
+        // list, and HyperOS draws a thumb on every one of them. It was missing
+        // here for a reading error, not for a reason: the bar that already
+        // existed belongs to [AboutTabScreen], a different body, and the tab
+        // host reaches [AboutBody] instead.
+        MiuixScrollBar(
+            listState = listState,
+            modifier = Modifier.align(Alignment.CenterEnd),
+            top = innerPadding.calculateTopPadding(),
+            bottom = innerPadding.calculateBottomPadding()
         )
     }
 }
@@ -795,7 +818,7 @@ private fun AboutProjectSection(
         Column {
             MiuixCardSurface(
                 shape = connectedGroupShape(first = true, last = true),
-                modifier = Modifier.padding(horizontal = 12.dp)
+                modifier = Modifier.padding(horizontal = MiuixMetrics.PageInset)
             ) {
                 ArrowPreference(
                     title = stringResource(R.string.view_source_code),
@@ -806,8 +829,8 @@ private fun AboutProjectSection(
             MiuixCardSurface(
                 shape = connectedGroupShape(first = true, last = true),
                 modifier = Modifier
-                    .padding(horizontal = 12.dp)
-                    .padding(top = 12.dp)
+                    .padding(horizontal = MiuixMetrics.PageInset)
+                    .padding(top = MiuixMetrics.PageGap)
             ) {
                 // [MiuixCardSurface]'s [Surface] is a box — its children stack
                 // rather than arrange — so the two rows of this card must sit
@@ -825,7 +848,7 @@ private fun AboutProjectSection(
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(MiuixMetrics.PageGap))
         }
         return
     }
@@ -931,6 +954,12 @@ private fun AboutBody(
     actions: AboutActions,
     snackbarHostState: SnackbarHostState,
     showProjectSection: Boolean,
+    /**
+     * The page's list state, owned by the caller because the scroll indicator
+     * has to sit beside the list in the body box rather than inside it — two
+     * siblings cannot share one `remember` unless the scope above both holds it.
+     */
+    listState: LazyListState,
     topPadding: Dp,
     bottomPadding: Dp,
     modifier: Modifier = Modifier
@@ -945,6 +974,9 @@ private fun AboutBody(
     // system-side setting with no palette behind it, and the update badge is
     // screen state by definition.
     var hideIcon by remember { mutableStateOf(LauncherIcon.isHidden(context)) }
+    // 预测性返回：读一次页面栈当前的方向口径（偏好），改由开关自己写回并转给
+    // Activity —— 这一行不需要跟任何系统侧读数对齐，所以本地镜像就够。
+    var predictiveBack by remember { mutableStateOf(Prefs.readPredictiveBack(context)) }
     // Read once per screen: the hook side owns the live value, and the mirror
     // is only the answer the UI last left behind (same rule as the experiment
     // page's mirrors).
@@ -983,7 +1015,6 @@ private fun AboutBody(
 
     val modeEntries = stringArrayResource(R.array.theme_mode_entries)
     val uiStyleEntries = stringArrayResource(R.array.ui_style_entries)
-    val floatingBarEntries = stringArrayResource(R.array.floating_bar_entries)
     val styleEntries = stringArrayResource(R.array.palette_style_entries)
     val specEntries = stringArrayResource(R.array.color_spec_entries)
     // 强调色's menu: entry 0 is the stored 0 (跟随壁纸), the rest are
@@ -1055,7 +1086,7 @@ private fun AboutBody(
             .padding(start = inset, end = inset),
         // The four appearance menus all re-skin the app on a pick, so this page is
         // the one place a menu could visibly throw the reader back to the start.
-        state = rememberPageListState(),
+        state = listState,
         // The gesture-hint strip is scroll-through, not a hard stop: rows pass
         // under it while scrolling and only rest that far above the edge. The
         // top inset rides here (not on the modifier) so rows pass under the
@@ -1078,6 +1109,24 @@ private fun AboutBody(
                         hideIcon = checked
                     },
                     first = true,
+                    last = false
+                )
+                // 预测性返回：返回手势要不要“跟手预览”。它管的是 Activity 的页面栈
+                // （[MainActivity] 的 AppPages）——那一层只认 compose 出来的 handler
+                // 顺序，所以这里写偏好 + 通过 [AboutActions.onPredictiveBackChange]
+                // 把新值交上去，不另存一份本地镜像去猜页面栈该长什么样。
+                // 与「中间区域横向拖拽返回」无关：那个手势本应用没有提供。
+                SettingsSwitchCard(
+                    iconRes = R.drawable.ic_swipe_left,
+                    title = stringResource(R.string.predictive_back),
+                    description = stringResource(R.string.about_sub_predictive_back),
+                    checked = predictiveBack,
+                    onCheckedChange = { checked ->
+                        Prefs.writePredictiveBack(context, checked)
+                        predictiveBack = checked
+                        actions.onPredictiveBackChange(checked)
+                    },
+                    first = false,
                     last = false
                 )
                 // 语言选择交给平台的 LocaleManager：写下去系统自己持久化并重建
@@ -1175,29 +1224,26 @@ private fun AboutBody(
                             }
                         )
                     }
-                    // The Example's "Enable blur effect" is not offered as a row:
-                    // the glass is this look's default dressing — title bar and
-                    // bottom bar are always frosted — so a switch would only
-                    // offer the way back to a look the Example never ships.
-                    //
-                    // What *is* a taste is whether the foot floats: off is the
-                    // library's docked pane, on is the texture-blur glass capsule
-                    // hovered over the list. Miuix look only — the SoftGlass look
-                    // always floats its own glass tab bar, so under it this row
-                    // would name a choice the home frame is not offering.
+                    // One switch, two pieces of chrome. Off gives the library's
+                    // docked pane and MIUIX's DEFAULT title bar; on lifts the
+                    // foot into the texture-blur glass capsule AND puts the
+                    // glass band behind the title bar (see PageScaffold). The
+                    // description says so — this row is not only about the foot.
+                    // Miuix look only: 柔光玻璃 always floats its own glass tab
+                    // bar and always wears the band, so under it this row would
+                    // name a choice that look is not offering.
                     if (barRowVisible) {
-                        PopupCard(
+                        SettingsSwitchCard(
                             iconRes = R.drawable.ic_ui_style,
                             title = stringResource(R.string.miuix_floating_bar),
-                            subtitle = stringResource(R.string.about_sub_miuix_floating_bar),
-                            entries = floatingBarEntries.toList(),
-                            currentIndex = if (floatingBar) 1 else 0,
-                            first = false,
-                            last = true,
-                            onPick = { index ->
-                                AppearanceState.setFloatingBar(context, index == 1)
+                            description = stringResource(R.string.about_sub_miuix_floating_bar),
+                            checked = floatingBar,
+                            onCheckedChange = { checked ->
+                                AppearanceState.setFloatingBar(context, checked)
                                 actions.onAppearanceChange()
-                            }
+                            },
+                            first = false,
+                            last = true
                         )
                     }
                 }
@@ -1861,7 +1907,8 @@ private fun AboutScreenPreview() {
                     onUpdateOpen = {},
                     versionLine = "当前版本 3.7.0 (45)",
                     versionTag = "v3.7.0 (45)",
-                    onAppearanceChange = {}
+                    onAppearanceChange = {},
+                    onPredictiveBackChange = {}
                 )
             )
         }

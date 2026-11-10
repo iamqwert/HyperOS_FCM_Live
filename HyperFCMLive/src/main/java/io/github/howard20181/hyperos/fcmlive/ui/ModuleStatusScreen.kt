@@ -54,6 +54,7 @@ import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
@@ -70,9 +71,9 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  * module — carrying the module version and the service's API badge on the
  * right, and a device section naming the machine the module runs on.
  *
- * M3 only: this screen is hosted by [HomeShell], which exists under the
- * Material look alone. The Miuix home keeps the single-page layout with
- * AboutActivity carrying the settings, so no Miuix branch is written here.
+ * Both shells host every tab through the same `tabContent`; only the chrome
+ * around them differs, so this screen has no per-look page branch. The
+ * settings live on their own tab, not in a second Activity.
  */
 @OptIn(ExperimentalScrollBarApi::class)
 @Composable
@@ -110,6 +111,11 @@ fun ModuleStatusScreen(
     // what moves it (and the Activity clears the flag when the release opens).
     var updateBadge by remember { mutableStateOf(UpdateChecker.isUpdateAvailable(context)) }
     var updateOffer by remember { mutableStateOf<UpdateOutcome.Available?>(null) }
+    // Whether the release check is in flight. Under Miuix the row answers with
+    // the library's own spinner in its trailing slot, which is a better account
+    // of "working" than the toast that used to fire and vanish while the
+    // request was still out; Material has no slot for one and keeps its toast.
+    var checking by remember { mutableStateOf(false) }
     val checkingText = stringResource(R.string.update_checking)
     val noneText = stringResource(R.string.update_none)
     val errorText = stringResource(R.string.update_error)
@@ -153,17 +159,23 @@ fun ModuleStatusScreen(
         // Card spacing: the reference runs its list on spacedBy(12.dp) end to
         // end, so the Miuix-based looks breathe that air between every block;
         // the M3 cut keeps its own 16dp rhythm.
-        val pageGap = if (LocalUiStyle.current.isMiuixBased) 12.dp else 16.dp
+        val pageGap = if (LocalUiStyle.current.isMiuixBased) MiuixMetrics.PageGap else 16.dp
         val listState = rememberPageListState()
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
+                // This page can come up short of a screen (one hero card and a
+                // handful of rows), and a short list has no boundary for the
+                // theme's edge effect to answer. See [pageOverscroll].
+                .pageOverscroll()
                 .listScrollEndHaptic()
                 .padding(start = inset, end = inset),
             // A tab switch re-skins nothing, but the saveable registry still
             // keeps the scroll position across window re-creations — the same
             // rule every page in this app runs on (see [rememberPageListState]).
             state = listState,
+            // The other half of [pageOverscroll]: never two springs on one drag.
+            overscrollEffect = rememberPageOverscrollEffect(),
             contentPadding = PaddingValues(
                 top = innerPadding.calculateTopPadding(),
                 bottom = innerPadding.calculateBottomPadding()
@@ -175,7 +187,7 @@ fun ModuleStatusScreen(
                 // Miuix look rides that air; the M3 cut keeps its own rhythm.
                 Column(
                     modifier = Modifier.padding(
-                        top = if (LocalUiStyle.current.isMiuixBased) 12.dp else 0.dp
+                        top = if (LocalUiStyle.current.isMiuixBased) MiuixMetrics.PageGap else 0.dp
                     )
                 ) {
                     StatusHero(
@@ -258,8 +270,13 @@ fun ModuleStatusScreen(
                         title = stringResource(R.string.check_for_updates),
                         subtitle = "",
                         onClick = {
-                            show(checkingText)
+                            // Miuix: the spinner in the trailing slot IS the
+                            // "checking" acknowledgement, so the toast would be
+                            // the same news twice.
+                            if (!miuixNow) show(checkingText)
+                            checking = true
                             onCheckUpdate { outcome ->
+                                checking = false
                                 updateBadge = outcome is UpdateOutcome.Available
                                 when (outcome) {
                                     UpdateOutcome.None -> show(noneText)
@@ -271,17 +288,18 @@ fun ModuleStatusScreen(
                         first = false,
                         last = false,
                         trailing = {
-                            if (updateBadge) {
-                                val badgeDesc = stringResource(R.string.update_badge_desc)
-                                Box(
-                                    modifier = Modifier
-                                        .padding(start = 8.dp)
-                                        .size(8.dp)
-                                        // The dot is colour alone; without a
-                                        // label the row reads as an ordinary
-                                        // "check for updates" entry.
-                                        .semantics { contentDescription = badgeDesc }
-                                        .background(MaterialTheme.colorScheme.error, CircleShape)
+                            when {
+                                // The busy state takes the slot: a badge next to
+                                // a spinner would claim there is both something
+                                // new and something running.
+                                checking -> CircularProgressIndicator(
+                                    modifier = Modifier.padding(start = 8.dp),
+                                    size = 18.dp,
+                                    strokeWidth = 2.dp
+                                )
+                                updateBadge -> UpdateBadgeDot(
+                                    description = stringResource(R.string.update_badge_desc),
+                                    modifier = Modifier.padding(start = 8.dp)
                                 )
                             }
                         }

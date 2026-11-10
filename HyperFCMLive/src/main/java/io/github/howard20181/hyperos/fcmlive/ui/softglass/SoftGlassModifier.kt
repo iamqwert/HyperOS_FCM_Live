@@ -2,15 +2,18 @@ package io.github.howard20181.hyperos.fcmlive.ui.softglass
 
 // Migrated from Deadliner 210e4a2d4c6bf7df291b6c6852d39366bc1fee17.
 // Integration changes: package and MIUIX semantic UI bindings only.
+//
+// The source's chromatic tint profiles are gone: this app's glass is one
+// neutral wash on the bar, the tab capsule and the top-bar actions, and the
+// colourise/screen-lift pair only ever ran for callers that asked for it —
+// none did. What is left is the neutral path, stated once.
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TileMode
@@ -28,50 +31,19 @@ fun Modifier.softGlassMaterial(
     backdrop: LayerBackdrop?,
     shape: Shape,
     tint: Color,
-    tintStyle: GlassTintStyle = GlassTintStyle.Neutral,
     isDark: Boolean,
     recipe: GlassMaterialRecipe,
     interaction: GlassMaterialInteraction = GlassMaterialInteraction(),
-    blurRadiusOverride: Float? = null,
-    tintAlphaOverride: Float? = null,
 ): Modifier {
     val blurSpec = recipe.blur
-    val resolvedBlurRadius = blurRadiusOverride
-        ?.takeIf { it.isFinite() }
-        ?.coerceIn(0f, blurSpec.maxRadius)
     val resolvedMaterial = softGlass.copy(
-        blurRadius = resolvedBlurRadius ?: softGlass.blurRadius * blurSpec.radiusMultiplier,
-        blurRadiusX = if (resolvedBlurRadius != null) {
-            null
-        } else {
-            softGlass.blurRadiusX?.times(blurSpec.radiusMultiplier)
-        },
-        blurRadiusY = if (resolvedBlurRadius != null) {
-            null
-        } else {
-            softGlass.blurRadiusY?.times(blurSpec.radiusMultiplier)
-        },
+        blurRadius = softGlass.blurRadius * blurSpec.radiusMultiplier,
         noiseCoefficient = (softGlass.noiseCoefficient * blurSpec.noiseMultiplier)
             .coerceAtLeast(0f),
     )
     val resolvedTint = tint.copy(
-        alpha = tintAlphaOverride
-            ?.takeIf { it.isFinite() }
-            ?.coerceIn(0f, 1f)
-            ?: (tint.alpha * blurSpec.tintAlphaMultiplier).coerceIn(0f, 1f),
+        alpha = (tint.alpha * blurSpec.tintAlphaMultiplier).coerceIn(0f, 1f),
     )
-    val seedComposite = resolveGlassTintComposite(
-        tint = resolvedTint,
-        style = tintStyle,
-        isDark = isDark,
-    )
-    val tintComposite = if (tintStyle == GlassTintStyle.SeedChromatic && interaction.neutralTintProgress > 0f) {
-        val neutralTint = softGlass.fineTuning.softGlassTintColor(isDark).copy(
-            alpha = ((if (softGlass.enabled) softGlass.navigationTintAlpha else 0.92f) *
-                blurSpec.tintAlphaMultiplier).coerceIn(0f, 1f))
-        blendGlassTintComposites(seedComposite,
-            resolveGlassTintComposite(neutralTint, GlassTintStyle.Neutral, isDark), interaction.neutralTintProgress)
-    } else seedComposite
     val canDrawBackdrop = resolvedMaterial.textureBlurEnabled && backdrop != null
     val canDrawOpticalStack = canDrawBackdrop &&
         recipe.refraction.enabled &&
@@ -81,7 +53,7 @@ fun Modifier.softGlassMaterial(
             backdrop = requireNotNull(backdrop),
             shape = shape,
             material = resolvedMaterial,
-            tintComposite = tintComposite,
+            tint = resolvedTint,
             recipe = recipe,
             interaction = interaction,
             isDark = isDark,
@@ -89,7 +61,7 @@ fun Modifier.softGlassMaterial(
 
         canDrawBackdrop -> {
             val blurColors = resolvedMaterial.rememberBlurColors(
-                additionalBlendColors = listOf(BlendColorEntry(tintComposite.fallbackTint)),
+                additionalBlendColors = listOf(BlendColorEntry(resolvedTint)),
             )
             Modifier
                 .softGlassTextureBlur(
@@ -102,105 +74,23 @@ fun Modifier.softGlassMaterial(
         }
 
         else -> Modifier
-            .background(color = tintComposite.fallbackTint, shape = shape)
+            .background(color = resolvedTint, shape = shape)
             .fallbackGlassEdge(shape, recipe.edgeOptics, isDark)
     }
 
     return this.then(material)
 }
 
-internal data class GlassTintComposite(
-    val baseTint: Color,
-    val colorizeTint: Color,
-    val liftTint: Color,
-    val fallbackTint: Color,
-)
-
-internal fun blendGlassTintComposites(from: GlassTintComposite, to: GlassTintComposite, progress: Float): GlassTintComposite {
-    val p = progress.coerceIn(0f, 1f)
-    return GlassTintComposite(lerp(from.baseTint, to.baseTint, p), lerp(from.colorizeTint, to.colorizeTint, p),
-        lerp(from.liftTint, to.liftTint, p), lerp(from.fallbackTint, to.fallbackTint, p))
-}
-
 /**
- * Chromatic glass keeps the sampled luminance instead of covering it with one nearly opaque wash.
- * The seed profile uses the supplied RGB directly in both color modes, with enough transparent base
- * coverage to remain recognizable without sacrificing backdrop blur and refraction.
- */
-internal fun resolveGlassTintComposite(
-    tint: Color,
-    style: GlassTintStyle,
-    isDark: Boolean,
-): GlassTintComposite {
-    if (style == GlassTintStyle.Neutral) {
-        return GlassTintComposite(
-            baseTint = tint,
-            colorizeTint = Color.Transparent,
-            liftTint = Color.Transparent,
-            fallbackTint = tint,
-        )
-    }
-
-    val seedFaithful = style == GlassTintStyle.SeedChromatic
-    val average = (tint.red + tint.green + tint.blue) / 3f
-    val saturationScale = when {
-        seedFaithful -> 1f
-        isDark -> 1.24f
-        else -> 1.16f
-    }
-    val brightnessLift = when {
-        seedFaithful -> 0f
-        isDark -> 0.08f
-        else -> 0.035f
-    }
-    fun resolveChannel(channel: Float): Float {
-        val saturated = average + (channel - average) * saturationScale
-        return (saturated + (1f - saturated) * brightnessLift).coerceIn(0f, 1f)
-    }
-
-    val vividTint = Color(
-        red = resolveChannel(tint.red),
-        green = resolveChannel(tint.green),
-        blue = resolveChannel(tint.blue),
-        alpha = 1f,
-    )
-    val baseAlpha = tint.alpha * when {
-        seedFaithful -> 0.835f
-        isDark -> 0.42f
-        else -> 0.34f
-    }
-    val colorizeAlpha = tint.alpha * when {
-        seedFaithful -> 0.86f
-        isDark -> 0.58f
-        else -> 0.50f
-    }
-    val liftAlpha = tint.alpha * when {
-        seedFaithful -> 0f
-        isDark -> 0.28f
-        else -> 0.10f
-    }
-    val fallbackAlpha = tint.alpha * when {
-        seedFaithful -> 0.96f
-        isDark -> 0.68f
-        else -> 0.62f
-    }
-    return GlassTintComposite(
-        baseTint = vividTint.copy(alpha = baseAlpha.coerceIn(0f, 1f)),
-        colorizeTint = vividTint.copy(alpha = colorizeAlpha.coerceIn(0f, 1f)),
-        liftTint = vividTint.copy(alpha = liftAlpha.coerceIn(0f, 1f)),
-        fallbackTint = vividTint.copy(alpha = fallbackAlpha.coerceIn(0f, 1f)),
-    )
-}
-
-/**
- * A single backdrop effect chain keeps the Gaussian blur inside the refractive lens:
- * color treatment -> full material blur -> rounded-rectangle lens -> gentle softening.
+ * A single backdrop effect chain keeps the Gaussian blur inside the refractive
+ * lens: colour treatment -> full material blur -> capsule lens -> gentle
+ * softening.
  */
 private fun Modifier.glassOpticalBackdrop(
     backdrop: LayerBackdrop,
     shape: Shape,
     material: SoftGlassSpec,
-    tintComposite: GlassTintComposite,
+    tint: Color,
     recipe: GlassMaterialRecipe,
     interaction: GlassMaterialInteraction,
     isDark: Boolean,
@@ -209,16 +99,21 @@ private fun Modifier.glassOpticalBackdrop(
     shape = { shape },
     effects = {
         val maxBlurRadius = recipe.blur.maxRadius.coerceAtLeast(0f)
-        val blurRadiusX = (material.blurRadiusX ?: material.blurRadius)
-            .coerceIn(0f, maxBlurRadius)
-        val blurRadiusY = (material.blurRadiusY ?: material.blurRadius)
-            .coerceIn(0f, maxBlurRadius)
+        // The radius the material ships with, used as the shader path always
+        // used it: the optics stack's own number, NOT converted to pixels. It
+        // reads as a gentler blur than the fallback's dp reading on the same
+        // glass, and that soft focus is the look's resting character — the
+        // delivered default, not an oversight.
+        val blurRadius = material.blurRadius.coerceIn(0f, maxBlurRadius)
         val refraction = recipe.refraction
         val postBlurRadiusPx = if (recipe.layering.postRefractionBlurEnabled) {
             recipe.layering.postRefractionBlurRadius.toPx().coerceAtLeast(0f)
         } else {
             0f
         }
+        // Set before the blur: the library raises the padding to its kernel
+        // reach anyway, and raising it after would re-run this whole block once
+        // (see BackdropEffectScope.padding).
         val effectPaddingPx = postBlurRadiusPx * 2f
         padding = effectPaddingPx
 
@@ -227,15 +122,19 @@ private fun Modifier.glassOpticalBackdrop(
             contrast = material.blurContrast,
             saturation = material.blurSaturation,
         )
-        if (blurRadiusX > 0f || blurRadiusY > 0f) {
+        if (blurRadius > 0f) {
+            // The upstream chain's own pass: a full-resolution BlurEffect, then
+            // the lens. No downscale is taken, so every pixel-space uniform
+            // below is already in this layer's pixels.
             effect(
                 BlurEffect(
-                    radiusX = blurRadiusX,
-                    radiusY = blurRadiusY,
+                    radiusX = blurRadius,
+                    radiusY = blurRadius,
                     edgeTreatment = TileMode.Clamp,
                 ),
             )
         }
+
         runtimeShaderEffect(
             key = GlassRefractionShaderKey,
             shaderString = GlassRefractionShader,
@@ -245,17 +144,19 @@ private fun Modifier.glassOpticalBackdrop(
                 if (isDark) recipe.edgeOptics.darkHighlightMultiplier else 1f
             setFloatUniform("content_origin", effectPaddingPx, effectPaddingPx)
             setFloatUniform("content_size", size.width, size.height)
-            setFloatUniform(
-                "corner_radius",
-                recipe.geometry.cornerRadius?.toPx() ?: (size.height / 2f),
-            )
+            // Every surface this app draws is a capsule: the lens radius is
+            // half the rendered height.
+            setFloatUniform("corner_radius", size.height / 2f)
             setFloatUniform("refraction_height", refraction.height.toPx())
             setFloatUniform(
                 "refraction_amount",
                 refraction.amount.toPx() * interaction.refractionScale.coerceAtLeast(0f),
             )
             setFloatUniform("depth_effect", refraction.depthEffect.coerceIn(0f, 1f))
-            setFloatUniform("chromatic_aberration", refraction.chromaticAberration.toPx())
+            setFloatUniform(
+                "chromatic_aberration",
+                refraction.chromaticAberration.toPx(),
+            )
             setFloatUniform("noise_coefficient", material.noiseCoefficient.coerceAtLeast(0f))
             setFloatUniform(
                 "highlight_alpha",
@@ -277,19 +178,7 @@ private fun Modifier.glassOpticalBackdrop(
         }
     },
     onDrawSurface = {
-        drawRect(tintComposite.baseTint)
-        if (tintComposite.colorizeTint.alpha > 0f) {
-            drawRect(
-                color = tintComposite.colorizeTint,
-                blendMode = BlendMode.Color,
-            )
-        }
-        if (tintComposite.liftTint.alpha > 0f) {
-            drawRect(
-                color = tintComposite.liftTint,
-                blendMode = BlendMode.Screen,
-            )
-        }
+        drawRect(tint)
     },
     contentBlendMode = material.blurContentBlendMode,
 )

@@ -52,11 +52,17 @@ import kotlin.math.roundToInt
 
 object MiuixCapsuleTabRowDefaults {
     /**
-     * The library [top.yukonga.miuix.kmp.basic.TabRow]'s own height. Swapping
-     * the strip for this one must not move the page below it, so the height is
-     * not a taste of its own.
+     * The pinned chrome's height: `SearchBarDefaults.InputFieldMinHeight`'s
+     * 45dp, the same 45 the library's `TabRowWithContour` uses.
+     *
+     * It used to copy the plain [top.yukonga.miuix.kmp.basic.TabRow]'s 42dp so
+     * that swapping the strip in would not move the page below it. But the strip
+     * is pinned directly under the bar, beside the apps page's 45dp search
+     * capsule in the same slot — at 42 the three dp it lacked pushed this page's
+     * first row three dp above the apps page's, and the two pages' content lines
+     * never met. One height for both pinned chromes keeps them on one line.
      */
-    val Height = 42.dp
+    val Height = 45.dp
 
     /** The gap between the capsule's edge and the pill riding inside it. */
     val HorizontalPadding = 3.dp
@@ -83,6 +89,15 @@ object MiuixCapsuleTabRowDefaults {
 
     /** The pill under the selected label, faint in both lights — an ink wash, not a plate. */
     fun indicatorAlpha(isDark: Boolean): Float = if (isDark) 0.13f else 0.075f
+
+    /**
+     * The strip's own lens: the delivered material with its radius multiplied
+     * up to 92 × 0.8 = 73.6 on the look's base. The two records-page strips
+     * were tuned up by eye and are the only surfaces that take it — the
+     * floating bar, its plates and the bar's actions keep the delivered
+     * 0.217 (≈ MIUIX's PuredThinGlass 20dp).
+     */
+    const val BlurRadiusMultiplier = 0.8f
 }
 
 /**
@@ -94,26 +109,22 @@ object MiuixCapsuleTabRowDefaults {
  * per tab, which is what makes it read as one plate rather than as the library's
  * row of outlined buttons.
  *
- * Both Miuix-dressed looks wear it (MIUIX and 柔光玻璃): the plate is a layout,
- * and the two looks differ in material only. 柔光玻璃 gets the glass on top
- * whenever it has a backdrop to refract; plain Miuix never provides one, so it
- * gets the exact strip the reference shows at the top of its own page. That is
- * the same split the look table has everywhere else — one structure, the
- * material as the difference.
+ * The glass Miuix looks wear it — 柔光玻璃 always, plain MIUIX once its
+ * floating-bar row is ON: one plate, one layout, and one glass material over
+ * it. Both are handed the page's own recorded layer, so both refract the
+ * content passing under the strip. Plain MIUIX with the docked bar keeps the
+ * library's own `TabRow` instead; the call site decides, not this component.
  *
  * **On the backdrop.** The reference's strip lives in a collapsing top bar, so
- * it can sample the content scrolling under it — and the records page now does
- * exactly that: its strips are mounted in the page bar's glass pane
- * ([io.github.howard20181.hyperos.fcmlive.ui.PageScaffold.barExtension]), with
- * the pane's own recipe covering the blur, so this strip wears the same
- * construction and resolves to the reference's resting state: the container
- * wash alone, with the material joining only when a caller hands a
- * [LayerBackdrop] in (through the parameter or [LocalSoftGlassBackdrop]).
- * That is not a shortcut around the material — a layer recorded here would
- * capture the page background the strip already sits on, so the optics would
- * cost a full-page render node to refract a flat colour. A page that lets
- * content run under its strip gets the glass by providing the layer, with no
- * change at this call site.
+ * it can sample the content scrolling under it. The records page now does
+ * exactly that: its strips mount inside the page bar's TRANSPARENT gradient
+ * band
+ * ([io.github.howard20181.hyperos.fcmlive.ui.PageScaffold.barExtension]) but
+ * OUTSIDE the recorded body, so the page's own layer — provided through
+ * [LocalSoftGlassBackdrop] by the page scaffold — is a legal source with no
+ * render-node cycle, and the rows travelling under the band are real content
+ * to blur. Passing `backdrop = null` leaves only the container wash: a
+ * half-transparent plate and no frost at all.
  *
  * @param tabs the labels, in tab order.
  * @param selectedTabIndex the tab the pill sits under; clamped into range.
@@ -143,8 +154,8 @@ fun MiuixCapsuleTabRow(
 
     // The strip's type, once: the label and the measurement that decides how
     // wide its tab is have to be the same text, or a tab sized for one weight
-    // would clip the other. Medium is the selected weight, so measuring with it
-    // is measuring the worst case.
+    // would clip the other. Bold is the selected weight — MIUIX's own for a
+    // tab (TabRow) — so measuring with it is measuring the worst case.
     val labelStyle = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 16.sp)
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
@@ -153,7 +164,7 @@ fun MiuixCapsuleTabRow(
         tabs.map { label ->
             val widthPx = measurer.measure(
                 text = AnnotatedString(label),
-                style = labelStyle.copy(fontWeight = FontWeight.Medium),
+                style = labelStyle.copy(fontWeight = FontWeight.Bold),
                 maxLines = 1,
                 softWrap = false,
             ).size.width
@@ -169,16 +180,27 @@ fun MiuixCapsuleTabRow(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                // The outer rim belongs to the PLATE, not to the frost: it used
+                // to hang on the glass layer below, so any strip handed a null
+                // backdrop lost its shadow as well as its blur. Both Miuix
+                // looks keep the rim now, glass or not.
+                .softGlassShadow(shape = shape, isDark = isDark)
                 .clip(shape)
                 .background(containerColor)
         )
         if (softGlass.enabled && backdrop != null) {
+            // The strip's own lens: the delivered material with its radius
+            // raised (see [MiuixCapsuleTabRowDefaults.BlurRadiusMultiplier]).
+            // The floating bar and the bar's actions keep the default.
+            val base = SoftGlassRecipes.floatingNavigation(softGlass.fineTuning)
             SoftGlassSurface(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .softGlassShadow(shape = shape, isDark = isDark),
+                modifier = Modifier.fillMaxSize(),
                 shape = shape,
-                recipe = SoftGlassRecipes.floatingNavigation(softGlass.fineTuning),
+                recipe = base.copy(
+                    blur = base.blur.copy(
+                        radiusMultiplier = MiuixCapsuleTabRowDefaults.BlurRadiusMultiplier,
+                    ),
+                ),
                 backdrop = backdrop,
             ) {}
         }
@@ -306,8 +328,10 @@ fun MiuixCapsuleTabRow(
                             text = label,
                             color = textColor,
                             style = labelStyle,
+                            // MIUIX's own tab emphasis: the selected label is
+                            // Bold, the rest Normal.
                             fontWeight = if (selected) {
-                                FontWeight.Medium
+                                FontWeight.Bold
                             } else {
                                 FontWeight.Normal
                             },

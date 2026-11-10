@@ -16,7 +16,6 @@ import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.background
@@ -26,7 +25,6 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,7 +52,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -63,16 +60,17 @@ import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.theme.AppearanceState
 import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
 import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
-import io.github.howard20181.hyperos.fcmlive.ui.softglass.MiuixFloatingTabBar
-import io.github.howard20181.hyperos.fcmlive.ui.softglass.MiuixFloatingTabBarDefaults
-import io.github.howard20181.hyperos.fcmlive.ui.softglass.MiuixFloatingTabItem
-import io.github.howard20181.hyperos.fcmlive.ui.softglass.MiuixFloatingTabLayout
+import io.github.howard20181.hyperos.fcmlive.ui.softglass.SoftGlassNavigationBar
+import io.github.howard20181.hyperos.fcmlive.ui.softglass.SoftGlassNavigationBarDefaults
+import io.github.howard20181.hyperos.fcmlive.ui.softglass.SoftGlassNavigationItem
+import io.github.howard20181.hyperos.fcmlive.ui.softglass.softGlassNavigationBarBottomMargin
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurColors
 import top.yukonga.miuix.kmp.blur.highlight.Highlight
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
+import top.yukonga.miuix.kmp.squircle.isSquircleEnabled
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.GridView
 import top.yukonga.miuix.kmp.icon.extended.Home
@@ -233,9 +231,9 @@ fun HomeShell(
  *    frosted — the standard HyperOS bottom bar.
  *  - Miuix look, 悬浮底栏 on: the same bar lifted into a floating capsule,
  *    its glass the Example's textureBlur recipe over the recorded pages.
- *  - SoftGlass look: always floating, and the bar is the reference project's
- *    own glass tab bar ([MiuixFloatingTabBar]) — the look's defining chrome,
- *    so it is not a switch but a certainty.
+ *  - SoftGlass look: always floating, and the bar is MIUIX's glass navigation
+ *    bar ([SoftGlassNavigationBar]) on this app's material — the look's
+ *    defining chrome, so it is not a switch but a certainty.
  *
  * The skeleton mirrors [HomeShell] exactly, for the same reasons: the bar is a
  * plain sibling below the content box (each tab is itself a full
@@ -366,13 +364,17 @@ fun MiuixHomeShell(
             // the same 16dp the app list keeps between its search box and its
             // first row — one value for the gap between chrome and content
             // everywhere, rather than one per page. The extent itself is per
-            // frame: the SoftGlass bar is its 54dp height plus the reference
-            // layout's paddings (12 above, 4 below) riding on the navigation
-            // inset; the Miuix capsule is its 52dp minimum plus the air the
-            // official pill keeps; the docked pane is measured off its wrapper.
+            // frame: the SoftGlass bar is its own 54dp plus the floating margin
+            // it keeps at the foot (MIUIX's 16dp over the navigation inset, 32dp
+            // without one — the bar applies that margin itself, so the number is
+            // asked for, not assumed); the Miuix capsule is its 52dp minimum plus
+            // the air the official pill keeps; the docked pane is measured off
+            // its wrapper.
             val clearance = when {
                 softGlassStyle ->
-                    MiuixFloatingTabBarDefaults.Height + 12.dp + 4.dp + insetDp + FLOATING_BAR_GAP
+                    SoftGlassNavigationBarDefaults.Height +
+                        softGlassNavigationBarBottomMargin(insetDp) +
+                        FLOATING_BAR_GAP
                 floating ->
                     FLOATING_BAR_MIN_HEIGHT + pillBottomAir + FLOATING_BAR_GAP
                 else ->
@@ -468,32 +470,26 @@ fun MiuixHomeShell(
             }
             if (floating) {
                 if (softGlassStyle) {
-                    // The SoftGlass look's own foot: the reference project's
-                    // glass tab bar, ported whole — its glass recipe, drag
-                    // physics and stacked layout are that bar's business, and
-                    // the bar reads the 柔光玻璃 spec through the locals the
-                    // theme already provides. Placement is the reference's own:
-                    // pinned to the bottom-center, lifted over the navigation
-                    // inset, 16dp off the sides, 4dp off the inset.
-                    MiuixFloatingTabBar(
+                    // The SoftGlass look's own foot: MIUIX's GlassNavigationBar,
+                    // laid on this app's glass (see [SoftGlassNavigationBar]) —
+                    // the capsule, the stretch-while-travelling chip and the
+                    // press-and-drag gesture are the library's; the material,
+                    // shadow and depth read are 柔光玻璃's. Placement is the
+                    // bar's own business too: it keeps MIUIX's floating margin
+                    // over the navigation inset, so nothing is padded here but
+                    // the page's side inset.
+                    SoftGlassNavigationBar(
                         items = HomeTab.entries.map { tab ->
-                            MiuixFloatingTabItem(
-                                key = tab.name,
+                            SoftGlassNavigationItem(
+                                icon = tab.miuixIcon,
                                 label = stringResource(tab.titleRes),
-                                // ONE glyph for both states, as the reference's
-                                // items carry: selection is the bar's own ink
-                                // and indicator treatment, not a fill swap.
-                                selectedIcon = rememberVectorPainter(tab.miuixIcon),
-                                unselectedIcon = rememberVectorPainter(tab.miuixIcon),
                             )
                         },
-                        selectedKey = selected.name,
-                        onItemSelected = { onSelect(HomeTab.valueOf(it.key)) },
+                        selectedIndex = selected.ordinal,
+                        onSelect = { onSelect(HomeTab.entries[it]) },
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .navigationBarsPadding()
-                            .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 4.dp),
-                        layout = MiuixFloatingTabLayout.Stacked,
+                            .padding(horizontal = SOFTGLASS_BAR_SIDE_INSET),
                         backdrop = backdrop,
                     )
                 } else {
@@ -524,7 +520,23 @@ fun MiuixHomeShell(
                         FloatingNavigationBar(
                             modifier = Modifier.textureBlur(
                                 backdrop = backdrop,
-                                shape = RoundedCornerShape(FLOATING_BAR_CORNER),
+                                // The pill's own silhouette: continuous corners,
+                                // like every card and every system capsule beside
+                                // it. At 50dp on a 52dp-tall pill the tile clamps
+                                // to half the height, so the two ends are full
+                                // superelliptical caps rather than the semicircles
+                                // a RoundedCornerShape draws — the difference is
+                                // at the shoulders, where the eye reads "system
+                                // pill" or "generic chip". Gated on the library's
+                                // own switch so it degrades with the rest of the
+                                // app when the platform has no shaders.
+                                shape = MiuixGroupShape(
+                                    FLOATING_BAR_CORNER,
+                                    FLOATING_BAR_CORNER,
+                                    FLOATING_BAR_CORNER,
+                                    FLOATING_BAR_CORNER,
+                                    isSquircleEnabled()
+                                ),
                                 blurRadius = DOCK_BLUR.value,
                                 colors = BlurColors(
                                     blendColors = listOf(
@@ -534,10 +546,15 @@ fun MiuixHomeShell(
                                         )
                                     )
                                 ),
+                                // The compact preset: a 52dp pill is the
+                                // "small" size in the library's own three-step
+                                // rim scale (big for cards, middle for panels),
+                                // and the crisper rim is what keeps a thin
+                                // capsule from looking swollen.
                                 highlight = if (pillIsDark) {
-                                    Highlight.GlassStrokeMiddleDark
+                                    Highlight.GlassStrokeSmallDark
                                 } else {
-                                    Highlight.GlassStrokeMiddleLight
+                                    Highlight.GlassStrokeSmallLight
                                 },
                             ),
                             // The capsule's own surface is absent: the glass
@@ -586,10 +603,18 @@ fun MiuixHomeShell(
 private val FLOATING_BAR_GAP = 16.dp
 
 /**
+ * The air the SoftGlass bar keeps off each side of the screen — MIUIX's own
+ * inset for its glass navigation bar (the library's doc and its example both
+ * pass 24dp). The bar itself owns its foot margin (MIUIX's floating margin over
+ * the navigation inset); only the sides are the page shell's business.
+ */
+private val SOFTGLASS_BAR_SIDE_INSET = 24.dp
+
+/**
  * One tab of the Default pill, carrying its label — [Mishka]'s
  * `MiuixFloatingNavigationBarItem`, lifted whole: a centered column on a
  * 48dp-minimum plate (56 wide with a label, 48 without), the glyph at 22dp and
- * the word at 11sp sharing ONE ink, `selectable` under the Tab role with no
+ * the word at MIUIX's 12sp sharing ONE ink, `selectable` under the Tab role with no
  * indication (the pill row's own layout is the feedback surface; a ripple
  * here would print a rectangle over the glass). The ink is
  * `onSurfaceContainer` at three strengths — resting 0.6, selected 1.0,
@@ -642,13 +667,17 @@ private fun PillTabItem(
             Text(
                 text = label,
                 color = tint,
-                fontSize = 11.sp,
+                // MIUIX's own label size for a navigation item
+                // ([NavigationBarDefaults.LabelFontSize]), which is what the
+                // docked bar beside this pill wears — the pill was the odd one
+                // out at 11sp. Nothing else about the item moves.
+                fontSize = 12.sp,
                 // The ambient style's line height is built for 14-16sp body text;
-                // at 11sp its leading pads a wedge of air between the icon and
+                // at 12sp its leading pads a wedge of air between the icon and
                 // the word. Pin the box to the glyphs so the word sits directly
                 // under the glyph — the gap that remains is the vector's own
                 // bottom padding, which is the reference's gap too.
-                lineHeight = 12.sp,
+                lineHeight = 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
