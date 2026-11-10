@@ -1,5 +1,27 @@
 # Changelog
 
+## 4.5.0 (58)
+
+### 简体中文
+
+#### 新增
+
+- 新增预测性返回开关。
+
+#### 变更
+
+- 优化 MIUIX 系风格。
+
+### English
+
+#### Added
+
+- Added a Predictive back switch.
+
+#### Changed
+
+- Polished the MIUIX-family looks.
+
 ## 4.4.0 (56)
 
 #### 本版本大幅变动，重新评估部分功能定位

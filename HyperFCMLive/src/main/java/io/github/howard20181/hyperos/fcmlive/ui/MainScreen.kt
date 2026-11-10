@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -83,8 +84,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import dev.chrisbanes.haze.hazeSource
-import dev.chrisbanes.haze.rememberHazeState
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
@@ -280,25 +279,20 @@ fun MainScreen(
 
     if (LocalUiStyle.current.isMiuixBased) {
         // The Miuix frame: the Scaffold the overlay popups open into (the
-        // overflow menu below), a large title that holds still with the search
-        // field pinned beneath it — the list scrolls under both, and neither
-        // the title nor the search leaves the page as the list travels — and
-        // the system's own pull-to-refresh, the circle with the refresh text,
-        // not the M3 spinner. The title + search region wears the same
-        // progressive-blur glass as the secondary pages ([MiuixGlassBar]); the
-        // glass wraps the whole bar, so the area around the capsule blurs with
-        // it while the capsule itself keeps its own surface.
+        // overflow menu below), a large title in a gradient band, and the
+        // search capsule as the LIST'S FIRST ITEM — it scrolls away with the
+        // rows instead of pinning chrome under the bar. With no pinned chrome
+        // left, this page wears the same glass band the other Miuix pages wear
+        // (see [PageScaffold]); plain MIUIX still follows the floating-bar row
+        // and falls back to the library's default bar when that row is off.
+        // The system's own pull-to-refresh, the circle with the refresh text,
+        // stays the M3 spinner's counterpart.
         val scrollBehavior = MiuixScrollBehavior()
-        // The glass is this look's default dressing, not a switch (the Example
-        // ships it enabled): the list below always registers into this layer
-        // (see [MiuixGlassBar] for why the glass must stay out of that subtree).
-        val glass = true
-        val hazeState = rememberHazeState()
-        // The page's own layer for its own chrome — the bar's controls and the
-        // resting capsule. Recorded over the list below and not over the bar, so
-        // the controls that read it are its siblings rather than its contents;
-        // see [rememberPageLayerBackdrop] for why that has to be this page's
-        // layer and not the shell's.
+        // The page's own layer for its own chrome — the bar's controls. Recorded
+        // over the list below and not over the bar, so the controls that read it
+        // are its siblings rather than its contents; see
+        // [rememberPageLayerBackdrop] for why that has to be this page's layer
+        // and not the shell's.
         val chromeGlass = softGlassChrome()
         val pageBackdrop = rememberPageLayerBackdrop()
 
@@ -307,8 +301,9 @@ fun MainScreen(
         // 0 as the bar folds to the compact title — which is what pulls the
         // capsule up against the small title instead of leaving it at the
         // large title's spacing. A lambda keeps the fraction out of
-        // composition; the NaN guard is the same one [HazeGlassBar] documents
-        // for this very property (0/0 before the scroll range is measured).
+        // composition; the NaN guard is the same one [MiuixGlassTopAppBar]
+        // documents for this very property (0/0 before the scroll range is
+        // measured).
         val searchBarTopPadding: () -> Dp = remember(scrollBehavior) {
             {
                 val fraction = scrollBehavior.state.collapsedFraction
@@ -346,13 +341,52 @@ fun MainScreen(
                 updateSearchStatus(searchStatus.copy(resultStatus = searchResultStatus))
             }
         }
-        // The capsule's colour under the glass bar: the reference's own
-        // blurred-bar variant — the High fill at 80%, which the pager lerps
-        // back to full as its surface rises over it.
-        val searchCapsuleColor = if (glass) {
-            MiuixTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f)
-        } else {
-            null
+        // The resting capsule wears its plain High fill: there is no glass
+        // behind it to blend into any more, so the reference's 80% variant has
+        // nothing to sit on.
+        val searchCapsuleColor: Color? = null
+
+        // The search entry is a LIST ITEM now, not a bar slot: it scrolls up
+        // with the rows, which is what lets the bar above wear the gradient
+        // band — nothing pinned reaches under it. Its window Y is still
+        // reported, so the pager's ride starts from wherever the capsule sits
+        // when it is tapped (see [SearchStatus.SearchPager]).
+        val searchHeader: @Composable () -> Unit = {
+            val density = LocalDensity.current
+            Box(
+                modifier = Modifier
+                    .alpha(if (searchStatus.isCollapsed()) 1f else 0f)
+                    .onGloballyPositioned { coordinates ->
+                        searchOffsetY = with(density) {
+                            coordinates.positionInWindow().y.toDp()
+                        }
+                    }
+                    .then(
+                        if (searchStatus.isCollapsed()) {
+                            Modifier.pointerInput(Unit) {
+                                detectTapGestures {
+                                    updateSearchStatus(
+                                        searchStatus.copy(
+                                            current = SearchStatus.Status.EXPANDING
+                                        )
+                                    )
+                                }
+                            }
+                        } else {
+                            Modifier
+                        }
+                    )
+            ) {
+                SearchBarFake(
+                    label = searchStatus.label,
+                    capsuleColor = searchCapsuleColor,
+                    // The list already insets its items: a second inset here
+                    // would narrow the field against the app cards below it.
+                    horizontalInset = 0.dp,
+                    // The list's own item spacing owns the gap to the first row.
+                    bottomPadding = 0.dp
+                )
+            }
         }
         Box(modifier = modifier.fillMaxSize()) {
         MiuixScaffold(
@@ -362,74 +396,51 @@ fun MainScreen(
             // disagree with the window chrome behind the bar.
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                val bar: @Composable () -> Unit = {
-                    // The bar's controls and its capsule read the page's own
-                    // layer; the provider wraps the bar alone, because the list
-                    // below is the recorded node and reads nothing. The reveal
-                    // beside it is the look's bare-at-the-top rule: the plates
-                    // appear once the list has scrolled under the bar.
-                    CompositionLocalProvider(
-                        LocalSoftGlassBackdrop provides pageBackdrop,
-                        LocalSoftGlassBarReveal provides softGlassBarMaterialProgress(
-                            scrollBehavior.state.collapsedFraction
-                        )
-                    ) {
-                    // The reference's own cross-fade: the resting bar (title +
-                    // fake capsule) fades out while the pager's surface fades
-                    // in, so the expanding bar never overlaps a standing fake.
+                // The bar's controls read the page's own layer; the provider
+                // wraps the bar alone, because the list below is the recorded
+                // node and reads nothing. The reveal beside it is the look's
+                // bare-at-the-top rule: the plates appear once the list has
+                // scrolled under the bar.
+                CompositionLocalProvider(
+                    LocalSoftGlassBackdrop provides pageBackdrop,
+                    LocalSoftGlassBarReveal provides softGlassBarMaterialProgress(
+                        scrollBehavior.state.collapsedFraction
+                    )
+                ) {
+                    // The reference's own cross-fade: the resting bar fades out
+                    // while the pager's surface fades in, so the expanding bar
+                    // never overlaps a standing capsule. Transparent, not the
+                    // page tone: a band needs the body's rows behind it.
                     searchStatus.TopAppBarAnim(
-                        backgroundColor = if (glass) {
-                            Color.Transparent
-                        } else {
-                            MaterialTheme.colorScheme.background
-                        }
+                        backgroundColor = Color.Transparent
                     ) {
                         MainTopBar(
                             state = topBarState,
                             actions = actions,
-                            query = query,
-                            onQueryChange = onQueryChange,
-                            searchStatus = searchStatus,
-                            onSearchStatusChange = updateSearchStatus,
-                            searchCapsuleColor = searchCapsuleColor,
-                            searchBarTopPadding = searchBarTopPadding,
-                            onSearchOffset = { searchOffsetY = it },
                             scrollBehavior = scrollBehavior
                         )
                     }
-                    }
-                }
-                if (glass) {
-                    HazeGlassBar(
-                        hazeState = hazeState,
-                        scrim = MaterialTheme.colorScheme.background
-                        // No backdrop: the apps page's bar keeps the Gaussian
-                        // band under every look, the soft-glass one included —
-                        // the progressive recipe rides only the second-level
-                        // pages (see [PageScaffold]).
-                    ) {
-                        bar()
-                    }
-                } else {
-                    bar()
                 }
             },
         ) { innerPadding ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(if (glass) Modifier.hazeSource(hazeState) else Modifier)
                     // The list alone; the bar above is composed outside this node,
                     // which is what lets its controls read the layer — see
                     // [rememberPageLayerBackdrop].
                     .then(if (chromeGlass) Modifier.layerBackdrop(pageBackdrop) else Modifier)
+                    // The bar's collapse and its band's fade-in both read this
+                    // connection. The page has no pinned chrome of its own now,
+                    // so it collapses exactly like every other Miuix page.
+                    .nestedScroll(scrollBehavior.nestedScrollConnection)
             ) {
                 MiuixPullToRefresh(
                     isRefreshing = refreshing,
                     onRefresh = onRefresh,
-                    // The bar never collapses on this page, so the circle's
-                    // anchor is a constant — but the library still reads it
-                    // from the behavior, so the behavior rides along.
+                    // The circle's anchor follows the bar as it collapses; the
+                    // library reads it from the behavior, which the body box
+                    // above now drives through nested scroll.
                     topAppBarScrollBehavior = scrollBehavior,
                     // The library's defaults are hard-coded English; the text is
                     // part of the indicator, so it localises here.
@@ -439,16 +450,16 @@ fun MainScreen(
                         stringResource(R.string.refreshing),
                         stringResource(R.string.refresh_done)
                     ),
-                    // Full height, no top padding: rows must travel UNDER the
-                    // glass for the blur to have something to sample. The bar's
-                    // room rides in the list's content padding instead (see
-                    // [AppListPane]). `contentPadding` pads only the REFRESH
-                    // HEADER, not the content: it anchors the indicator just
-                    // below the glass bar — the library's own demo passes the
-                    // toolbar inset here. Without it the header sits at the
-                    // very top of the screen, behind the glass, where a pull
-                    // only grows it in place: nothing appears until the circle
-                    // has stretched past the bar's bottom edge.
+                    // Full height, no top padding: rows travel UNDER the bar,
+                    // which paints over them. The bar's room rides in the
+                    // list's content padding instead (see [AppListPane]).
+                    // `contentPadding` pads only the REFRESH HEADER, not the
+                    // content: it anchors the indicator just below the bar —
+                    // the library's own demo passes the toolbar inset here.
+                    // Without it the header sits at the very top of the screen,
+                    // behind the bar, where a pull only grows it in place:
+                    // nothing appears until the circle has stretched past the
+                    // bar's bottom edge.
                     contentPadding = PaddingValues(top = innerPadding.calculateTopPadding()),
                     modifier = Modifier.fillMaxSize()
                 ) {
@@ -469,6 +480,9 @@ fun MainScreen(
                         // the bar is docked.
                         bottomPadding = innerPadding.calculateBottomPadding() +
                             LocalFloatingBarClearance.current,
+                        // The search capsule, as the list's first item: it
+                        // leaves the screen with the rows when the page scrolls.
+                        header = searchHeader,
                         modifier = Modifier.fillMaxSize()
                     )
                     // The reference's scroll indicator, riding the same list —
@@ -480,7 +494,7 @@ fun MainScreen(
                             .align(Alignment.CenterEnd)
                             .fillMaxHeight(),
                         trackPadding = PaddingValues(
-                            top = 4.dp + innerPadding.calculateTopPadding(),
+                            top = appListOpeningAir() + innerPadding.calculateTopPadding(),
                             bottom = innerPadding.calculateBottomPadding() +
                                 LocalFloatingBarClearance.current
                         )
@@ -501,6 +515,9 @@ fun MainScreen(
             defaultResult = {},
             searchBarTopPadding = searchBarTopPadding,
             collapsedCapsuleColor = searchCapsuleColor,
+            // The sheet covers the page but NOT the home's bottom chrome, which
+            // is composed outside it. Keep the last result clear of that bar.
+            resultBottomPadding = LocalFloatingBarClearance.current,
         ) {
                 items(items = apps, key = { it.packageName }) { app ->
                     AppRow(
@@ -523,12 +540,12 @@ fun MainScreen(
         return
     }
     // The M3 home. Like every secondary page, the title is a collapsing
-    // large bar — the search field lives under it as a standalone inline
-    // card, not pinned inside the bar — and the diagnostics entry is a card
-    // on the module tab, not a FAB. The bar paints itself the page's
-    // background (rows travel under it and are occluded; the bar's room
-    // rides in the list's content padding) — no glass: the Haze treatment
-    // is the Miuix look's own now.
+    // large bar — the search field is the LIST'S FIRST ITEM now, travelling
+    // up with the rows instead of standing under the bar — and the
+    // diagnostics entry is a card on the module tab, not a FAB. The bar
+    // paints itself the page's background (rows travel under it and are
+    // occluded; the bar's room rides in the list's content padding) — no
+    // glass: the Miuix look paints a gradient band instead.
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
         modifier = modifier
@@ -552,9 +569,6 @@ fun MainScreen(
             MainTopBar(
                 state = topBarState,
                 actions = actions,
-                query = query,
-                onQueryChange = onQueryChange,
-                scrollBehavior = null,
                 m3ScrollBehavior = scrollBehavior
             )
         }
@@ -595,11 +609,26 @@ fun MainScreen(
                     icons = icons,
                     topPadding = innerPadding.calculateTopPadding(),
                     // The bar's row is spent by the frame above, so this is the
-                    // clearance alone: the air the list keeps at its foot, the
-                    // same the search box keeps at its head — without it the
-                    // last row landed flush against the bar and read crowded.
+                    // clearance alone: the air the list keeps at its foot —
+                    // without it the last row landed flush against the bar and
+                    // read crowded.
                     bottomPadding = innerPadding.calculateBottomPadding() +
-                        LocalFloatingBarClearance.current
+                        LocalFloatingBarClearance.current,
+                    // The search card, as the list's first item: it scrolls off
+                    // with the rows. The list already insets its items, so the
+                    // card drops the horizontal padding it wore in the bar.
+                    header = {
+                        InlineSearchCard(
+                            query = query,
+                            onQueryChange = onQueryChange,
+                            modifier = Modifier
+                                .background(MaterialTheme.colorScheme.background)
+                                // The list's own 8dp item spacing carries the
+                                // rest of the 12dp gap the pinned card used to
+                                // keep entirely to itself.
+                                .padding(bottom = 4.dp)
+                        )
+                    }
                 )
             }
         )
@@ -648,22 +677,12 @@ private val OverflowMenuPositionProvider = object : top.yukonga.miuix.kmp.basic.
 fun MainTopBar(
     state: MainTopBarState,
     actions: MainActions,
-    query: String,
-    onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     /**
-     * The search state machine and its updater — the reference's own
-     * ([SearchStatus], see MiuixSearchPager.kt). Only the Miuix branch reads
-     * these; the M3 look keeps its inline field on `query`/`onQueryChange`.
+     * The Miuix bar's collapse behavior. Owned by [MainScreen] so the body's
+     * nested-scroll connection and the bar read the same state; only the Miuix
+     * branch uses it.
      */
-    searchStatus: SearchStatus = SearchStatus(""),
-    onSearchStatusChange: (SearchStatus) -> Unit = {},
-    /** The fake capsule's colour under the glass bar (null = the High fill). */
-    searchCapsuleColor: Color? = null,
-    /** The capsule's top inset — 12dp at rest, riding to 0 as the bar folds. */
-    searchBarTopPadding: () -> Dp = { 12.dp },
-    /** Reports the fake capsule's window Y — the pager's ride-down anchor. */
-    onSearchOffset: (Dp) -> Unit = {},
     scrollBehavior: top.yukonga.miuix.kmp.basic.ScrollBehavior? = null,
     /**
      * The M3 bar's collapse behavior, owned by [MainScreen] so its
@@ -673,189 +692,120 @@ fun MainTopBar(
     m3ScrollBehavior: androidx.compose.material3.TopAppBarScrollBehavior? = null
 ) {
     if (LocalUiStyle.current.isMiuixBased) {
-        // The system settings' own bar: the large title at the left while the
-        // page rests, with the search capsule in the bar's own bottom slot —
-        // the reference's resting search entry (the Example's IconPage). The
-        // capsule is FAKE ([SearchBarFake]): inert, hint-labelled, and merely
-        // the tap target that raises the full-screen pager (see MainScreen's
-        // Miuix frame) whose real bar rides from this capsule's position to
-        // the screen's top. The pager hides this bar behind its own surface,
-        // so the fake never shows through a live field.
-        //
-        // One colour for the whole title + search region: the glass sheet paints
-        // it (the glass is always on in this look), hence transparent here.
-        val barColor = Color.Transparent
+        // The search capsule is no longer a bar slot: MainScreen mounts it as
+        // the list's first item, so it travels up with the rows. With nothing
+        // pinned under the bar, this page can wear the same gradient band as
+        // every other Miuix page. Plain MIUIX still follows the floating-bar
+        // row and keeps the library's default bar when that row is off.
+        val floatingBar by AppearanceState.floatingBar
+        val useGlassBar = softGlassChrome() || floatingBar
+        // MainScreen always hands one in; the fallback only protects the
+        // signature for the M3 call site, which never enters this branch.
+        val behavior = scrollBehavior ?: MiuixScrollBehavior()
+        val fraction = behavior.state.collapsedFraction
+        val scrolled = !fraction.isNaN() && fraction > 0f
+        val view = LocalView.current
         // Every operation control on this bar ticks (the row press's own
         // KEYBOARD_TAP, the app page's one feedback language): the batch bar's
-        // ✕ and ✓, the resting bar's batch entry, and the overflow (筛选)
-        // button below.
-        val view = LocalView.current
-        // The resting capsule, shared by the resting and batch bars: batch mode
-        // keeps the search visible — same slot, same 12dp→0 ride with the
-        // collapse, same tap into the pager — so the bar's search behaves
-        // identically over either title.
-        val searchBottom: @Composable () -> Unit = {
-            val density = LocalDensity.current
-            Box(
-                modifier = Modifier
-                    .alpha(if (searchStatus.isCollapsed()) 1f else 0f)
-                    .onGloballyPositioned { coordinates ->
-                        onSearchOffset(
-                            with(density) {
-                                coordinates.positionInWindow().y.toDp()
-                            }
-                        )
-                    }
-                    .then(
-                        if (searchStatus.isCollapsed()) {
-                            Modifier.pointerInput(Unit) {
-                                detectTapGestures {
-                                    onSearchStatusChange(
-                                        searchStatus.copy(
-                                            current = SearchStatus.Status.EXPANDING
-                                        )
-                                    )
-                                }
-                            }
-                        } else {
-                            Modifier
-                        }
-                    ),
-            ) {
-                SearchBarFake(
-                    label = searchStatus.label,
-                    searchBarTopPadding = searchBarTopPadding,
-                    capsuleColor = searchCapsuleColor
+        // ✕ and ✓, the resting bar's batch entry, and the overflow (筛选).
+        val leading: @Composable () -> Unit = {
+            BarIconButton(onClick = {
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                actions.onExitMultiSelect()
+            }) {
+                Icon(
+                    imageVector = MiuixIcons.Close,
+                    contentDescription = stringResource(R.string.batch_exit),
+                    tint = MiuixTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }
-        Column(modifier = modifier.background(barColor)) {
+        val emptyControl: @Composable () -> Unit = {}
+        // Batch mode keeps the resting bar's own shape: the same collapsing
+        // large title, with the count in the title slot — 「应用」 simply
+        // becomes 「已选择 N 项」. The mode's controls stay at the bar's right
+        // end where HyperOS's own batch pages keep them: the select-all flip,
+        // then 保存. Glyphs, not words — 全选 widening to 取消全选 shoved the
+        // count sideways on every flip.
+        val barActions: @Composable RowScope.() -> Unit = {
             if (state.multiSelect) {
-                // Batch mode keeps the resting bar's own shape: the same
-                // collapsing large title, with the count in the title slot —
-                // 「应用」 simply becomes 「已选择 N 项」 — instead of dropping
-                // to a collapsed compact bar. The mode's controls stay at the
-                // bar's right end — where HyperOS's own batch pages keep them:
-                // the select-all flip, then 保存. Checkboxes show the final
-                // membership; one save applies the add/remove diff.
-                //
-                MiuixTopAppBar(
-                    title = state.title,
-                    largeTitle = state.title,
-                    color = barColor,
-                    // The mode's own leading ✕: leave without saving, the same
-                    // bar control the bar's right end wears ([BarIconButton]: the
-                    // library's bare button, or 柔光玻璃's plate) — the
-                    // unambiguous "I'm done looking" control, beside the back
-                    // gesture which here also means leave.
-                    navigationIcon = {
-                        BarIconButton(onClick = {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            actions.onExitMultiSelect()
-                        }) {
-                            Icon(
-                                imageVector = MiuixIcons.Close,
-                                contentDescription = stringResource(R.string.batch_exit),
-                                tint = MiuixTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    },
-                    // The mode's controls are the reference's own top-right
-                    // language — icon buttons, the Example's home bar kind: a
-                    // SelectAll glyph opening the selection menu (全选 /
-                    // 取消全选, the current one carrying the check, the panel
-                    // the [OverflowMenu] machinery paints) and an Ok glyph
-                    // saving in one tap. Words here were the bug: 全选
-                    // widening to 取消全选 shoved the 「已选择 N 项」 title
-                    // sideways on every flip, and a word that changes width
-                    // mid-bar reads broken. Glyphs hold one width each, so
-                    // the title never moves.
-                    actions = {
-                        BatchSelectMenu(
-                            allVisibleSelected = state.allVisibleSelected,
-                            onSelectAll = actions.onSelectAll
-                        )
-                        // The bar packs its actions edge to edge, which the
-                        // 24dp ink buttons absorb but the 柔光玻璃 44dp glass
-                        // discs do not — two of them parked adjacent read as
-                        // one blob, rims nearly touching. Give the glass some
-                        // air; the plain buttons keep the bar's own rhythm.
-                        if (softGlassChrome()) Spacer(Modifier.width(8.dp))
-                        BarIconButton(onClick = {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            actions.onBatchSave()
-                        }) {
-                            Icon(
-                                imageVector = MiuixIcons.Ok,
-                                contentDescription = stringResource(R.string.batch_save),
-                                tint = MiuixTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    },
-                    scrollBehavior = scrollBehavior,
-                    bottomContent = searchBottom
+                BatchSelectMenu(
+                    allVisibleSelected = state.allVisibleSelected,
+                    onSelectAll = actions.onSelectAll
                 )
+                // The bar packs its actions edge to edge, which the 24dp ink
+                // buttons absorb but the 柔光玻璃 44dp glass discs do not —
+                // two of them parked adjacent read as one blob.
+                if (softGlassChrome()) Spacer(Modifier.width(8.dp))
+                BarIconButton(onClick = {
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    actions.onBatchSave()
+                }) {
+                    Icon(
+                        imageVector = MiuixIcons.Ok,
+                        contentDescription = stringResource(R.string.batch_save),
+                        tint = MiuixTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             } else {
+                // Resting bar: batch mode's entry one slot left of the
+                // overflow — the same two-control bar the reference app rests
+                // in. The NORMAL weight, so this bar carries one stroke.
+                TopBarIconButton(
+                    painter = rememberVectorPainter(MiuixIcons.Normal.SelectAll),
+                    description = stringResource(R.string.batch_ops),
+                    onClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        actions.onStartMultiSelect()
+                    }
+                )
+                // Same air the batch bar gets: under 柔光玻璃 these are 44dp
+                // glass discs parked rim to rim without it.
+                if (softGlassChrome()) Spacer(Modifier.width(8.dp))
+                OverflowMenu(state.overflow, actions)
+            }
+        }
+        if (useGlassBar) {
+            MiuixGlassTopAppBar(
+                title = state.title,
+                scrolled = scrolled,
+                showBack = false,
+                backDescription = "",
+                onBack = {},
+                scrollBehavior = behavior,
+                modifier = modifier,
+                actions = barActions,
+                navigationIcon = if (state.multiSelect) leading else null
+            )
+        } else {
+            Column(modifier = modifier.background(MaterialTheme.colorScheme.background)) {
                 MiuixTopAppBar(
                     title = state.title,
                     largeTitle = state.title,
-                    color = barColor,
-                    // No gear at rest: settings is the bar's own「设置」tab now,
-                    // the same top-level destination the M3 home docks there —
-                    // a second entry above the bar would be one more thing to
-                    // keep in step, not one more way in.
-                    actions = {
-                        // Resting bar: batch mode's entry one slot left of the
-                        // overflow — the same two-control bar the reference
-                        // app rests in.
-                        TopBarIconButton(
-                            painter = rememberVectorPainter(MiuixIcons.SelectAll),
-                            description = stringResource(R.string.batch_ops),
-                            onClick = {
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                actions.onStartMultiSelect()
-                            }
-                        )
-                        // Same air the batch bar gets: under 柔光玻璃 these are
-                        // 44dp glass discs parked rim to rim without it.
-                        if (softGlassChrome()) Spacer(Modifier.width(8.dp))
-                        OverflowMenu(state.overflow, actions)
-                    },
-                    scrollBehavior = scrollBehavior,
-                    // The reference's own resting capsule, in the bar's own
-                    // bottom slot — shared with the batch bar above (see
-                    // [searchBottom]).
-                    bottomContent = searchBottom
+                    color = MaterialTheme.colorScheme.background,
+                    navigationIcon = if (state.multiSelect) leading else emptyControl,
+                    actions = barActions,
+                    scrollBehavior = behavior
                 )
             }
-            // The pinned field and its hand-rolled cancel are gone: the search
-            // is the reference's pager now (see MainScreen's Miuix frame and
-            // MiuixSearchPager.kt).
         }
         return
     }
     if (state.multiSelect) {
         // Batch mode keeps the resting bar's own shape — the same collapsing
-        // large title and the same inline search card beneath it, exactly the
-        // way the Miuix branch keeps its MiuixTopAppBar plus bottom search
-        // through the mode. 「应用」 becomes 「已选择 N 项」 in the title
-        // slot, the leading ✕ leaves without saving, and the bar's right end
-        // carries the mode's controls where HyperOS's own batch pages keep
-        // them: the select-all flip, then 保存. Glyphs, not words — 全选
-        // widening to 取消全选 would shove the count sideways on every flip
-        // (the bug the Miuix bar's own comment records); glyphs hold one
-        // width each. The select-all control is a single icon that states the
-        // action it offers: select_all at rest, select once everything is
-        // on (the user-settled cycle — select_all <-> select; gstatic ships
-        // no deselect_all glyph, the checkbox pair this replaced lied twice
-        // over: all-selected wore an EMPTY box, none-selected a CHECKED one).
+        // large title. 「应用」 becomes 「已选择 N 项」 in the title slot, the
+        // leading ✕ leaves without saving, and the bar's right end carries the
+        // mode's controls where HyperOS's own batch pages keep them: the
+        // select-all flip, then 保存. Glyphs, not words — 全选 widening to
+        // 取消全选 would shove the count sideways on every flip. The
+        // select-all control is a single icon that states the action it
+        // offers: select_all at rest, select once everything is on.
         //
-        // The search card below is the resting one to the pixel — same
-        // scroll behavior instance, so the collapse state carries across the
-        // mode's edges instead of resetting (the Miuix branch's own rule:
-        // batch is a tool over the list, not a different page).
+        // The search card lives in the list now, so it stays put across the
+        // mode's edges without a second copy here: batch is a tool over the
+        // list, not a different page.
         Column(modifier = modifier.fillMaxWidth()) {
             AppTopBar(
                 titleRes = R.string.settings_title,
@@ -889,21 +839,13 @@ fun MainTopBar(
                 },
                 scrollBehavior = m3ScrollBehavior
             )
-            InlineSearchCard(
-                query = query,
-                onQueryChange = onQueryChange,
-                modifier = Modifier
-                    .background(MaterialTheme.colorScheme.background)
-                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
-            )
         }
         return
     }
     // The resting M3 bar: the collapsing large title every secondary page
     // wears, the batch entry one slot left of the overflow at its end — the
-    // same two-control bar the Miuix branch rests in — and the search field
-    // pulled OUT of the bar into a standalone inline card beneath it,
-    // visible at once instead of behind an icon.
+    // same two-control bar the Miuix branch rests in. The search card is
+    // the list's first item (see MainScreen), not a bar slot.
     Column(modifier = modifier.fillMaxWidth()) {
         AppTopBar(
             titleRes = R.string.settings_title,
@@ -919,31 +861,14 @@ fun MainTopBar(
             },
             scrollBehavior = m3ScrollBehavior
         )
-        InlineSearchCard(
-            query = query,
-            onQueryChange = onQueryChange,
-            modifier = Modifier
-                // The list scrolls UNDER this card (the bar's room rides in
-                // the list's content padding). The card is a rounded
-                // rectangle; its corners would let the rows show through.
-                // This square, page-coloured backdrop fills the corners AND
-                // the strip below the card — rows vanish at the card's outer
-                // bounds, and the capsule never reads as cut off at its foot.
-                .background(MaterialTheme.colorScheme.background)
-                .padding(
-                    start = pageHorizontalInset(),
-                    end = pageHorizontalInset(),
-                    bottom = 12.dp
-                )
-        )
     }
 }
 
 /**
- * The applications tab's inline search: a standalone capsule under the
- * collapsing title, the way the Miuix home pins [MiuixSearchCard] under its
- * own bar. Always composed — the old search-icon round trip (icon → focus →
- * back arrow) is gone along with the auto-focus dance that needed it.
+ * The applications tab's inline search: the list's first item, so it scrolls
+ * up with the rows instead of standing fixed under the collapsing title.
+ * Always composed — the old search-icon round trip (icon → focus → back
+ * arrow) is gone along with the auto-focus dance that needed it.
  */
 @Composable
 private fun InlineSearchCard(
@@ -1169,7 +1094,11 @@ private fun BatchSelectMenu(
             expanded = true
         }) {
             Icon(
-                imageVector = MiuixIcons.SelectAll,
+                // Same weight as the bar's own copy of this glyph (see the
+                // resting bar's note): the popup row and the control that opens
+                // it are one control in two states, and a weight change between
+                // them would read as the glyph growing when the panel opens.
+                imageVector = MiuixIcons.Normal.SelectAll,
                 contentDescription = stringResource(
                     if (allVisibleSelected) R.string.deselect_all else R.string.select_all
                 ),
@@ -1434,11 +1363,27 @@ private fun OverflowCheckbox(checked: Boolean) {
 }
 
 /**
+ * The air the app list opens on, below its top bar.
+ *
+ * None on the Miuix looks: the search capsule is the list's FIRST ITEM now and
+ * carries its own top inset, so a gap here would only push it away from the
+ * bar. Material keeps its 4dp: its search card is the first item too, and the
+ * list's 8dp item spacing plus the card's own 4dp bottom lands on the same
+ * 12dp gap the pinned card used to keep to itself.
+ */
+@Composable
+private fun appListOpeningAir(): Dp =
+    if (LocalUiStyle.current.isMiuixBased) 0.dp else 4.dp
+
+/**
  * The app list: a `LazyColumn` keyed by package name.
  *
  * The key is also why the scroll position survives a refresh without the manual
  * `setSelectionFromTop` the ListView needed — keys let Compose follow rows whose
- * order moved because a check promoted them.
+ * order moved because a check promoted them. The page's search field mounts as
+ * the FIRST item through [header], so it travels up with the rows rather than
+ * pinning chrome under the bar; the list's own content padding insets it, which
+ * is why the field itself no longer carries a horizontal padding of its own.
  */
 @Composable
 fun AppListPane(
@@ -1452,44 +1397,61 @@ fun AppListPane(
     modifier: Modifier = Modifier,
     icons: Map<String, Drawable?> = emptyMap(),
     topPadding: Dp = 0.dp,
-    bottomPadding: Dp
+    bottomPadding: Dp,
+    /** First list item — the page's search field, travelling with the rows. */
+    header: (@Composable () -> Unit)? = null
 ) {
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .listScrollEndHaptic(),
-        state = lazyListState,
-        // The bottom room comes from the caller's `innerPadding` (navigation
-        // bar inset + FAB reservation). As *content* padding it lives inside
-        // the scroll: cards glide under the gesture hint line on the way past
-        // and only come to rest that far above it. The top room rides here too
-        // on the Miuix look (the glass bar's height): rows scroll UNDER the
-        // bar's blur instead of stopping at its edge.
-        contentPadding = PaddingValues(
-            start = pageHorizontalInset(), top = 4.dp + topPadding,
-            end = pageHorizontalInset(), bottom = bottomPadding
-        ),
-        // 12dp between cards under Miuix, the spacing the reference apps leave
-        // between their section cards; 8dp is the Material ramp's own choice.
-        verticalArrangement = Arrangement.spacedBy(
-            if (LocalUiStyle.current.isMiuixBased) 12.dp else 8.dp
-        )
-    ) {
-        items(items = apps, key = { it.packageName }) { app ->
-            AppRow(
-                label = app.label,
-                packageName = app.packageName,
-                icon = icons[app.packageName],
-                checked = app.checked,
-                supportMiPush = app.supportMiPush,
-                exempt = app.exempt,
-                multiSelect = multiSelect,
-                rowSelected = selected.contains(app.packageName),
-                onClick = { onRowClick(app) },
-                onLongClick = { onRowLongClick(app) },
-                onIconMissing = { loadIcon(app) }
+    Box(modifier = modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .listScrollEndHaptic(),
+            state = lazyListState,
+            // The bottom room comes from the caller's `innerPadding` (navigation
+            // bar inset + FAB reservation). As *content* padding it lives inside
+            // the scroll: cards glide under the gesture hint line on the way past
+            // and only come to rest that far above it. The top room rides here too
+            // on the Miuix look (the glass bar's height): rows scroll UNDER the
+            // base of the bar instead of stopping at its edge.
+            contentPadding = PaddingValues(
+                start = pageHorizontalInset(), top = appListOpeningAir() + topPadding,
+                end = pageHorizontalInset(), bottom = bottomPadding
+            ),
+            // 12dp between cards under Miuix, the spacing the reference apps leave
+            // between their section cards; 8dp is the Material ramp's own choice.
+            verticalArrangement = Arrangement.spacedBy(
+                if (LocalUiStyle.current.isMiuixBased) 12.dp else 8.dp
             )
+        ) {
+            if (header != null) {
+                item(key = "searchHeader") { header() }
+            }
+            items(items = apps, key = { it.packageName }) { app ->
+                AppRow(
+                    label = app.label,
+                    packageName = app.packageName,
+                    icon = icons[app.packageName],
+                    checked = app.checked,
+                    supportMiPush = app.supportMiPush,
+                    exempt = app.exempt,
+                    multiSelect = multiSelect,
+                    rowSelected = selected.contains(app.packageName),
+                    onClick = { onRowClick(app) },
+                    onLongClick = { onRowLongClick(app) },
+                    onIconMissing = { loadIcon(app) }
+                )
+            }
         }
+        // The look's own indicator, on the track the list's content padding
+        // leaves: the thumb starts under the glass bar and stops above the
+        // gesture strip. It only paints while the list is moving, so a short
+        // list — and this list at rest — looks exactly as it did before.
+        MiuixScrollBar(
+            listState = lazyListState,
+            modifier = Modifier.align(Alignment.CenterEnd),
+            top = appListOpeningAir() + topPadding,
+            bottom = bottomPadding
+        )
     }
 }
 

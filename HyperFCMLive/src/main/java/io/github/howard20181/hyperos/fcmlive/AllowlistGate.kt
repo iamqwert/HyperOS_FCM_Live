@@ -277,27 +277,6 @@ internal object AllowlistGate {
         }
     }
 
-    /**
-     * Run [task] on the allowlist handler thread after [delayMs].
-     *
-     * Exists so other subsystems can borrow the thread's serialization without
-     * reaching into the receiver plumbing: the autostart backfill uses it to
-     * park its boot-time whole-allowlist walk somewhere that cannot race the
-     * allowlist reads. Fails silently when the handler thread cannot start —
-     * the callers of this helper are maintenance passes, not hot paths.
-     */
-    internal fun postDelayedToAllowlistHandler(
-        module: XposedInterface,
-        delayMs: Long,
-        task: () -> Unit
-    ) {
-        try {
-            allowlistBackgroundHandler().postDelayed(task, delayMs)
-        } catch (t: Throwable) {
-            module.logGated(Log.WARN, HookerSupport.TAG, "Failed to schedule a task on the allowlist handler", t)
-        }
-    }
-
     private fun requestAllowlistReload(module: XposedInterface) {
         val sinceLastRead = SystemClock.uptimeMillis() - sAllowlistReadMs
         if (sinceLastRead >= HookerSupport.ALLOWLIST_RELOAD_MIN_MS) {

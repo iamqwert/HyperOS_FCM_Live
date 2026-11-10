@@ -80,6 +80,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -101,10 +102,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.howard20181.hyperos.fcmlive.FcmAppScan
 import io.github.howard20181.hyperos.fcmlive.R
+import io.github.howard20181.hyperos.fcmlive.theme.AppearanceState
 import io.github.howard20181.hyperos.fcmlive.theme.LocalAppSurfaces
 import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
+import io.github.howard20181.hyperos.fcmlive.theme.UiStyle
 import io.github.howard20181.hyperos.fcmlive.ui.AppDialog
 import io.github.howard20181.hyperos.fcmlive.ui.GroupRow
+import io.github.howard20181.hyperos.fcmlive.ui.MiuixDockedTabRow
+import io.github.howard20181.hyperos.fcmlive.ui.MiuixMetrics
+import io.github.howard20181.hyperos.fcmlive.ui.MiuixScrollBar
 import io.github.howard20181.hyperos.fcmlive.ui.GROUP_ROW_GAP
 import io.github.howard20181.hyperos.fcmlive.ui.LongPressTooltip
 import io.github.howard20181.hyperos.fcmlive.ui.NavCard
@@ -126,7 +132,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.TabRowWithContour as MiuixTabRowWithContour
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Share
 import top.yukonga.miuix.kmp.basic.PullToRefresh as MiuixPullToRefresh
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
@@ -184,14 +193,15 @@ private val PageTab.symbolRes: Int
  * flat Surface for that reason, and the full 全部 list was scrolled to its end
  * on device after the switch without a failure.
  * Both tab strips sit outside the scrolling content — under the Miuix looks
- * inside the bar's glass pane ([PageScaffold.barExtension], which also puts
- * the page on the settings page's blur), under Material in the page column.
- * That pane is the MIUIX Gaussian band on BOTH Miuix-dressed looks here: the
- * strips are its foot, and 柔光玻璃's own progressive fade is clear at its foot,
- * so this page turns the fade off ([PageScaffold.barProgressive]) rather than
- * pin navigation onto a window of sharp rows. Everything else the 柔光玻璃 look
- * draws on this page — the bar's glass control, the surfaces below — is
- * untouched.
+ * pinned in the bar ([PageScaffold.barExtension]), under Material in the
+ * page column. Where the bar is a gradient band (柔光玻璃, or plain MIUIX with
+ * the floating row ON) they mount as `MiuixGlassTopAppBar`'s bottomContent:
+ * ONE band covers the title bar and both strips and overhangs their foot, so
+ * rows travelling under a pinned strip fade out with the same ramp instead of
+ * meeting a hard opaque edge. Plain MIUIX with the floating row OFF keeps the
+ * library's default solid bar, and its strips are the library's own `TabRow`
+ * (see [useDefaultMiuixTabRow]). Everything else the 柔光玻璃 look draws on
+ * this page — the bar's glass control, the surfaces below — is untouched.
  *
  * Under the Miuix looks (MIUIX and 柔光玻璃) both levels run the library's
  * canonical TabRow + HorizontalPager pairing — the shape its own example
@@ -341,8 +351,8 @@ fun RecordsScreen(
     }
 
     // The Miuix looks' pager wiring, hoisted to the screen on purpose: the two
-    // tab strips ride INSIDE the bar's glass pane (PageScaffold's barExtension),
-    // and their selected indexes read these pagers — so the states have to
+    // tab strips sit in the bar's band (PageScaffold's barExtension), and
+    // their selected indexes read these pagers — so the states have to
     // outlive the body they used to live in. The Material look ignores them.
     val pagerScope = rememberCoroutineScope()
     val pagePagerState = rememberPagerState(pageCount = { PageTab.entries.size })
@@ -445,8 +455,16 @@ fun RecordsScreen(
                 // the style's button (the 柔光玻璃 glass disc included) with the
                 // bar's onSurface ink. A material3 icon here was the odd one out:
                 // a Material glyph in a Miuix bar, tinted a caption grey.
+                //
+                // The glyph is the library's too. `ic_upload` was the last
+                // Material Symbols mark still standing in a Miuix surface — and
+                // it stood on the bar this look dresses most carefully. The
+                // library's Share is the same "hand it out of the app" mark the
+                // other bars speak, at the Normal weight the overflow uses (see
+                // the note on that glyph: Regular's 1.78dp stroke reads heavier
+                // than every line beside it).
                 TopBarIconButton(
-                    painter = painterResource(R.drawable.ic_upload),
+                    painter = rememberVectorPainter(MiuixIcons.Normal.Share),
                     description = stringResource(R.string.records_export),
                     onClick = {
                         exportText = diagnosticsReport(
@@ -481,20 +499,21 @@ fun RecordsScreen(
                 }
             }
         },
-        // The Miuix looks' two tab strips, pinned inside the bar's glass pane.
-        // This is what puts the page on the settings page's blur: the strips are
-        // chrome, not content, so they ride the collapsing bar like the apps
-        // page's search capsule — and the pane covers the whole column, bar and
-        // strips. The events strip joins only while its page is
-        // the target, expanding and collapsing with the dock's own
-        // AnimatedVisibility recipe so the pane's height glides instead of
-        // jumping. The body below scrolls under the lot — which is the whole
-        // point: rows travelling beneath the pane are what the blur reads.
+        // The Miuix looks' two tab strips, pinned in the title bar's chrome:
+        // with a gradient band they are glass capsules in its bottomContent
+        // (one ramp over bar and strips), with the docked default bar they are
+        // MIUIX's own TabRows on its solid page tone (see
+        // [useDefaultMiuixTabRow] and [PageScaffold.barExtension]). The events
+        // strip joins only while its page is the target, expanding and
+        // collapsing with the dock's own AnimatedVisibility recipe so the
+        // chrome's height glides instead of jumping. The body below scrolls
+        // under the lot.
+        //
         // This page's own reading of how far its visible content has travelled
-        // under the pane — see the two numbers above. Handed in on both Miuix
-        // looks and ignored by Material, which has no pane. It feeds the pane's
-        // frost and the reveal ONLY: the bar itself is the standard large
-        // title, collapsing on the nested scroll like every other page's
+        // — see the two numbers above — is handed in on both Miuix looks and
+        // ignored by Material, which has no plates. It feeds the look's plate
+        // reveal AND the band's fade-in; the bar itself is still the standard
+        // large title, collapsing on the nested scroll like every other page's
         // (compactBar stays false) — a page whose bar collapsed over its own
         // reading grew a small title that never came back, and a title whose
         // alpha was keyed to that reading vanished whenever the visible tab
@@ -509,54 +528,84 @@ fun RecordsScreen(
             }
         },
         barExtension = if (LocalUiStyle.current.isMiuixBased) { {
-            // `backdrop = null` on both strips: they sit ON the pane (the bar's
-            // Gaussian band is the blur here), and the capsule's
-            // SoftGlassSurface path — which samples [LocalSoftGlassBackdrop] —
-            // would stack a second glass on glass. The apps page's pinned
-            // search capsule runs the same rule: plain wash on the pane, the
-            // refraction is the band's business.
+            // Both levels answer the same floating-bar switch as the bar:
+            // docked → the library's rows, glass band → capsules sampling the
+            // page's own recorded layer from OUTSIDE the recorded body (see
+            // [useDefaultMiuixTabRow]).
+            //
+            // Two strips are one control stack: between them sits the tighter
+            // [STRIP_GAP], while the foot under the last one keeps the chrome
+            // breath — the same 16dp the page leaves above the bottom bar. The
+            // page strip alone (状态) keeps that breath at its foot instead, or
+            // the gap under the single strip would halve as well.
+            val eventsStripTargeted =
+                PageTab.entries[pagePagerState.targetPage] == PageTab.Events
             RecordsPageTabRow(
                 selected = PageTab.entries[pagePagerState.currentPage],
                 onSelect = { tab ->
                     pagerScope.launch { pagePagerState.springAnimateToPage(tab.ordinal) }
                 },
                 modifier = Modifier.padding(
-                    start = inset, end = inset, bottom = STRIP_BREATH
+                    start = inset,
+                    end = inset,
+                    bottom = if (eventsStripTargeted) STRIP_GAP else STRIP_BREATH
                 )
             )
             AnimatedVisibility(
-                visible = PageTab.entries[pagePagerState.targetPage] == PageTab.Events,
+                visible = eventsStripTargeted,
                 // Anchored to the bar: the strip reveals downward from under
                 // it and folds back up into it — never a gap between the two.
-                enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
-                exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
+                //
+                // The enter leg carries no fade, and neither leg clips,
+                // because both were making the strip's soft shadow arrive a
+                // beat late. Measured on device at 10x animator scale, in the
+                // gap the shadow falls into (16dp then, [STRIP_GAP] now):
+                //
+                //  - with the old `fadeIn` the gap read 243.9 (its unfilled
+                //    value) for the whole transition and only dropped to 240.9
+                //    once the animation settled; the list also showed THROUGH
+                //    the half-faded plate. The capsule's shadow is a
+                //    `Modifier.dropShadow` RenderEffect, and under a layer
+                //    whose alpha is still ramping it does not land;
+                //  - `expandVertically` also clips the subtree to the growing
+                //    rect, and the shadow lives OUTSIDE the plate's outline
+                //    (24dp ambient), so the half that falls up into that gap
+                //    was cut away until the clip was released.
+                //
+                // Without either, the gap reads 240.9 and the plate's side
+                // gutter 244.5 from the first frame. That is legitimate here
+                // because the plate never moves: a fixed 45dp shape at a fixed
+                // spot, with only the SPACE under it animating — so it and its
+                // shadow can come in at final geometry and full strength while
+                // the content below travels out from under them. The exit
+                // keeps its fade: a strip leaving may dissolve, and the
+                // dissolve is what covers the shadow leaving with it.
+                enter = expandVertically(expandFrom = Alignment.Top, clip = false),
+                exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top, clip = false)
             ) {
                 EventsTabRow(
                     selected = EventTab.entries[eventPagerState.currentPage],
                     onSelect = { tab ->
                         pagerScope.launch { eventPagerState.springAnimateToPage(tab.ordinal) }
                     },
+                    // The foot under the second strip takes the SAME gap as the
+                    // space between the two strips — strip, gap, strip, gap,
+                    // content — instead of the wider chrome breath, which now
+                    // stays only where a single strip ends the chrome (状态).
                     modifier = Modifier.padding(
-                        start = inset, end = inset, bottom = STRIP_BREATH
+                        start = inset, end = inset, bottom = STRIP_GAP
                     )
                 )
             }
         } } else null,
-        // The strips ARE the pane's foot, and 柔光玻璃's pane fades to clear
-        // exactly there — so under that look the strips and the rows sliding out
-        // from under them stayed sharp, which read as "this page has no blur"
-        // next to every MIUIX page. The page therefore asks for the MIUIX
-        // Gaussian band: 25dp at a constant radius, page tone at 0.8, a hard
-        // bottom edge — the very recipe the plain MIUIX look already puts here,
-        // reused rather than re-derived (see HazeGlassBar's `progressive`). It
-        // is the same pane, so the bar, both strips and the body under them are
-        // one frost; nothing else about the look changes.
-        barProgressive = false
+        // [barExtension] above mounts the strips inside the bar's band (see
+        // [PageScaffold.barExtension]); the page's own travel above drives both
+        // the band's fade and the plate reveal.
     ) { innerPadding ->
         // MIUIX 系 (MIUIX / 柔光玻璃): the library example's canonical
         // TabRow + HorizontalPager pairing, both tab levels — with the strips
-        // mounted in the bar's glass above (see barExtension) and the pages
-        // padded by the pane's full extent so the content starts below them
+        // mounted in the bar's band above (see barExtension) and the pages
+        // padded by the chrome's full extent so the content starts below them
         // and scrolls under them. The Material look keeps the when() switch
         // below — its PrimaryTabRow has no pager dance of its own.
         if (LocalUiStyle.current.isMiuixBased) {
@@ -754,43 +803,67 @@ private fun exportFileName(): String {
 /**
  * The top-level 状态/事件 strip.
  *
- * Both Miuix-dressed looks wear the capsule ([MiuixCapsuleTabRow]) and its
- * `selectedTabIndex` rides the page pager ([MiuixRecordsPagerBody]); the
- * Material look uses the M3 primary tab row of leading-icon tabs
- * ([RecordsLeadingIconTab]: `insights` before 状态, `receipt_long` before 事件).
- * Two tabs fill the width, so no scrolling is involved.
+ * Three shapes, one `selectedTabIndex` riding the page pager
+ * ([MiuixRecordsPagerBody]):
+ *  - Material — M3's primary tab row of leading-icon tabs
+ *    ([RecordsLeadingIconTab]: `insights` before 状态, `receipt_long` before
+ *    事件). Two tabs fill the width, so no scrolling is involved.
+ *  - Plain MIUIX with its DOCKED bar (悬浮底栏 off) — [MiuixDockedTabRow], the
+ *    library's own look at its defaults: 42dp, one outlined slot per tab, the
+ *    selected one a squircle plate. It is drawn here rather than borrowed
+ *    because the library's row lets a sideways drag slide it out of place; see
+ *    that component for the measurement and the reason a pointer-level fix was
+ *    rejected.
+ *  - 柔光玻璃, and plain MIUIX with the floating bar ON — the glass capsule
+ *    ([MiuixCapsuleTabRow]), pinned inside the title bar's gradient band as
+ *    [PageScaffold]'s `barExtension`, refracting the rows passing under it.
  *
- * Under the Miuix looks the strip is [PageScaffold]'s `barExtension` — pinned
- * inside the bar's glass pane, riding the collapsing bar the way the apps
- * page's search capsule does, with the page's blur recipe covering it. The
- * Material look keeps the strip in the page column: M3 has no glass to mount
- * it in, and its rows own their divider there.
+ * The Material look keeps its strip in the page column: M3 has no bar of this
+ * shape to mount it in, and its rows own their divider there.
  *
- * The capsule replaced the library's own row on both looks rather than only on
- * 柔光玻璃, because it is a layout and the two looks differ in material: the
- * library row drew a band with an outlined button per tab, which is not what
- * either look is after. 柔光玻璃 draws the glass over the plate whenever it has
- * a backdrop; plain MIUIX gets the same plate the reference shows at the top of
- * its page. The Material look never sees either — its row is M3's.
+ * The two Miuix levels (状态/事件 and the six categories) answer this same
+ * question through [useDefaultMiuixTabRow], so a switch flip cannot leave one
+ * of them in the other shape.
  */
+@Composable
+private fun useDefaultMiuixTabRow(): Boolean {
+    // The same state [PageScaffold] reads for the bar: floating OFF keeps the
+    // library's default solid bar, and the library's own strip belongs under
+    // it. Floating ON (or 柔光玻璃, which always floats) lifts the bar onto a
+    // gradient band, and the glass capsule belongs in that band.
+    if (LocalUiStyle.current != UiStyle.Miuix) return false
+    val floatingBar by AppearanceState.floatingBar
+    return !floatingBar
+}
+
 @Composable
 private fun RecordsPageTabRow(
     selected: PageTab,
     onSelect: (PageTab) -> Unit,
     modifier: Modifier = Modifier
-) {
-    val labels = PageTab.entries.map { stringResource(it.labelRes) }
+) {    val labels = PageTab.entries.map { stringResource(it.labelRes) }
     if (LocalUiStyle.current.isMiuixBased) {
+        if (useDefaultMiuixTabRow()) {
+            // The library's row as it looks at its defaults — 42dp, 12dp
+            // corners, one outlined slot per tab with a plate under the
+            // selected one — but built here instead of borrowed: that row is a
+            // `LazyRow` with an overscroll effect that lets a sideways drag
+            // slide the whole strip out of place. See [MiuixDockedTabRow].
+            MiuixDockedTabRow(
+                tabs = labels,
+                selectedTabIndex = selected.ordinal,
+                onTabSelected = { onSelect(PageTab.entries[it]) },
+                modifier = modifier
+            )
+            return
+        }
         MiuixCapsuleTabRow(
             tabs = labels,
             selectedTabIndex = selected.ordinal,
             onTabSelected = { onSelect(PageTab.entries[it]) },
-            // backdrop = null: under the Miuix looks this strip is mounted in
-            // the bar's glass pane (PageScaffold.barExtension), where the pane
-            // IS the blur — sampling the page layer here would stack a second
-            // glass on glass, and the page layer's record covers this strip
-            // too (it lives in the recorded body) — glass sampling itself.
-            backdrop = null,
+            // The default backdrop is the page's own recorded layer: the strip
+            // sits OUTSIDE that record, so it can refract the rows travelling
+            // under the band without a cycle (see `MiuixCapsuleTabRow`).
             modifier = modifier
         )
         return
@@ -829,14 +902,12 @@ private fun RecordsPageTabRow(
  * riding indicator are unaffected).
  *
  * The strips themselves live ABOVE this body — they are [PageScaffold]'s
- * `barExtension`, pinned inside the bar's glass pane like the apps page's
- * search capsule. That mount is what puts the page on the settings page's
- * blur: the pane (the MIUIX Gaussian band on both Miuix-dressed looks, see the
- * screen's own note on `barProgressive`) covers bar + strips, and the pages
- * below are padded by the pane's
- * full extent ([topPad]) while running the FULL height of the body area — so
- * a list scrolled up passes beneath the strips and the bar, and the blur has
- * travelling rows to read. Every page is a plain verticalScroll Column (the
+ * `barExtension`, pinned in the title bar's chrome: a gradient band covering
+ * bar and strips when the floating row is on, the library's solid bar + rows
+ * when it is off (see [useDefaultMiuixTabRow]). The pages below are padded by
+ * the chrome's full extent ([topPad]) while running the FULL height of the
+ * body area — so a list scrolled up passes beneath the strips and the bar,
+ * and the band (where there is one) has travelling rows to fade out. Every page is a plain verticalScroll Column (the
  * class KDoc's no-lazy rule holds per pager page), composed on demand like
  * the example's own pagers — resident pages made this tab heavy enough to
  * jank the home's tab spring — and every scroll position is hoisted here, so
@@ -903,7 +974,16 @@ private fun MiuixRecordsPagerBody(
         // No padding on the content either side — the pager takes the box's
         // full height, and each page keeps its own distance from the chrome as
         // CONTENT padding ([topPad]), so rows travel under the glass.
-        contentPadding = PaddingValues(top = topPad),
+        //
+        // Plus the header's own empty tail ([MiuixMetrics.RefreshHeaderTail]):
+        // the library reserves `circleSize + 36dp` and draws about 43 of it, and
+        // the list starts where the RESERVED band ends. Without the tail the
+        // label ends up that far above the first block, which on this page is a
+        // section heading that already carries its own air — the pulled state
+        // read as a gap twice the apps page's. The content does not move by
+        // this: the tail shifts where the header is DRAWN, not where the list
+        // starts.
+        contentPadding = PaddingValues(top = topPad + MiuixMetrics.RefreshHeaderTail),
         modifier = modifier
     ) {
         HorizontalPager(
@@ -932,18 +1012,31 @@ private fun MiuixRecordsPagerBody(
             modifier = Modifier.fillMaxSize()
         ) { page ->
             when (PageTab.entries[page]) {
-                PageTab.Status -> StatusTab(
-                    archive = archive,
-                    noSource = noSource,
-                    problem = problem,
-                    loading = loading,
-                    onOpenStatus = onOpenStatus,
-                    inset = inset,
-                    topPad = topPad,
-                    bottomPad = bottomPad,
-                    scrollState = statusScroll,
-                    modifier = Modifier.fillMaxSize()
-                )
+                PageTab.Status -> Box(modifier = Modifier.fillMaxSize()) {
+                    StatusTab(
+                        archive = archive,
+                        noSource = noSource,
+                        problem = problem,
+                        loading = loading,
+                        onOpenStatus = onOpenStatus,
+                        inset = inset,
+                        topPad = topPad,
+                        bottomPad = bottomPad,
+                        scrollState = statusScroll,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    // The status tab scrolls a plain [ScrollState] — hoisted to
+                    // the screen, so the look's indicator can be mounted here
+                    // instead of inside the tab. Its track starts under the pane
+                    // (the same topPad the column pads itself with) and stops
+                    // above the gesture strip.
+                    MiuixScrollBar(
+                        scrollState = statusScroll,
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        top = topPad,
+                        bottom = bottomPad
+                    )
+                }
                 PageTab.Events -> EventsCategoriesPager(
                     archive = archive,
                     classes = eventClasses,
@@ -962,7 +1055,7 @@ private fun MiuixRecordsPagerBody(
 
 /**
  * The 事件 page's six-way category pager — the pairing's inner level, minus
- * its strip: the category strip rides INSIDE the bar's glass pane
+ * its strip: the category strip rides INSIDE the bar's gradient band
  * ([PageScaffold.barExtension], next to the page strip), so the pager here is
  * the scrolling body alone and fills the whole page area, its pages padded by
  * the pane's full extent ([topPad]). Each category keeps its own
@@ -1081,18 +1174,25 @@ private fun EventsContent(
     LaunchedEffect(listState, onScrolled) {
         snapshotFlow {
             // Measured off the layout rather than off
-            // `firstVisibleItemScrollOffset`: that reading's zero point moves
-            // with the list's top content padding — which here is the glass
-            // pane's whole extent — while the item's own offset against the
-            // padding is the travel plain to read. Only the first item's
-            // travel is measured exactly (the ramp is shorter than a row
-            // anyway); anything past it is simply "past the ramp".
+            // `firstVisibleItemScrollOffset`, which is only the offset inside
+            // the first row: a list whose top sits mid-row would under-report.
+            // The item's own offset is the travel of the whole list, and it is
+            // in CONTENT coordinates — the viewport starts at
+            // `-beforeContentPadding` (LazyListMeasure's `viewportStartOffset`),
+            // so a list at its very top reports `offset == 0`, NOT
+            // `beforeContentPadding`. Subtracting the padding here therefore
+            // reported the pane's whole height as already travelled on a list
+            // nobody had touched, which pinned the bar's reading at 1: that was
+            // the glass plates appearing by themselves the moment the 事件 tab
+            // opened. Only the first item's travel is measured exactly (the
+            // ramp is shorter than a row anyway); anything past it is simply
+            // "past the ramp".
             val info = listState.layoutInfo
             val first = info.visibleItemsInfo.firstOrNull()
             when {
                 first == null -> 0
                 first.index > 0 -> Int.MAX_VALUE
-                else -> (info.beforeContentPadding - first.offset).coerceAtLeast(0)
+                else -> (-first.offset).coerceAtLeast(0)
             }
         }.collect { onScrolled(it) }
     }
@@ -1159,71 +1259,93 @@ private fun EventsContent(
         }
     }
 
-    LazyColumn(
-        state = listState,
-        modifier = modifier
-            .fillMaxWidth()
-            .pointerInput(selected) {
-                awaitPointerEventScope {
-                    var moves = 0
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        when (event.type) {
-                            PointerEventType.Press -> {
-                                moves = 0
-                                Log.d(SCROLL_LOG, "press tab=$selected")
+    Box(modifier = modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .pointerInput(selected) {
+                    awaitPointerEventScope {
+                        var moves = 0
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            when (event.type) {
+                                PointerEventType.Press -> {
+                                    moves = 0
+                                    Log.d(SCROLL_LOG, "press tab=$selected")
+                                }
+                                PointerEventType.Move -> moves++
+                                PointerEventType.Release -> Log.d(
+                                    SCROLL_LOG,
+                                    "release tab=$selected moves=$moves " +
+                                        "idx=${listState.firstVisibleItemIndex} " +
+                                        "off=${listState.firstVisibleItemScrollOffset}"
+                                )
+                                else -> Unit
                             }
-                            PointerEventType.Move -> moves++
-                            PointerEventType.Release -> Log.d(
-                                SCROLL_LOG,
-                                "release tab=$selected moves=$moves " +
-                                    "idx=${listState.firstVisibleItemIndex} " +
-                                    "off=${listState.firstVisibleItemScrollOffset}"
-                            )
-                            else -> Unit
                         }
                     }
                 }
+                .listScrollEndHaptic(),
+            // Inset as content padding rather than a modifier padding: the rows
+            // still line up with the tab strips, and the scroll area itself keeps
+            // the full page width, so the edge haptic fires at the real edges.
+            // Under the Miuix looks [topPad] is the pane's whole extent — the list
+            // runs the full body height and rows scroll under the glass.
+            contentPadding = PaddingValues(
+                start = inset, top = topPad, end = inset, bottom = bottomPad
+            )
+        ) {
+            if (visibleEvents.isEmpty()) {
+                item(key = "empty") {
+                    EmptyEventsRow(selected, selected.emptyRes)
+                }
+                return@LazyColumn
             }
-            .listScrollEndHaptic(),
-        // Inset as content padding rather than a modifier padding: the rows
-        // still line up with the tab strips, and the scroll area itself keeps
-        // the full page width, so the edge haptic fires at the real edges.
-        // Under the Miuix looks [topPad] is the pane's whole extent — the list
-        // runs the full body height and rows scroll under the glass.
-        contentPadding = PaddingValues(
-            start = inset, top = topPad, end = inset, bottom = bottomPad
+            days.forEachIndexed { dayIndex, day ->
+                item(key = "day-${day.firstTs}") {
+                    // The newest day's heading opens the page. Under the Miuix
+                    // looks it is FLUSH: the strip above already keeps its own
+                    // 16dp breath, so the heading adds none of its own and the
+                    // blank under the six-category strip measures exactly that
+                    // breath — the same 16dp the page leaves above the bottom
+                    // bar. Material keeps M3's 28dp opening section break.
+                    val opensPage = LocalUiStyle.current.isMiuixBased && dayIndex == 0
+                    SectionTitleText(
+                        text = dayLabel(day.firstTs, todayLabel, yesterdayLabel),
+                        first = opensPage,
+                        flush = opensPage
+                    )
+                }
+                itemsIndexed(
+                    items = day.events,
+                    // `ts|text` is unique: RecordsStore.trim and parseEvents both
+                    // dedupe on exactly this pair before anything is written.
+                    key = { _, event -> "${event.ts}|${event.text}" },
+                    contentType = { _, event -> EventTaxonomy.kindOf(event) }
+                ) { index, event ->
+                    EventRow(
+                        event = event,
+                        appLabel = appLabels[eventPackage(event)].orEmpty(),
+                        uptimeSeconds = uptimes[event],
+                        arrivalMs = arrivals[event],
+                        first = index == 0,
+                        last = index == day.events.lastIndex
+                    )
+                }
+            }
+        }
+        // Every category carries the look's own indicator, on the same track the
+        // list's content padding leaves: under the glass bar, above the gesture
+        // strip. It rides the page's own [listState], so the thumb follows the
+        // list the reader is looking at — the six categories slide horizontally,
+        // they do not share a scroll.
+        MiuixScrollBar(
+            listState = listState,
+            modifier = Modifier.align(Alignment.CenterEnd),
+            top = topPad,
+            bottom = bottomPad
         )
-    ) {
-        if (visibleEvents.isEmpty()) {
-            item(key = "empty") {
-                EmptyEventsRow(selected, selected.emptyRes)
-            }
-            return@LazyColumn
-        }
-        days.forEach { day ->
-            item(key = "day-${day.firstTs}") {
-                SectionTitleText(
-                    text = dayLabel(day.firstTs, todayLabel, yesterdayLabel)
-                )
-            }
-            itemsIndexed(
-                items = day.events,
-                // `ts|text` is unique: RecordsStore.trim and parseEvents both
-                // dedupe on exactly this pair before anything is written.
-                key = { _, event -> "${event.ts}|${event.text}" },
-                contentType = { _, event -> EventTaxonomy.kindOf(event) }
-            ) { index, event ->
-                EventRow(
-                    event = event,
-                    appLabel = appLabels[eventPackage(event)].orEmpty(),
-                    uptimeSeconds = uptimes[event],
-                    arrivalMs = arrivals[event],
-                    first = index == 0,
-                    last = index == day.events.lastIndex
-                )
-            }
-        }
     }
 }
 
@@ -1272,7 +1394,7 @@ private fun StatusTab(
             )
         }
         if (noSource) {
-            val gap = if (LocalUiStyle.current.isMiuixBased) 12.dp else 16.dp
+            val gap = if (LocalUiStyle.current.isMiuixBased) MiuixMetrics.PageGap else 16.dp
             Spacer(modifier = Modifier.height(gap))
             SettingsGroup {
                 NavCard(
@@ -1314,7 +1436,18 @@ private fun StatusTab(
                         )
                         else -> timeOf(archive.fetchedAt)
                     }
-                )
+                ),
+                // The「未接入」card leads the page when it is there; otherwise
+                // this heading is the page's first block, and under the Miuix
+                // looks it sits FLUSH on the breath under the strips — the
+                // heading's first line touching the whitespace's edge, with no
+                // opening air of its own, so the whole connection block reads
+                // as starting at the chrome rather than a gap below it.
+                //
+                // Miuix only: the Material page has no refresh header pushing
+                // its content down and keeps M3's 28dp section break, which is
+                // the look's own rule for a heading (see SectionTitleText).
+                flush = LocalUiStyle.current.isMiuixBased && !noSource
             )
             ConfigSection(R.string.records_section_network, networkConfigRows(snapshot))
             ConfigSection(R.string.records_section_heartbeat, heartbeatConfigRows(snapshot))
@@ -1539,9 +1672,12 @@ private val EventTab.emptyRes: Int
 /**
  * The second-level strip — the "content of tab" area.
  *
- * Under the Miuix-dressed looks the capsule ([MiuixCapsuleTabRow]) rides
- * INSIDE the bar's glass pane ([PageScaffold.barExtension], beside the page
- * strip), its `selectedTabIndex` reading the category pager
+ * Under the glass Miuix looks (柔光玻璃, or plain MIUIX with the floating row
+ * ON) the capsule ([MiuixCapsuleTabRow]) rides INSIDE the bar's gradient band
+ * ([PageScaffold.barExtension], beside the page strip); plain MIUIX with the
+ * docked bar wears the library's own contour row (`TabRowWithContour`) there
+ * instead (see [useDefaultMiuixTabRow]). Its `selectedTabIndex` reads the
+ * category pager
  * ([EventsCategoriesPager]); under the Material look the row sits between the
  * primary strip and the list, and the M3 row's own divider closes it at the
  * foot. Neither implementation sits inside the list, so neither is subject to
@@ -1563,11 +1699,27 @@ private val EventTab.emptyRes: Int
  *    longer shows; with no text in the tab it is the only thing a screen reader
  *    has to announce.
  *
- * The six-way strip is where the capsule earns its keep: it sizes each tab from
- * its own label and only scrolls when the six of them genuinely do not fit, so
- * English's longer labels are not clipped the way an equal six-way share would
- * clip them — and the Chinese labels, all two glyphs, still come out sharing
- * the width edge to edge. Nothing here sits inside the list.
+ * On the glass looks the six-way strip is where the capsule earns its keep: it
+ * sizes each tab from its own label and only scrolls when the six of them
+ * genuinely do not fit, so English's longer labels are not clipped the way an
+ * equal six-way share would clip them — and the Chinese labels, all two
+ * glyphs, still come out sharing the width edge to edge.
+ *
+ * With the docked bar the six wear the library's CONTOUR row, and the reason
+ * is arithmetic rather than taste. The plain `TabRow` gives every slot a fixed
+ * 12dp of horizontal padding and sets its label in `body1` (16sp); on a 400dp
+ * screen — 376dp of row once [MiuixMetrics.PageInset] is taken out, six slots
+ * and five 6dp gaps — a slot measures 57.7dp, leaving 33.7dp for the label,
+ * while two Chinese glyphs at 16sp on a 1.1 font scale need 35.2dp. Every
+ * label lost 1.5dp and every label drew as a bare ellipsis. Dropping the floor
+ * further cannot help: the floor was never what squeezed the label, the
+ * padding was. The contour row carries no per-slot padding at all (its own
+ * `body2`, 14sp, tabs wrap their text), so the same six labels need 30.8dp
+ * each and fit with room to spare, even at a 1.5 font scale. What it gives up
+ * is the per-slot outline — the strip reads as one plate with a sliding pill
+ * instead of six separate buttons, the shape MIUIX itself uses for a segmented
+ * row. Only the floor and the gap are overridden ([MiuixMetrics]).
+ * Nothing here sits inside the list.
  */
 @Composable
 private fun EventsTabRow(
@@ -1577,13 +1729,30 @@ private fun EventsTabRow(
 ) {
     val labels = EventTab.entries.map { stringResource(it.labelRes) }
     if (LocalUiStyle.current.isMiuixBased) {
+        if (useDefaultMiuixTabRow()) {
+            // The library's CONTOUR row, not its plain one: same docked
+            // family (one squircle plate, the selected one filled), but with
+            // no per-slot label padding — see the KDoc above for the 1.5dp this
+            // row was losing every label to. Only the floor is overridden;
+            // height, corners, the 5dp gap and the 5dp contour stay the
+            // library's own (45dp), which is also the height the capsule
+            // takes when the floating bar is on, so that switch no longer
+            // moves this strip by 3dp.
+            MiuixTabRowWithContour(
+                tabs = labels,
+                selectedTabIndex = selected.ordinal,
+                onTabSelected = { onSelect(EventTab.entries[it]) },
+                minWidth = MiuixMetrics.CategoryTabMinWidth,
+                modifier = modifier
+            )
+            return
+        }
         MiuixCapsuleTabRow(
             tabs = labels,
             selectedTabIndex = selected.ordinal,
             onTabSelected = { onSelect(EventTab.entries[it]) },
-            // Same rule as the page strip: the pane is the blur, no second
-            // glass on glass (see RecordsPageTabRow).
-            backdrop = null,
+            // Same as the page strip: the page's own recorded layer is the
+            // backdrop, so this row frosts the content passing under the band.
             modifier = modifier
         )
         return
@@ -1726,6 +1895,9 @@ private fun EventCard(
     content: @Composable () -> Unit
 ) {
     val shape = connectedGroupShape(first, last)
+    // The corners are the Miuix look's own under a Miuix-dressed style — the
+    // shape carries the curvature, so the flat fill here stays flat and the list
+    // stays lazy: nothing about this card needs a layer.
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -1793,9 +1965,15 @@ private fun PlainInfoRow(label: String, value: String) {
  * renders nothing either, and the status line already says "not read yet".
  */
 @Composable
-private fun ConfigSection(titleRes: Int, rows: List<Pair<String, String>>) {
+private fun ConfigSection(
+    titleRes: Int,
+    rows: List<Pair<String, String>>,
+    first: Boolean = false,
+    /** See [SectionTitle.flush]: the Miuix first-block treatment, zero air. */
+    flush: Boolean = false
+) {
     if (rows.isEmpty()) return
-    SectionTitle(titleRes)
+    SectionTitle(titleRes, first = first, flush = flush)
     SettingsGroup {
         rows.forEachIndexed { index, row ->
             RecordsRow(
@@ -3314,11 +3492,22 @@ private const val MIN_REFRESH_VISIBLE_MS = 420L
 private const val VERDICT_WINDOW_MS = 60L * 60 * 1000
 
 /**
- * The 12dp breath under each capsule strip — the example's own spacing, which
- * keeps the page body off the capsules' bottom edge. Both strips carry it, so
- * the events page reads strip, breath, strip, breath, content.
+ * The breath under a SINGLE strip — [MiuixMetrics.ChromeBreath], the same 16dp
+ * the apps page's search capsule keeps and the lists keep at their foot, and
+ * the same 16dp the page leaves above the bottom bar. Only 状态 ends its chrome
+ * with one strip, so only that page reads it; 事件 ends with two and uses
+ * [STRIP_GAP] at both seams.
  */
-private val STRIP_BREATH = 12.dp
+private val STRIP_BREATH = MiuixMetrics.ChromeBreath
+
+/**
+ * The rhythm between stacked strips — half the chrome breath — and, on 事件,
+ * under the last one as well: strip, [STRIP_GAP], strip, [STRIP_GAP], content.
+ * The two levels are one control stack (page switch over category switch), not
+ * two unrelated bars, and at the full 16dp both they and the space around them
+ * took a large bite out of the content under a large title.
+ */
+private val STRIP_GAP = 8.dp
 
 /** Logcat tag for the event list's scroll diagnostics. */
 private const val SCROLL_LOG = "RecordsScroll"

@@ -2,6 +2,8 @@ package io.github.howard20181.hyperos.fcmlive.ui
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.OverscrollEffect
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -27,6 +30,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.rememberOverscrollEffect
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
@@ -54,9 +58,11 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,6 +81,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -101,14 +108,12 @@ import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurBlendMode
 import top.yukonga.miuix.kmp.blur.BlurColors
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
-import top.yukonga.miuix.kmp.blur.ProgressiveBlur
 import top.yukonga.miuix.kmp.blur.colorControls
-import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
 import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
@@ -118,6 +123,9 @@ import top.yukonga.miuix.kmp.basic.TopAppBar as MiuixTopAppBar
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar as MiuixSmallTopAppBar
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
+import top.yukonga.miuix.kmp.basic.VerticalScrollBar
+import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+import top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.icon.extended.Back
@@ -126,15 +134,11 @@ import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
 import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.preference.SliderPreference
+import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
-import dev.chrisbanes.haze.blur.HazeColorEffect
-import dev.chrisbanes.haze.HazeInput
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
-import dev.chrisbanes.haze.rememberHazeState
-import dev.chrisbanes.haze.blur.HazeBlurStyle
-import dev.chrisbanes.haze.blur.hazeBlur
+import top.yukonga.miuix.kmp.squircle.isSquircleEnabled
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -145,6 +149,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
  * Group heading shared by every page, in both looks' languages.
@@ -160,8 +165,19 @@ import kotlin.math.pow
  * switched.
  */
 @Composable
-fun SectionTitle(res: Int, modifier: Modifier = Modifier, first: Boolean = false) {
-    SectionTitleText(stringResource(res), modifier, first)
+fun SectionTitle(
+    res: Int,
+    modifier: Modifier = Modifier,
+    first: Boolean = false,
+    /**
+     * Miuix only: no air above the heading at all — it sits ON the chrome's
+     * breath, its first line touching the edge of the whitespace under a pinned
+     * strip (the records page's first block, see [ConfigSection.flush]).
+     * Ignored by the Material branch.
+     */
+    flush: Boolean = false
+) {
+    SectionTitleText(stringResource(res), modifier, first, flush)
 }
 
 /**
@@ -169,7 +185,13 @@ fun SectionTitle(res: Int, modifier: Modifier = Modifier, first: Boolean = false
  * headers, which are dates rather than resources.
  */
 @Composable
-fun SectionTitleText(text: String, modifier: Modifier = Modifier, first: Boolean = false) {
+fun SectionTitleText(
+    text: String,
+    modifier: Modifier = Modifier,
+    first: Boolean = false,
+    /** See [SectionTitle]'s same-named parameter; Miuix only. */
+    flush: Boolean = false
+) {
     if (LocalUiStyle.current.isMiuixBased) {
         // The Miuix header is the system settings' own: small, grey, part of the
         // page. Blue was the Material reading of a section break; under Miuix an
@@ -186,10 +208,16 @@ fun SectionTitleText(text: String, modifier: Modifier = Modifier, first: Boolean
                 .fillMaxWidth()
                 .semantics { heading() },
             insideMargin = PaddingValues(
-                start = 16.dp,
-                top = if (first) 12.dp else 20.dp,
-                end = 8.dp,
-                bottom = 8.dp
+                start = MiuixMetrics.SectionTitleStart,
+                top = when {
+                    // Flush: the page's first heading rides the chrome's own
+                    // breath, so nothing sits between the strips and the text.
+                    flush -> 0.dp
+                    first -> MiuixMetrics.SectionTitleTopFirst
+                    else -> MiuixMetrics.SectionTitleTop
+                },
+                end = MiuixMetrics.SectionTitleEnd,
+                bottom = MiuixMetrics.SectionTitleBottom
             )
         )
         return
@@ -252,6 +280,92 @@ fun rememberPageListState(): LazyListState {
  */
 fun Modifier.listScrollEndHaptic(): Modifier = composed {
     if (LocalUiStyle.current.isMiuixBased) Modifier.scrollEndHaptic() else Modifier
+}
+
+/**
+ * The Miuix look's spring overscroll, for a page whose content may not fill the
+ * screen — the pairing half of [rememberPageOverscrollEffect].
+ *
+ * The theme's own `MiuixOverscrollFactory` answers a drag only once the list
+ * reaches a real boundary, and a list shorter than its viewport has none: pull
+ * it and nothing moves, which is what a page with a handful of rows feels like.
+ * The library's [overScrollVertical] answers the drag itself (a damped
+ * translation of the whole list, settled by a spring), so it has to be mounted
+ * by hand on exactly the pages where "fits on one screen" is the normal case —
+ * 模块页 and 实验页 here.
+ *
+ * It is the effect *instead of* the factory, never beside it, which is why it
+ * comes with a second half: the list must also be handed
+ * `overscrollEffect = null` ([rememberPageOverscrollEffect]), or one drag runs
+ * two springs at once. Both halves answer to the same look, so a Material page
+ * keeps the platform stretch and its own nothing-else.
+ */
+fun Modifier.pageOverscroll(): Modifier = composed {
+    if (LocalUiStyle.current.isMiuixBased) Modifier.overScrollVertical() else Modifier
+}
+
+/**
+ * The `overscrollEffect` argument that goes with [pageOverscroll]: `null` under
+ * the Miuix looks (the modifier is the effect), the theme's factory under
+ * Material (the platform stretch, exactly the default this replaces).
+ */
+@Composable
+fun rememberPageOverscrollEffect(): OverscrollEffect? =
+    if (LocalUiStyle.current.isMiuixBased) null else rememberOverscrollEffect()
+
+/**
+ * The Miuix look's scroll indicator, mounted beside a page's scrollable.
+ *
+ * The system settings draw one on every page long enough to scroll, and the
+ * library ships it as [VerticalScrollBar] with the system's own numbers: a
+ * 3.64dp thumb at 10% ink, a 1 s idle delay, a 500 ms fade. It shows **only
+ * while the page moves** — it starts at zero alpha and answers
+ * `adapter.scrollOffset`, so a page whose content fits, or one nobody has
+ * touched, is pixel-identical to a page without one. That is why it is safe to
+ * hang here unconditionally under the look instead of tracking whether a list
+ * can scroll.
+ *
+ * Nothing is mounted under Material: M3 has no such chrome, and this app's M3
+ * pages keep the platform's own edge effect as their only scroll affordance.
+ *
+ * @param top the distance from the container's top edge to where the track may
+ *   start — the bar's height, i.e. the same number the page's own list passes as
+ *   its top content padding. The track must not run up behind the glass, or the
+ *   thumb would slide out of the pane's bottom edge.
+ * @param bottom the room the page reserves at its foot (navigation bar, gesture
+ *   strip, floating bar).
+ */
+@OptIn(ExperimentalScrollBarApi::class)
+@Composable
+fun MiuixScrollBar(
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+    top: Dp = 0.dp,
+    bottom: Dp = 0.dp
+) {
+    if (!LocalUiStyle.current.isMiuixBased) return
+    VerticalScrollBar(
+        adapter = rememberScrollBarAdapter(listState),
+        modifier = modifier.fillMaxHeight(),
+        trackPadding = PaddingValues(top = top, bottom = bottom)
+    )
+}
+
+/** The same indicator for a page that scrolls a plain [ScrollState]. */
+@OptIn(ExperimentalScrollBarApi::class)
+@Composable
+fun MiuixScrollBar(
+    scrollState: ScrollState,
+    modifier: Modifier = Modifier,
+    top: Dp = 0.dp,
+    bottom: Dp = 0.dp
+) {
+    if (!LocalUiStyle.current.isMiuixBased) return
+    VerticalScrollBar(
+        adapter = rememberScrollBarAdapter(scrollState),
+        modifier = modifier.fillMaxHeight(),
+        trackPadding = PaddingValues(top = top, bottom = bottom)
+    )
 }
 
 /**
@@ -326,14 +440,23 @@ fun SettingsGroup(
         )
         return
     }
-    // Glass group: one glass plane behind the whole run. Each row carries its
-    // OWN blur, and where two of them meet the anti-aliased edge lets a hairline
-    // of whatever sits behind through. Over a still card fill that hairline is
-    // invisible; over a background that moves it is not — it paints the moving
-    // gradient across the card, the line visible between the about page's rows.
-    // Under this plane the edge meets glass sampled from the very same pixel, so
-    // the hairline goes. The reference has none to show: its rows share ONE card
-    // node, where there is no edge between rows to leak.
+    // Glass group: ONE glass plane behind the whole run, and the rows above it
+    // contribute no blur of their own (see [LocalGroupGlassPlane]).
+    //
+    // It used to be both: every row carried its own [textureBlur] and this plane
+    // existed only to fill the seam where two of those blurs met — the
+    // anti-aliased edge let a hairline of the moving backdrop through, which
+    // over a still fill is invisible and over the about page's drifting mesh is
+    // not. But a row's glass is opaque, so the plane was never visible under
+    // it; the app paid one full-resolution 60dp Gaussian per row to hide a
+    // hairline between them. Handing the blur to the plane alone is the same
+    // picture with one pass per group rather than one per row, and there is no
+    // seam left to leak because there is no longer an edge between two glasses.
+    //
+    // The plane wears the group's own shape, which is the squircle under the
+    // Miuix looks (see [connectedGroupShape]) — the outermost silhouette of the
+    // run, and the only one that needs one, since the rows inside are
+    // square-cornered bar the first and last.
     Box(modifier = modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
@@ -349,11 +472,13 @@ fun SettingsGroup(
                     enabled = true
                 )
         )
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
-            content = content
-        )
+        CompositionLocalProvider(LocalGroupGlassPlane provides true) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+                content = content
+            )
+        }
     }
 }
 
@@ -367,6 +492,16 @@ fun SettingsGroup(
  * the background to fill it ([MiuixBgEffectBackground]).
  */
 val LocalMiuixGlassBackdrop = compositionLocalOf<LayerBackdrop?> { null }
+
+/**
+ * True inside a [SettingsGroup] that has already laid the group's glass down.
+ *
+ * A row reads it to skip its own blur: the plane is the glass now, and a second
+ * one drawn over it is the same pixels for a full-resolution pass per row. Set
+ * only where a plane actually exists — a group with no backdrop leaves it false,
+ * so rows keep the solid card fill they have always had.
+ */
+private val LocalGroupGlassPlane = compositionLocalOf { false }
 
 /**
  * The room the Miuix look's floating bar takes at the foot of the screen, as the
@@ -400,7 +535,7 @@ val LocalSoftGlassBarReveal = compositionLocalOf { 1f }
  * first sliver of the collapse travel, then rides a smoothstep across a short
  * window so the material is fully in by a fifth of the way down. Top of the
  * page — including the pre-measure NaN the fraction holds before the scroll
- * range exists (see [HazeGlassBar]) — reads as fully bare.
+ * range exists (see [MiuixGlassTopAppBar]) — reads as fully bare.
  */
 private const val SOFT_GLASS_REVEAL_START = 0.015f
 private const val SOFT_GLASS_REVEAL_RANGE = 0.18f
@@ -436,6 +571,16 @@ private fun miuixGlassIsDark(): Boolean =
  * light/dark blend tints, over a transparent fill, so the gradient shows
  * THROUGH the card instead of being covered by it. Shape, metrics and the row's
  * press feedback are untouched: only what the card is made of changes.
+ *
+ * The silhouette is the library's: [connectedGroupShape] hands this a
+ * [MiuixGroupShape] under the Miuix looks, so the fill, the clip and the blur's
+ * own shape all draw continuous corners — a card next to an `ArrowPreference`
+ * must not be the one with shaved corners.
+ *
+ * Inside a group whose plane already carries the glass — [LocalGroupGlassPlane]
+ * — the row contributes content only. Its own blur would be drawn over a plane
+ * made of the very same pixels, at one full-resolution pass per row: the group
+ * looks identical either way, the page just stops paying for the second one.
  */
 @Composable
 internal fun MiuixCardSurface(
@@ -444,10 +589,13 @@ internal fun MiuixCardSurface(
     content: @Composable () -> Unit
 ) {
     val backdrop = LocalMiuixGlassBackdrop.current
-    if (backdrop == null) {
+    if (backdrop == null || LocalGroupGlassPlane.current) {
         Surface(
             modifier = modifier.fillMaxWidth(),
-            color = LocalAppSurfaces.current.card,
+            // Transparent over the plane, the page's card fill with none: the
+            // row sits ON glass in the first case and IS the surface's paint in
+            // the second, so one call site covers both.
+            color = if (backdrop == null) LocalAppSurfaces.current.card else Color.Transparent,
             shape = shape,
             content = content
         )
@@ -554,11 +702,8 @@ fun LongPressTooltip(
  */
 @Composable
 fun pageHorizontalInset(): Dp {
-    return if (LocalUiStyle.current.isMiuixBased) 12.dp else 16.dp
+    return if (LocalUiStyle.current.isMiuixBased) MiuixMetrics.PageInset else 16.dp
 }
-
-/** Miuix CardDefaults.CornerRadius, the group radius under the Miuix look. */
-private val MIUIX_CARD_RADIUS = 16.dp
 
 /**
  * The shape of one slot in a connected group of cards: the outer corners take
@@ -567,6 +712,13 @@ private val MIUIX_CARD_RADIUS = 16.dp
  * Stated once because two places build it — [GroupRow] for the list rows and
  * `DynamicColorCard` on the appearance page, which is a card that opens. A
  * radius change has to land in both or the two stop matching.
+ *
+ * Under a Miuix-dressed look the answer is a [MiuixGroupShape], i.e. a
+ * **continuous-corner** silhouette, because that is what every library card and
+ * every system settings panel on the device draws — see the type's own note for
+ * why the curvature lives in the shape rather than in a modifier at each card.
+ * The Material look's answer is unchanged: `LocalAppShapes`, which is the M3
+ * generation's own corner set.
  */
 @Composable
 fun connectedGroupShape(first: Boolean, last: Boolean): Shape {
@@ -574,15 +726,18 @@ fun connectedGroupShape(first: Boolean, last: Boolean): Shape {
         // Miuix cards: one radius on the group's outer ends, square seams inside.
         // The radius is CardDefaults.CornerRadius, so a group reads exactly like
         // a Miuix Card with the rows stacked in it.
+        //
+        // The library's own switch decides the curvature: `isSquircleEnabled()`
+        // is `LocalSquircleEnabled` AND the platform's runtime-shader check, and
+        // on a build where the library's cards fall back to arcs this one has to
+        // fall back with them rather than be the only squircle on the page.
+        val radius = MiuixMetrics.CardRadius
+        val squircle = isSquircleEnabled()
         return when {
-            first && last -> RoundedCornerShape(MIUIX_CARD_RADIUS)
-            first -> RoundedCornerShape(
-                topStart = MIUIX_CARD_RADIUS, topEnd = MIUIX_CARD_RADIUS
-            )
-            last -> RoundedCornerShape(
-                bottomStart = MIUIX_CARD_RADIUS, bottomEnd = MIUIX_CARD_RADIUS
-            )
-            else -> RectangleShape
+            first && last -> MiuixGroupShape(radius, radius, radius, radius, squircle)
+            first -> MiuixGroupShape(radius, radius, 0.dp, 0.dp, squircle)
+            last -> MiuixGroupShape(0.dp, 0.dp, radius, radius, squircle)
+            else -> MiuixGroupShape(0.dp, 0.dp, 0.dp, 0.dp, squircle)
         }
     }
     val shapes = LocalAppShapes.current
@@ -662,9 +817,9 @@ fun GroupRow(
                 .heightIn(min = 56.dp)
                 .padding(
                     start = 16.dp,
-                    top = if (miuixRow) 16.dp else 14.dp,
+                    top = if (miuixRow) MiuixMetrics.RowInsideMargin else 14.dp,
                     end = 16.dp,
-                    bottom = if (miuixRow) 16.dp else 14.dp
+                    bottom = if (miuixRow) MiuixMetrics.RowInsideMargin else 14.dp
                 ),
             verticalArrangement = Arrangement.Center
         ) {
@@ -976,51 +1131,6 @@ private fun contrastRatio(a: Color, b: Color): Float {
 
 /** Icons are non-text content, so 3:1 is the threshold that applies. */
 private const val MIN_ICON_CONTRAST = 3.0f
-
-/**
- * The paint mixed over the Miuix bar's blurred backdrop. The number IS the
- * example's (`PageUtils.BlurredBar`): the Gaussian band blends the page tone
- * at 0.8 over a 25dp blur. The earlier hand-picked 0.85/64dp pair predated the
- * example comparison and read as a heavier film than the reference ever shows.
- */
-private const val BAR_GLASS_SCRIM_GAUSSIAN = 0.8f
-
-/** The blur strength of the plain-Miuix title-bar glass, in dp — the example's own. */
-private val GLASS_BLUR_GAUSSIAN = 25.dp
-
-/**
- * The 柔光玻璃 look's title-bar blur, verbatim from the example's progressive
- * recipe (`PageUtils.BlurredBar`): a 10dp blur that is strongest at the bar's
- * top edge and fades to clear pixels at its foot, the falloff reshaped by the
- * example's 2.2 power curve, with the page tone blended at 0.3. Drawn by
- * miuix's own [progressiveTextureBlur] — the RuntimeShader path Haze has no
- * counterpart for — so this style only engages where a RuntimeShader exists;
- * anything older falls back to the Gaussian band.
- */
-private val GLASS_BLUR_PROGRESSIVE = 10f
-
-/** The page-tone blend under the progressive blur — the example's own. */
-private const val BAR_GLASS_SCRIM_PROGRESSIVE = 0.3f
-
-/** The falloff curve of the progressive blur — the example's own. */
-private const val GLASS_BLUR_CURVE = 2.2f
-
-/**
- * The blurred title-bar glass, one recipe per look. The plain Miuix look runs
- * on Haze (dev.chrisbanes.haze), not miuix's own blur — the "why" lives with
- * the dependency in build.gradle — as one uniform pass: [GLASS_BLUR_GAUSSIAN]
- * blur with a page-tone tint at [BAR_GLASS_SCRIM_GAUSSIAN], a band with a hard
- * bottom edge and no spatial fade. The 柔光玻璃 look instead draws the
- * example's progressive blur through miuix's [progressiveTextureBlur] (see
- * [GLASS_BLUR_PROGRESSIVE]), which needs the page's recorded [Backdrop] — the
- * caller hands it in only where the style has recorded one, and a missing
- * shader engine falls back to the Haze band.
- *
- * Either way the glass breathes with the page: [progress] — the caller's
- * bar-collapse fraction — scales the radius and the tint together, so a page
- * at its top reads as plain background paint and the depth builds as rows
- * travel under the bar.
- */
 
 /**
  * A switch row — icon, title, optional state line, description and the switch
@@ -1392,6 +1502,33 @@ fun NavCard(
 }
 
 /**
+ * The "a newer release exists" mark on an update row, in each look's own
+ * language.
+ *
+ * Material keeps the 8dp dot this app has always drawn: M3 has no badge in a
+ * list row, and a dot is the quietest thing that can carry the meaning.
+ *
+ * Miuix hands the same meaning to [Badge] — the library's own mark, the one the
+ * system settings put on a row that has something new. Its 6dp circle and its
+ * `error` fill are the library's tokens, so the dot stops being a shape this
+ * app invented and starts matching every other badge on the device. Colour
+ * alone says nothing to a screen reader in either look, hence the label.
+ */
+@Composable
+fun UpdateBadgeDot(description: String, modifier: Modifier = Modifier) {
+    if (LocalUiStyle.current.isMiuixBased) {
+        Badge(modifier = modifier.semantics { contentDescription = description })
+        return
+    }
+    Box(
+        modifier = modifier
+            .size(8.dp)
+            .semantics { contentDescription = description }
+            .background(MaterialTheme.colorScheme.error, CircleShape)
+    )
+}
+
+/**
  * One summary line for a Miuix row: the Material card carries a state line and
  * a description at the same time, [top.yukonga.miuix.kmp.basic.BasicComponent]
  * carries one summary — the state the row is in wins, because that is the line
@@ -1470,7 +1607,7 @@ internal fun MiuixSwitchSlice(
                     MiuixSwitch(
                         checked = checked,
                         onCheckedChange = { toggle() },
-                        modifier = Modifier.padding(end = 8.dp)
+                        modifier = Modifier.padding(end = MiuixMetrics.SwitchEndGap)
                     )
                 }
             }
@@ -1479,135 +1616,64 @@ internal fun MiuixSwitchSlice(
 }
 
 /**
- * The Miuix title bar's glass — home title + search bar and secondary pages
- * alike. A wrapper, not a sheet:
- * whatever the caller puts inside defines the glass extent, and the Haze blur —
- * constant radius, faded out toward the bottom edge by one alpha mask over
- * both the blur and the tint (see the block comment on [GLASS_BLUR_RADIUS]) —
- * spans exactly that. It is the same construction LibChecker draws its app bar
- * blur with: the glass only has something to sample because the page's list
- * underlaps the bar. The M3 look wore this wrapper too and has dropped it
- * (its bars paint themselves the page background — [AppTopBar]).
+ * A **numeric** choice under the Miuix look, as the library draws one: the
+ * values live on a slider in the row's bottom action, not in a popup menu.
  *
- * The extent hugging the bar is load-bearing. An earlier attempt used a fixed
- * 200dp sheet that reached well past the bar, and on device it broke both
- * ways: at rest the first section titles below the bar sat inside the sheet
- * and were blurred into smudges, and while scrolling a card straddling the
- * sheet's edge was sharp at its foot and blurred at its head. Nothing here
- * reaches past the bar's bottom edge.
+ * The Material look answers the same row with [SettingsMenuCard] — a menu of
+ * entries — and that is right for it: M3 has no stepped slider in a settings
+ * row, and a menu keeps the row one line tall. Under Miuix the menu is the odd
+ * one out. The system's own settings put an ordinal (brightness, font size,
+ * a signal threshold) on a `SliderPreferences` track, because a menu hides
+ * every alternative until it is opened while a slider shows where the current
+ * value sits in the range — which is the whole reason the user opened the
+ * page. It also stops a four-entry value from looking like a navigation.
  *
- * Placed in the scaffold's topBar slot this is outside the source subtree
- * (inside it, the glass's own output would be captured back as a source and
- * feed on itself), over the scrolling rows and under the bar's text, and it
- * consumes no touches — the bar's controls stay tappable.
+ * The write is deferred to `onValueChangeFinished` on purpose: a drag produces
+ * a new index every few pixels, and every one of them would broadcast to the
+ * PowerKeeper hook. The track and the value text follow the finger; the system
+ * setting moves once, when the finger lifts.
  *
- * @param progress the page's bar-collapse fraction, 0 at the top of a page and
- *   1 once the large title has fully collapsed. The blur and the tint scale
- *   with it (see the block comment on [GLASS_BLUR_RADIUS]); callers without a
- *   collapsing bar (the home pages) leave it at 1 and keep the constant glass.
- * @param frost how much the pane frosts what it shows, on top of [progress]:
- *   1 is the full glass, 0 leaves the pane a plain window on the page — the
- *   scenery behind it reads sharp and no tint is laid over it. That is what a
- *   page carrying scenery of its own wears while the glass is switched off: it
- *   still needs the pane, because an opaque bar would guillotine its scenery.
- * @param backdrop the page's recorded layer, handed in only by the 柔光玻璃
- *   look — its blur runs on miuix's progressive shader, which reads the layer
- *   instead of Haze's sources (see [GLASS_BLUR_PROGRESSIVE]). `null` — every
- *   other look, or a device without a shader engine — keeps the Haze band.
- * @param progressive whether the 柔光玻璃 pane may run that shader at all. The
- *   fade is the look's resting recipe and the default; a page whose chrome
- *   reaches the pane's FOOT asks for the band instead, because a fade is by
- *   definition clear at its foot — see the records page, whose two tab strips
- *   are pinned right there and would otherwise sit on plain page colour with
- *   sharp rows travelling under them. Turning this off is what leaves it the
- *   MIUIX constant band: same 25dp radius, same 0.8 page tone, same hard
- *   bottom edge the plain Miuix look wears, that look's recipe reused rather
- *   than re-derived. It has no effect without a [backdrop] (there is no shader
- *   path to suppress).
+ * @param entries the labels, in value order — index is the slider's value.
+ * @param currentIndex the selected entry; coerced into range.
+ * @param onPick called with the index the user settled on, only when it moved.
  */
 @Composable
-fun HazeGlassBar(
-    hazeState: HazeState,
-    scrim: Color,
+fun MiuixSliderCard(
+    title: String,
+    entries: List<String>,
+    currentIndex: Int,
+    onPick: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    progress: Float = 1f,
-    frost: Float = 1f,
-    backdrop: Backdrop? = null,
-    progressive: Boolean = true,
-    content: @Composable () -> Unit
+    summary: String? = null,
+    first: Boolean = true,
+    last: Boolean = true
 ) {
-    // The collapse fraction reads as NaN before the bar's scroll range has
-    // been measured (0/0) — which is the state of a freshly composed MIUIX
-    // tree, i.e. exactly the moment a style switch or page entry lands in —
-    // and NaN * 64dp hit Haze's radius check ("must be specified and
-    // non-negative") as a hard crash. Sanitize to the at-rest reading and
-    // floor the radius above zero (a sub-visible 1dp, indistinguishable from
-    // none) so the style never receives an unspeakable value.
-    val safeProgress = if (progress.isNaN()) 0f else progress.coerceIn(0f, 1f)
-    // Frost rides the same ramp the progress does: one strength drives both, so
-    // the switch can only ever scale the glass down to plain paper thin air.
-    val strength = safeProgress * frost.coerceIn(0f, 1f)
-    // One recipe per look. The plain Miuix look runs the Example's Gaussian on
-    // Haze: a uniform frosted band, a 25dp blur with the page tone at 0.8, the
-    // hard bottom edge a classic frosted bar has. The 柔光玻璃 look runs the
-    // Example's progressive blur on miuix's own shader instead — 10dp strongest
-    // at the top edge, fading to clear at the foot on the 2.2 curve, page tone
-    // at 0.3 — which is exactly the pairing the reference draws; it needs the
-    // page's recorded layer and a working RuntimeShader, so anything without
-    // either lands back on the Gaussian band. (An earlier take removed the
-    // progressive style outright because its fade washed out the apps page's
-    // search capsule; the capsule has since gone plain, which was the whole
-    // conflict, and the style is back — scoped to this look, no switch.)
-    val blurRadius = (GLASS_BLUR_GAUSSIAN * strength).coerceAtLeast(1.dp)
-    val scrimAlpha = BAR_GLASS_SCRIM_GAUSSIAN * strength
-    val progressiveBlur = progressive && backdrop != null && isRuntimeShaderSupported()
-    Box(modifier = modifier.fillMaxWidth()) {
-        if (progressiveBlur) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .progressiveTextureBlur(
-                        // K2 keeps the null check inside `progressiveBlur` in
-                        // view, so this is a smart cast rather than an `!!`.
-                        backdrop = backdrop,
-                        shape = RectangleShape,
-                        blurRadius = (GLASS_BLUR_PROGRESSIVE * strength).coerceAtLeast(1f),
-                        gradient = ProgressiveBlur.Top.copy(curve = GLASS_BLUR_CURVE),
-                        colors = BlurColors(
-                            blendColors = listOf(
-                                BlendColorEntry(
-                                    color = scrim.copy(alpha = BAR_GLASS_SCRIM_PROGRESSIVE * strength)
-                                )
-                            )
-                        )
-                    )
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .hazeBlur(
-                        input = HazeInput.Sources(hazeState),
-                        style = HazeBlurStyle {
-                            blurRadius(blurRadius)
-                            // Page tone: the resting glass reads as the bar's paint,
-                            // not as a grey film over it. The tint rides the same
-                            // ramp as the blur, so the two never fall out of step.
-                            backgroundColor(scrim)
-                            colorEffects(
-                                listOf(
-                                    HazeColorEffect.tint(
-                                        scrim.copy(alpha = scrimAlpha)
-                                    )
-                                )
-                            )
-                            // Scroll-invariant: [progress] moves strength, never
-                            // the mask shape.
-                        }
-                    )
-            )
-        }
-        content()
+    if (entries.size < 2) return
+    val lastIndex = entries.lastIndex
+    val index = currentIndex.coerceIn(0, lastIndex)
+    // Keyed on the settled index, not on every frame of the drag: an outside
+    // change (a restored pref, a re-read) re-seats the thumb, a drag does not.
+    var draft by remember(entries, index) { mutableFloatStateOf(index.toFloat()) }
+    val settled = draft.roundToInt().coerceIn(0, lastIndex)
+    MiuixCardSurface(shape = connectedGroupShape(first, last), modifier = modifier) {
+        SliderPreference(
+            value = draft,
+            onValueChange = { draft = it },
+            onValueChangeFinished = {
+                draft = settled.toFloat()
+                if (settled != index) onPick(settled)
+            },
+            title = title,
+            summary = summary,
+            valueText = entries[settled],
+            valueRange = 0f..lastIndex.toFloat(),
+            // The library's own reading: N positions need N-2 intermediate
+            // stops, so a four-entry list lands on 0 / 1 / 2 / 3 exactly.
+            steps = (entries.size - 2).coerceAtLeast(0),
+            // The stops are the point of the track: without the dots the thumb
+            // reads as continuous and the values it can land on are invisible.
+            showKeyPoints = true
+        )
     }
 }
 
@@ -1619,7 +1685,7 @@ const val TOP_BAR_PLATE_ALPHA = 0.6f
  * 柔光玻璃. True only under [UiStyle.SoftGlass]: the material is what that style
  * *is*, so a page wearing it while the pick says plain Miuix would be the style
  * row lying about what it does. The bar's own pane is not this — it stays the
- * Haze frost on every Miuix-dressed look (see [MiuixGlassBar]); this answers for
+ * frost on the bars this look draws for itself (see [MiuixGlassTopAppBar]); this answers for
  * the controls that sit on it.
  */
 @Composable
@@ -1743,12 +1809,12 @@ fun PageScaffold(
      * - The about page, whose hero IS its title — [compactBar] true: the
      *   reading replaces the fraction everywhere and the bar goes compact, its
      *   title arriving as the hero walks out.
-     * - The records page — [compactBar] false (the default): the reading feeds
-     *   the pane's frost and the reveal ONLY. The bar stays the standard
-     *   large-title bar and its collapse stays on the nested scroll, the same
-     *   driver every standard page uses — the title's size may briefly inherit
-     *   the previous tab's state until the first scroll gesture, the same
-     *   inheritance the M3 look has always had on this page.
+ * - The records page — [compactBar] false (the default): the reading feeds
+ *   the look's plate reveal AND the gradient band's fade-in. The bar stays
+ *   the standard large-title bar and its collapse stays on the nested
+ *   scroll, the same driver every standard page uses — the title's size
+ *   may briefly inherit the previous tab's state until the first scroll
+ *   gesture, the same inheritance the M3 look has always had on this page.
      */
     barScrollProgress: (() -> Float)? = null,
     /**
@@ -1766,39 +1832,28 @@ fun PageScaffold(
      * hence the page measures its own hero and hands the number in.
      *
      * False — the default — keeps the standard large-title bar even though a
-     * reading is supplied: the records page hands one in for the pane alone
+     * reading is supplied: the records page hands one in for its plate reveal
      * (see [barScrollProgress]) and its title must still collapse like every
      * other page's.
      */
     compactBar: Boolean = false,
     /**
-     * Miuix only: chrome pinned directly under the bar, INSIDE the glass pane —
-     * the records page's two tab strips, which are navigation, not content. The
-     * pane wraps the whole column (bar + extension), so the page's own blur
-     * recipe covers the strips too, and the scrolling body passes under the lot.
-     * The records page also sets [barProgressive] to false: its extension is
-     * what the pane's foot lands on, and the 柔光玻璃 fade is clear there, so it
-     * wears the MIUIX Gaussian band instead — the blur the plain Miuix look has
-     * had on this page all along. The apps page runs the same model with its
-     * pinned search capsule.
+     * Miuix only: chrome pinned directly under the bar — the records page's two
+     * tab strips, which are navigation, not content.
+     *
+     * The strips ride INSIDE [MiuixGlassTopAppBar]'s band as its `bottomContent`:
+     * one gradient covers the title bar and the strips together and overhangs
+     * the foot by 28dp, so content travelling under a pinned strip fades out
+     * with the same ramp instead of meeting a hard opaque row. Under plain
+     * Miuix with the floating-bar row OFF the page keeps MIUIX's DEFAULT bar,
+     * with the strips on the solid page tone below it.
      *
      * The scaffold measures the topBar slot's full height into
      * `innerPadding.calculateTopPadding()`, so a page that mounts an extension
      * sees the strips in its top inset for free and needs no second number.
-     * Null — every page but the records page — keeps the bar alone.
+     * Null — every page but the records page — is the bar alone.
      */
     barExtension: (@Composable ColumnScope.() -> Unit)? = null,
-    /**
-     * 柔光玻璃 only: whether the pane runs the look's progressive fade. True is
-     * the look's own recipe, where the blur is strongest at the bar's top edge
-     * and fades to clear at its foot; false trades it for the plain MIUIX
-     * constant band ([HazeGlassBar]'s `progressive`). A page flips it off when
-     * its chrome reaches the pane's foot — a fade is clear exactly there — so
-     * the records page's pinned strips are the only caller today: they want the
-     * MIUIX Gaussian under them, not a window onto sharp rows. Has no effect on
-     * the other looks: plain MIUIX already runs the band, Material has no pane.
-     */
-    barProgressive: Boolean = true,
     // A BoxScope receiver, because the body Box below is where the content is
     // mounted (both branches) — the Example's pages lean on the same scope to
     // hang a VerticalScrollBar beside their list without wrapping it.
@@ -1807,20 +1862,24 @@ fun PageScaffold(
     if (LocalUiStyle.current.isMiuixBased) {
         val title = stringResource(titleRes)
         val scrollBehavior = MiuixScrollBehavior()
-        // The glass is this look's default dressing, not a switch (the Example
-        // ships it enabled): the pane is always mounted, so the bar always
-        // frosts the content scrolling under it (`hazeSource` on the body box
-        // below — Haze, see [HazeGlassBar]). A page that brings scenery of its
-        // own ([background], today the about page's mesh) needs the pane too:
-        // an opaque bar would cut that scenery off at the bar's foot and leave
-        // a flat band of page colour above it.
-        val pane = true
-        val hazeState = rememberHazeState()
         // The page's own layer, and the controls that read it, described where
         // they are built below. Nothing is recorded outside 柔光玻璃: the plain
-        // Miuix look has no control here that samples anything, and a record
-        // costs a RenderNode capture whether or not it is drawn.
+        // Miuix look's bar reads no backdrop, and a record costs a RenderNode
+        // capture whether or not it is drawn.
         val chromeGlass = softGlassChrome()
+        // The floating-bar row is a Miuix-look toggle with a second job: it
+        // also picks that look's title bar. Off — MIUIX's DEFAULT top app bar;
+        // on — [MiuixGlassTopAppBar]'s band, the same glass style 柔光玻璃
+        // wears. Reading the state here subscribes the bar to the row, so the
+        // two change together without a restart.
+        val floatingBar by AppearanceState.floatingBar
+        // Bar assignment:
+        //  - every 柔光玻璃 page, and every plain Miuix page with the floating
+        //    bar ON, wears the glass band — the records page included, whose
+        //    strips mount INSIDE it as [MiuixGlassTopAppBar]'s bottomContent;
+        //  - the remaining plain Miuix pages wear the DEFAULT bar, with the
+        //    about page still compact.
+        val useGlassBar = chromeGlass || floatingBar
         val pageBackdrop = rememberPageLayerBackdrop()
         MiuixScaffold(
             modifier = modifier,
@@ -1849,29 +1908,76 @@ fun PageScaffold(
                 } else {
                     {}
                 }
-                // The paint belongs to the pane wherever there is one; with the
-                // switch off and no scenery of its own, the bar paints itself the
-                // page colour.
-                val barColor = if (pane) Color.Transparent else MaterialTheme.colorScheme.background
-                val bar: @Composable () -> Unit = {
-                    // The controls on the bar read the page's OWN layer. The
-                    // provider wraps only the bar, because only the bar reads it
-                    // — the page body is the recorded node and does not. The
-                    // reveal beside it is the look's bare-at-the-top rule: the
-                    // plates appear once the page has scrolled under the bar.
-                    CompositionLocalProvider(
-                        LocalSoftGlassBackdrop provides pageBackdrop,
-                        LocalSoftGlassBarReveal provides softGlassBarMaterialProgress(
-                            barScrollProgress?.invoke() ?: scrollBehavior.state.collapsedFraction
-                        )
-                    ) {
-                    val appBar: @Composable () -> Unit = {
+                // The default bar paints itself; a glass bar stays transparent
+                // so its band can show the body behind it.
+                val barColor = if (useGlassBar) {
+                    Color.Transparent
+                } else {
+                    MaterialTheme.colorScheme.background
+                }
+                // The bars share one composition-local envelope: the controls
+                // on the bar — its leading control and the page's own actions —
+                // read the page's OWN layer and the look's reveal. The provider
+                // wraps the bar alone, because only the bar reads it; the page
+                // body is the recorded node and reads nothing. The reveal is the
+                // look's bare-at-the-top rule: the plates appear once the page
+                // has scrolled under the bar.
+                val reveal = softGlassBarMaterialProgress(
+                    barScrollProgress?.invoke() ?: scrollBehavior.state.collapsedFraction
+                )
+                CompositionLocalProvider(
+                    LocalSoftGlassBackdrop provides pageBackdrop,
+                    LocalSoftGlassBarReveal provides reveal
+                ) {
+                    if (barExtension != null) {
+                        if (useGlassBar) {
+                            // ONE gradient over the whole pinned chrome: the
+                            // strips mount as the bar's bottomContent, so the
+                            // band measures over title bar AND strips and
+                            // overhangs their foot. No solid paint anywhere —
+                            // rows travel under both and fade out together.
+                            val travel = barScrollProgress?.invoke()
+                                ?: scrollBehavior.state.collapsedFraction
+                            MiuixGlassTopAppBar(
+                                title = title,
+                                scrolled = travel > 0f,
+                                showBack = showBack,
+                                backDescription = stringResource(
+                                    io.github.howard20181.hyperos.fcmlive.R.string.back
+                                ),
+                                onBack = onBack,
+                                scrollBehavior = scrollBehavior,
+                                actions = actions,
+                                bottomContent = barExtension
+                            )
+                        } else {
+                            // MIUIX's DEFAULT bar: a solid page-tone bar with
+                            // the pinned strips directly beneath it, one column
+                            // so they ride its collapse. The paint covers the
+                            // strips too — content travelling under them must
+                            // not show through.
+                            Column(
+                                modifier = Modifier.background(MaterialTheme.colorScheme.background)
+                            ) {
+                                MiuixTopAppBar(
+                                    title = title,
+                                    largeTitle = title,
+                                    color = barColor,
+                                    navigationIcon = backControl,
+                                    actions = actions,
+                                    scrollBehavior = scrollBehavior
+                                )
+                                barExtension.invoke(this)
+                            }
+                        }
+                    } else if (!useGlassBar) {
+                        // MIUIX's DEFAULT bar: solid page tone, no band. Plain
+                        // Miuix with the floating bar OFF lands here; the about
+                        // page keeps its compact title, whose hero still drives
+                        // that title's arrival.
                         val travel = barScrollProgress?.invoke()
-                        if (travel != null && compactBar) {
-                            // The hero IS this page's title, so the bar keeps none of
-                            // its own: the reference's compact bar, whose title walks
-                            // in as the hero walks out — nothing over the hero's first
-                            // third of travel, the whole title once it is gone.
+                            ?: scrollBehavior.state.collapsedFraction
+                        if (compactBar && barScrollProgress != null) {
                             MiuixSmallTopAppBar(
                                 title = title,
                                 titleColor = MiuixTheme.colorScheme.onSurface.copy(
@@ -1883,11 +1989,6 @@ fun PageScaffold(
                                 scrollBehavior = scrollBehavior
                             )
                         } else {
-                            // The standard large-title bar — every page's resting
-                            // shape, records page included. Its collapse rides the
-                            // nested scroll like every other page's, even where a
-                            // page hands its own pane reading in (compactBar false):
-                            // the reading is the pane's business, never the title's.
                             MiuixTopAppBar(
                                 title = title,
                                 largeTitle = title,
@@ -1897,61 +1998,37 @@ fun PageScaffold(
                                 scrollBehavior = scrollBehavior
                             )
                         }
-                    }
-                    if (barExtension == null) {
-                        appBar()
                     } else {
-                        // One column under one pane: the bar and the pinned chrome
-                        // below it travel as a unit — the extension rides the bar's
-                        // collapse, and the pane's blur covers both.
-                        Column {
-                            appBar()
-                            barExtension()
-                        }
+                        // The glass BAND: 柔光玻璃 on every page, and plain
+                        // Miuix when its floating bar is ON. The travel
+                        // driving the band and its control plate is the page's
+                        // own reading when it hands one in (the about page,
+                        // whose hero drives everything), else the bar's own
+                        // collapse fraction.
+                        val travel = barScrollProgress?.invoke()
+                            ?: scrollBehavior.state.collapsedFraction
+                        MiuixGlassTopAppBar(
+                            title = title,
+                            scrolled = travel > 0f,
+                            showBack = showBack,
+                            backDescription = stringResource(
+                                io.github.howard20181.hyperos.fcmlive.R.string.back
+                            ),
+                            onBack = onBack,
+                            scrollBehavior = scrollBehavior,
+                            actions = actions,
+                            // The compact bar's title rides the page's travel,
+                            // the same ramp the control plate's reveal uses.
+                            compactTitleAlpha = if (compactBar && barScrollProgress != null) {
+                                { ((travel - 0.35f) / 0.65f).coerceIn(0f, 1f) }
+                            } else {
+                                null
+                            }
+                            // The bar samples no layer: 柔光玻璃 still records
+                            // one, but only its control plate reads it, through
+                            // the composition local above.
+                        )
                     }
-                    }
-                }
-                // The glass wraps the bar (extent = the bar's own, collapsing
-                // included); the paint is the glass's job — hence what the bar
-                // above is told to be transparent for. With no pane at all the
-                // bar stands in its own colour and no layer is recorded.
-                if (pane) {
-                    HazeGlassBar(
-                        hazeState = hazeState,
-                        scrim = MaterialTheme.colorScheme.background,
-                        // A large bar hands in its own collapse fraction; a
-                        // page that measures its own scroll — the records
-                        // page, whose body is a pager — hands in that reading
-                        // instead, and it REPLACES the fraction rather than
-                        // raising it. The fraction is an accumulated
-                        // nested-scroll reading of the ONE connection the body
-                        // box wears, and a body made of several scrollables
-                        // (two page tabs, six category lists) keeps whichever
-                        // value the last one left: a page that comes back
-                        // already scrolled produces no scroll event at all,
-                        // so it inherits the previous page's — frost over
-                        // empty air, or a clear pane with rows under it. A
-                        // caller that supplies [barScrollProgress] owns the
-                        // whole reading, and is expected to derive it from
-                        // whichever page is visible; every other page keeps
-                        // the fraction, which is exactly right for a single
-                        // scrollable under a bar of its own.
-                        progress = barScrollProgress?.invoke()
-                            ?: scrollBehavior.state.collapsedFraction,
-                        // The pane never goes away in this look; the glass is
-                        // always full.
-                        frost = 1f,
-                        // The 柔光玻璃 look's blur reads the recorded layer; the
-                        // layer is only recorded where that look is live.
-                        backdrop = if (chromeGlass) pageBackdrop else null,
-                        // ...unless the page's chrome reaches the pane's foot and
-                        // asks for the constant band instead (see barProgressive).
-                        progressive = barProgressive
-                    ) {
-                        bar()
-                    }
-                } else {
-                    bar()
                 }
             }
         ) { innerPadding ->
@@ -1977,20 +2054,20 @@ fun PageScaffold(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    // Only a pane reads a source layer back, so nothing is
-                    // recorded when there is no pane to read it.
-                    .then(if (pane) Modifier.hazeSource(hazeState) else Modifier)
                     // The body alone, and the bar above is composed OUTSIDE this
-                    // node — that is what lets the bar's control read the layer
-                    // without the cycle; see [rememberPageLayerBackdrop].
+                    // node — that is what lets the bar's controls read the layer
+                    // without the cycle; see [rememberPageLayerBackdrop]. The
+                    // record is 柔光玻璃's: its pane and its plates are the only
+                    // readers, and a record costs a RenderNode capture whether
+                    // or not anything draws it.
                     .then(if (chromeGlass) Modifier.layerBackdrop(pageBackdrop) else Modifier)
                     // The bar reads the list's scroll through this connection;
                     // the page bodies all scroll, so putting it here covers them
                     // all without each page having to opt in.
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
             ) {
-                // Behind the body and under the glass bar — the bar's blur
-                // picks it up through the haze source above.
+                // Behind the body and under the glass bar — 柔光玻璃's pane and
+                // plates read it back through the recorded layer above.
                 background?.invoke(this)
                 content(bodyPadding)
             }

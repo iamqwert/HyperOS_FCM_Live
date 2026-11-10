@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import io.github.howard20181.hyperos.fcmlive.Prefs
 import io.github.howard20181.hyperos.fcmlive.R
 import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
+import io.github.howard20181.hyperos.fcmlive.theme.LocalUiStyle
 
 /**
  * Experiment switches: everything here is off by default and reaches into
@@ -85,6 +87,11 @@ import io.github.howard20181.hyperos.fcmlive.theme.HyperFCMLiveTheme
  */
 @Composable
 fun ExperimentScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
+    // Hoisted out of the body so the look's scroll indicator can be mounted
+    // beside the list in the scaffold's own body scope — the same shape
+    // [ModuleStatusScreen] uses. The list keeps its position across a rebuild
+    // through this state, exactly as it did when the body owned it.
+    val listState = rememberPageListState()
     PageScaffold(
         titleRes = R.string.experiment,
         onBack = onBack,
@@ -95,7 +102,14 @@ fun ExperimentScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
             // contentPadding, so rows scroll UNDER the title bar's glass
             // instead of stopping at its edge (see PageScaffold).
             topPadding = innerPadding.calculateTopPadding(),
-            bottomPadding = innerPadding.calculateBottomPadding()
+            bottomPadding = innerPadding.calculateBottomPadding(),
+            listState = listState
+        )
+        MiuixScrollBar(
+            listState = listState,
+            modifier = Modifier.align(Alignment.CenterEnd),
+            top = innerPadding.calculateTopPadding(),
+            bottom = innerPadding.calculateBottomPadding()
         )
     }
 }
@@ -105,6 +119,7 @@ fun ExperimentScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
 private fun ExperimentBody(
     topPadding: Dp,
     bottomPadding: Dp,
+    listState: LazyListState,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -160,11 +175,17 @@ private fun ExperimentBody(
     LazyColumn(
         modifier = modifier
             .fillMaxWidth()
+            // Every section here is a couple of rows, so on a tall screen the
+            // page does not overflow — and an edge effect that waits for a
+            // boundary never answers a pull. See [pageOverscroll].
+            .pageOverscroll()
             .listScrollEndHaptic()
             .padding(start = inset, end = inset),
         // The signal-floor menu, and every menu added hereafter, must leave the
         // reader where they were. See [rememberPageListState].
-        state = rememberPageListState(),
+        state = listState,
+        // The other half of [pageOverscroll]: never two springs on one drag.
+        overscrollEffect = rememberPageOverscrollEffect(),
         // The gesture-hint strip is scroll-through, not a hard stop. The top
         // inset rides here (not on the modifier) so rows pass under the glass
         // bar while scrolling.
@@ -209,28 +230,52 @@ private fun ExperimentBody(
                 ) {
                     Column {
                         GroupRowGap()
-                        SettingsMenuCard(
-                            iconRes = R.drawable.ic_tune,
-                            title = stringResource(R.string.experiment_wifi_weak_signal_floor),
-                            description = stringResource(
-                                R.string.experiment_wifi_weak_signal_floor_desc
-                            ),
-                            entries = floorLabels,
-                            currentIndex = Prefs.WIFI_WEAK_SIGNAL_FLOORS
-                                .indexOf(wifiWeakSignalFloor)
-                                .coerceAtLeast(0),
-                            onPick = { index ->
-                                val picked = Prefs.WIFI_WEAK_SIGNAL_FLOORS[index]
-                                Prefs.writeWifiWeakSignalFloor(context, Prefs.remote(), picked)
-                                wifiWeakSignalFloor = picked
-                            },
-                            // The entries are bare numbers, so the panel takes the
-                            // numeric floor instead of the two-character one; see
-                            // [MENU_NUMERIC_MIN_WIDTH].
-                            menuMinWidth = MENU_NUMERIC_MIN_WIDTH,
-                            first = false,
-                            last = true
-                        )
+                        // 档位选择在两种观感里不是一个控件。Miuix 系照系统设置的
+                        // 写法：值落在带档位点的滑杆上（见 [MiuixSliderCard]），
+                        // 一眼能看见当前值在量程里的位置；Material 保持菜单，
+                        // M3 的列表行里没有带档位的滑杆这回事。
+                        if (LocalUiStyle.current.isMiuixBased) {
+                            MiuixSliderCard(
+                                title = stringResource(R.string.experiment_wifi_weak_signal_floor),
+                                summary = stringResource(
+                                    R.string.experiment_wifi_weak_signal_floor_desc
+                                ),
+                                entries = floorLabels,
+                                currentIndex = Prefs.WIFI_WEAK_SIGNAL_FLOORS
+                                    .indexOf(wifiWeakSignalFloor)
+                                    .coerceAtLeast(0),
+                                onPick = { index ->
+                                    val picked = Prefs.WIFI_WEAK_SIGNAL_FLOORS[index]
+                                    Prefs.writeWifiWeakSignalFloor(context, Prefs.remote(), picked)
+                                    wifiWeakSignalFloor = picked
+                                },
+                                first = false,
+                                last = true
+                            )
+                        } else {
+                            SettingsMenuCard(
+                                iconRes = R.drawable.ic_tune,
+                                title = stringResource(R.string.experiment_wifi_weak_signal_floor),
+                                description = stringResource(
+                                    R.string.experiment_wifi_weak_signal_floor_desc
+                                ),
+                                entries = floorLabels,
+                                currentIndex = Prefs.WIFI_WEAK_SIGNAL_FLOORS
+                                    .indexOf(wifiWeakSignalFloor)
+                                    .coerceAtLeast(0),
+                                onPick = { index ->
+                                    val picked = Prefs.WIFI_WEAK_SIGNAL_FLOORS[index]
+                                    Prefs.writeWifiWeakSignalFloor(context, Prefs.remote(), picked)
+                                    wifiWeakSignalFloor = picked
+                                },
+                                // The entries are bare numbers, so the panel takes the
+                                // numeric floor instead of the two-character one; see
+                                // [MENU_NUMERIC_MIN_WIDTH].
+                                menuMinWidth = MENU_NUMERIC_MIN_WIDTH,
+                                first = false,
+                                last = true
+                            )
+                        }
                     }
                 }
             }

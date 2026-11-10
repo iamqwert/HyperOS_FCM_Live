@@ -88,6 +88,8 @@
     <string name="license_gpl_3">GPL-3.0</string>
     <string name="license_mit">MIT License</string>
     <string name="hide_launcher_icon">隐藏桌面图标</string>
+    <string name="predictive_back">预测性返回</string>
+    <string name="about_sub_predictive_back">通过返回手势预览上一界面</string>
     <string name="theme_mode">主题模式</string>
     <string name="palette_style">调色风格</string>
     <string name="ui_style">界面风格</string>
@@ -99,7 +101,7 @@
     <string name="about_sub_ui_style">选择应用的界面风格</string>
     <string name="about_sub_miuix_monet">跟随壁纸为界面取色</string>
     <string name="about_sub_miuix_accent">挑选莫奈配色的主色调</string>
-    <string name="about_sub_miuix_floating_bar">关闭为停靠式面板，开启为悬浮玻璃胶囊</string>
+    <string name="about_sub_miuix_floating_bar">启用后会同步改变顶栏风格</string>
     <string name="about_sub_palette_style">选择动态取色风格</string>
     <string name="about_sub_color_spec">选择 Material 颜色规范</string>
     <string name="language">语言</string>
@@ -117,11 +119,6 @@
         <item>Material 3</item>
         <item>Miuix</item>
         <item>柔光玻璃</item>
-    </string-array>
-    <!-- 悬浮底栏开关的两档选项：索引 0 为关闭（停靠），1 为开启（悬浮）。 -->
-    <string-array name="floating_bar_entries">
-        <item>关闭</item>
-        <item>MIUIX</item>
     </string-array>
     <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格 + 末位 CMF），选项保留英文原文。 -->
     <string-array name="palette_style_entries">
@@ -171,7 +168,7 @@
     <string name="shortcut_help_long">在浏览器中查看帮助</string>
     <string name="shortcut_fcm_diagnostics_long">查看 FCM 诊断</string>
 
-    <!-- 底部导航（仅 Material 3 风格）：「设置」标签复用 settings -->
+    <!-- 底部导航：四个 tab 在三种风格下共用，仅外壳不同 -->
     <string name="nav_modules">主页</string>
     <string name="nav_apps">应用</string>
     <string name="nav_about">关于</string>
@@ -419,7 +416,7 @@
     <string name="records_hours">%1$d 时 %2$d 分</string>
     <string name="records_heartbeat_value">间隔 %1$d ms，相位 %2$d，正常 %3$d，异常 %4$d</string>
 
-    <!-- 模块状态页（底部导航「主页」tab，仅 Material 3 风格） -->
+    <!-- 模块状态页（「模块」tab，三种风格共用同一页面） -->
     <string name="status_activated">已激活</string>
     <string name="status_not_activated">未激活</string>
     <string name="status_version_line">版本 %1$s (%2$d)</string>

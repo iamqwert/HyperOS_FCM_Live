@@ -55,11 +55,11 @@ HyperOS layers several gates on this chain; the module handles them gate by gate
 
 | Stage | System-side gate | What the module does |
 |---|---|---|
-| Broadcast delivery | `isAllowBroadcast` (the c2dm delivery check) | Allowed per the allowlist |
+| GMS reconnect intents | `isAllowBroadcast` | Only `CN_DEFER_BROADCAST` actions are answered |
 | App is "stopped" | "stopped" package filter | Re-adds `FLAG_INCLUDE_STOPPED_PACKAGES` |
 | Autostart check | `checkApplicationAutoStart` | Allowed per the allowlist |
 | App is frozen | `isRestrictReceiver` (greeze broadcast gate) | Let through, replaying the stock unfreeze |
-| Broadcast deferred | `isNeedCachedBroadcast`, `deferBroadcast` | See [Known limitations](#9-known-limitations) |
+| GMS network cap | `updateGmsNetStatus` (OS4) | Argument forced to false |
 | Alarm blocked | `checkAlarmIsAllowedSend` (the MIUI alarm delivery gate) | If an alarm belonging to GMS is judged blocked, it is let through instead |
 | Power/network limits | PowerKeeper profiles, AppStandby, greeze's `isRestrictNet`, network restrictions | GMS is written into the no-restrict list |
 | Force stop | `isForceStopEnable` | Applies to selected apps (that declare FCM components) only |
@@ -169,7 +169,7 @@ Two tabs inside:
 
 | Section | Items |
 |---|---|
-| Display | Language (Simplified Chinese / English), hide launcher icon (once hidden, open the module from LSPosed) |
+| Display | Language (Simplified Chinese / English), hide launcher icon (once hidden, open the module from LSPosed), predictive back (on by default, see below) |
 | Theme | Theme mode, dynamic color, palette style, color spec |
 | Battery optimization | WeChat battery optimization switch, AOSP app battery usage entry |
 | Sleep mode | Keep Wi-Fi, keep mobile data (off by default, see below) |
@@ -205,18 +205,17 @@ Both mobile data and Wi-Fi stay connected all night; overnight battery use goes 
 
 Long-press the launcher icon for direct access to: Settings, Help (opens this guide in a browser), FCM diagnostics.
 
-### Horizontal swipe-back (subpages)
+### Predictive back (back-gesture preview)
 
-On the **subpages** — Settings, Experimental features, Privacy & permissions, Open-source licenses — swipe right from the **middle of the screen** to go back. The page follows your finger and gradually reveals the page beneath; the back action completes past a certain distance, otherwise the page springs back. A quick flick works too.
+The **Predictive back** switch in the settings page's Display section controls **whether the screen follows your finger during a back gesture**, and it is **on by default**.
 
-This gesture is not the same thing as the system's predictive back:
+With it on (default), swipe inward from the left or right **edge** and the page moves with your finger: on a subpage the page beneath is gradually revealed, on the main page it is the preview of returning to the launcher. Releasing past the threshold completes the back action; releasing before it springs the page back.
 
-| | Horizontal swipe-back (this module) | System predictive back |
-|---|---|---|
-| Start position | The middle of the screen | The left/right **edges** |
-| Destination | The **previous page** | Exits the **current app** |
+With it off, back still works but nothing follows your finger — the screen stays put during the gesture and the back action runs on release.
 
-The main page does not enable the gesture — its previous page is the launcher, which matches the system back action, so the system handles it.
+The main page is covered by the switch too: with it off, even leaving the app no longer previews anything.
+
+> This module does **not** offer "swipe right from the middle of the screen to go back" — that gesture was dropped in 4.0.0, and back is handled entirely by the system's edge gesture and the back key.
 
 ---
 

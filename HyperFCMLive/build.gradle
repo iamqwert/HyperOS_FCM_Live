@@ -61,8 +61,8 @@ android {
         targetSdkVersion 37
         // Fixed (bumped by hand each release) so LSPosed update checks never treat
         // this fork as older than upstream builds that inherit a low jgit commitCount.
-        versionCode 56
-        versionName "4.4.0"
+        versionCode 58
+        versionName "4.5.0"
 
         // HyperOS modules ship arm64 only; drop armv7a / x86 / x86_64 natives.
         ndk {
@@ -242,19 +242,11 @@ dependencies {
     // for the SDF lens shader. RenderEffect paths need API 31; this module is
     // minSdk 35.
     implementation 'top.yukonga.miuix.kmp:miuix-blur-android:0.9.4'
-    // The blurred title-bar glass. Haze over miuix-blur, after four device
-    // rounds: miuix-blur's progressive blur ramps the RADIUS from full to zero,
-    // and that ramp necessarily crosses the mid range (10-30dp) that smears
-    // dark glyphs into grey pills (the "stain" reports), while its kernel also
-    // samples past the bar's bottom edge (the light strip under the search
-    // capsule, the pull-refresh indicator smeared into a column). Haze blurs
-    // at a CONSTANT radius and fades with an alpha mask (HazeProgressive), so
-    // a half-masked region shows the already-homogenized wash at partial alpha
-    // over sharp content — no half-blurred state exists to read as dirt, and
-    // the mask covers the tints too, so the scrim fades on the same ramp.
-    // RenderEffect paths need API 31; this module is minSdk 35.
-    implementation 'dev.chrisbanes.haze:haze:2.0.1'
-    implementation 'dev.chrisbanes.haze:haze-blur:2.0.1'
+    // No separate title-bar blur engine: both of MIUIX's GlassTopAppBar shapes
+    // are expressible with what is already here — the band paints itself, and
+    // the 柔光玻璃 pane runs miuix-blur's progressive texture blur (the same
+    // artifact as the floating bar above). The Haze dependency the old
+    // Gaussian bar needed is gone with that bar.
     // The navigation runtime the pages now run through: one Activity holding one
     // `NavDisplay`, every page an entry in its back stack.
     //

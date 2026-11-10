@@ -1122,7 +1122,7 @@ adb logcat -v time -s HyperGreeze | grep -E "allowlist loaded|auto-check|Allowli
 | ProcessCleaner                    | 🟡 待验证                 | 🟡 预期可用           | policy≠13                                  |
 | SmartPower                        | 🟡 OS3 目标               | ❌ OS4 无拦截点       | OS4 整段死代码                             |
 | GmsObserver OS3 状态机            | 🟡 OS3 目标               | ❌ OS4 缺失           | 10 个跨代缺失属预期                        |
-| GmsObserver OS4 限流出口          | ❌ OS3 无                 | 🟡 OS4 关键           | `updateFrameworkGmsNetStatus`              |
+| GmsObserver OS4 限流出口          | ❌ OS3 无                 | 🔸 已删除（2026-10-30） | 原钩 `updateFrameworkGmsNetStatus`（P8）改由 S5 在 system_server 端承担；S5 报 absent 时再恢复 |
 | NetdExecutor `gms_wall`           | 🟡 OS3 目标               | ❌ OS4 缺失           | 跨代 DEBUG                                 |
 | 睡眠旧链（system_server）         | 🟡 OS3 目标               | 🟡 OS4 存在但可能不跑 | sentinel FIRED = 换代                      |
 | 睡眠保 WiFi/数据（PowerKeeper）   | ⚠️ 待验证                 | 🟡 OS4 路径           | OS4 在 `PhoneSleepModeController`          |
@@ -1130,8 +1130,8 @@ adb logcat -v time -s HyperGreeze | grep -E "allowlist loaded|auto-check|Allowli
 | 微信 doze keepout                 | ⚠️ 待验证                 | 🟡 OS4 路径           | 默认关                                     |
 | ScenarioCompiler                  | ✅ 7 参                   | ✅ 8 参               | 按参数个数匹配                             |
 | 冻结期 wakelock（S30）            | 🟡 预期可用               | 🟡 预期可用           | GMS 未冻结时 inert；`no_cached_wake_locks=true` |
-| 冻结期 alarm 缓存（S31）          | 🟡 预期可用               | 🟡 预期可用           | 仅 `FULLY_FROZEN` 生效；GMS 未冻结时 inert      |
-| 温接收器黑名单探针（R9）          | 🟡 预期可用               | 🟡 预期可用           | 只读；`c2dm-denied` 非零才需处理           |
+| 冻结期 alarm 缓存（S31）          | 🔸 已删除（2026-10-30）   | 🔸 已删除（2026-10-30） | `isNeedCachedAlarmForAurogonInner` 对 GMS 必然 false，名单到不了 |
+| 温接收器黑名单探针（R9）          | 🔸 已删除（2026-10-30）   | 🔸 已删除（2026-10-30） | 只读探针；模块在温进程路径无处置 |
 | 多用户                            | 🔸 代码用 `uid % 100000` | 🔸 未测试            | 需实测                                     |
 
 ### 8.2 已知不兼容 / 未覆盖

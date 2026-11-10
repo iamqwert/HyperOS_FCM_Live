@@ -348,6 +348,26 @@ object Prefs {
     const val DEFAULT_RECORD_ROWS = 500
 
     /**
+     * UI-only: 「预测性返回」— whether the system's back gesture previews the
+     * return instead of firing blind. **The edge gesture's follow, and nothing
+     * else**: the app offers no mid-screen drag-to-dismiss, so this pref never
+     * touches `swipeDismiss` on the nav entries.
+     *
+     * The library's own handler is what animates that preview, and it has no off
+     * switch — it is hard-wired to `backStack.size > 1`. So when this pref is
+     * false, [MainActivity] stands a plain back handler above it (navigationevent
+     * arbitrates "last composed enabled handler wins"): the library never sees
+     * the gesture, nothing follows the finger, and back fires on release with the
+     * normal page transition.
+     *
+     * Nothing outside the app reads it: this is our navigation, not the system's
+     * edge-back, so it neither joins [GROUP_CONFIG] nor needs a reload broadcast.
+     * Default **on** — that is the look every other Miuix manager ships, and the
+     * behaviour this app has always had at the edge.
+     */
+    const val KEY_PREDICTIVE_BACK = "predictive_back"
+
+    /**
      * Remote + local: "Smart Power 拦截放行"（OS3 世代实验功能）。
      *
      * Read inside system_server by [SmartPowerHooks]: when on, a c2dm
@@ -952,6 +972,25 @@ object Prefs {
     @JvmStatic
     fun writeShowSystem(context: Context, enabled: Boolean) {
         localPrefs(appContext(context)).edit().putBoolean(KEY_SHOW_SYSTEM, enabled).apply()
+    }
+
+    /** [KEY_PREDICTIVE_BACK] as the settings switch last left it. */
+    @JvmStatic
+    fun readPredictiveBack(context: Context): Boolean {
+        return localPrefs(context).getBoolean(KEY_PREDICTIVE_BACK, true)
+    }
+
+    /**
+     * Persist the 预测性返回 switch.
+     *
+     * The reader is [MainActivity]'s own page stack, so the write reaches the
+     * screen through the Activity's state rather than through a reload: the
+     * switch's callback updates that state itself, and this key is what the next
+     * launch reads back.
+     */
+    @JvmStatic
+    fun writePredictiveBack(context: Context, enabled: Boolean) {
+        localPrefs(appContext(context)).edit().putBoolean(KEY_PREDICTIVE_BACK, enabled).apply()
     }
 
     /** Smart Power 放行开关在 UI 侧留下的最近值。 */

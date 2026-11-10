@@ -1,19 +1,20 @@
 // Dependabot alert #11 (GHSA-xxph-c9ww-hj94 / CVE-2026-102554): AGP's plugin
 // classpath pulls in guava 33.4.0-jre, vulnerable to a deserialization-driven
 // OOM in CompactHashMap/CompactHashSet/MapMakerInternalMap. Force the patched
-// 33.7.2-jre on that classpath only — guava is not on the app runtime classpath
-// and never ships in the APK. The version suffix is required; bare 33.7.2 does
-// not exist on Maven Central.
+// release on that classpath only — guava is not on the app runtime classpath
+// and never ships in the APK. Keep the -jre suffix: the bare version does not
+// exist on Maven Central. The exact version is the single force below, so a
+// dependabot bump does not leave this comment contradicting the build.
 buildscript {
     configurations.classpath {
         resolutionStrategy {
-            force 'com.google.guava:guava:33.7.2-jre'
+            force 'com.google.guava:guava:33.8.0-jre'
         }
     }
 }
 
 plugins {
-    id 'com.android.application' version '9.5.0' apply false
+    id 'com.android.application' version '9.5.1' apply false
     // Standalone Kotlin 2.4.20 — AGP's built-in Kotlin is stuck at 2.2.10, see
     // gradle.properties for the POM-verified evidence and the opt-out pair.
     id 'org.jetbrains.kotlin.android' version '2.4.21' apply false

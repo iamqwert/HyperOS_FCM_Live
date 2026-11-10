@@ -600,14 +600,6 @@ private val DEPS = arrayOf(
     // in the APK, 12 classes of it (window + window-core), verified against the
     // R8 mapping.
     arrayOf("AndroidX Window", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
-    // The title-bar glass's blur engine (the constant-radius, alpha-masked
-    // treatment the stain reports drove us to) — haze + haze-blur.
-    arrayOf(
-        "Haze",
-        "2.0.1",
-        "Apache License 2.0",
-        "https://github.com/chrisbanes/haze"
-    ),
     // Test scope only — nothing from it is in any APK. Listed for the same
     // reason as the annotation-only rows: it is a third-party project in the
     // build with its own licence. EPL-1.0 (see licenseRawFor).
@@ -658,9 +650,9 @@ private val DEPS = arrayOf(
     // the standalone KGP 2.4.20 lift removed the 0.9.1 metadata ceiling — the
     // toolchain comment in build.gradle has the audit. One row for the project,
     // though it ships as miuix-ui, miuix-core, miuix-preference, miuix-icons,
-    // miuix-blur (back since the floating bottom bar — the title-bar glass stayed
-    // on Haze), miuix-shader and miuix-squircle behind it, and miuix-nav (the
-    // navigation runtime the pages run through).
+    // miuix-blur (the floating bottom bar and the title bar's progressive pane),
+    // miuix-shader and miuix-squircle behind it, and miuix-nav (the navigation
+    // runtime the pages run through).
     arrayOf(
         "Miuix",
         "0.9.4",
@@ -714,9 +706,9 @@ private val REFERENCES = arrayOf(
     // repository — shown as 「—」, the row links to the project like the other
     // unlicensed ones.
     arrayOf("kooritea/fcmfix", "—", "https://github.com/kooritea/fcmfix"),
-    // The title-bar glass both looks wear ([HazeGlassBar]) is this app's app
-    // bar blur construction: the list underlaps the bar, and that underlap is
-    // what the blur samples.
+    // The title-bar glass ([MiuixGlassTopAppBar]) is this app's own app-bar
+    // construction: the list underlaps the bar, and that underlap is what the
+    // blur samples.
     arrayOf("LibChecker/LibChecker", "GPL-3.0", "https://github.com/LibChecker/LibChecker"),
     arrayOf("tiann/KernelSU", "GPL-3.0", "https://github.com/tiann/KernelSU"),
     // No LICENSE file in the repository — shown as 「—」. There is no text to

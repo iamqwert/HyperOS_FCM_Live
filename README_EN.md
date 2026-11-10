@@ -49,14 +49,14 @@ HyperOS layers several gates on this chain; the module handles them gate by gate
 
 | Stage | System-side gate | What the module does |
 |---|---|---|
-| Broadcast delivery | `GreezeManagerService#isAllowBroadcast` | Allowlist-based; unselected apps fall back to the system's own decision |
+| GMS reconnect intents | `GreezeManagerService#isAllowBroadcast` | Only `CN_DEFER_BROADCAST` actions are answered |
 | App is "stopped" | "stopped" package filter | Re-adds `FLAG_INCLUDE_STOPPED_PACKAGES` |
 | Autostart check | `BroadcastQueueModernStubImpl#checkApplicationAutoStart` | Allowed for allowlisted apps |
 | App is frozen | `isRestrictReceiver` (greeze broadcast gate) | Let through, replaying the stock unfreeze |
 | Power-saving profile / standby | `AppStandbyController#setUidState` | Rewritten to allow |
 | Freeze policy | `AurogonImmobulusMode#isNoRestrictApp` and friends | Exemption returned for GMS |
-| Broadcast deferred | `isNeedCachedBroadcast` (greeze broadcast cache) | Allowed for allowlisted apps |
-| Reconnect/heartbeat deferred | `deferBroadcastForMiui` | Only GMS reconnect-type intents are answered; nothing else is let through |
+| GMS network cap | `updateGmsNetStatus` (OS4) | Argument forced to false |
+| Alarm blocked | `checkAlarmIsAllowedSend` | GMS alarms judged blocked are let through |
 | Force stop | `isForceStopEnable` | Applies to selected apps only |
 
 The hooked hosts: the mainline hooks live in `system` (the framework) and `com.miui.powerkeeper`. The module does not inject into the `com.google.android.gms` process — the former "GCM reconnect repair" experiment was removed in 4.1.1 after GMS hot updates tightened their integrity detection.

@@ -2,6 +2,10 @@ package io.github.howard20181.hyperos.fcmlive.ui.softglass
 
 // Migrated from Deadliner 210e4a2d4c6bf7df291b6c6852d39366bc1fee17.
 // Integration changes: package and MIUIX semantic UI bindings only.
+//
+// The source let a caller hand in its own tint and a tint *style*; nothing in
+// this app ever did, because the look is one neutral wash everywhere. Both are
+// gone, and the tint is resolved here from the look's own tuning.
 
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -14,22 +18,21 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 object SoftGlassDefaults {
     val Shape: Shape = RoundedCornerShape(percent = 50)
@@ -37,18 +40,17 @@ object SoftGlassDefaults {
 }
 
 /**
- * Layout-neutral high-level entry point for Deadliner's soft-glass material.
+ * Layout-neutral high-level entry point for the soft-glass material.
  *
- * The caller owns size and padding. This layer only resolves the active material, backdrop,
- * tint strategy and optical recipe before delegating to [softGlassMaterial].
+ * The caller owns size and padding. This layer only resolves the active
+ * material, backdrop and optical recipe before delegating to
+ * [softGlassMaterial].
  */
 @Composable
 fun SoftGlassSurface(
     modifier: Modifier = Modifier,
     shape: Shape = SoftGlassDefaults.Shape,
     recipe: GlassMaterialRecipe? = null,
-    tint: Color? = null,
-    tintStyle: GlassTintStyle = GlassTintStyle.Neutral,
     interaction: GlassMaterialInteraction = GlassMaterialInteraction(),
     materialAlpha: Float = 1f,
     backdrop: LayerBackdrop? = LocalSoftGlassBackdrop.current,
@@ -60,7 +62,10 @@ fun SoftGlassSurface(
     val resolvedRecipe = recipe ?: SoftGlassRecipes.floatingNavigation(
         softGlass.fineTuning,
     )
-    val resolvedTint = tint ?: softGlass.fineTuning
+    // The look's one wash: the tuned grey at the navigation alpha while the
+    // material is live, and a nearly opaque version of the same grey when the
+    // device cannot run it at all — the plate still has to be a plate.
+    val resolvedTint = softGlass.fineTuning
         .softGlassTintColor(isDark)
         .copy(
             alpha = if (softGlass.enabled) {
@@ -85,7 +90,6 @@ fun SoftGlassSurface(
                     backdrop = backdrop,
                     shape = shape,
                     tint = resolvedTint,
-                    tintStyle = tintStyle,
                     isDark = isDark,
                     recipe = resolvedRecipe,
                     interaction = interaction,
@@ -100,20 +104,15 @@ fun SoftGlassSurface(
 fun SoftGlassIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    size: Dp = SoftGlassDefaults.IconButtonSize,
     recipe: GlassMaterialRecipe? = null,
-    tint: Color? = null,
-    tintStyle: GlassTintStyle = GlassTintStyle.Neutral,
-    backdrop: LayerBackdrop? = LocalSoftGlassBackdrop.current,
     materialAlpha: Float = 1f,
-    neutralTintProgress: Float = 0f,
+    backdrop: LayerBackdrop? = LocalSoftGlassBackdrop.current,
     content: @Composable () -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val pressProgress by animateFloatAsState(
-        targetValue = if (pressed && enabled) 1f else 0f,
+        targetValue = if (pressed) 1f else 0f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium,
@@ -127,7 +126,7 @@ fun SoftGlassIconButton(
 
     SoftGlassSurface(
         modifier = modifier
-            .size(size)
+            .size(SoftGlassDefaults.IconButtonSize)
             .softGlassShadow(
                 shape = SoftGlassDefaults.Shape,
                 isDark = isDark,
@@ -140,11 +139,9 @@ fun SoftGlassIconButton(
             },
         shape = SoftGlassDefaults.Shape,
         recipe = recipe,
-        tint = tint,
-        tintStyle = tintStyle,
         backdrop = backdrop,
         materialAlpha = materialAlpha,
-        interaction = softGlassPressMaterialInteraction(pressProgress).copy(neutralTintProgress = neutralTintProgress),
+        interaction = softGlassPressMaterialInteraction(pressProgress),
     ) {
         Box(
             modifier = Modifier
@@ -157,7 +154,6 @@ fun SoftGlassIconButton(
                 .clickable(
                     interactionSource = interactionSource,
                     indication = null,
-                    enabled = enabled,
                     role = Role.Button,
                     onClick = onClick,
                 ),

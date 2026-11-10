@@ -87,6 +87,8 @@
     <string name="license_gpl_3">GPL-3.0</string>
     <string name="license_mit">MIT License</string>
     <string name="hide_launcher_icon">Hide Launcher Icon</string>
+    <string name="predictive_back">Predictive Back</string>
+    <string name="about_sub_predictive_back">Preview the return while your finger drags; off goes back on release</string>
     <string name="theme_mode">Theme</string>
     <string name="palette_style">Palette Style</string>
     <string name="ui_style">UI Style</string>
@@ -98,7 +100,7 @@
     <string name="about_sub_ui_style">Choose the app\'s UI style</string>
     <string name="about_sub_miuix_monet">Pick colors from your wallpaper</string>
     <string name="about_sub_miuix_accent">Pick the accent color for the Monet palette</string>
-    <string name="about_sub_miuix_floating_bar">Off for the docked pane, on for the floating glass capsule</string>
+    <string name="about_sub_miuix_floating_bar">Enabling it also changes the top app bar style</string>
     <string name="about_sub_palette_style">Choose a dynamic color style</string>
     <string name="about_sub_color_spec">Choose the Material color spec</string>
     <string name="language">Language</string>
@@ -116,11 +118,6 @@
         <item>Material 3</item>
         <item>Miuix</item>
         <item>Soft Light Glass</item>
-    </string-array>
-    <!-- The floating-bar switch as a two-option row: index 0 is off (docked), 1 is on (floating). -->
-    <string-array name="floating_bar_entries">
-        <item>Off</item>
-        <item>MIUIX</item>
     </string-array>
     <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格 + 末位 CMF），选项保留英文原文。 -->
     <string-array name="palette_style_entries">
@@ -175,7 +172,7 @@
     <string name="shortcut_help_long">Getting help in Your Browser</string>
     <string name="shortcut_fcm_diagnostics_long">View FCM Diagnostics</string>
 
-    <!-- 底部导航（仅 Material 3 风格）：「设置」标签复用 settings -->
+    <!-- 底部导航：四个 tab 在三种风格下共用，仅外壳不同 -->
     <string name="nav_modules">Home</string>
     <string name="nav_apps">Apps</string>
     <string name="nav_about">About</string>
@@ -425,7 +422,7 @@
     <string name="records_hours">%1$d h %2$d min</string>
     <string name="records_heartbeat_value">%1$d ms, phase %2$d, good %3$d, bad %4$d</string>
 
-    <!-- 模块状态页（底部导航「主页」tab，仅 Material 3 风格） -->
+    <!-- 模块状态页（「模块」tab，三种风格共用同一页面） -->
     <string name="status_activated">Active</string>
     <string name="status_not_activated">Inactive</string>
     <string name="status_version_line">Version %1$s (%2$d)</string>
