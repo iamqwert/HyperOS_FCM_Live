@@ -17,9 +17,9 @@
              same look. MainActivity picks the tab up from the action (see
              [MainActivity.handleShortcutIntent]). -->
         <intent
-            android:action="io.github.howard20181.hyperos.fcmlive.OPEN_SETTINGS"
-            android:targetPackage="io.github.howard20181.hyperos.fcmlive"
-            android:targetClass="io.github.howard20181.hyperos.fcmlive.MainActivity" />
+            android:action="io.github.iamqwert.hypergreeze.OPEN_SETTINGS"
+            android:targetPackage="io.github.iamqwert.hypergreeze"
+            android:targetClass="io.github.iamqwert.hypergreeze.MainActivity" />
     </shortcut>
 
     <shortcut
@@ -42,8 +42,8 @@
         android:shortcutShortLabel="@string/fcm_diagnostics"
         android:shortcutLongLabel="@string/shortcut_fcm_diagnostics_long">
         <intent
-            android:action="io.github.howard20181.hyperos.fcmlive.FCM_DIAGNOSTICS"
-            android:targetPackage="io.github.howard20181.hyperos.fcmlive"
-            android:targetClass="io.github.howard20181.hyperos.fcmlive.MainActivity" />
+            android:action="io.github.iamqwert.hypergreeze.FCM_DIAGNOSTICS"
+            android:targetPackage="io.github.iamqwert.hypergreeze"
+            android:targetClass="io.github.iamqwert.hypergreeze.MainActivity" />
     </shortcut>
 </shortcuts>

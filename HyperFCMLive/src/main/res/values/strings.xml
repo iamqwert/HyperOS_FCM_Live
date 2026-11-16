@@ -12,7 +12,7 @@
   6. 英文要求地道、符合母语者习惯，禁止逐字硬翻；UI 术语以 Android 官方表述为准。
 -->
 <resources>
-    <string name="app_name">HyperOS Push Fix</string>
+    <string name="app_name">HyperGreeze</string>
     <string name="launcher_name">HyperGreeze</string>
     <string name="back">Back</string>
     <string name="help">Help</string>
@@ -92,12 +92,14 @@
     <string name="theme_mode">Theme</string>
     <string name="palette_style">Palette Style</string>
     <string name="ui_style">UI Style</string>
+    <string name="miuix_flavor">Miuix Style</string>
     <string name="miuix_monet">Monet Colors</string>
     <string name="miuix_accent">Accent Color</string>
     <string name="miuix_floating_bar">Floating Navigation Bar</string>
     <string name="color_spec">Color Spec</string>
     <string name="about_sub_theme_mode">Choose the app\'s theme mode</string>
     <string name="about_sub_ui_style">Choose the app\'s UI style</string>
+    <string name="about_sub_miuix_flavor">Choose which HyperOS version\'s look to follow</string>
     <string name="about_sub_miuix_monet">Pick colors from your wallpaper</string>
     <string name="about_sub_miuix_accent">Pick the accent color for the Monet palette</string>
     <string name="about_sub_miuix_floating_bar">Enabling it also changes the top app bar style</string>
@@ -113,11 +115,15 @@
         <item>Light</item>
         <item>Dark</item>
     </string-array>
-    <!-- 与 ThemePrefs.UI_STYLE_* 的顺序一致。风格名保留原文，柔光玻璃是本项目自己的命名。 -->
+    <!-- 与界面风格的存储取值一致（Material 3 / Miuix）。选项保留原文；柔光玻璃是 Miuix 的 OS 4 款式，不再单列。 -->
     <string-array name="ui_style_entries">
         <item>Material 3</item>
         <item>Miuix</item>
-        <item>Soft Light Glass</item>
+    </string-array>
+    <!-- 与 ThemePrefs.MIUIX_FLAVOR_* 的顺序一致：OS 3 是 Miuix 原本的观感，OS 4 是柔光玻璃。 -->
+    <string-array name="miuix_flavor_entries">
+        <item>OS 3</item>
+        <item>OS 4</item>
     </string-array>
     <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格 + 末位 CMF），选项保留英文原文。 -->
     <string-array name="palette_style_entries">

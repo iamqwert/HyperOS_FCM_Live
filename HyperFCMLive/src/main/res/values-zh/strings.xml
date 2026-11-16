@@ -13,7 +13,7 @@
   6. 危险开关只放在实验性功能页（ExperimentScreen）。
 -->
 <resources>
-    <string name="app_name">修复澎湃系统谷歌推送重连</string>
+    <string name="app_name">HyperGreeze</string>
     <string name="launcher_name">HyperGreeze</string>
     <string name="back">返回</string>
     <string name="help">帮助</string>
@@ -93,12 +93,14 @@
     <string name="theme_mode">主题模式</string>
     <string name="palette_style">调色风格</string>
     <string name="ui_style">界面风格</string>
+    <string name="miuix_flavor">Miuix样式</string>
     <string name="miuix_monet">莫奈颜色</string>
     <string name="miuix_accent">强调色</string>
     <string name="miuix_floating_bar">悬浮底栏</string>
     <string name="color_spec">颜色规格</string>
     <string name="about_sub_theme_mode">调整应用的主题模式</string>
     <string name="about_sub_ui_style">选择应用的界面风格</string>
+    <string name="about_sub_miuix_flavor">选择界面参照的 HyperOS 版本</string>
     <string name="about_sub_miuix_monet">跟随壁纸为界面取色</string>
     <string name="about_sub_miuix_accent">挑选莫奈配色的主色调</string>
     <string name="about_sub_miuix_floating_bar">启用后会同步改变顶栏风格</string>
@@ -114,11 +116,15 @@
         <item>浅色模式</item>
         <item>深色模式</item>
     </string-array>
-    <!-- 与 ThemePrefs.UI_STYLE_* 的顺序一致。风格名保留原文，柔光玻璃是本项目自己的命名。 -->
+    <!-- 与界面风格的存储取值一致（Material 3 / Miuix）。选项保留原文；柔光玻璃是 Miuix 的 OS 4 款式，不再单列。 -->
     <string-array name="ui_style_entries">
         <item>Material 3</item>
         <item>Miuix</item>
-        <item>柔光玻璃</item>
+    </string-array>
+    <!-- 与 ThemePrefs.MIUIX_FLAVOR_* 的顺序一致：OS 3 是 Miuix 原本的观感，OS 4 是柔光玻璃。 -->
+    <string-array name="miuix_flavor_entries">
+        <item>OS 3</item>
+        <item>OS 4</item>
     </string-array>
     <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格 + 末位 CMF），选项保留英文原文。 -->
     <string-array name="palette_style_entries">

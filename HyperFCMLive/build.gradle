@@ -77,6 +77,14 @@ android {
                 storePassword localProperties.getProperty("storePassword")
                 keyAlias localProperties.getProperty("keyAlias")
                 keyPassword localProperties.getProperty("keyPassword")
+                // 签名方案显式固定，不交给 AGP 推断。minSdk 35 下 v1（JAR 签名，
+                // 只服务 API < 24）毫无用处；v4 只产出 adb 增量安装用的 .idsig。
+                // v3 是 API 28+ 的校验方案，AGP 9.5.1 实测默认只签 v2，这里补上。
+                // v3.1 无法在此指定：它由密钥轮换 lineage 触发，本项目没有轮换链。
+                enableV1Signing false
+                enableV2Signing true
+                enableV3Signing true
+                enableV4Signing false
             }
         }
     }
@@ -132,7 +140,7 @@ android {
         checkReleaseBuilds false
     }
 
-    namespace 'io.github.howard20181.hyperos.fcmlive'
+    namespace 'io.github.iamqwert.hypergreeze'
 }
 
 base {

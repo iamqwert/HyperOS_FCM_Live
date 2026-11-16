@@ -8,7 +8,7 @@
 }
 
 # Module app + hooks (reflection, layout inflation, libxposed)
--keep class io.github.howard20181.hyperos.fcmlive.** { *; }
+-keep class io.github.iamqwert.hypergreeze.** { *; }
 
 # Two package-wide keeps that used to sit below were removed on 2026-10-05.
 #

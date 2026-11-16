@@ -10,4 +10,4 @@
 # merges them — only this package's classes are missing from that set.
 # Hooker.kt classes are included by the wildcard but never load in this
 # process; they cost nothing here.
-HSPLio/github/howard20181/hyperos/fcmlive/**->**(**)**
+HSPLio/github/iamqwert/hypergreeze/**->**(**)**
