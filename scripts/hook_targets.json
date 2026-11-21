@@ -149,10 +149,20 @@
       ]
     },
     {
+      "id": "S4",
+      "host": "system_server",
+      "generation": "OS3/OS4",
+      "os3": true,
+      "os4": true,
+      "methods": [
+        "triggerGMSLimitAction"
+      ]
+    },
+    {
       "id": "S5",
       "host": "system_server",
-      "generation": "OS4（OS3 无此方法）",
-      "os3": true,
+      "generation": "OS4",
+      "os3": false,
       "os4": true,
       "methods": [
         "updateGmsNetStatus"
@@ -185,8 +195,11 @@
       "os3": true,
       "os4": true,
       "methods": [
+        "isJobRestrict",
         "isRestrictReceiver",
-        "thawUidAsync"
+        "isUidFrozen",
+        "thawUidAsync",
+        "tryDelayFreeze"
       ]
     },
     {
@@ -259,7 +272,10 @@
       "os3": true,
       "os4": true,
       "methods": [
-        "checkAlarmIsAllowedSend"
+        "adjustAlarmLocked",
+        "alignAlarmLocked",
+        "checkAlarmIsAllowedSend",
+        "isExemptFromSsru"
       ]
     },
     {
@@ -286,7 +302,7 @@
     {
       "id": "S25",
       "host": "system_server",
-      "generation": "OS3/OS4（OS4 已确认）",
+      "generation": "OS3/OS4",
       "os3": true,
       "os4": true,
       "methods": [
@@ -296,7 +312,7 @@
     {
       "id": "S30",
       "host": "system_server",
-      "generation": "OS3/OS4（OS4 已确认）",
+      "generation": "OS3/OS4",
       "os3": true,
       "os4": true,
       "methods": [
@@ -352,8 +368,7 @@
       "os3": true,
       "os4": false,
       "methods": [
-        "disableGms",
-        "disableGmsApps"
+        "disableGms"
       ]
     },
     {
@@ -376,26 +391,6 @@
       "os4": true,
       "methods": [
         "onGoogleReachabilityChanged"
-      ]
-    },
-    {
-      "id": "P10",
-      "host": "powerkeeper",
-      "generation": "OS3/OS4",
-      "os3": true,
-      "os4": true,
-      "methods": [
-        "c"
-      ]
-    },
-    {
-      "id": "P11",
-      "host": "powerkeeper",
-      "generation": "OS3/OS4",
-      "os3": true,
-      "os4": true,
-      "methods": [
-        "googleNetworkDisconnect"
       ]
     },
     {
@@ -431,7 +426,7 @@
     {
       "id": "P19",
       "host": "powerkeeper",
-      "generation": "OS3/OS4（OS3 已核存在）",
+      "generation": "OS3/OS4",
       "os3": true,
       "os4": true,
       "methods": [
@@ -441,7 +436,7 @@
     {
       "id": "P20",
       "host": "powerkeeper",
-      "generation": "OS3/OS4（OS3 已核存在）",
+      "generation": "OS3/OS4",
       "os3": true,
       "os4": true,
       "methods": [

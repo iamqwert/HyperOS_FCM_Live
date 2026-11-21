@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "HyperFCMLive/src/main/java/io/github/howard20181/hyperos/fcmlive"
+SRC = ROOT / "HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze"
 HOOKER = SRC / "Hooker.kt"
 TECH = ROOT / "FCM_HOOK_TECH_DOC.md"
 BASELINE = Path(__file__).with_name("hook_targets.json")

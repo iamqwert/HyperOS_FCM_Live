@@ -74,7 +74,7 @@
             </intent-filter>
             <!-- Explicit entry for LSPosed / adb / shortcuts when the icon is hidden. -->
             <intent-filter>
-                <action android:name="io.github.howard20181.hyperos.fcmlive.SETTINGS" />
+                <action android:name="io.github.iamqwert.hypergreeze.SETTINGS" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>

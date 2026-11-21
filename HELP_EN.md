@@ -2,403 +2,135 @@
 
 **English** · [简体中文](HELP.md)
 
-Removes HyperOS restrictions on broadcasts related to Google push connections.
-
-> The module targets LSPosed API 102.
-> This guide matches the module's current behavior one to one; if anything here disagrees with what the module actually does, please open an issue.
+This guide covers setup, key options, and fast troubleshooting. For framework hook internals, see the [Technical Docs (Chinese)](FCM_HOOK_TECH_DOC.md).
 
 ---
 
-## Contents
+## 1. Quick Start
 
-- [1. What it solves](#1-what-it-solves)
-- [2. Quick start](#2-quick-start)
-- [3. How it works](#3-how-it-works)
-- [4. The allowlist mechanism](#4-the-allowlist-mechanism)
-- [5. Power saving and freezing](#5-power-saving-and-freezing)
-- [6. UI and features](#6-ui-and-features)
-- [7. Experimental features](#7-experimental-features)
-- [8. FAQ](#8-faq)
-- [9. Known limitations](#9-known-limitations)
-- [10. Privacy and permissions](#10-privacy-and-permissions)
-- [11. Troubleshooting and feedback](#11-troubleshooting-and-feedback)
+1. **Install the module**: download and install the APK from [Releases](https://github.com/iamqwert/HyperOS_FCM_Live/releases).
+2. **Enable and select scope**: in LSPosed Manager, enable the module and select **System Framework (`system`)** and **Battery and Performance (`com.miui.powerkeeper`)**.
+3. **Apply**: LSPosed builds supporting API 102 hot-reload automatically; older builds require a manual reboot.
+4. **Select apps**: open the module and select the apps that need timely FCM push notifications.
+5. **Verify**: switch to the **Records** tab and confirm GMS shows Connected and hooks are installed in the exported summary.
 
 ---
 
-## 1. What it solves
+## 2. FCM Wake-up Allowlist
 
-HyperOS's power-saving policies restrict broadcasts and networking for background apps. Google push (FCM) relies on Google Play services to broadcast a wake-up call to the target app; once that broadcast is deferred or blocked, notifications stop arriving.
+The allowlist is the module's **only** narrowing control — there is no "allow all" master switch. After a fresh install, the allowlist is empty and only Google Play services (GMS) itself is protected.
 
-This module rewrites those checks inside the framework: it lets Google push and reconnect broadcasts through, keeps GMS from being cut off from the network, frozen or blacklisted, and lets the app receive the broadcast even in the "stopped" state.
+### What selected apps get
 
-> The trade-off: allowing push reconnects means apps can be woken by pushes, and battery use may go up with the module enabled. That is inherent to what the module does.
+Only **selected** apps have these restrictions lifted:
 
----
+- FCM push broadcasts pass the system autostart check
+- Apps in the "stopped" state can still be woken by push broadcasts
+- Frozen apps receive push broadcasts directly with stock unfreeze behavior
+- Swiping away from Recents does not force-stop them (apps declaring FCM components only)
 
-## 2. Quick start
+Unselected apps keep stock system behavior: swiping them from Recents force-stops them, and they generally need to be reopened once for pushes to resume.
 
-1. LSPosed (or another compatible Xposed framework) is installed on the device
-2. Install this module's APK
-3. Enable the module in LSPosed's module list and check its scope
-4. An LSPosed manager that supports API 102 hot-reloads the scope automatically when the module is enabled or updated, and the change takes effect immediately; on older LSPosed builds, both the first install and later updates require a manual reboot
-5. Open the module and configure the allowlist as needed
+### Why is Google Play services greyed out with a lock icon?
 
-It's a good idea to confirm the version under "Settings → Check for updates" and use "FCM diagnostics" to check GMS's connection state.
+GMS and push reconnects are **always protected**, regardless of allowlist selection. The card is locked and excluded from Select All / batch actions because toggling it would make no difference.
 
----
+### Why does the list show only some apps?
 
-## 3. How it works
-
-The delivery chain: GMS receives the FCM message → sends the `com.google.android.c2dm.intent.RECEIVE` broadcast → the target app's receiver runs.
-
-HyperOS layers several gates on this chain; the module handles them gate by gate:
-
-| Stage | System-side gate | What the module does |
-|---|---|---|
-| GMS reconnect intents | `isAllowBroadcast` | Only `CN_DEFER_BROADCAST` actions are answered |
-| App is "stopped" | "stopped" package filter | Re-adds `FLAG_INCLUDE_STOPPED_PACKAGES` |
-| Autostart check | `checkApplicationAutoStart` | Allowed per the allowlist |
-| App is frozen | `isRestrictReceiver` (greeze broadcast gate) | Let through, replaying the stock unfreeze |
-| GMS network cap | `updateGmsNetStatus` (OS4) | Argument forced to false |
-| Alarm blocked | `checkAlarmIsAllowedSend` (the MIUI alarm delivery gate) | If an alarm belonging to GMS is judged blocked, it is let through instead |
-| Power/network limits | PowerKeeper profiles, AppStandby, greeze's `isRestrictNet`, network restrictions | GMS is written into the no-restrict list |
-| Force stop | `isForceStopEnable` | Applies to selected apps (that declare FCM components) only |
-
-The hooked system services include `ActivityManagerService`, the alarm delivery gate (`AlarmManagerServiceStubImpl`), greeze (`GreezeManagerService`, `AurogonImmobulusMode`, the policy managers `DomesticPolicyManager` / `InternationalPolicyManager`), PowerKeeper's `AppStandbyController`, the process policy tables, and more.
-
-**Compatibility**: both PowerKeeper designs are supported. The module picks at runtime based on whether the method exists — no manual switching.
-
-- HyperOS 3 — the old design (`initGmsChain` / `updateGmsAlarm` / `updateGmsNetWork` and friends)
-- HyperOS 4 — the new design (`updateFrameworkGmsNetStatus`)
+- The module uses Android 11+ package visibility (`<queries>`) to see only push-capable apps — **no installed-apps permission is required**.
+- **Exclude MiPush apps** is on by default (apps using Xiaomi's system push usually do not rely on FCM). You can change filters or show system apps from the top-right menu.
+- Long-press an app card (or tap **Batch Actions** in the MIUIX style) to add or remove multiple apps at once.
 
 ---
 
-## 4. The allowlist mechanism
+## 3. Records & Diagnostics
 
-The allowlist is the module's **only** narrowing mechanism: every restriction is lifted for selected apps only, and unselected apps keep the system's own judgment in full. There is no master switch and no "allow everything" entry — to lift a restriction for an app, select that app.
+The **Records** tab reads GMS's own FCM diagnostics directly from the system process — **no root or shell needed** (the module must be active in LSPosed):
 
-### Nothing selected
-
-Everything stays tightened: all apps keep the system's default judgment, and behavior is essentially the same as without the module. In this state the module does exactly one thing — protect Google Play services itself (see below).
-
-This is also the state right after a fresh install. To enable push wake-ups for an app, just select it.
-
-### Some apps selected
-
-Selected apps gain extra privileges:
-
-- The autostart check lets them through directly
-- They can be woken by this push even in the "stopped" state
-- When the app is frozen, the push broadcast is delivered directly instead of being cached
-- Google push broadcasts are allowed through (`isAllowBroadcast`)
-- Swiping them away from Recents does not force-stop them (`isForceStopEnable`; only apps that declare Google push components)
-
-Unselected apps get none of these. Pushes for them usually arrive only after the app has been opened; swiping them away really does force-stop them and mark them "stopped", after which a push may fail to deliver (the system log shows `Failed to broadcast to stopped app`) — the app generally has to be reopened once to recover.
-
-### What is always protected
-
-GMS and push reconnects are protected **always**, regardless of selection: whether the list is empty or a page long, Google Play services itself is never narrowed. On top of that, part of the protection is written as device-wide policy tables (power-saving profiles, process allowlist, no-restrict list), which apply to the whole device as well.
-
-That is why, in the app list, the Google Play services (GMS) card is **grey and unselectable**, showing a lock icon on the right instead of a checkbox: there is no "selected vs unselected" for it — behavior is identical either way. The card is also excluded from multi-select; select all never picks it up.
+- **Status tab**: displays live Connection / Network / Heartbeat / Push / Errors rows. Rows appear only when data exists, so a missing row is normal.
+- **Events tab**: filters event history into All / Connection / Heartbeat / Push / Sleep / Errors. Keeps 500 rows or 7 days by default (configurable in Settings).
+- **Export diagnostic text**: tap the upload icon in the top bar to save a `.txt` report containing device info, OS/module versions, **hook-install summary**, current status, and event history.
 
 ---
 
-## 5. Power saving and freezing
+## 4. Settings & Experimental Features
 
-### What the module does
+> Three lists are distinct throughout this guide: **this app's "FCM wake-up allowlist"**, the Security app's **"battery saver policy"**, and AOSP **"battery optimization"**.
 
-It never modifies GMS itself — only the system-side checks:
+### Everyday settings
 
-- Writes GMS into the no-restrict list, flips its power-saving profile from "Smart restrict" to "Unrestricted", and writes "Unrestricted" back into the background control of the configuration table
-- Fast freezing and the freeze policy skip GMS outright
-- Turns off the restriction switch and network restrictions aimed at GMS
-- Lets push reconnect and delivery broadcasts through
-- Whether the network is cut during sleep mode is up to the system — the module stays out by default; the "Sleep mode" switches on the Settings page can keep the connection alive overnight
-- If GMS is found frozen, it also sends heartbeat/reconnect requests so GMS dials back in
+- **Sleep mode (Keep Wi-Fi / Keep mobile data)**: off by default. HyperOS cuts Wi-Fi and mobile data device-wide when sleep mode is entered or exited, without per-app control. Enable Wi-Fi or both if you need overnight push delivery (increases overnight battery use).
+- **Stop the system from putting WeChat back on the battery-unoptimized list**: HyperOS repeatedly resets WeChat to "Not optimized" on power-mode changes, bypassing the normal cached-process FCM path. Turn this switch on first, then tap **AOSP App Battery Usage** below to set WeChat to **Optimized** manually.
+- **Backup & restore**: export or import your allowlist and switch settings as a plain text file.
+- **Hide launcher icon**: once hidden, open the module from LSPosed Manager. When visible, long-press the icon for shortcuts (Settings, Help, FCM diagnostics).
 
-Summarized by dimension ("AOSP equivalent" = what stock Android does in that dimension):
+### Experimental features (Settings → Experiments & Debugging)
 
-| Dimension | Means | Nature | AOSP equivalent |
-|---|---|---|---|
-| Delivery to stopped apps | Adds the "include stopped packages" flag to Google push broadcasts | In-memory, per-broadcast, reversible | Restores: stock push broadcasts carry the flag natively |
-| Broadcast autostart gate | Push broadcasts pass the system's autostart entry directly | In-memory | Neutralizes: a broadcast gate HyperOS added |
-| Power-saving policy | No-restrict list, profile forced to "Unrestricted", background control write-back | In-memory + config write-back | Neutralizes: no such layer in stock |
-| Freezing and network limits | Fast freeze skips Google services, network restrictions turned off | In-memory | Neutralizes: no such layer in stock |
-| Process retention | Three places (policy tables, process allowlist, etc.) written persistently in the lenient direction | Persistent | Restores AOSP-level survival surface |
+All switches are **off by default** and take effect immediately without rebooting or reloading:
 
-### How it relates to the allowlist
-
-The GMS protections above are always on; they do not depend on selection.
-
-The allowlist decides whether the target app gets the wake-up privileges — autostart wake-ups and "stopped" wake-ups — and whether "allow Google push broadcasts" and "protection from force-stop" apply to it. Force-stop protection only covers apps that declare Google push components.
+| Switch | What it does | Notes |
+| --- | --- | --- |
+| **Allow apps to be started** | Lifts runtime service-start autostart checks for selected apps | Writes nothing to system settings; for permanent autostart, use **Autostart manager** directly |
+| **Stay connected on weak Wi-Fi** | Reduces automatic switching to mobile data on weak Wi-Fi (thresholds: `45 / 40 / 35 / 30`) | Keeps you on poor Wi-Fi; **does not improve Wi-Fi quality** |
+| **Keep network access while frozen** | Keeps selected apps' network open while frozen | Preserves the app's own connections; plays no role in FCM delivery |
+| **Bypass Smart Power blocking** | Allows FCM broadcasts and messaging service starts | **HyperOS 3 only** (removed in HyperOS 4) |
 
 ---
 
-## 6. UI and features
-
-### Main page (the FCM wake-up allowlist)
-
-| Feature | Description |
-|---|---|
-| Search | Filter by app name or package name |
-| Long-press a card | Enter multi-select to batch add/remove allowlist entries |
-| Select all / deselect all | Applies to the current list in multi-select mode |
-| More options (top right) | Exclude MiPush apps, show system apps, Settings |
-| FCM diagnostics | Opens GMS's built-in diagnostics screen; falls back to GMS's app details page when unavailable |
-
-### Records page (Records tab)
-
-Brings GMS's own diagnostic content into the app, so you no longer have to open FCM Diagnostics. The module reads it inside the system process and hands it back to the app — **no root, no shell**. The price is that **the module has to be active**: while it is not, the page shows only a locked card plus whatever archive the last active period left.
-
-Two tabs inside:
-
-| Tab | Content |
-| --- | --- |
-| Status | Five blocks — connection / network / heartbeat / push / errors — e.g. connection state (connected, connecting, disconnected), endpoint, connected for, last connection duration, last close, current network, adaptive heartbeat, queued messages, the most recent delivery delay, failed logins and backoff |
-| Events | Event history, filtered by All / Connection / Heartbeat / Push / Sleep / Errors |
-
-**Rows appear only when there is something to say.** The system prints those fields only when it has a value (no queued messages means no queue row), so a missing row is not a fault, and the page never pads a row with zeros or placeholders. The dot in front of each event is a severity: green normal, amber worth a look, red abnormal, grey unknown.
-
-- Pull down to refresh now; while the Records tab is on screen it samples once a minute
-- The archive keeps 500 rows by default (200 / 300 / 500 / 800 / 1200 in Settings) and only the last 7 days, whichever limit comes first
-- The upload icon in the bar **exports the diagnostic text**: device, system version, Android version, manager version, module version, the hook-install summary, current FCM status and the event history, all in one txt
-
-> The "hook install" row is what the module itself reports after it finishes installing inside the system process (`N hook(s) installed, M target(s) absent`). When you report a problem, that one row decides whether there is anything to investigate at all.
-
-### Settings page
-
-| Section | Items |
-|---|---|
-| Display | Language (Simplified Chinese / English), hide launcher icon (once hidden, open the module from LSPosed), predictive back (on by default, see below) |
-| Theme | Theme mode, dynamic color, palette style, color spec |
-| Battery optimization | WeChat battery optimization switch, AOSP app battery usage entry |
-| Sleep mode | Keep Wi-Fi, keep mobile data (off by default, see below) |
-| Backup & restore | Back up the current configuration to a text file, import it back (allowlist and switches together) |
-| Privacy & permissions | What each permission is for, and the privacy commitment |
-| Experiments & debugging | Debug logging, experimental features entry |
-| About | View source, check for updates, open-source licenses |
-
-### Battery optimization (Settings page)
-
-**Stop the system from putting WeChat back on the battery-unoptimized list**
-
-Only blocks subsequent writes of WeChat into AOSP battery optimization's "Not optimized" list.
-
-- Only blocks future writes; existing entries are not withdrawn
-- Entries already on the list must be changed to "Optimized" yourself in battery optimization
-
-The "AOSP app battery usage" row next to it is a direct entry into the system's battery usage page.
-
-### Sleep mode (Settings page)
-
-**Keep Wi-Fi connected**
-
-Wi-Fi stays on when sleep mode is entered or exited, so the Google push channel is not cut all night; overnight battery use goes up.
-
-**Keep mobile data connected**
-
-Both mobile data and Wi-Fi stay connected all night; overnight battery use goes up further.
-
-> Sleep mode cuts the network device-wide: the system turns off Wi-Fi and mobile data outright, without per-app handling. The only choice is keeping Wi-Fi, or keeping mobile data along with it.
-
-### Launcher shortcuts
-
-Long-press the launcher icon for direct access to: Settings, Help (opens this guide in a browser), FCM diagnostics.
-
-### Predictive back (back-gesture preview)
-
-The **Predictive back** switch in the settings page's Display section controls **whether the screen follows your finger during a back gesture**, and it is **on by default**.
-
-With it on (default), swipe inward from the left or right **edge** and the page moves with your finger: on a subpage the page beneath is gradually revealed, on the main page it is the preview of returning to the launcher. Releasing past the threshold completes the back action; releasing before it springs the page back.
-
-With it off, back still works but nothing follows your finger — the screen stays put during the gesture and the back action runs on release.
-
-The main page is covered by the switch too: with it off, even leaving the app no longer previews anything.
-
-> This module does **not** offer "swipe right from the middle of the screen to go back" — that gesture was dropped in 4.0.0, and back is handled entirely by the system's edge gesture and the back key.
-
----
-
-## 7. Experimental features
-
-These switches are reached from the "Experiments & debugging" section of the Settings page. They are all off by default, and each one makes the module intervene in behavior it otherwise leaves alone — which is why they are hidden one level deeper.
-
-Flipping a switch takes effect immediately: no reboot, no module reload.
-
-> Three kinds of lists are not the same thing, here and throughout: **this app's "FCM wake-up allowlist"**, the Security app's "battery saver policy", and AOSP "battery optimization".
-
-For exactly where these switches intervene in the system, which behaviors the module deliberately leaves alone, and which conclusions are not yet backed by real-device measurements, see [the technical docs, §8.2 (Chinese)](FCM_HOOK_TECH_DOC.md).
-
-### Autostart
-
-**Allow apps to be started**
-
-When the system judges an autostart, selected apps' service starts and process starts are allowed through. Nothing is written to any setting; turning it off restores stock behavior immediately.
-
-Two sub-switches live under it, each widening coverage; a sub-switch only shows once the one above it is on, and the chain collapses as you go up:
-
-| Tier | Intervention point | Nature | Description |
-|---|---|---|---|
-| Turn off app freezing | The system's restart gate at freeze time | In-memory, off restores stock | Reduces freezing of selected apps; once on, whether processes take the cold or warm path changes wholesale, so cross-tier counters are not directly comparable |
-| Allow all autostart checks | The unified query entry for the autostart switches | In-memory, off restores stock | The widest tier. Behavior is equivalent to having autostart enabled but nothing is written to disk, and the Security app's display is unchanged; it also lifts the "pre-start penalty", so the app's own autostart queries stop being refused |
-
-A hidden sub-switch is just as inert: each tier only takes effect when it and every tier above it are on. Turn any tier off and the hidden tiers chained below it stop working along with it (their counters dropping to zero is expected, not a failure).
-
-> These switches only affect selected apps — add apps to the allowlist first, otherwise the switches have nothing to act on.
-
-The last row, "Autostart manager", is an entry that opens the Security app's autostart management page. Apps that earlier versions only wrote the autostart behavior bit for are reconciled automatically at every boot.
-
-### Network
-
-**Stay connected on weak Wi-Fi**
-
-When the Wi-Fi signal is weak, the system no longer switches to mobile data based on its score, reducing back-and-forth switching.
-
-The honest description: it keeps you on a Wi-Fi network that really is bad, and **does not improve Wi-Fi quality**.
-
-**Adjust the weak Wi-Fi threshold**
-
-Choose 45 / 40 / 35 / 30; the default 45 is the most conservative. When the score falls below the chosen value, switching is handed back to the system's default policy.
-
-This change only applies at the moment the system reports the score; nothing is written to any configuration, and uninstalling leaves no residue.
-
-> Boundary: more than one reason can trigger a switch, and they share a single exit — the module works on that exit rather than on each reason. There is also one switching path in the system that bypasses the score and is not covered. No switch has ever been observed on that path, **but absence of evidence is not evidence of absence**.
-
-### Background network
-
-**Keep network access while frozen**
-
-When the system freezes a background app, it cuts that app's network too. With this on, selected apps keep network access while frozen; the freezing itself happens as usual.
-
-- Only affects selected apps; with an empty allowlist, the switch affects no app
-- Writes nothing to any setting; turning it off restores stock behavior immediately
-- This switch plays no part in Google push delivery; what it preserves is the app's own persistent connections surviving a freeze
-
-### Smart Power
-
-**Bypass Smart Power blocking**
-
-Allows the app's FCM broadcasts and messaging service to start.
-
-- Visible on OS3 devices only: OS4 removed SmartPower's blocking decisions, so there is nothing to hook and the section is not rendered on OS4
-- Off by default; writes nothing to any setting
-
-> An earlier experimental switch, "GCM reconnect repair", worked inside the Google Play services process. It was removed in 4.1.1: GMS hot updates tightened their integrity detection, and in-process hooks were flagged as breaking device integrity. This module no longer injects into the Google Play services process.
-
----
-
-## 8. FAQ
+## 5. Troubleshooting & FAQ
 
 ### Selected the app, still no push?
 
-Check, in order:
+Check these four items in order:
 
-① The module is enabled in LSPosed
-② The app actually supports FCM (declaring FCM components does not mean the app sends its notifications through FCM)
-③ Use "FCM diagnostics" to check GMS's connection state
+1. **Check the Records tab**: confirm the module is active, hooks are installed, and GMS shows **Connected**.
+2. **Check VPN / proxy rules**: intercepting FCM domains can drop or delay the long-lived connection, while blindly bypassing all of `com.google.android.gms` or entire port ranges can break other Google services (such as Google Search) in Mainland China. Follow [Firebase's network configuration guide](https://firebase.google.com/docs/cloud-messaging/network-configuration) and route these domains **direct** in your proxy client (toggle Airplane mode once afterward so the socket reconnects):
+   - **Mainland China**:
+     - `mtalk.google.com`, `mtalk4.google.com`, `mtalk-staging.google.com`, `mtalk-dev.google.com`
+     - `alt1-mtalk.google.com` through `alt8-mtalk.google.com`
+   - **Other regions with unrestricted internet**: ensuring direct access on TCP ports `5228`, `5229`, `5230`, and `443` is sufficient.
+   - The module has no root or `iptables` access and cannot see or change proxy routing.
+3. **Verify the app actually uses FCM**: declaring FCM components does not guarantee the server sends notifications via FCM.
+4. **Confirm the app is selected**: unselected apps swiped from Recents are force-stopped until reopened.
 
-### Battery drain went up?
+### Why are there more disconnect entries in Records / FCM Diagnostics?
 
-That is the module's inherent cost — it lets push reconnects through and allows apps to be woken.
+When the system restricts networking, the underlying socket can die silently until GMS's next heartbeat times out. When rewriting GMS into the no-restrict list, the module nudges GMS to verify and rebuild the connection early. More entries are **expected** — what matters is returning to **Connected** within seconds. Only prolonged disconnection indicates a network or proxy issue.
 
-Selecting only the apps that genuinely need instant push reduces how often apps are woken from the "stopped" state, which is where most of the extra drain lives.
+### Do apps stay alive after a push? How much extra battery is used?
 
-But this is not about turning the module off for other apps: GMS and push broadcasts are protected regardless.
-
-### Where does the app list come from? Why only push-capable apps?
-
-The list requires **no permission at all**: the module declares the push-related component actions in its manifest, and Android 11+'s package visibility automatically grants access to apps matching those declarations — in other words, the system only ever lets the module see apps that declare push components, and nothing else. This is not an extra filter toggle.
-
-Three push-related declarations are checked in an app's manifest:
-
-- ② declares the broadcast action `com.google.firebase.INSTANCE_ID_EVENT`
-- ③ declares the broadcast action `com.google.firebase.MESSAGING_EVENT`
-- ④ declares the broadcast action `com.google.android.c2dm.intent.RECEIVE`
-
-The rule: **any two of ②③④ qualify the app; only ② or only ③ also qualifies; only ④ does not.** Additionally, an app whose RECEIVE receiver resolves to Google's own push entrypoint (a PushReceiver under the `com.google.android.libraries.notifications.` namespace) qualifies directly — Google's own apps are built that way.
-
-Why ② is not required: push SDKs let apps declare their own receiver to catch the `RECEIVE` broadcast without subclassing the SDK's receiver class — Google Play services itself does exactly that. So "no ②" is not an exclusion criterion. ④ alone does not qualify because components from the early C2DM era still carry that action (one lives in the system framework, unrelated to push).
-
-Google Play services is exempt from this rule and always listed.
-
-### What counts as a MiPush app?
-
-The app's manifest declares `com.xiaomi.push.service.XMPushService` (disabled components included).
-
-> MiPush is a system-level push: once an app registers, the system takes over delivery and disables the app's own `XMPushService`. So **that component being disabled is precisely the sign MiPush is working**.
-
-### After a push wakes the app, does it stay alive?
-
-The module only handles delivery and does nothing after the fact. A woken app usually becomes a cached process, later reclaimed or frozen by greeze.
-
-That does not affect the next push — the next one cold-starts the app again; measured cold start to receiver execution is about 0.5 seconds.
-
-### Why does FCM diagnostics always show disconnects?
-
-When GMS is (re)written into the no-restrict list, the module proactively asks it to re-establish the push connection.
-
-The reason: a connection can be dead without anyone knowing. When the system restricts networking it cuts the underlying socket directly, and GMS only notices at the next heartbeat timeout — during that window pushes are not actually arriving, yet diagnostics still show "Connected".
-
-Nudging it once moves the discovery from "whenever the next heartbeat fires" to "right now", and the dead connection is replaced immediately.
-
-So with the module enabled, the connection log will be more fragmented and longer than before — expected. What to actually watch: does it reconnect promptly after a drop? Back to Connected within seconds is normal; stuck disconnected for a long time is what deserves investigation.
+The module **never keeps apps alive**. After delivery, the app becomes a cached process and is reclaimed or frozen normally without hurting the next push (cold-start delivery takes ~0.5 s in testing). Extra battery drain comes mainly from push wake-ups, so select only apps that genuinely need instant notifications.
 
 ---
 
-## 9. Known limitations
+## 6. Known Boundaries & Privacy
 
-These are the module's real behaviors, listed to prevent misreading:
+### Known boundaries
 
-- **Whether a Google push broadcast gets deferred and whether it can be delivered are decided by the same check.** That check reads the allowlist, so for unselected apps the decision is handed back to the system — behavior identical to running without the module.
-- **"No network restrictions" depends on the international policy implementation.** Real-world testing on HyperOS 4 China builds shows the domestic policy runs (that branch never participates), so on such ROMs the narrowing happens in two places: allowing push broadcasts through, and protection from force-stop.
-- **Unselected apps are exposed to being force-stopped.** Force-stop protection only applies to selected apps: swiping an unselected app away from Recents really does force-stop it and mark it "stopped"; the app has to be reopened once for push to resume.
-- **Part of the GMS protection is written as device-wide policy tables** (power-saving profiles, process allowlist, no-restrict list). They apply to the whole device and are never narrowed by selection.
-- **Sleep mode cuts the network device-wide.** On entering sleep the system turns off Wi-Fi and mobile data outright, without per-app handling — there is no "let only Google push through" option; the Sleep mode keep-alive switches on the Settings page can only keep Wi-Fi, or mobile data along with it, and are off by default.
-- **Push delays during Doze are not touched.** During doze, non-high-priority pushes are held on Google's servers and delivered in a batch when doze ends, and apps are not added to battery optimization's allowlist automatically — stock Android does the same, and the module deliberately preserves it. The module's only doze-layer action is making sure vendor policy does not cut Google services' network on top.
-- **Target apps are not added to the freeze-exempt set.** After being woken by a push they become cached processes, later reclaimed or frozen — that is normal and does not affect the next push.
-- **The alarm gate only intervenes when the ROM judges "blocked".** Real-device testing shows the gate does see GMS's alarms, but no case of the ROM refusing a GMS alarm was ever observed — in normal states this change alters nothing and only matters if the ROM blocks GMS's alarms (reconnects, heartbeats).
-- **The list write-back proactively asks GMS to reconnect.** It sends reconnect and heartbeat broadcasts to GMS and GSF, prompting GMS to verify the connection and rebuild it if needed — hence more connection entries in FCM diagnostics than with the module off. More entries does not mean a worse connection; the criterion is whether it returns to Connected quickly after a drop.
-- **The module has no keep-alive capability.** It does not stop the system from reclaiming app processes, and it holds no persistent background work of its own.
+- **Doze batching is untouched**: during Doze, non-high-priority pushes are held on Google's servers and delivered in batches afterward — stock Android behavior preserved intentionally.
+- **Brief drops under heavy memory pressure**: aggressive memory cleanup may briefly disconnect GMS (~3 s) before it reconnects automatically.
+- **No keep-alive or proxy control**: no persistent background service, no `su`, and no `iptables` access.
 
----
+### Privacy & permissions
 
-## 10. Privacy and permissions
+The module requests **no sensitive permissions**, collects or uploads no personal data, stores everything locally, and includes no analytics or ad SDKs:
 
-The module requests **no sensitive permissions** — the app list needs no "read installed apps" grant:
-
-| Declaration | What it is for |
-|---|---|
-| `<queries>` (manifest declaration, not a permission) | Android 11+ package visibility: the system only grants access to apps declaring push components, so the module cannot see the full app list even by design |
-| `android.permission.INTERNET` | Used only to check for updates on GitHub |
-
-Privacy commitment: no personal data is collected or uploaded; the allowlist and settings stay on this device; no analytics, ads or tracking SDKs; the code is open source and auditable.
+| Declaration | Purpose |
+| --- | --- |
+| `<queries>` (manifest declaration, not a permission) | Android 11+ package visibility — exposes only push-capable apps |
+| `android.permission.INTERNET` | Used solely to check for module updates on GitHub |
 
 ---
 
-## 11. Troubleshooting and feedback
+## 7. Reporting Issues
 
-### Confirm the module is loaded
+Grab a **diagnostic report** before opening an issue:
 
-On every successful load the module leaves one summary line:
+- **Preferred**: open the **Records** tab → tap the top-right upload icon to export the diagnostic text (includes the `HyperFCMLive active in ...` hook summary and event history).
+- **Fallback (if the module is not responding)**: enable **Show debug logs** under Settings → Experiments & Debugging, wait for boot to finish, and run:
+  ```bash
+  adb logcat -d | grep "HyperFCMLive active in"
+  ```
+  Or attach `modules_*.log` exported from LSPosed Manager.
 
-```
-HyperFCMLive active in <host>: N hook(s) installed, M target(s) absent
-```
-
-**Preferred**: open the Records tab → upload icon → export the diagnostic text. That line is the "hook install" row there, together with the device, the system version and the recent events — no separate log capture needed. (`N` = hooks installed, `M` = targets absent on the current ROM; the `cross-generation` part is the expected OS 3 / OS 4 split.)
-
-**Fallback** (when the Records page says the module did not answer the query, the module is not running and only the log has the line): first turn on **debug logging** under Settings → Experimental, then run
-
-```bash
-adb logcat -d | grep "HyperFCMLive active in"
-```
-
-> The module emits warnings and worse by default. That line is INFO, so it does not exist unless debug logging is on — which is why the command in the old guide found nothing on a default install. The Records export has no such precondition.
-> Enlarge the log buffer in Developer options, or early-boot entries may be missing. Wait for `sys.boot_completed=1` before capturing.
-> The `/sdcard/Download/.../log/modules_*.log` files LSPosed exports are more complete than a logcat snapshot — prefer them.
-
-### Feedback
-
-- Source: <https://github.com/iamqwert/HyperOS_FCM_Live>
-- File issues through the repository's issue template and attach the **exported diagnostic text**; the template asks for device, system version, module version, LSPosed version, reproduction steps, and whether the target app is checked
-- Released under the GNU GPL-3.0 license
+Open an issue using the template on [GitHub Issues](https://github.com/iamqwert/HyperOS_FCM_Live/issues) and attach the exported report.

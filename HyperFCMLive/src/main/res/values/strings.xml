@@ -12,7 +12,7 @@
   6. 英文要求地道、符合母语者习惯，禁止逐字硬翻；UI 术语以 Android 官方表述为准。
 -->
 <resources>
-    <string name="app_name">HyperOS Push Fix</string>
+    <string name="app_name">HyperGreeze</string>
     <string name="launcher_name">HyperGreeze</string>
     <string name="back">Back</string>
     <string name="help">Help</string>
@@ -89,18 +89,34 @@
     <string name="hide_launcher_icon">Hide Launcher Icon</string>
     <string name="predictive_back">Predictive Back</string>
     <string name="about_sub_predictive_back">Preview the return while your finger drags; off goes back on release</string>
+    <string name="theme_settings">Theme Settings</string>
+    <string name="theme_section_dynamic_color">Dynamic Color</string>
+    <string name="theme_section_appearance">Appearance &amp; Interaction</string>
+    <string name="theme_section_navigation">Navigation</string>
+    <string name="follow_system">Follow System</string>
+    <string name="light_mode">Light Mode</string>
+    <string name="dark_mode">Dark Mode</string>
+    <string name="miuix_monet_dynamic_color">Monet Dynamic Color</string>
+    <string name="about_sub_miuix_monet">Pick colors from your wallpaper</string>
+    <string name="enable_blur_effect">Enable Blur Effect</string>
+    <string name="enable_page_user_scroll">Enable Page User Scroll</string>
+    <string name="pager_gesture_mode">Pager Gesture Mode</string>
+    <string name="global_scale">Global Scale</string>
+    <string name="global_scale_summary" formatted="false">Adjust overall UI density scale (80%–110%)</string>
+    <string name="enable_swipe_back">Enable Swipe Back</string>
+    <string name="about_sub_enable_swipe_back">Swipe a pushed page to pop it; direction follows layout</string>
+    <string-array name="pager_gesture_mode_entries">
+        <item>Default</item>
+        <item>Cross-Axis</item>
+    </string-array>
     <string name="theme_mode">Theme</string>
     <string name="palette_style">Palette Style</string>
     <string name="ui_style">UI Style</string>
-    <string name="miuix_monet">Monet Colors</string>
-    <string name="miuix_accent">Accent Color</string>
-    <string name="miuix_floating_bar">Floating Navigation Bar</string>
+    <string name="miuix_accent">Key Color</string>
     <string name="color_spec">Color Spec</string>
     <string name="about_sub_theme_mode">Choose the app\'s theme mode</string>
     <string name="about_sub_ui_style">Choose the app\'s UI style</string>
-    <string name="about_sub_miuix_monet">Pick colors from your wallpaper</string>
-    <string name="about_sub_miuix_accent">Pick the accent color for the Monet palette</string>
-    <string name="about_sub_miuix_floating_bar">Enabling it also changes the top app bar style</string>
+    <string name="about_sub_miuix_accent">Pick the key color for the Monet palette</string>
     <string name="about_sub_palette_style">Choose a dynamic color style</string>
     <string name="about_sub_color_spec">Choose the Material color spec</string>
     <string name="language">Language</string>
@@ -113,11 +129,19 @@
         <item>Light</item>
         <item>Dark</item>
     </string-array>
-    <!-- 与 ThemePrefs.UI_STYLE_* 的顺序一致。风格名保留原文，柔光玻璃是本项目自己的命名。 -->
+    <!-- Miuix 风格的主题模式菜单，与 MIUIX demo ColorSchemeMode 顺序一致。 -->
+    <string-array name="miuix_theme_mode_entries">
+        <item>Follow System</item>
+        <item>Light</item>
+        <item>Dark</item>
+        <item>Monet System</item>
+        <item>Monet Light</item>
+        <item>Monet Dark</item>
+    </string-array>
+    <!-- 与界面风格的存储取值一致（Material 3 / Miuix）。选项保留原文。 -->
     <string-array name="ui_style_entries">
         <item>Material 3</item>
         <item>Miuix</item>
-        <item>Soft Light Glass</item>
     </string-array>
     <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格 + 末位 CMF），选项保留英文原文。 -->
     <string-array name="palette_style_entries">
@@ -156,6 +180,25 @@
         <item>Brown</item>
         <item>Blue Grey</item>
         <item>Sakura Pink</item>
+    </string-array>
+    <!-- Material 3 custom seed swatches: order matches SEED_COLORS in ui/AboutScreen.kt. -->
+    <string-array name="seed_color_names">
+        <item>Purple (Default)</item>
+        <item>Red</item>
+        <item>Deep Orange</item>
+        <item>Orange</item>
+        <item>Amber</item>
+        <item>Olive</item>
+        <item>Lime</item>
+        <item>Green</item>
+        <item>Teal</item>
+        <item>Cyan</item>
+        <item>Light Blue</item>
+        <item>Blue</item>
+        <item>Indigo</item>
+        <item>Deep Purple</item>
+        <item>Pink</item>
+        <item>Neutral Grey</item>
     </string-array>
     <!-- 语言下拉：选项用各自的原生名，不翻译（仅 values/ 定义一份）。 -->
     <string-array name="language_entries">
@@ -199,10 +242,10 @@
     <string name="records_page_events">Events</string>
     <string name="records_tab_all">All</string>
     <string name="records_tab_connection">Connection</string>
-    <string name="records_tab_heartbeat">Heartbeat</string>
+    <string name="records_tab_heartbeat">HB</string>
     <string name="records_tab_push">Push</string>
-    <string name="records_tab_sleep">Sleep</string>
-    <string name="records_tab_error">Anomalies</string>
+    <string name="records_tab_sleep">Doze</string>
+    <string name="records_tab_error">Issues</string>
     <string name="records_tab_empty_connection">No connection events in this window.</string>
     <string name="records_tab_empty_heartbeat">No heartbeat events in this window.</string>
     <string name="records_tab_empty_push">No push events in this window.</string>

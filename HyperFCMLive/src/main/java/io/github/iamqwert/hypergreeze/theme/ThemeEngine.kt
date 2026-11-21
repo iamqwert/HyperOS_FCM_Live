@@ -1,0 +1,120 @@
+package io.github.iamqwert.hypergreeze.theme
+
+import android.content.Context
+import androidx.compose.runtime.mutableIntStateOf
+import io.github.iamqwert.hypergreeze.mcu.Scheme
+
+/**
+ * Builds the runtime color scheme. The seed comes from the system's own
+ * Material You accent (so the palette still follows the wallpaper); the style
+ * and spec version come from [ThemePrefs].
+ */
+object ThemeEngine {
+
+    /** Brand seed used when the platform has no dynamic color (below API 31). */
+    private val FALLBACK_SEED: Int = 0xFF8B4A5A.toInt()
+
+    @Volatile
+    private var sCached: AppPalette? = null
+
+    @Volatile
+    private var sCacheKey: String? = null
+
+    /**
+     * Compose-visible bump counter. [invalidate] increments it, so a theme
+     * switch re-skins the UI in place — composables keyed on this value
+     * recompute their palette without the Activity being recreated. Before
+     * this existed the only way to push a new palette was `recreate()`, which
+     * rebuilt the whole window and read as a jarring jump on every menu pick.
+     */
+    private val _generation = mutableIntStateOf(0)
+
+    /** Read inside composition to re-skin on [invalidate]. */
+    val generation: Int
+        get() = _generation.intValue
+
+    /** Drop the cached palette; call after any appearance setting changes. */
+    @JvmStatic
+    fun invalidate() {
+        sCached = null
+        sCacheKey = null
+        _generation.intValue++
+    }
+
+    @JvmStatic
+    fun palette(context: Context): AppPalette {
+        val dark = ThemePrefs.isDark(context)
+        val variant = ThemePrefs.paletteStyle(context)
+        val spec = ThemePrefs.specVersion(context)
+        val dynamic = ThemePrefs.dynamicColor(context)
+        val seed = seed(context, dynamic)
+
+        val key = (if (dark) "d" else "l") + ':' + variant.ordinal + ':' + spec + ':' +
+            (if (dynamic) 'w' else 'c') + ':' + seed
+        val cached = sCached
+        if (cached != null && key == sCacheKey) {
+            return cached
+        }
+        val built = buildPalette(seed, variant, dark, spec)
+        sCached = built
+        sCacheKey = key
+        return built
+    }
+
+    /**
+     * Derives the palette for an explicit light/dark mode using the user's
+     * current seed, dynamic-color toggle, palette style and color spec —
+     * without touching [sCached]. Used by the Material 3 theme-mode preview
+     * cards so both light and dark thumbnails reflect live palette choices.
+     */
+    @JvmStatic
+    fun paletteForDarkMode(context: Context, dark: Boolean): AppPalette {
+        val variant = ThemePrefs.paletteStyle(context)
+        val spec = ThemePrefs.specVersion(context)
+        val dynamic = ThemePrefs.dynamicColor(context)
+        val seed = seed(context, dynamic)
+        return buildPalette(seed, variant, dark, spec)
+    }
+
+    private fun buildPalette(
+        seed: Int,
+        variant: Scheme.Variant,
+        dark: Boolean,
+        spec: Int,
+    ): AppPalette {
+        // All three spec versions map through: 2026 is the CMF style's own
+        // layer (ThemePrefs.specVersion only ever hands it back for CMF), and
+        // folding it into 2021 here is what used to silently skip the whole
+        // ColorSpec2026 rule set — the CMF palette rendered with 2021 tone
+        // math while the UI advertised Spec 2026.
+        val specEnum = when (spec) {
+            ThemePrefs.SPEC_2025 -> Scheme.Spec.SPEC_2025
+            ThemePrefs.SPEC_2026 -> Scheme.Spec.SPEC_2026
+            else -> Scheme.Spec.SPEC_2021
+        }
+        return AppPalette(Scheme.create(seed, variant, dark, specEnum), dark)
+    }
+
+    /**
+     * Seed color: with dynamic color on, the middle tone of the system accent
+     * palette carries the wallpaper's hue (Android 12+); with dynamic color
+     * off, the user's own seed is used instead. Both feed the same Material
+     * color utilities, so derivation stays spec-compliant either way. If the
+     * platform does not expose a system accent, the app's brand color is used.
+     */
+    private fun seed(context: Context, dynamic: Boolean): Int {
+        if (!dynamic) {
+            val custom = ThemePrefs.seedColor(context)
+            if (custom != 0) {
+                return custom
+            }
+        }
+        try {
+            @Suppress("DEPRECATION")
+            return context.resources.getColor(android.R.color.system_accent1_500)
+        } catch (ignored: Throwable) {
+            // Fall through to the brand seed.
+        }
+        return FALLBACK_SEED
+    }
+}
