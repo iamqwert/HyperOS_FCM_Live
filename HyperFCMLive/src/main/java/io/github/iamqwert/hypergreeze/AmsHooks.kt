@@ -27,13 +27,9 @@ import java.lang.reflect.Method
  */
 internal object AmsHooks {
 
-    internal fun hookActivityManagerService(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        findMethod: (Class<*>, String, Array<Class<*>?>) -> Method?,
-        systemContext: () -> Context?
-    ) {
+    internal fun hookActivityManagerService(env: HookEnv) {
+        val module = env.module
+        val classLoader = env.classLoader
         val ActivityManagerServiceClass =
             classLoader.loadClass("com.android.server.am.ActivityManagerService")
         val IApplicationThreadClass = classLoader.loadClass("android.app.IApplicationThread")
@@ -41,14 +37,14 @@ internal object AmsHooks {
         val ProcessRecordClass = classLoader.loadClass("com.android.server.am.ProcessRecord")
         val infoField = ProcessRecordClass.getDeclaredField("info")
         infoField.isAccessible = true
-        var getRecordMethod = findMethod(
+        var getRecordMethod = env.findMethod(
             ActivityManagerServiceClass,
-            "getRecordForAppLOSP", arrayOf(IApplicationThreadClass)
+            "getRecordForAppLOSP", IApplicationThreadClass
         )
         if (getRecordMethod == null) {
-            getRecordMethod = findMethod(
+            getRecordMethod = env.findMethod(
                 ActivityManagerServiceClass,
-                "getRecordForAppLocked", arrayOf(IApplicationThreadClass)
+                "getRecordForAppLocked", IApplicationThreadClass
             )
         }
         if (getRecordMethod == null) {
@@ -89,25 +85,23 @@ internal object AmsHooks {
             )
         )
         for (signature in featureSignatures) {
-            broadcastMethod = findMethod(
+            broadcastMethod = env.findMethod(
                 ActivityManagerServiceClass,
-                "broadcastIntentWithFeature", signature
+                "broadcastIntentWithFeature", *signature
             )
             if (broadcastMethod != null) {
                 break
             }
         }
         if (broadcastMethod == null) {
-            broadcastMethod = findMethod(
+            broadcastMethod = env.findMethod(
                 ActivityManagerServiceClass, "broadcastIntent",
-                arrayOf<Class<*>?>(
-                    IApplicationThreadClass,
-                    Intent::class.java, String::class.java, IIntentReceiverClass,
-                    Int::class.javaPrimitiveType, String::class.java, Bundle::class.java,
-                    Array<String>::class.java, Int::class.javaPrimitiveType, Bundle::class.java,
-                    Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType,
-                    Int::class.javaPrimitiveType
-                )
+                IApplicationThreadClass,
+                Intent::class.java, String::class.java, IIntentReceiverClass,
+                Int::class.javaPrimitiveType, String::class.java, Bundle::class.java,
+                Array<String>::class.java, Int::class.javaPrimitiveType, Bundle::class.java,
+                Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType
             )
             if (broadcastMethod != null) {
                 intentArgIndex = 1
@@ -122,18 +116,18 @@ internal object AmsHooks {
         }
         val finalGetRecordMethod = getRecordMethod
         val finalIntentArgIndex = intentArgIndex
-        hookE(broadcastMethod).intercept { chain: XposedInterface.Chain ->
+        env.hookE(broadcastMethod).intercept { chain: XposedInterface.Chain ->
             val intent = chain.getArg(finalIntentArgIndex) as? Intent
             if (intent != null && HookerSupport.ACTION_REMOTE_INTENT == intent.action) {
                 try {
                     val targetPackage = HookerSupport.targetPackageOf(intent)
                     if (callerIsGms(
-                            module, systemContext,
+                            module, env::systemContext,
                             finalGetRecordMethod, infoField,
                             chain.thisObject, chain.getArg(0)
                         ) &&
                         targetPackage != null &&
-                        AllowlistGate.moduleAppliesTo(module, systemContext, targetPackage)
+                        AllowlistGate.moduleAppliesTo(module, env::systemContext, targetPackage)
                     ) {
                         // ponytail: only the flag is added — appOp is passed
                         //   through untouched. External modules raise OP_NONE to

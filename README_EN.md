@@ -1,121 +1,83 @@
-# HyperOS FCM Live (HyperGreeze)
+# HyperGreeze (HyperOS FCM Live)
 
 **English** · [简体中文](README.md)
 
-Removes HyperOS restrictions on broadcasts related to Google push connections, keeping FCM push notifications working on Xiaomi devices.
+Removes HyperOS 3 / 4 restrictions on Firebase Cloud Messaging (FCM) broadcasts and GMS, keeping push notifications reliable in the background.
 
-**This module is built with AI assistance**
+> Developed with AI assistance.
 
-[User guide](HELP_EN.md) · [Technical docs (Chinese)](FCM_HOOK_TECH_DOC.md) · [Changelog (Chinese)](CHANGELOG.md) · [Downloads](https://github.com/iamqwert/HyperOS_FCM_Live/releases)
-
----
-
-## Overview
-
-HyperOS's power-saving policies restrict broadcasts and networking for background apps. Google push (FCM) relies on Google Play services to broadcast a wake-up call to the target app; once that broadcast is deferred or blocked, notifications stop arriving.
-
-This module rewrites those checks at the framework level (`system_server` and `com.miui.powerkeeper`): it lets Google push and reconnect broadcasts through, keeps GMS from being cut off from the network, frozen or blacklisted, and lets the app receive the broadcast even in the "stopped" state.
-
-It does **not** keep FCM apps alive, does **not** stop the system from reclaiming their processes, and does **not** touch GMS's push-handling logic.
-
-> The trade-off: allowing push reconnects means apps can be woken by pushes, and battery use may go up with the module enabled.
+[User Guide](HELP_EN.md) · [Technical Docs (Chinese)](FCM_HOOK_TECH_DOC.md) · [Changelog](CHANGELOG.md) · [Downloads](https://github.com/iamqwert/HyperOS_FCM_Live/releases)
 
 ---
 
-## Features
+## What It Does
 
-| Category | What it does |
-|---|---|
-| Push fix | Lets c2dm delivery and reconnect broadcasts through, re-adds `FLAG_INCLUDE_STOPPED_PACKAGES`, passes the greeze autostart and freeze gates |
-| GMS protection | Adds GMS to the no-restrict list, forces its power-saving profile to "Unrestricted", skips fast freezing, turns off network restrictions; whether the network is cut during sleep mode is left to the system by default |
-| Allowlist | The module's only narrowing mechanism: decides which apps get the "woken by push" privileges; multi-select batch add/remove, search, select all |
-| List filters | Only apps that declare push components (Android 11+ package visibility, no permission needed), exclude MiPush apps (on by default), show system apps |
-| Tools | Opens GMS's built-in diagnostics screen, allowlist export/import, update check |
-| Records | Current FCM status and event history without opening FCM Diagnostics, filed in six classes, plus a one-tap export of the diagnostic text (device, system version and the hook-install summary included) |
-| Connection recovery | While the screen is on, samples GMS traffic and DNS on the existing cycle; reconnects only after two consecutive starved windows. 5-minute cooldown, at most 5 actions per boot, never retried, never restarts GMS. The verdict rests on GMS's own alarm cadence (~3 min; a gap over 10 min counts as abnormal), and network changes are recorded but never acted on |
-| Display & appearance | Language (Simplified Chinese / English), theme mode, dynamic color, palette style, color spec, hide launcher icon |
-| Experimental | Three-tier chained autostart release, weak-signal switching relief, network while frozen, Smart Power (OS3 only); WeChat battery optimization and sleep keep-alive live on the Settings page |
-| Entries | Shortcuts to Settings, Help and FCM diagnostics |
+HyperOS power-saving and freezing policies defer or block background broadcasts. Because FCM relies on Google Play services (GMS) broadcasting a wake-up intent to the target app, blocking that broadcast delays or drops notifications.
 
-> The "Help" entry opens the online guide ([HELP_EN.md](HELP_EN.md)) in a browser; there is no in-app help page.
+This module lifts those gates at the framework level (`system` and `com.miui.powerkeeper`), keeping GMS online and unfrozen while allowing allowlisted apps to be woken by pushes even when stopped or frozen.
+
+- **No app keep-alive**: after delivery, apps return to normal system reclamation and freezing
+- **No GMS injection**: hooks only system hosts, avoiding GMS integrity checks
+- **Trade-off**: allowing push wake-ups may slightly increase battery usage
 
 ---
 
-## How it works
-
-The delivery chain: GMS receives the FCM message → sends the `com.google.android.c2dm.intent.RECEIVE` broadcast → the target app's receiver runs.
-
-HyperOS layers several gates on this chain; the module handles them gate by gate:
-
-| Stage | System-side gate | What the module does |
-|---|---|---|
-| GMS reconnect intents | `GreezeManagerService#isAllowBroadcast` | Only `CN_DEFER_BROADCAST` actions are answered |
-| App is "stopped" | "stopped" package filter | Re-adds `FLAG_INCLUDE_STOPPED_PACKAGES` |
-| Autostart check | `BroadcastQueueModernStubImpl#checkApplicationAutoStart` | Allowed for allowlisted apps |
-| App is frozen | `isRestrictReceiver` (greeze broadcast gate) | Let through, replaying the stock unfreeze |
-| Power-saving profile / standby | `AppStandbyController#setUidState` | Rewritten to allow |
-| Freeze policy | `AurogonImmobulusMode#isNoRestrictApp` and friends | Exemption returned for GMS |
-| GMS network cap | `updateGmsNetStatus` (OS4) | Argument forced to false |
-| Alarm blocked | `checkAlarmIsAllowedSend` | GMS alarms judged blocked are let through |
-| Force stop | `isForceStopEnable` | Applies to selected apps only |
-
-The hooked hosts: the mainline hooks live in `system` (the framework) and `com.miui.powerkeeper`. The module does not inject into the `com.google.android.gms` process — the former "GCM reconnect repair" experiment was removed in 4.1.1 after GMS hot updates tightened their integrity detection.
-
-The four GMS-side protections:
-
-- **P1** — keeps GMS on the `Settings.System.MILLET_NO_RESTRICT_APP` list
-- **P2** — backstops the greeze freeze path in system_server
-- **P3** — forces GMS's compiled standby bucket to "Unrestricted" (8) instead of 0
-- **P4** — when GMS is found frozen, asks GMS / GSF to rebuild the connection and unfreezes it
-
----
-
-## Installation
+## Quick Start
 
 ### Requirements
 
-- HyperOS 3 / 4
-- LSPosed (API ≥ 101)
-- Google Play services available
+- **OS**: HyperOS 3 / 4 (Android 15+)
+- **Framework**: LSPosed (API ≥ 101; API ≥ 102 recommended for automatic hot-reload)
+- **Services**: Working Google Play services (GMS)
 
-### Steps
+### Installation
 
-1. Download the APK from [Releases](https://github.com/iamqwert/HyperOS_FCM_Live/releases) and install it
-2. Enable the module in LSPosed and check its scope
-3. Wait for the scope to hot-reload (requires an LSPosed build with API 102+); if that fails or no notification shows up, reboot manually to apply
-4. Open the module's allowlist
+1. Download and install the APK from [Releases](https://github.com/iamqwert/HyperOS_FCM_Live/releases)
+2. Enable the module in LSPosed Manager and select scope: **System Framework (`system`)** and **Battery and Performance (`com.miui.powerkeeper`)**
+3. Wait for automatic hot-reload (API 102+); if it does not trigger, reboot manually
+4. Open the module and select the apps that need FCM push wake-ups (GMS is always protected automatically)
+5. Open the **Records** tab to confirm GMS shows Connected and hooks are installed
 
-See [HELP_EN.md](HELP_EN.md) for details.
-
----
-
-## Compatibility
-
-Verified devices:
-
-| Device | System |
-|---|---|
-| Xiaomi 17 Pro Max | OS3.0.319 / Android 16 |
-| REDMI K90 Pro Max | OS4.0.33 / Android 17 |
+See the [User Guide (HELP_EN.md)](HELP_EN.md) for detailed configuration and troubleshooting.
 
 ---
 
-## Known limitations
+## Highlights
 
-- **Whether c2dm gets deferred and whether it can be delivered are decided by the same check.** That check reads the allowlist, so for unselected apps the decision is handed back to the system — behavior identical to running without the module.
-- **The narrowing nominally covers three points, one of which ("no network restrictions") depends on the international policy implementation.** Real-world testing on HyperOS 4 China builds shows the domestic policy runs and that point never participates, so in practice the narrowing happens in two places.
-- **Unselected apps are exposed to being force-stopped.** Force-stop protection only applies to selected apps: swiping an unselected app away from Recents really does force-stop it and mark it "stopped"; the app has to be reopened once for push to resume.
-- **Part of the GMS protection is written as device-wide policy tables** (power-saving profiles, process allowlist, no-restrict list). They apply to the whole device and are never narrowed by selection.
-- **Sleep mode cuts the network device-wide.** On entering sleep, the system turns off Wi-Fi and mobile data outright, without per-app handling; to stay connected overnight, enable the keep-alive options under "Sleep mode" on the Settings page — keep Wi-Fi, keep mobile data, or both.
-- **Target apps are not added to the freeze-exempt set.** After being woken by a push they become cached processes and may later be reclaimed or frozen — that is normal and does not affect the next push.
-- **Under heavy memory pressure, memory cleanup may drop GMS briefly** — about 3 seconds; it reconnects immediately.
-- **Proxies and transparent proxies are outside this module's reach.** The FCM long connection uses TCP 5228-5230; if a proxy does not route GMS or those ports directly, the connection is severed at the proxy layer. The module has no `iptables` access and never runs `su`, so it cannot change routing rules — and it cannot see the proxy at all.
+| Area                         | What it provides                                                                                                                                      |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **FCM wake-up allowlist**    | Lifts push restrictions only for selected apps                                                                                                        |
+| **Always-on GMS protection** | Keeps GMS in the no-restrict list, sets its battery saver policy to Unrestricted, skips fast freeze, and lets reconnect broadcasts/alarms through     |
+| **Records & diagnostics**    | View live FCM status and six event categories without root or shell; export a full diagnostic report (including hook-install summary) in one tap      |
+| **Everyday options**         | Sleep-mode Wi-Fi / mobile data keep-alive, block resetting WeChat to battery-unoptimized, config backup/restore, theme settings, hide launcher icon   |
+| **Experimental switches**    | All off by default, take effect immediately: allow app starts, stay connected on weak Wi-Fi, keep network while frozen, Smart Power bypass (OS3 only) |
+| **Privacy & permissions**    | `INTERNET` is used solely to check for updates                                                                                                        |
+
+---
+
+## Compatibility & Key Boundaries
+
+Verified on real devices:
+
+| Device            | System                       |
+| ----------------- | ---------------------------- |
+| Xiaomi 17 Pro Max | HyperOS 3.0.319 / Android 16 |
+| REDMI K90 Pro Max | HyperOS 4.0.6.0 / Android 17 |
+
+Good to know before using:
+
+- **Unselected apps stay untouched**: unselected apps keep stock behavior and are force-stopped when swiped from Recents
+- **No keep-alive**: apps woken by push may be frozen or reclaimed afterward; this is normal and does not affect the next push
+- **Sleep mode is untouched by default**: HyperOS cuts networking device-wide during sleep; enable the Sleep mode options in Settings if you want overnight connectivity
+- **Proxies are outside module control**: if you use a VPN or proxy, set the `mtalk` domains to direct per [FCM's network configuration docs](https://firebase.google.com/docs/cloud-messaging/network-configuration) (see the [User Guide](HELP_EN.md)). See [Configure your Network for FCM](https://firebase.google.com/docs/cloud-messaging/network-configuration)
+
+For hook details and ROM internals, see [Technical Docs (FCM_HOOK_TECH_DOC.md)](FCM_HOOK_TECH_DOC.md).
 
 ---
 
 ## Acknowledgements
 
-This project is a fork; thanks to these projects and contributors:
+This fork builds on and references the work of:
 
 - [Howard20181/HyperOS_FCM_Live](https://github.com/Howard20181/HyperOS_FCM_Live)
 - [billtv/HyperOS_FCM_Live](https://github.com/billtv/HyperOS_FCM_Live)
@@ -125,7 +87,7 @@ This project is a fork; thanks to these projects and contributors:
 - [ByteJuno/fcmfix-coloros](https://github.com/ByteJuno/fcmfix-coloros)
 - [ReedGAOOO/FCMGuard-HyperOS](https://github.com/ReedGAOOO/FCMGuard-HyperOS)
 - [zuohl/HyperOS_FCM_Live](https://github.com/zuohl/HyperOS_FCM_Live)
-- The original idea for requesting the `GET_INSTALLED_APPS` runtime permission came from 250king's [PR #1](https://github.com/250king/HyperOS_FCM_Live/pull/1); that permission has since been removed when the app list moved to the package-visibility approach
+- 250king ([PR #1](https://github.com/250king/HyperOS_FCM_Live/pull/1), original app-list permission approach, later replaced by package visibility)
 
 ---
 

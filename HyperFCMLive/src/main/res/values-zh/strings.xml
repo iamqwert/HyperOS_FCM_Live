@@ -90,20 +90,34 @@
     <string name="hide_launcher_icon">隐藏桌面图标</string>
     <string name="predictive_back">预测性返回</string>
     <string name="about_sub_predictive_back">通过返回手势预览上一界面</string>
+    <string name="theme_settings">主题设置</string>
+    <string name="theme_section_dynamic_color">动态取色</string>
+    <string name="theme_section_appearance">外观与交互</string>
+    <string name="theme_section_navigation">导航</string>
+    <string name="follow_system">跟随系统</string>
+    <string name="light_mode">浅色模式</string>
+    <string name="dark_mode">深色模式</string>
+    <string name="miuix_monet_dynamic_color">莫奈动态取色</string>
+    <string name="about_sub_miuix_monet">跟随壁纸为界面取色</string>
+    <string name="enable_blur_effect">启用模糊效果</string>
+    <string name="enable_page_user_scroll">启用页面滑动切换</string>
+    <string name="pager_gesture_mode">页面手势模式</string>
+    <string name="global_scale">全局缩放</string>
+    <string name="global_scale_summary" formatted="false">调整整体界面显示缩放比例（80%–110%）</string>
+    <string name="enable_swipe_back">启用滑动返回</string>
+    <string name="about_sub_enable_swipe_back">在二级页面横向滑动以返回上一页</string>
+    <string-array name="pager_gesture_mode_entries">
+        <item>默认</item>
+        <item>跨轴拦截</item>
+    </string-array>
     <string name="theme_mode">主题模式</string>
     <string name="palette_style">调色风格</string>
     <string name="ui_style">界面风格</string>
-    <string name="miuix_flavor">Miuix样式</string>
-    <string name="miuix_monet">莫奈颜色</string>
     <string name="miuix_accent">强调色</string>
-    <string name="miuix_floating_bar">悬浮底栏</string>
     <string name="color_spec">颜色规格</string>
     <string name="about_sub_theme_mode">调整应用的主题模式</string>
     <string name="about_sub_ui_style">选择应用的界面风格</string>
-    <string name="about_sub_miuix_flavor">选择界面参照的 HyperOS 版本</string>
-    <string name="about_sub_miuix_monet">跟随壁纸为界面取色</string>
     <string name="about_sub_miuix_accent">挑选莫奈配色的主色调</string>
-    <string name="about_sub_miuix_floating_bar">启用后会同步改变顶栏风格</string>
     <string name="about_sub_palette_style">选择动态取色风格</string>
     <string name="about_sub_color_spec">选择 Material 颜色规范</string>
     <string name="language">语言</string>
@@ -116,15 +130,19 @@
         <item>浅色模式</item>
         <item>深色模式</item>
     </string-array>
-    <!-- 与界面风格的存储取值一致（Material 3 / Miuix）。选项保留原文；柔光玻璃是 Miuix 的 OS 4 款式，不再单列。 -->
+    <!-- Miuix 风格的主题模式菜单，与 MIUIX demo ColorSchemeMode 顺序一致。 -->
+    <string-array name="miuix_theme_mode_entries">
+        <item>跟随系统</item>
+        <item>浅色模式</item>
+        <item>深色模式</item>
+        <item>跟随系统（莫奈）</item>
+        <item>浅色模式（莫奈）</item>
+        <item>深色模式（莫奈）</item>
+    </string-array>
+    <!-- 与界面风格的存储取值一致（Material 3 / Miuix）。选项保留原文。 -->
     <string-array name="ui_style_entries">
         <item>Material 3</item>
         <item>Miuix</item>
-    </string-array>
-    <!-- 与 ThemePrefs.MIUIX_FLAVOR_* 的顺序一致：OS 3 是 Miuix 原本的观感，OS 4 是柔光玻璃。 -->
-    <string-array name="miuix_flavor_entries">
-        <item>OS 3</item>
-        <item>OS 4</item>
     </string-array>
     <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格 + 末位 CMF），选项保留英文原文。 -->
     <string-array name="palette_style_entries">
@@ -163,6 +181,25 @@
         <item>棕</item>
         <item>蓝灰</item>
         <item>樱粉</item>
+    </string-array>
+    <!-- Material 3 自定义种子色块名称：顺序与 ui/AboutScreen.kt 的 SEED_COLORS 一一对应。 -->
+    <string-array name="seed_color_names">
+        <item>紫（默认）</item>
+        <item>红</item>
+        <item>深橙</item>
+        <item>橙</item>
+        <item>琥珀</item>
+        <item>橄榄绿</item>
+        <item>黄绿</item>
+        <item>绿</item>
+        <item>蓝绿</item>
+        <item>青</item>
+        <item>浅蓝</item>
+        <item>蓝</item>
+        <item>靛蓝</item>
+        <item>深紫</item>
+        <item>粉</item>
+        <item>中性灰</item>
     </string-array>
     <string name="hide_icon_toast">桌面图标已隐藏，需要设置时请从 LSPosed 打开模块</string>
     <string name="show_icon_toast">桌面图标已恢复</string>

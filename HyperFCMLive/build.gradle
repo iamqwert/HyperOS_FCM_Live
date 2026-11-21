@@ -24,19 +24,14 @@
 
 plugins {
     id 'com.android.application'
-    // Standalone KGP 2.4.20 — AGP's built-in Kotlin is opted out, see
-    // gradle.properties for the POM-verified reason.
-    id 'org.jetbrains.kotlin.android'
     // nav/Route.kt's keys: the back stack is saved by serializing it.
     id 'org.jetbrains.kotlin.plugin.serialization'
     // Compose compiler: must match the KGP version exactly, so it moves with it.
-    id 'org.jetbrains.kotlin.plugin.compose' version '2.4.20'
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.4.21'
 }
 
 kotlin {
     compilerOptions {
-        // Built-in Kotlin used to inherit this from android.compileOptions; the
-        // standalone KGP defaults jvmTarget to 1.8, so pin the module's level.
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
     }
 }
@@ -57,12 +52,12 @@ android {
         // HyperOS 3 (and 4) devices ship Android 15 at the very least, so the
         // module targets them directly: everything below API 35 is dropped, and
         // with it the whole pre-edge-to-edge window handling path.
-        minSdkVersion 35
-        targetSdkVersion 37
+        minSdk 35
+        targetSdk 37
         // Fixed (bumped by hand each release) so LSPosed update checks never treat
         // this fork as older than upstream builds that inherit a low jgit commitCount.
-        versionCode 58
-        versionName "4.5.0"
+        versionCode 60
+        versionName "4.6.0"
 
         // HyperOS modules ship arm64 only; drop armv7a / x86 / x86_64 natives.
         ndk {
@@ -81,10 +76,10 @@ android {
                 // 只服务 API < 24）毫无用处；v4 只产出 adb 增量安装用的 .idsig。
                 // v3 是 API 28+ 的校验方案，AGP 9.5.1 实测默认只签 v2，这里补上。
                 // v3.1 无法在此指定：它由密钥轮换 lineage 触发，本项目没有轮换链。
-                enableV1Signing false
-                enableV2Signing true
-                enableV3Signing true
-                enableV4Signing false
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = false
             }
         }
     }
@@ -92,33 +87,33 @@ android {
     buildTypes {
         debug {
             if (localProperties.getProperty("storeFile") != null) {
-                signingConfig signingConfigs.config
+                signingConfig = signingConfigs.config
             }
         }
         release {
             if (localProperties.getProperty("storeFile") != null) {
-                signingConfig signingConfigs.config
+                signingConfig = signingConfigs.config
             } else if (project.hasProperty("allowDebugSignedRelease")) {
                 // Local/CI opt-in only: sign with the public debug keystore so the
                 // APK can still be installed and inspected. Never ship this build.
-                signingConfig signingConfigs.debug
+                signingConfig = signingConfigs.debug
             }
             // No silent debug fallback: the AOSP debug keystore is public, so a
             // release signed with it can be impersonated — anyone can sign an APK
             // with the same signature and it installs over this one as an update.
             // Which is refused, loudly, by the guard at the end of this file.
-            minifyEnabled true
+            minifyEnabled = true
             // Resource shrink often drops values only referenced from code
             // (e.g. getColor) and can break Release-only inflation.
-            shrinkResources false
+            shrinkResources = false
             proguardFiles 'proguard-rules.pro'
-            vcsInfo.include false
+            vcsInfo.include = false
         }
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_21
-        targetCompatibility JavaVersion.VERSION_21
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     buildFeatures {
@@ -126,21 +121,21 @@ android {
     }
 
     dependenciesInfo {
-        includeInApk false
-        includeInBundle false
+        includeInApk = false
+        includeInBundle = false
     }
 
-    packagingOptions {
+    packaging {
         resources {
             excludes += ['kotlin/**', 'META-INF/androidx/**']
         }
     }
 
     lint {
-        checkReleaseBuilds false
+        checkReleaseBuilds = false
     }
 
-    namespace 'io.github.iamqwert.hypergreeze'
+    namespace = 'io.github.iamqwert.hypergreeze'
 }
 
 base {
@@ -274,7 +269,7 @@ dependencies {
     // build and applied above; this is the runtime half. 1.12.0 is built on
     // Kotlin 2.4.10 and the module compiles at 2.4.21, so the metadata is read
     // by a newer compiler, never an older one — the only direction that breaks.
-    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.13.0'
     compileOnly 'io.github.libxposed:api:102.0.0'
     implementation 'io.github.libxposed:service:102.0.0'
     // Coroutines: UpdateChecker's network check runs on Dispatchers.IO through a

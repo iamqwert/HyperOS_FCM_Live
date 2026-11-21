@@ -4,11 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
 import android.util.Pair
-import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
-import java.lang.reflect.Executable
-import java.lang.reflect.Method
 
 /**
  * Xposed module entry: keeps FCM / GMS wake paths alive on HyperOS.
@@ -40,27 +37,25 @@ import java.lang.reflect.Method
 class Hooker : XposedModule() {
 
     private var param: Pair<String, ClassLoader>? = null
+
+    @Volatile
     private var systemContext: Context? = null
 
     /**
      * Install-pass bookkeeping (counters, absent buffers, probe findings, the
      * end-of-install summary and the group runner) — see [InstallBookkeeping].
-     * The forwarders below keep every group-table entry's `::hookE` /
-     * `::logSkip` references — and every extracted subsystem's injected
-     * callables — pointing at the same implementations as before the
-     * extraction.
      */
     private val installBook = InstallBookkeeping(this)
 
-    private fun hookE(executable: Executable): XposedInterface.HookBuilder =
-        installBook.hookE(executable)
-
-    /** This generation is expected to carry it, and does not. Counted and logged. */
-    private fun logSkip(message: String) = installBook.logSkip(message)
-
-    private fun logSkipOtherGeneration(symbol: String) = installBook.logSkipOtherGeneration(symbol)
-
-    private fun recordProbe(finding: String) = installBook.recordProbe(finding)
+    private fun envFor(classLoader: ClassLoader): HookEnv = HookEnv(
+        module = this,
+        classLoader = classLoader,
+        installBook = installBook,
+        systemContextProvider = ::getSystemContext,
+        gmsUidProvider = ::gmsUid,
+        isGmsUidCheck = ::isGmsUid,
+        allowlistPackageLookup = ::allowlistPackageForUid
+    )
 
     private fun flushOtherGenerationAbsent() = installBook.flushOtherGenerationAbsent()
 
@@ -130,110 +125,83 @@ class Hooker : XposedModule() {
      *    FCM_HOOK_TECH_DOC.md §3.6 quotes verbatim — hence the verb being
      *    part of the entry rather than a fixed "hook".
      */
-    private fun systemServerGroups(classLoader: ClassLoader): List<Group> = listOf(
-        Group("hook", "allowlist receiver") {
-            AllowlistGate.hookAllowlist(this, ::getSystemContext)
-        },
-        Group("hook", "GreezeManagerService") {
-            GreezeHooks.hookGreezeManagerService(
-                this, classLoader, ::hookE, ::logSkip, ::isGmsUid,
-                ::forceBooleanArg, ::getSystemContext,
-                { cls, name, types -> findMethod(cls, name, *types) }
-            )
-        },
-        Group("hook", "GreezerNoRestrict") {
-            GmsSupport.hookGreezerNoRestrict(
-                this, classLoader, ::hookE, ::logSkip, ::logSkipOtherGeneration, ::isGmsUid
-            )
-        },
-        Group("hook", "greeze wake-up list") {
-            GreezeHooks.hookAllowWakeUpList(
-                this, classLoader, ::hookE, ::logSkip, ::isGmsUid
-            )
-        },
-        // S31 (`isNeedCachedAlarmForAurogon`) was removed on 2026-10-30: the ROM
-        // answers false for any package whose name lacks "xiaomi", so the GMS
-        // uid never reached the hook's override. See GreezeHooks.
-        Group("hook", "DomesticPolicyManager") {
-            GreezeHooks.hookDomesticPolicyManager(
-                this, classLoader, ::hookE, ::logSkip, ::isGmsUid,
-                ::isGreezeNetReleaseEnabled, ::allowlistPackageForUid
-            )
-        },
-        Group("hook", "ListAppsManager") {
-            GreezeHooks.hookListAppsManager(this, classLoader, ::hookE)
-        },
-        Group("hook", "BroadcastQueueModernStubImpl") {
-            GreezeHooks.hookBroadcastQueueModernStubImpl(
-                this, classLoader, ::hookE, ::logSkip,
-                ::getSystemContext, ::isGmsUid
-            )
-        },
-        Group("hook", "SmartPower intercept") {
-            SmartPowerHooks.hookSmartPowerIntercept(
-                this, classLoader, ::hookE, ::logSkip, ::logSkipOtherGeneration,
-                ::isSmartPowerReleaseEnabled, ::getSystemContext
-            )
-        },
-        Group("hook", "ProcessPolicy") {
-            GreezeHooks.hookProcessPolicy(this, classLoader, ::hookE)
-        },
-        Group("hook", "AwareResourceControl") {
-            GreezeHooks.hookAwareResourceControl(this, classLoader, ::hookE)
-        },
-        Group("hook", "sleep-mode network policy") {
-            SleepModeGate.hookSleepModeNetworkPolicy(
-                this, classLoader, ::hookE, ::logSkip, ::logSkipOtherGeneration,
-                ::getSystemContext, ::gmsUid,
-                { GmsSupport.recoverGmsConnection(this, it) }
-            )
-        },
-        Group("hook", "ActivityManagerService") {
-            AmsHooks.hookActivityManagerService(
-                this, classLoader, ::hookE,
-                { cls, name, types -> findMethod(cls, name, *types) },
-                ::getSystemContext
-            )
-        },
-        Group("hook", "udpPackageRestrict") {
-            GreezeHooks.hookUdpPackageRestrict(this, classLoader, ::hookE, ::logSkip, ::isGmsUid)
-        },
-        Group("hook", "ProcessCleanerBase") {
-            ProcessCleanerHooks.hookProcessCleanerBase(
-                this, classLoader, ::hookE, ::getSystemContext
-            )
-        },
-        Group("hook", "autostart gate") {
-            AutostartGate.hookAutostartGate(
-                this, classLoader, ::hookE, ::logSkip, ::logSkipOtherGeneration,
-                ::getSystemContext,
-                ::isAutostartServiceReleaseEnabled,
-                ::isAutostartProcessReleaseEnabled
-            )
-        },
-        Group("hook", "alarm gate") {
-            AlarmGate.hookAlarmGate(
-                this, classLoader, ::hookE, ::logSkip, ::logSkipOtherGeneration, ::isGmsUid
-            )
-        },
-        Group("hook", "wifi weak-signal switch") {
-            WifiWeakSignalSwitch.hook(
-                this, classLoader, ::hookE, ::logSkip, ::logSkipOtherGeneration
-            )
-        },
-        Group("probe", "mMessageApp") {
-            SystemProbes.probeGmsInMessageApp(this, classLoader, ::logSkip, ::recordProbe)
-        },
-        Group("probe", "sleep-mode uid rule") {
-            SystemProbes.probeSleepModeUidRule(this, classLoader, ::logSkip, ::recordProbe)
-        },
-        Group("probe", "packet filter support") {
-            SystemProbes.probePacketFilterSupport(this, classLoader, ::logSkip, ::recordProbe)
-        },
-        Group("start", "records bridge") {
-            RecordsBridge.install(this, ::getSystemContext) { installBook.lastSummary }
-        },
-    )
+    private fun systemServerGroups(classLoader: ClassLoader): List<Group> {
+        val env = envFor(classLoader)
+        return listOf(
+            Group("hook", "allowlist receiver") {
+                AllowlistGate.hookAllowlist(this, ::getSystemContext)
+            },
+            Group("hook", "GreezeManagerService") {
+                GreezeHooks.hookGreezeManagerService(env)
+            },
+            Group("hook", "GreezerNoRestrict") {
+                GmsSupport.hookGreezerNoRestrict(env)
+            },
+            Group("hook", "greeze wake-up list") {
+                GreezeHooks.hookAllowWakeUpList(env)
+            },
+            // S31 (`isNeedCachedAlarmForAurogon`) was removed on 2026-10-30: the ROM
+            // answers false for any package whose name lacks "xiaomi", so the GMS
+            // uid never reached the hook's override. See GreezeHooks.
+            Group("hook", "DomesticPolicyManager") {
+                GreezeHooks.hookDomesticPolicyManager(env, ::isGreezeNetReleaseEnabled)
+            },
+            Group("hook", "ListAppsManager") {
+                GreezeHooks.hookListAppsManager(env)
+            },
+            Group("hook", "BroadcastQueueModernStubImpl") {
+                GreezeHooks.hookBroadcastQueueModernStubImpl(env)
+            },
+            Group("hook", "SmartPower intercept") {
+                SmartPowerHooks.hookSmartPowerIntercept(env, ::isSmartPowerReleaseEnabled)
+            },
+            Group("hook", "ProcessPolicy") {
+                GreezeHooks.hookProcessPolicy(env)
+            },
+            Group("hook", "AwareResourceControl") {
+                GreezeHooks.hookAwareResourceControl(env)
+            },
+            Group("hook", "sleep-mode network policy") {
+                SleepModeGate.hookSleepModeNetworkPolicy(env) {
+                    GmsSupport.recoverGmsConnection(this, it)
+                }
+            },
+            Group("hook", "ActivityManagerService") {
+                AmsHooks.hookActivityManagerService(env)
+            },
+            Group("hook", "udpPackageRestrict") {
+                GreezeHooks.hookUdpPackageRestrict(env)
+            },
+            Group("hook", "ProcessCleanerBase") {
+                ProcessCleanerHooks.hookProcessCleanerBase(env)
+            },
+            Group("hook", "autostart gate") {
+                AutostartGate.hookAutostartGate(
+                    env,
+                    ::isAutostartServiceReleaseEnabled,
+                    ::isAutostartProcessReleaseEnabled
+                )
+            },
+            Group("hook", "alarm gate") {
+                AlarmGate.hookAlarmGate(env)
+            },
+            Group("hook", "wifi weak-signal switch") {
+                WifiWeakSignalSwitch.hook(env)
+            },
+            Group("probe", "mMessageApp") {
+                SystemProbes.probeGmsInMessageApp(env)
+            },
+            Group("probe", "sleep-mode uid rule") {
+                SystemProbes.probeSleepModeUidRule(env)
+            },
+            Group("probe", "packet filter support") {
+                SystemProbes.probePacketFilterSupport(env)
+            },
+            Group("start", "records bridge") {
+                RecordsBridge.install(this, ::getSystemContext) { installBook.lastSummary }
+            },
+        )
+    }
 
     override fun onPackageReady(param: XposedModuleInterface.PackageReadyParam) {
         if (!param.isFirstPackage) return
@@ -277,36 +245,29 @@ class Hooker : XposedModule() {
     }
 
     /** The PowerKeeper install surface: same shape and same rules as [systemServerGroups]. */
-    private fun powerKeeperGroups(packageName: String, classLoader: ClassLoader): List<Group> =
-        listOf(
+    private fun powerKeeperGroups(packageName: String, classLoader: ClassLoader): List<Group> {
+        val env = envFor(classLoader)
+        return listOf(
             Group("hook", "GmsObserver") {
-                GmsSupport.hookGmsObserver(
-                    this, classLoader, ::hookE, ::logSkip, ::logSkipOtherGeneration,
-                    ::recordProbe, ::isGmsUid, ::forceBooleanArg
-                )
+                GmsSupport.hookGmsObserver(env)
             },
             Group("hook", "AppStandbyController") {
-                PowerKeeperHooks.hookAppStandbyUidState(
-                    this, packageName, classLoader, ::hookE, ::logSkip, ::isGmsUid
-                )
+                PowerKeeperHooks.hookAppStandbyUidState(env, packageName)
             },
             Group("hook", "NoRestrictList") {
-                PowerKeeperHooks.hookNoRestrictList(
-                    this, classLoader, ::hookE, ::logSkip, ::getSystemContext
-                )
+                PowerKeeperHooks.hookNoRestrictList(env)
             },
             Group("hook", "ScenarioCompiler") {
-                GmsSupport.hookScenarioCompiler(
-                    this, classLoader, ::hookE, ::logSkipOtherGeneration, ::getSystemContext
-                )
+                GmsSupport.hookScenarioCompiler(env)
             },
             Group("hook", "WeChat doze keepout") {
-                PowerKeeperHooks.hookWechatDozeKeepout(this, classLoader, ::hookE, ::logSkip)
+                PowerKeeperHooks.hookWechatDozeKeepout(env)
             },
             Group("hook", "sleep-mode network keepalive") {
-                SleepModeGate.hookSleepModeNetworkKeepalive(this, classLoader, ::hookE, ::logSkip)
+                SleepModeGate.hookSleepModeNetworkKeepalive(env)
             },
         )
+    }
 
     override fun onHotReloading(param: XposedModuleInterface.HotReloadingParam): Boolean {
         // Hot reload is fully supported on LSPosed API 102: onHotReloaded unhooks every
@@ -333,6 +294,7 @@ class Hooker : XposedModule() {
                 this.param = Pair.create(packageName, classLoader)
                 try {
                     if (param.isSystemServer) {
+                        WifiWeakSignalSwitch.resetForHotReload()
                         hookSystemServer(classLoader)
                     } else {
                         hookPackage(packageName, classLoader)
@@ -381,157 +343,42 @@ class Hooker : XposedModule() {
     }
 
     /**
-     * Pin the single boolean argument of [name] to [value] and let the call
-     * through: one shape, one helper, several targets (see the call sites).
-     *
-     * [level] is what keeps the two readings of "absent" apart, and the reason
-     * this replaced a helper that hardcoded [logSkipOtherGeneration]: an
-     * OS3-only target and an OS4 load-bearing target have the same shape, but a
-     * miss on the second must not be reported at the same level as a miss on
-     * the first. Callers pass [Log.DEBUG] for "another generation's method"
-     * (routed to [logSkipOtherGeneration], so it joins the merged
-     * cross-generation line and stays out of `target(s) absent`) and
-     * [Log.INFO] for "a target this generation should carry".
-     *
-     * Pinning the argument unconditionally is equivalent to the older
-     * only-if-it-is-true form used by `updateFrameworkGmsNetStatus`: the
-     * argument is a primitive boolean, so writing the value it already holds is
-     * a no-op.
-     */
-    internal fun forceBooleanArg(
-        owner: Class<*>,
-        name: String,
-        value: Boolean,
-        label: String,
-        level: Int = Log.DEBUG
-    ) {
-        try {
-            val method = owner.getDeclaredMethod(name, Boolean::class.javaPrimitiveType)
-            hookE(method).intercept { chain: XposedInterface.Chain ->
-                val args = chain.args.toTypedArray()
-                if (args.isNotEmpty()) {
-                    args[0] = value
-                }
-                chain.proceed(args)
-            }
-            deoptimize(method)
-        } catch (e: NoSuchMethodException) {
-            if (level == Log.DEBUG) {
-                logSkipOtherGeneration("$label#$name")
-            } else {
-                logSkip("$label#$name absent, skip")
-            }
-        }
-    }
-
-    /**
-     * True when [uid] belongs to GMS (any Android user). Uses the package
-     * manager when available; falls back to comparing against known GMS UIDs
-     * resolved once per process.
+     * True when [uid] belongs to GMS (any Android user). Resolves and caches
+     * GMS's appId once per process via [gmsUid].
      */
     private fun isGmsUid(uid: Int): Boolean {
         val appId = uid % 100000
-        // Cache hit: done.
-        if (cachedGmsAppId != null) {
-            return appId == cachedGmsAppId
-        }
-        // First call: resolve and cache.
-        val gms = gmsUid()
-        if (gms != null) {
-            cachedGmsAppId = gms % 100000
-            return appId == cachedGmsAppId
-        }
-        // gmsUid() failed; try PackageManager directly.
-        return try {
-            val context = getSystemContext() ?: return false
-            val info = context.packageManager.getApplicationInfo(HookerSupport.GMS_PACKAGE_NAME, 0)
-            val resolved = info.uid % 100000
-            cachedGmsAppId = resolved
-            appId == resolved
-        } catch (ignored: Throwable) {
-            false
-        }
+        cachedGmsAppId?.let { return appId == it }
+        val gms = gmsUid() ?: return false
+        val resolved = gms % 100000
+        cachedGmsAppId = resolved
+        return appId == resolved
     }
 
     @Volatile
     private var cachedGmsAppId: Int? = null
 
-    private fun findMethod(
-        owner: Class<*>,
-        name: String,
-        vararg parameterTypes: Class<*>?
-    ): Method? {
-        return try {
-            owner.getDeclaredMethod(name, *parameterTypes)
-        } catch (e: NoSuchMethodException) {
-            null
-        } catch (e: SecurityException) {
-            null
-        }
-    }
-
     /**
      * Experiment switch: release OS3 SmartPower intercepts for checked apps.
-     * Reads its **own** key — it answers the OS3-generation broadcast/service
-     * interception, not the greeze gates, and must stay measurable on its own.
-     *
-     * Fails to *disabled*: this answers a verdict the ROM owns. On OS4 the
-     * hooks never install (targets absent), so this read never happens there.
+     * Served from [AllowlistGate]'s broadcast-refreshed snapshot (fail-closed
+     * default off). On OS4 the hooks never install (targets absent).
      */
-    private fun isSmartPowerReleaseEnabled(): Boolean {
-        return try {
-            val prefs = getRemotePreferences(Prefs.GROUP_CONFIG)
-            prefs.getBoolean(Prefs.KEY_SMARTPOWER_RELEASE, false)
-        } catch (ignored: Throwable) {
-            false
-        }
-    }
+    private fun isSmartPowerReleaseEnabled(): Boolean =
+        AllowlistGate.isSmartPowerReleaseEnabled(this)
 
     /**
      * Experiment switch: keep a checked app's network up across a greeze
-     * freeze. Reads its **own** key — it answers the freeze-time network cut,
-     * not the autostart verdict, and must stay measurable on its own.
-     *
-     * Fails to *disabled*: this answers a verdict the ROM owns.
+     * freeze. Served from [AllowlistGate]'s broadcast-refreshed snapshot
+     * (fail-closed default off).
      */
-    private fun isGreezeNetReleaseEnabled(): Boolean {
-        return try {
-            val prefs = getRemotePreferences(Prefs.GROUP_CONFIG)
-            // This read runs on every qualifying freeze, which makes it one of
-            // the config openings the debug-log gate refreshes from (see
-            // [HookLog]); the greeze path logs its verdicts through the gate.
-            HookLog.refresh(prefs)
-            prefs.getBoolean(Prefs.KEY_GREEZE_NET_RELEASE, false)
-        } catch (ignored: Throwable) {
-            false
-        }
-    }
-
-    /**
-     * Experiment switch: answer one MIUI autostart checkpoint for a checked
-     * app (see [AutostartGate]). Reads its **own** key — each checkpoint is its
-     * own switch, so each can be measured alone.
-     *
-     * Fails to *disabled*: this answers a verdict the ROM owns.
-     */
-    private fun isAutostartRungEnabled(rungKey: String): Boolean {
-        return try {
-            val prefs = getRemotePreferences(Prefs.GROUP_CONFIG)
-            // The hook reads this per service start, i.e. on a path far
-            // busier than the freeze one, so the debug-log gate refreshes
-            // here as well.
-            HookLog.refresh(prefs)
-            prefs.getBoolean(rungKey, false)
-        } catch (ignored: Throwable) {
-            false
-        }
-    }
+    private fun isGreezeNetReleaseEnabled(): Boolean =
+        AllowlistGate.isGreezeNetReleaseEnabled(this)
 
     private fun isAutostartServiceReleaseEnabled(): Boolean =
-        isAutostartRungEnabled(Prefs.KEY_AUTOSTART_SERVICE_RELEASE)
+        AllowlistGate.isAutostartServiceReleaseEnabled(this)
 
     private fun isAutostartProcessReleaseEnabled(): Boolean =
-        isAutostartRungEnabled(Prefs.KEY_AUTOSTART_PROCESS_RELEASE)
+        AllowlistGate.isAutostartProcessReleaseEnabled(this)
 
     /**
      * The allowlisted package a uid belongs to, if any.

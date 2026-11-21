@@ -52,30 +52,27 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.layout.layoutId
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassBackdrop
 import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassSpec
 import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassIconButton
@@ -86,6 +83,7 @@ import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.TopAppBarDefaults
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurDefaults
+import top.yukonga.miuix.kmp.blur.ProgressiveBlur
 import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
@@ -103,9 +101,6 @@ object MiuixGlassTopAppBarDefaults {
     /** How far the band reaches past the bottom of the bar. */
     val BandOverhang = 28.dp
 
-    /** The band's fade tail below [BandOverhang] — the library's own 12dp. */
-    val BandFadeTail = 12.dp
-
     /**
      * How far content has to scroll under the bar before the band reaches full
      * strength — the library's `RampDistance`, read against the content offset.
@@ -121,8 +116,11 @@ object MiuixGlassTopAppBarDefaults {
     /** How far the progressive pane is stretched past its covered height. */
     const val ProgressivePaneScale = 1.2f
 
-    /** How far the large title blurs out as it collapses — the library's 12dp. */
-    val LargeTitleBlurRadius = 12.dp
+    /** How far the large title blurs out as it collapses — `GlassTopAppBarDefaults.TitleBlurRadius`. */
+    val LargeTitleBlurRadius = 8.dp
+
+    /** Progressive blur curve matching `GlassTopAppBar.kt`'s `TopBarProgressiveGradient`. */
+    val ProgressiveGradient: ProgressiveBlur = ProgressiveBlur.Top.copy(curve = 0.25f)
 
     /** Glyph opacity while a control is held. */
     const val PressedContentAlpha = 0.6f
@@ -131,10 +129,8 @@ object MiuixGlassTopAppBarDefaults {
     private const val BAND_RAMP_MS = 100
 
     /**
-     * The band's paint as 柔光玻璃 has always worn it — a gradient that starts
-     * fading partway down the bar. Kept unchanged for that look: OS 4's looks
-     * are not this row's business, and switching them over is a separate
-     * decision (see [bandFadeBrush] for the shape the OS 3 bar wears).
+     * Fallback gradient band when no recorded page backdrop is available (e.g.
+     * in a preview or outside [PageScaffold]).
      */
     fun bandBrush(color: Color): Brush = Brush.verticalGradient(
         0.00f to color,
@@ -144,41 +140,6 @@ object MiuixGlassTopAppBarDefaults {
         0.86f to color.copy(alpha = 0.34f),
         1.00f to color.copy(alpha = 0f)
     )
-
-    /**
-     * The band's paint in the library's CURRENT shape: the page colour held
-     * solid down the bar, then fading out over the last [fadeHeight] px (the
-     * overhang plus [BandFadeTail]). The 17-stop smoothstep curve is
-     * `TopAppBarBandBrush` / `TopAppBarFadeBrush` from miuix-glass, reproduced
-     * so a later library release can be diffed against this one function.
-     *
-     * @param bandHeight the drawn height in px: the bar plus its overhang.
-     * @param fadeHeight how long the tail takes, in px.
-     */
-    fun bandFadeBrush(color: Color, bandHeight: Float, fadeHeight: Float): Brush {
-        val height = bandHeight.coerceAtLeast(1f)
-        val fadeStart = (height - fadeHeight).coerceAtLeast(0f)
-        val colors = ArrayList<Color>(19)
-        val stops = ArrayList<Float>(19)
-        // Solid from the top to where the tail begins — the library's own
-        // `createBandShader` prepends the colour twice so the shader holds
-        // before fading.
-        colors += color
-        stops += 0f
-        if (fadeStart > 0f) {
-            colors += color
-            stops += fadeStart / height
-        }
-        for (index in 1..16) {
-            val t = index / 16f
-            val fade = t * t * t * (t * (t * 6f - 15f) + 10f)
-            colors += color.copy(alpha = color.alpha * (1f - fade))
-            stops += (fadeStart + fadeHeight * t).coerceAtMost(height) / height
-        }
-        return Brush.verticalGradient(
-            *Array(colors.size) { index -> stops[index] to colors[index] }
-        )
-    }
 
     internal fun bandRamp(): FiniteAnimationSpec<Float> =
         tween(durationMillis = BAND_RAMP_MS, easing = LinearEasing)
@@ -242,42 +203,21 @@ fun MiuixGlassTopAppBar(
     )
     // Read here, not inside the layer: a colour is a value, not draw state.
     val bandColor = MiuixTheme.colorScheme.surface
-    // 柔光玻璃 keeps the band it has always worn; only the OS 3 bar moves to
-    // the library's current shape (fade-brush band + blurred large title).
-    val softGlass = softGlassChrome()
-    // The OS 3 band's strength, the library's `collapseRamp`: continuous over
-    // [MiuixGlassTopAppBarDefaults.BandRampDistance] of content offset instead
-    // of a boolean switch. Read in the draw phase, so scrolling never
-    // recomposes the bar.
-    val rampDistancePx = with(LocalDensity.current) {
-        MiuixGlassTopAppBarDefaults.BandRampDistance.toPx()
-    }
-    val bandRamp = remember(scrollBehavior, scrollProgress, rampDistancePx) {
+    val useCollapseProgress = compactTitleAlpha == null && scrollProgress == null
+    val bandRamp = remember(scrollBehavior, scrollProgress, useCollapseProgress, bandAlpha) {
         derivedStateOf {
-            val supplied = scrollProgress?.invoke()
-            if (supplied != null) {
-                // The page hands in its own travel (the about page's pinned
-                // compact bar, the records page's multi-scrollable body). Read
-                // through the same reveal curve the plates use, so the pane is
-                // in by the time the chrome has barely moved.
-                softGlassBarMaterialProgress(supplied)
-            } else {
-                (-scrollBehavior.state.contentOffset / rampDistancePx).coerceIn(0f, 1f)
+            when {
+                scrollProgress != null -> softGlassBarMaterialProgress(scrollProgress())
+                useCollapseProgress -> {
+                    val f = scrollBehavior.state.collapsedFraction
+                    if (f.isNaN()) 0f else f.coerceIn(0f, 1f)
+                }
+                else -> bandAlpha
             }
         }
     }
-    // OS 3: the band is opaque from the first pixel of overlap instead of
-    // ramping in. At rest nothing sits under the bar, so the switch is
-    // invisible; a ramp, on the other hand, let the first flung rows show
-    // through the bar unblurred for a few frames.
-    val contentUnderBar = remember(scrollBehavior) {
-        derivedStateOf { scrollBehavior.state.contentOffset < 0f }
-    }
     val overhangPx = with(LocalDensity.current) {
         MiuixGlassTopAppBarDefaults.BandOverhang.toPx()
-    }
-    val fadeTailPx = with(LocalDensity.current) {
-        MiuixGlassTopAppBarDefaults.BandFadeTail.toPx()
     }
     val defaultControl: @Composable () -> Unit = if (showBack) {
         {
@@ -298,13 +238,7 @@ fun MiuixGlassTopAppBar(
         {}
     }
     val control = navigationIcon ?: defaultControl
-    // Height of the pinned chrome below the title (the records page's strips).
-    // The OS 4 progressive pane stretches over it, the way the library measures
-    // its own `bottomContentHeight`.
-    var bottomContentHeight by remember { mutableStateOf(0.dp) }
-    val density = LocalDensity.current
-    // The bar and its pinned chrome, once: whichever frame below draws the band
-    // wraps this same column.
+    val measurements = remember { GlassTopBarMeasurements() }
     val barColumn: @Composable () -> Unit = {
         Column(modifier = Modifier.fillMaxWidth()) {
             if (compactTitleAlpha != null) {
@@ -334,53 +268,50 @@ fun MiuixGlassTopAppBar(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .onSizeChanged {
-                        bottomContentHeight = with(density) { it.height.toDp() }
+                    .layout { measurable, constraints ->
+                        val placeable = measurable.measure(constraints)
+                        measurements.bottomContentHeight = placeable.height
+                        layout(placeable.width, placeable.height) {
+                            placeable.placeRelative(0, 0)
+                        }
                     }
             ) {
                 Column { bottomContent?.invoke(this) }
             }
         }
     }
-    if (softGlass) {
-        // OS 4 wears the library's DEFAULT GlassTopAppBar: the progressive
-        // texture-blur pane, not the band. It covers the title bar AND the
-        // pinned strips and stretches 1.2× past them, so the rows travelling
-        // under the chrome dissolve instead of meeting an edge — the demo's
-        // own arrangement, see IconPage's segmented tab row in `bottomContent`.
-        val pageBackdrop = LocalSoftGlassBackdrop.current
-        val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-        val paneHeight = (
-            statusTop +
-                TopAppBarDefaults.CollapsedHeight +
-                bottomContentHeight +
-                MiuixGlassTopAppBarDefaults.ProgressivePaneExtra
-            ) * MiuixGlassTopAppBarDefaults.ProgressivePaneScale
-        Box(modifier = modifier.fillMaxWidth()) {
+    // OS 4 wears MIUIX's `GlassTopAppBarLayout` + `progressiveTextureBlur`:
+    // foreground measures first so `topBar` keeps its exact layout height,
+    // while the progressive blur band overhangs downward by
+    // `(systemBarsTop + CollapsedHeight + bottomContentHeight + 20dp) * 1.2`.
+    val blurEnabled = LocalSoftGlassSpec.current.enabled
+    val pageBackdrop = if (blurEnabled) LocalSoftGlassBackdrop.current else null
+    val bandActive by remember(bandRamp) {
+        derivedStateOf { bandRamp.value > 0.001f }
+    }
+    val topInsets = WindowInsets.systemBars
+    Layout(
+        modifier = modifier,
+        content = {
             if (pageBackdrop != null) {
+                val blendColors = remember(bandColor) {
+                    listOf(BlendColorEntry(bandColor.copy(alpha = 0.3f)))
+                }
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(paneHeight)
                         .graphicsLayer { alpha = bandRamp.value }
                         .progressiveTextureBlur(
                             backdrop = pageBackdrop,
                             shape = RectangleShape,
+                            gradient = MiuixGlassTopAppBarDefaults.ProgressiveGradient,
                             blurRadius = MiuixGlassTopAppBarDefaults.ProgressiveBlurRadius.value,
-                            colors = BlurDefaults.blurColors(
-                                blendColors = listOf(
-                                    BlendColorEntry(bandColor.copy(alpha = 0.3f))
-                                )
-                            )
+                            colors = BlurDefaults.blurColors(blendColors = blendColors),
+                            enabled = bandActive,
                         )
                 )
             } else {
-                // No recorded page layer (a preview, or a page outside the
-                // scaffold): fall back to the band so the chrome still separates
-                // from the rows.
                 Box(
                     modifier = Modifier
-                        .matchParentSize()
                         .graphicsLayer {
                             alpha = bandAlpha
                             transformOrigin = TransformOrigin(0.5f, 0f)
@@ -395,52 +326,30 @@ fun MiuixGlassTopAppBar(
             }
             barColumn()
         }
-    } else {
-        // The OS 3 bar, measured the way the library's GlassTopAppBarLayout
-        // measures it: the band is a child given the bar's width and the bar's
-        // height PLUS the overhang, so the fade tail lives inside the child's
-        // own bounds instead of being painted past a same-size node. An
-        // overhang painted outside its node is the version that reads short.
-        Layout(
-            content = {
-                Box(
-                    modifier = Modifier
-                        .layoutId(BAND_SLOT)
-                        .graphicsLayer {
-                            alpha = if (contentUnderBar.value) 1f else 0f
-                        }
-                        .drawBehind {
-                            drawRect(
-                                brush = MiuixGlassTopAppBarDefaults.bandFadeBrush(
-                                    color = bandColor,
-                                    bandHeight = size.height,
-                                    fadeHeight = overhangPx + fadeTailPx
-                                )
-                            )
-                        }
-                )
-                Box(modifier = Modifier.layoutId(BAR_SLOT)) {
-                    barColumn()
-                }
-            }
-        ) { measurables, constraints ->
-            val bar = measurables
-                .first { it.layoutId == BAR_SLOT }
-                .measure(constraints.copy(minWidth = 0, minHeight = 0))
-            val bandHeight = bar.height + overhangPx.toInt()
-            val band = measurables
-                .first { it.layoutId == BAND_SLOT }
-                .measure(Constraints.fixed(bar.width, bandHeight))
-            layout(bar.width, bar.height) {
-                band.placeRelative(0, 0)
-                bar.placeRelative(0, 0)
-            }
+    ) { measurables, constraints ->
+        val foreground = measurables[1].measure(constraints.copy(minWidth = 0, minHeight = 0))
+        val width = constraints.constrainWidth(foreground.width)
+        val height = constraints.constrainHeight(foreground.height)
+        val bandHeight = if (pageBackdrop != null) {
+            val coveredHeight = topInsets.getTop(this) +
+                TopAppBarDefaults.CollapsedHeight.toPx() +
+                measurements.bottomContentHeight
+            ((coveredHeight + MiuixGlassTopAppBarDefaults.ProgressivePaneExtra.toPx()) *
+                MiuixGlassTopAppBarDefaults.ProgressivePaneScale).roundToInt()
+        } else {
+            height
+        }
+        val background = measurables[0].measure(Constraints.fixed(width, bandHeight))
+        layout(width, height) {
+            background.placeRelative(0, 0)
+            foreground.placeRelative(0, 0)
         }
     }
 }
 
-private const val BAND_SLOT = "glassTopAppBarBand"
-private const val BAR_SLOT = "glassTopAppBarBar"
+private class GlassTopBarMeasurements {
+    var bottomContentHeight: Int = 0
+}
 
 /**
  * A bar control on the look's glass disc: the disc fades in with the page's

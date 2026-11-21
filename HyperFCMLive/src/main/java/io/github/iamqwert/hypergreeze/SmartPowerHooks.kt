@@ -52,22 +52,11 @@ internal object SmartPowerHooks {
     private const val SERVICE_METHOD = "shouldInterceptService"
 
     internal fun hookSmartPowerIntercept(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        logSkipOtherGeneration: (String) -> Unit,
-        releaseEnabled: () -> Boolean,
-        systemContext: () -> Context?
+        env: HookEnv,
+        releaseEnabled: () -> Boolean
     ) {
-        hookBroadcastIntercept(
-            module, classLoader, hookE, logSkip, logSkipOtherGeneration,
-            releaseEnabled, systemContext
-        )
-        hookServiceIntercept(
-            module, classLoader, hookE, logSkip, logSkipOtherGeneration,
-            releaseEnabled, systemContext
-        )
+        hookBroadcastIntercept(env, releaseEnabled)
+        hookServiceIntercept(env, releaseEnabled)
     }
 
     /**
@@ -76,14 +65,11 @@ internal object SmartPowerHooks {
      * 位上没有 Intent 可直接用。
      */
     private fun hookBroadcastIntercept(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        logSkipOtherGeneration: (String) -> Unit,
-        releaseEnabled: () -> Boolean,
-        systemContext: () -> Context?
+        env: HookEnv,
+        releaseEnabled: () -> Boolean
     ) {
+        val module = env.module
+        val classLoader = env.classLoader
         try {
             val serviceClass = classLoader.loadClass(SMART_POWER_SERVICE_CLASS)
             val processRecordClass =
@@ -100,22 +86,19 @@ internal object SmartPowerHooks {
             val callerPackageField =
                 broadcastRecordClass.getDeclaredField("callerPackage")
             callerPackageField.isAccessible = true
-            hookE(method).intercept { chain: XposedInterface.Chain ->
+            env.hookE(method).intercept { chain: XposedInterface.Chain ->
                 try {
-                    if (releaseEnabled()) {
-                        val record = chain.getArg(1)
-                        val intent = intentField.get(record) as? Intent
+                    val record = chain.getArg(1)
+                    val intent = intentField.get(record) as? Intent
+                    if (intent != null && HookerSupport.ACTION_REMOTE_INTENT == intent.action) {
                         val callerPackage =
                             callerPackageField.get(record) as? String
-                        val targetPackage = intent?.let {
-                            HookerSupport.targetPackageOf(it)
-                        }
+                        val targetPackage = HookerSupport.targetPackageOf(intent)
                         if (callerPackage == HookerSupport.GMS_PACKAGE_NAME &&
-                            intent != null &&
-                            HookerSupport.ACTION_REMOTE_INTENT == intent.action &&
                             targetPackage != null &&
+                            releaseEnabled() &&
                             AllowlistGate.moduleAppliesTo(
-                                module, systemContext, targetPackage
+                                module, env::systemContext, targetPackage
                             )
                         ) {
                             return@intercept false
@@ -133,11 +116,9 @@ internal object SmartPowerHooks {
         } catch (e: NoSuchMethodException) {
             // OS4 的 SmartPowerService 还在但只剩观察者方法——本世代没有
             // 这个拦截点，属于「只有另一代才携带的目标」。
-            logSkipOtherGeneration(
-                "$SMART_POWER_SERVICE_CLASS#$BROADCAST_METHOD absent on this generation, skip"
-            )
+            env.logSkipOtherGeneration("SmartPowerService#$BROADCAST_METHOD")
         } catch (e: ClassNotFoundException) {
-            logSkip("$SMART_POWER_SERVICE_CLASS absent, $BROADCAST_METHOD not hooked")
+            env.logSkip("$SMART_POWER_SERVICE_CLASS absent, $BROADCAST_METHOD not hooked")
         }
     }
 
@@ -149,14 +130,11 @@ internal object SmartPowerHooks {
      * c2dm action，因此门控只看服务所属包是否已勾选。
      */
     private fun hookServiceIntercept(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        logSkipOtherGeneration: (String) -> Unit,
-        releaseEnabled: () -> Boolean,
-        systemContext: () -> Context?
+        env: HookEnv,
+        releaseEnabled: () -> Boolean
     ) {
+        val module = env.module
+        val classLoader = env.classLoader
         try {
             val managerClass = classLoader.loadClass(SMART_POWER_POLICY_MANAGER_CLASS)
             val callerInfoClass = classLoader.loadClass("miui.security.CallerInfo")
@@ -166,14 +144,14 @@ internal object SmartPowerHooks {
                 callerInfoClass,
                 ServiceInfo::class.java
             )
-            hookE(method).intercept { chain: XposedInterface.Chain ->
+            env.hookE(method).intercept { chain: XposedInterface.Chain ->
                 try {
                     if (releaseEnabled()) {
                         val serviceInfo = chain.getArg(2) as? ServiceInfo
                         val packageName = serviceInfo?.applicationInfo?.packageName
                         if (packageName != null &&
                             AllowlistGate.moduleAppliesTo(
-                                module, systemContext, packageName
+                                module, env::systemContext, packageName
                             )
                         ) {
                             return@intercept false
@@ -189,11 +167,9 @@ internal object SmartPowerHooks {
             }
             module.deoptimize(method)
         } catch (e: NoSuchMethodException) {
-            logSkipOtherGeneration(
-                "$SMART_POWER_POLICY_MANAGER_CLASS#$SERVICE_METHOD absent on this generation, skip"
-            )
+            env.logSkipOtherGeneration("SmartPowerPolicyManager#$SERVICE_METHOD")
         } catch (e: ClassNotFoundException) {
-            logSkip("$SMART_POWER_POLICY_MANAGER_CLASS absent, $SERVICE_METHOD not hooked")
+            env.logSkip("$SMART_POWER_POLICY_MANAGER_CLASS absent, $SERVICE_METHOD not hooked")
         }
     }
 }

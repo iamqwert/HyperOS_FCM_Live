@@ -1,18 +1,35 @@
 package io.github.iamqwert.hypergreeze.ui.softglass
 
-// The look is F1Info/Deadliner's `ImmersiveTextTabRow` (ui/navigation/), carried
-// over as the strip both Miuix-dressed looks wear in place of the library's tab
-// rows. Integration changes: the material comes from this module's own
-// soft-glass stack instead of being re-derived, and the strip has to survive
-// six labels as well as two — see [MiuixCapsuleTabRowDefaults].
+// Aligned with MIUIX's `GlassSegmentedTabRow` (`miuix-glass/GlassTabRow.kt`)
+// and `IconPage.kt`:
+//  - height 40dp, track padding 3dp (34dp inner pill), full pill corners;
+//  - opaque resting track fill (`restingTrackColor`) that transitions smoothly
+//    (450ms linear) into the `puredThinGlass` soft-glass layer + shadow as
+//    content scrolls under the top bar (`LocalSoftGlassBarReveal`);
+//  - dual-edge stretching indicator (`indicatorLeft` / `indicatorRight`) driven
+//    by `folmeSpring(0.7f, 0.4f)` leading and `folmeSpring(0.75f, 0.5f)`
+//    trailing;
+//  - indicator fill: light `Black @ 6%` (pressed `14%`), dark `White @ 13.3%`
+//    (pressed `26%`), or `primary` with the same alphas when Monet is active;
+//  - press feedback: indicator scales down (`folmeSpring(0.99f, 0.15f)` /
+//    `0.3f`), indicator tint deepens (`folmeSpring(1f, 0.2f)` /
+//    `folmeSpring(0.95f, 0.35f)`), pressed label dims to 0.6f alpha;
+//  - typography & ink: selected `subtitle` + (`primary` under Monet else
+//    `onSurface`), unselected `body2` + `onSurface` (150ms cubic-bezier);
+//  - retains adaptive natural widths + horizontal scroll so both the 2-tab
+//    状态/事件 strip and the 6-tab category strip fit cleanly without clipping.
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -20,7 +37,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -28,149 +44,209 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import io.github.iamqwert.hypergreeze.theme.AppearanceState
+import io.github.iamqwert.hypergreeze.ui.LocalSoftGlassBarReveal
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.anim.folmeSpring
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import kotlin.math.roundToInt
 
 object MiuixCapsuleTabRowDefaults {
-    /**
-     * The pinned chrome's height: `SearchBarDefaults.InputFieldMinHeight`'s
-     * 45dp, the same 45 the library's `TabRowWithContour` uses.
-     *
-     * It used to copy the plain [top.yukonga.miuix.kmp.basic.TabRow]'s 42dp so
-     * that swapping the strip in would not move the page below it. But the strip
-     * is pinned directly under the bar, beside the apps page's 45dp search
-     * capsule in the same slot — at 42 the three dp it lacked pushed this page's
-     * first row three dp above the apps page's, and the two pages' content lines
-     * never met. One height for both pinned chromes keeps them on one line.
-     */
-    val Height = 45.dp
+    /** `GlassSegmentedTabRowDefaults.Height`: 34dp inner tab + 3dp padding top/bottom. */
+    val Height = 40.dp
 
-    /** The gap between the capsule's edge and the pill riding inside it. */
+    /** `GlassSegmentedTabRowDefaults.TrackPadding`. */
     val HorizontalPadding = 3.dp
     val VerticalPadding = 3.dp
 
-    /** Air either side of a label; the pair is what makes a tab look tappable. */
-    val ItemHorizontalPadding = 12.dp
+    /** Horizontal air either side of a label (`GlassSegmentedTabRowDefaults.TabPaddingHorizontal`). */
+    val ItemHorizontalPadding = 16.dp
 
-    /**
-     * The floor a tab may be squeezed to before the strip scrolls instead.
-     * The two-glyph Chinese labels the records page uses sit on it exactly; an
-     * English label wider than this simply keeps its own width.
-     */
+    /** Tighter per-tab horizontal padding for dense multi-tab rows (e.g. 6 event categories). */
+    val CompactItemHorizontalPadding = 6.dp
+
+    /** Minimum tab width for compact multi-tab rows (e.g. 6 event categories). */
     val MinimumItemWidth = 48.dp
 
     val Shape: Shape = SoftGlassDefaults.Shape
 
-    /**
-     * The capsule's own wash over the page, the reference's resting values: it
-     * is the container the glass material is drawn over, and with no material
-     * (see [MiuixCapsuleTabRow]'s note on backdrops) it is the whole strip.
-     */
-    fun containerAlpha(isDark: Boolean): Float = if (isDark) 0.74f else 0.82f
+    private const val DarkIndicatorAlpha = 0.133f
+    private const val LightIndicatorAlpha = 0.06f
+    private const val DarkPressedIndicatorAlpha = 0.26f
+    private const val LightPressedIndicatorAlpha = 0.14f
+    internal const val PressedContentAlpha = 0.6f
 
-    /** The pill under the selected label, faint in both lights — an ink wash, not a plate. */
-    fun indicatorAlpha(isDark: Boolean): Float = if (isDark) 0.13f else 0.075f
+    /** `GlassSegmentedTabRowDefaults.restingTrackColor`: opaque fill before glass rises. */
+    @Composable
+    fun restingTrackColor(isDark: Boolean, isDynamic: Boolean): Color {
+        val surface = MiuixTheme.colorScheme.surface
+        return when {
+            isDark -> {
+                val tint = if (isDynamic) MiuixTheme.colorScheme.onSurface else Color.White
+                tint.copy(alpha = DarkIndicatorAlpha).compositeOver(surface)
+            }
+            isDynamic -> MiuixTheme.colorScheme.surfaceContainer
+            else -> Color.White
+        }
+    }
 
-    /**
-     * The strip's own lens: the delivered material with its radius multiplied
-     * up to 92 × 0.8 = 73.6 on the look's base. The two records-page strips
-     * were tuned up by eye and are the only surfaces that take it — the
-     * floating bar, its plates and the bar's actions keep the delivered
-     * 0.217 (≈ MIUIX's PuredThinGlass 20dp).
-     */
-    const val BlurRadiusMultiplier = 0.8f
+    @Composable
+    private fun indicatorTint(isDark: Boolean, isDynamic: Boolean): Color = when {
+        isDynamic -> MiuixTheme.colorScheme.primary
+        isDark -> Color.White
+        else -> Color.Black
+    }
+
+    /** `GlassSegmentedTabRowDefaults.indicatorColor`. */
+    @Composable
+    fun indicatorColor(isDark: Boolean, isDynamic: Boolean): Color =
+        indicatorTint(isDark, isDynamic).copy(
+            alpha = if (isDark) DarkIndicatorAlpha else LightIndicatorAlpha,
+        )
+
+    /** `GlassSegmentedTabRowDefaults.indicatorPressedColor`. */
+    @Composable
+    fun indicatorPressedColor(isDark: Boolean, isDynamic: Boolean): Color =
+        indicatorTint(isDark, isDynamic).copy(
+            alpha = if (isDark) DarkPressedIndicatorAlpha else LightPressedIndicatorAlpha,
+        )
+
+    internal val MaterialRampSpec = tween<Float>(durationMillis = 450, easing = LinearEasing)
+    internal val ContentColorSpec = tween<Color>(
+        durationMillis = 150,
+        easing = CubicBezierEasing(0.33f, 0f, 0.67f, 1f),
+    )
+    internal val ContentFloatSpec = tween<Float>(
+        durationMillis = 150,
+        easing = CubicBezierEasing(0.33f, 0f, 0.67f, 1f),
+    )
+    internal fun edgeSpring(leading: Boolean): SpringSpec<Float> =
+        if (leading) folmeSpring(0.7f, 0.4f) else folmeSpring(0.75f, 0.5f)
+    internal fun pressEnterColor(): SpringSpec<Color> = folmeSpring(1f, 0.2f)
+    internal fun pressExitColor(): SpringSpec<Color> = folmeSpring(0.95f, 0.35f)
+    internal fun pressDownScale(): SpringSpec<Float> = folmeSpring(0.99f, 0.15f)
+    internal fun pressUpScale(): SpringSpec<Float> = folmeSpring(0.99f, 0.3f)
 }
 
-/**
- * The Miuix tab strip as a capsule, after F1Info's `ImmersiveTextTabRow`.
- *
- * The shape of the thing: one capsule the width of the page's content, a pill
- * that springs to whichever label is selected, labels that shade from half to
- * full ink on selection. Nothing is drawn between tabs — no divider, no outline
- * per tab, which is what makes it read as one plate rather than as the library's
- * row of outlined buttons.
- *
- * The glass Miuix looks wear it — 柔光玻璃 always, plain MIUIX once its
- * floating-bar row is ON: one plate, one layout, and one glass material over
- * it. Both are handed the page's own recorded layer, so both refract the
- * content passing under the strip. Plain MIUIX with the docked bar keeps the
- * library's own `TabRow` instead; the call site decides, not this component.
- *
- * **On the backdrop.** The reference's strip lives in a collapsing top bar, so
- * it can sample the content scrolling under it. The records page now does
- * exactly that: its strips mount inside the page bar's TRANSPARENT gradient
- * band
- * ([io.github.iamqwert.hypergreeze.ui.PageScaffold.barExtension]) but
- * OUTSIDE the recorded body, so the page's own layer — provided through
- * [LocalSoftGlassBackdrop] by the page scaffold — is a legal source with no
- * render-node cycle, and the rows travelling under the band are real content
- * to blur. Passing `backdrop = null` leaves only the container wash: a
- * half-transparent plate and no frost at all.
- *
- * @param tabs the labels, in tab order.
- * @param selectedTabIndex the tab the pill sits under; clamped into range.
- * @param onTabSelected called with the index of the tab tapped.
- */
 @Composable
 fun MiuixCapsuleTabRow(
     tabs: List<String>,
     selectedTabIndex: Int,
     onTabSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    itemHorizontalPadding: Dp = MiuixCapsuleTabRowDefaults.ItemHorizontalPadding,
     backdrop: LayerBackdrop? = LocalSoftGlassBackdrop.current,
+    surfaceAlpha: Float = LocalSoftGlassBarReveal.current,
 ) {
     if (tabs.isEmpty()) return
 
     val softGlass = LocalSoftGlassSpec.current
-    val contentColor = MiuixTheme.colorScheme.onSurfaceContainer
-    val isDark = contentColor.luminance() > 0.5f
+    val isDark = MiuixTheme.colorScheme.background.luminance() < 0.5f
+    val isDynamic by AppearanceState.miuixMonet
     val shape = MiuixCapsuleTabRowDefaults.Shape
-    val containerColor = MiuixTheme.colorScheme.surfaceContainer.copy(
-        alpha = MiuixCapsuleTabRowDefaults.containerAlpha(isDark),
-    )
-    val indicatorColor = contentColor.copy(
-        alpha = MiuixCapsuleTabRowDefaults.indicatorAlpha(isDark),
-    )
+    val trackColor = MiuixCapsuleTabRowDefaults.restingTrackColor(isDark, isDynamic)
+    val baseIndicatorColor = MiuixCapsuleTabRowDefaults.indicatorColor(isDark, isDynamic)
+    val pressedIndicatorColor = MiuixCapsuleTabRowDefaults.indicatorPressedColor(isDark, isDynamic)
+    val selectedContentColor = if (isDynamic) {
+        MiuixTheme.colorScheme.primary
+    } else {
+        MiuixTheme.colorScheme.onSurface
+    }
+    val contentColor = MiuixTheme.colorScheme.onSurface
     val selectedIndex = selectedTabIndex.coerceIn(0, tabs.lastIndex)
 
-    // The strip's type, once: the label and the measurement that decides how
-    // wide its tab is have to be the same text, or a tab sized for one weight
-    // would clip the other. Bold is the selected weight — MIUIX's own for a
-    // tab (TabRow) — so measuring with it is measuring the worst case.
-    val labelStyle = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 16.sp)
+    val glassAvailable = softGlass.enabled && backdrop != null
+    val targetRamp = if (glassAvailable) surfaceAlpha.coerceIn(0f, 1f) else 0f
+    val rampState by animateFloatAsState(
+        targetValue = targetRamp,
+        animationSpec = MiuixCapsuleTabRowDefaults.MaterialRampSpec,
+        label = "glassSegmentedTabRamp",
+    )
+    val showGlass by remember(glassAvailable) {
+        derivedStateOf { glassAvailable && rampState > 0.001f }
+    }
+
+    val selectedStyle = MiuixTheme.textStyles.subtitle
+    val unselectedStyle = MiuixTheme.textStyles.body2
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
-    val itemInsets = MiuixCapsuleTabRowDefaults.ItemHorizontalPadding * 2
-    val labelWidths = remember(measurer, density, tabs, labelStyle) {
+    val itemInsets = itemHorizontalPadding * 2
+    val labelWidths = remember(measurer, density, tabs, selectedStyle, itemInsets) {
         tabs.map { label ->
             val widthPx = measurer.measure(
                 text = AnnotatedString(label),
-                style = labelStyle.copy(fontWeight = FontWeight.Bold),
+                style = selectedStyle,
                 maxLines = 1,
                 softWrap = false,
             ).size.width
             with(density) { widthPx.toDp() } + itemInsets
         }
     }
+
+    // Track per-tab interaction sources so pressing any tab animates the
+    // indicator press feedback and dims the pressed label.
+    val interactionSources = remember(tabs.size) {
+        List(tabs.size) { MutableInteractionSource() }
+    }
+    val pressedStates = interactionSources.map { it.collectIsPressedAsState().value }
+    val anyPressed = pressedStates.any { it }
+
+    val indicatorFill by animateColorAsState(
+        targetValue = if (anyPressed) pressedIndicatorColor else baseIndicatorColor,
+        animationSpec = if (anyPressed) {
+            MiuixCapsuleTabRowDefaults.pressEnterColor()
+        } else {
+            MiuixCapsuleTabRowDefaults.pressExitColor()
+        },
+        label = "glassSegmentedTabIndicatorFill",
+    )
+    val innerHeightPx = with(density) {
+        (MiuixCapsuleTabRowDefaults.Height - MiuixCapsuleTabRowDefaults.VerticalPadding * 2).toPx()
+    }
+    val indicatorScale by animateFloatAsState(
+        targetValue = if (anyPressed) {
+            // `glassPressScale`: takes 10dp off the smaller side, floored at 0.9f.
+            val insetPx = with(density) { 10.dp.toPx() }
+            if (innerHeightPx > 0f) {
+                ((innerHeightPx - insetPx) / innerHeightPx).coerceIn(0.9f, 1f)
+            } else {
+                1f
+            }
+        } else {
+            1f
+        },
+        animationSpec = if (anyPressed) {
+            MiuixCapsuleTabRowDefaults.pressDownScale()
+        } else {
+            MiuixCapsuleTabRowDefaults.pressUpScale()
+        },
+        label = "glassSegmentedTabIndicatorScale",
+    )
 
     BoxWithConstraints(
         modifier = modifier
@@ -180,44 +256,39 @@ fun MiuixCapsuleTabRow(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                // The outer rim belongs to the PLATE, not to the frost: it used
-                // to hang on the glass layer below, so any strip handed a null
-                // backdrop lost its shadow as well as its blur. Both Miuix
-                // looks keep the rim now, glass or not.
-                .softGlassShadow(shape = shape, isDark = isDark)
+                .softGlassShadow(
+                    shape = shape,
+                    isDark = isDark,
+                    alpha = if (glassAvailable) rampState else 1f,
+                )
                 .clip(shape)
-                .background(containerColor)
+                .background(trackColor)
         )
         if (softGlass.enabled && backdrop != null) {
-            // The strip's own lens: the delivered material with its radius
-            // raised (see [MiuixCapsuleTabRowDefaults.BlurRadiusMultiplier]).
-            // The floating bar and the bar's actions keep the default.
-            val base = SoftGlassRecipes.floatingNavigation(softGlass.fineTuning)
-            SoftGlassSurface(
-                modifier = Modifier.fillMaxSize(),
-                shape = shape,
-                recipe = base.copy(
-                    blur = base.blur.copy(
-                        radiusMultiplier = MiuixCapsuleTabRowDefaults.BlurRadiusMultiplier,
-                    ),
-                ),
-                backdrop = backdrop,
-            ) {}
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = if (showGlass) rampState else 0f }
+            ) {
+                if (showGlass) {
+                    SoftGlassSurface(
+                        modifier = Modifier.fillMaxSize(),
+                        shape = shape,
+                        recipe = SoftGlassRecipes.floatingNavigation(softGlass.fineTuning),
+                        backdrop = backdrop,
+                    ) {}
+                }
+            }
         }
 
         val available = (
-            maxWidth -
-                MiuixCapsuleTabRowDefaults.HorizontalPadding * 2
+            maxWidth - MiuixCapsuleTabRowDefaults.HorizontalPadding * 2
             ).coerceAtLeast(0.dp)
         val itemWidths = capsuleTabItemWidths(labelWidths, available)
         val contentWidth = itemWidths.runWidth(itemWidths.size)
         val scrollable = contentWidth > available
         val scrollState = rememberScrollState()
 
-        // A restored selection can be a tab the strip is not showing — the
-        // reference never needs this because its strip always fits. Only the
-        // edge cases are chased: a tap is on screen by definition, so this
-        // slides nothing during normal use.
         LaunchedEffect(selectedIndex, scrollable, available, itemWidths.size) {
             if (!scrollable) return@LaunchedEffect
             val startPx = with(density) {
@@ -234,36 +305,25 @@ fun MiuixCapsuleTabRow(
             }
         }
 
-        val indicatorStart by animateFloatAsState(
-            targetValue = with(density) {
-                itemWidths.runWidth(selectedIndex).toPx()
-            },
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioLowBouncy,
-                stiffness = Spring.StiffnessMediumLow,
-            ),
-            label = "soft_glass_tab_indicator_start",
-        )
-        val indicatorWidth by animateFloatAsState(
-            targetValue = with(density) { itemWidths[selectedIndex].toPx() },
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = Spring.StiffnessMediumLow,
-            ),
-            label = "soft_glass_tab_indicator_width",
-        )
+        val scope = rememberCoroutineScope()
+        val indicatorLeft = remember { Animatable(0f) }
+        val indicatorRight = remember { Animatable(0f) }
 
-        // The pill rides OUTSIDE the scroll container. Compose's horizontalScroll
-        // clips its content to a rectangle at the viewport edge, so the bouncy
-        // overshoot at either end — first or last tab — had its round corner
-        // sliced flat. The reference never shows that: its strip does not scroll,
-        // and the only clip around the pill is the capsule itself, so an overshoot
-        // is rounded off rather than squared off.
-        //
-        // So the pill gets its own layer, clipped to the capsule, offset by
-        // [scrollState] so it still travels with the labels; the row below keeps
-        // the scroll, whose rectangular clip only ever cuts text that has already
-        // left the viewport.
+        LaunchedEffect(selectedIndex, itemWidths) {
+            val targetLeft = with(density) { itemWidths.runWidth(selectedIndex).toPx() }
+            val targetRight = targetLeft + with(density) { itemWidths[selectedIndex].toPx() }
+            if (indicatorRight.value <= indicatorLeft.value) {
+                indicatorLeft.snapTo(targetLeft)
+                indicatorRight.snapTo(targetRight)
+            } else {
+                val movingLeft = targetLeft <= indicatorLeft.value
+                val leftSpec = MiuixCapsuleTabRowDefaults.edgeSpring(leading = movingLeft)
+                val rightSpec = MiuixCapsuleTabRowDefaults.edgeSpring(leading = !movingLeft)
+                scope.launch { indicatorLeft.animateTo(targetLeft, leftSpec) }
+                scope.launch { indicatorRight.animateTo(targetRight, rightSpec) }
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -279,16 +339,30 @@ fun MiuixCapsuleTabRow(
             ) {
                 Box(
                     modifier = Modifier
-                        .offset {
-                            IntOffset(
-                                (indicatorStart - scrollState.value).roundToInt(),
-                                0,
-                            )
-                        }
-                        .width(with(density) { indicatorWidth.toDp() })
                         .fillMaxHeight()
+                        .layout { measurable, constraints ->
+                            val start = (indicatorLeft.value - scrollState.value).roundToInt()
+                            val end = (indicatorRight.value - scrollState.value).roundToInt()
+                            val width = (end - start).coerceAtLeast(0)
+                            val placeable = measurable.measure(
+                                constraints.copy(minWidth = width, maxWidth = width)
+                            )
+                            layout(constraints.maxWidth, placeable.height) {
+                                placeable.placeRelative(IntOffset(start, 0))
+                            }
+                        }
+                        .graphicsLayer {
+                            val scale = indicatorScale
+                            val insetPx = (1f - scale) * size.height
+                            scaleX = if (size.width > 0f) {
+                                ((size.width - insetPx) / size.width).coerceIn(0f, 1f)
+                            } else {
+                                1f
+                            }
+                            scaleY = scale
+                        }
                         .clip(shape)
-                        .background(indicatorColor)
+                        .drawBehind { drawRect(indicatorFill) }
                 )
             }
             Row(
@@ -301,15 +375,21 @@ fun MiuixCapsuleTabRow(
             ) {
                 tabs.forEachIndexed { index, label ->
                     val selected = index == selectedIndex
+                    val pressed = pressedStates[index]
                     val textColor by animateColorAsState(
-                        targetValue = if (selected) {
-                            contentColor
-                        } else {
-                            contentColor.copy(alpha = 0.50f)
-                        },
-                        label = "soft_glass_tab_color_$index",
+                        targetValue = if (selected) selectedContentColor else contentColor,
+                        animationSpec = MiuixCapsuleTabRowDefaults.ContentColorSpec,
+                        label = "glassSegmentedTabColor_$index",
                     )
-                    val interactionSource = remember { MutableInteractionSource() }
+                    val pressAlpha by animateFloatAsState(
+                        targetValue = if (pressed) {
+                            MiuixCapsuleTabRowDefaults.PressedContentAlpha
+                        } else {
+                            1f
+                        },
+                        animationSpec = MiuixCapsuleTabRowDefaults.ContentFloatSpec,
+                        label = "glassSegmentedTabPressAlpha_$index",
+                    )
                     Box(
                         modifier = Modifier
                             .width(itemWidths[index])
@@ -318,23 +398,18 @@ fun MiuixCapsuleTabRow(
                             .selectable(
                                 selected = selected,
                                 role = Role.Tab,
-                                interactionSource = interactionSource,
+                                interactionSource = interactionSources[index],
                                 indication = null,
                                 onClick = { onTabSelected(index) },
-                            ),
+                            )
+                            .graphicsLayer { alpha = pressAlpha },
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             text = label,
                             color = textColor,
-                            style = labelStyle,
-                            // MIUIX's own tab emphasis: the selected label is
-                            // Bold, the rest Normal.
-                            fontWeight = if (selected) {
-                                FontWeight.Bold
-                            } else {
-                                FontWeight.Normal
-                            },
+                            style = if (selected) selectedStyle else unselectedStyle,
+                            textAlign = TextAlign.Center,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -345,19 +420,6 @@ fun MiuixCapsuleTabRow(
     }
 }
 
-/**
- * How wide each tab is: its own label plus air, and the leftover space on a
- * strip that does not fill its capsule shared out evenly.
- *
- * The reference divides the width by the tab count, which is right for its two
- * or three short labels and wrong for this page's six: English labels run from
- * `All` to `Anomalies`, and equal shares clip the long ones while starving the
- * short. Natural widths keep every label whole; the shared-out remainder is
- * what still makes a short strip look like the reference's (equal tabs, edge to
- * edge) instead of a huddle of text in a long capsule. When the natural widths
- * do not fit, they are kept and the strip scrolls — which the reference never
- * has to do, and Chinese almost never does either.
- */
 internal fun capsuleTabItemWidths(
     labelWidths: List<Dp>,
     available: Dp,
@@ -372,11 +434,6 @@ internal fun capsuleTabItemWidths(
     return natural.map { it + share }
 }
 
-/**
- * The width of the first [count] tabs — where a tab starts, and where a run of
- * them ends. The strip lays its tabs out edge to edge, so a tab's offset is the
- * sum of the widths before it.
- */
 private fun List<Dp>.runWidth(count: Int): Dp {
     var width = 0.dp
     for (index in 0 until count.coerceAtMost(size)) width += this[index]

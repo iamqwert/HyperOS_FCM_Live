@@ -18,28 +18,27 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
@@ -108,7 +107,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -128,6 +126,7 @@ import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
 import io.github.iamqwert.hypergreeze.theme.MIUIX_ACCENT_OPTIONS
 import io.github.iamqwert.hypergreeze.theme.UiStyle
 import io.github.iamqwert.hypergreeze.theme.ThemePrefs
+import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassSpec
 import kotlinx.coroutines.launch
 
 /**
@@ -148,10 +147,12 @@ import kotlinx.coroutines.launch
  */
 data class AboutActions(
     val onViewSource: () -> Unit,
+    val onHelp: () -> Unit = {},
     /** Opens the GPL-3.0 licence text — the 「许可证」 row. */
     val onLicense: () -> Unit,
     val onLicenses: () -> Unit,
     val onExperiment: () -> Unit,
+    val onThemeSettings: () -> Unit = {},
     val onExport: () -> Unit,
     val onImport: () -> Unit,
     /** Runs the update check; [report] carries back which answer to show. */
@@ -283,12 +284,15 @@ fun AboutTabScreen(
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
 ) {
     val miuix = LocalUiStyle.current.isMiuixBased
+    val blurEnabled = LocalSoftGlassSpec.current.enabled
     // The page's dynamic background is also what its glass is made of: the
     // gradient is recorded into this layer, the background fills it, and
     // everything drawn on top of it samples it — the hero's wordmark, the
-    // section's cards. Handed to the whole page rather than to one item: the
-    // hero rides in the list, and it is made of the backdrop just the same.
+    // section's cards. Respecting the global blur toggle mirrors the reference's
+    // `rememberBlurBackdrop()`: when blur is off, cards and wordmark fall back
+    // to their plain surfaces and ink.
     val glassBackdrop = rememberLayerBackdrop()
+    val activeBackdrop = if (miuix && blurEnabled) glassBackdrop else null
     // The reference page's layout (the Example's AboutPage), element for
     // element: the hero is NOT a list item — it is the content box's first
     // child, drawn beneath the list and never moving, while the list above it
@@ -325,7 +329,7 @@ fun AboutTabScreen(
     var logoHeightDp by remember { mutableStateOf(300.dp) }
 
     CompositionLocalProvider(
-        LocalMiuixGlassBackdrop provides if (miuix) glassBackdrop else null
+        LocalMiuixGlassBackdrop provides activeBackdrop
     ) {
         PageScaffold(
             titleRes = R.string.nav_about,
@@ -339,7 +343,11 @@ fun AboutTabScreen(
             background = if (miuix) {
                 {
                     MiuixBgEffectBackground(
-                        modifier = Modifier.layerBackdrop(glassBackdrop),
+                        modifier = if (activeBackdrop != null) {
+                            Modifier.layerBackdrop(activeBackdrop)
+                        } else {
+                            Modifier
+                        },
                         alpha = { 1f - scrollProgress }
                     )
                 }
@@ -625,8 +633,8 @@ private const val LOGO_SPACER_KEY = "logoSpacer"
 /** The key of the cards' item, the one viewport of column under the hero. */
 private const val ABOUT_SECTION_KEY = "about"
 
-/** The wordmark glass's blur radius, in the blur library's own units. */
-private const val NAME_BLUR_RADIUS = 150f
+/** The wordmark glass's blur radius, in the blur library's own units (matches miuix demo). */
+private const val NAME_BLUR_RADIUS = 100f
 
 /**
  * The ink the wordmark's glass is pushed to, copied from the reference: a
@@ -708,6 +716,7 @@ private fun rememberLauncherIconPainter(): androidx.compose.ui.graphics.painter.
  * shows it (rasterised once by [rememberLauncherIconPainter]), name and release
  * tag in M3 type.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun AboutHeroMaterial(versionTag: String) {
     Column(
@@ -733,8 +742,7 @@ private fun AboutHeroMaterial(versionTag: String) {
         Text(
             modifier = Modifier.padding(top = 12.dp),
             text = stringResource(R.string.launcher_name),
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Medium
+            style = MaterialTheme.typography.headlineMediumEmphasized
         )
         Text(
             text = versionTag,
@@ -820,11 +828,18 @@ private fun AboutProjectSection(
                 shape = connectedGroupShape(first = true, last = true),
                 modifier = Modifier.padding(horizontal = MiuixMetrics.PageInset)
             ) {
-                ArrowPreference(
-                    title = stringResource(R.string.view_source_code),
-                    onClick = actions.onViewSource,
-                    endActions = { AboutRowValue("GitHub") }
-                )
+                Column(Modifier.fillMaxWidth()) {
+                    ArrowPreference(
+                        title = stringResource(R.string.view_source_code),
+                        onClick = actions.onViewSource,
+                        endActions = { AboutRowValue("GitHub") }
+                    )
+                    ArrowPreference(
+                        title = stringResource(R.string.help_guide),
+                        onClick = actions.onHelp,
+                        endActions = { AboutRowValue("GitHub") }
+                    )
+                }
             }
             MiuixCardSurface(
                 shape = connectedGroupShape(first = true, last = true),
@@ -907,6 +922,15 @@ private fun AboutProjectSection(
             )
         }
         NavCard(
+            iconRes = R.drawable.ic_help,
+            title = stringResource(R.string.help_guide),
+            subtitle = "",
+            onClick = actions.onHelp,
+            first = false,
+            last = false,
+            trailing = { AboutRowValue("GitHub") }
+        )
+        NavCard(
             iconRes = R.drawable.ic_license,
             title = stringResource(R.string.about_license),
             subtitle = "",
@@ -974,9 +998,6 @@ private fun AboutBody(
     // system-side setting with no palette behind it, and the update badge is
     // screen state by definition.
     var hideIcon by remember { mutableStateOf(LauncherIcon.isHidden(context)) }
-    // 预测性返回：读一次页面栈当前的方向口径（偏好），改由开关自己写回并转给
-    // Activity —— 这一行不需要跟任何系统侧读数对齐，所以本地镜像就够。
-    var predictiveBack by remember { mutableStateOf(Prefs.readPredictiveBack(context)) }
     // Read once per screen: the hook side owns the live value, and the mirror
     // is only the answer the UI last left behind (same rule as the experiment
     // page's mirrors).
@@ -996,69 +1017,26 @@ private fun AboutBody(
     var recordRows by remember { mutableStateOf(Prefs.readRecordRows(context)) }
     val themeMode by AppearanceState.themeMode
     val uiStyle by AppearanceState.uiStyle
-    val miuixFlavor by AppearanceState.miuixFlavor
-    val dynamic by AppearanceState.dynamicColor
-    val seed by AppearanceState.seedColor
     val miuixMonet by AppearanceState.miuixMonet
-    val miuixAccent by AppearanceState.miuixAccent
-    val floatingBar by AppearanceState.floatingBar
-    val paletteStyle by AppearanceState.paletteStyle
-    val colorSpec by AppearanceState.colorSpec
-    // The whole theme section is scoped by this: 动态颜色 / 调色风格 / 颜色规格 are
-    // the app's own colour engine's controls, and the Miuix look does not go
-    // through that engine at all. A row that changes nothing has no business being
-    // on screen, and a row that is hidden but still feeding the look is worse —
-    // see MiuixStyleTheme, which stops reading them for exactly that reason.
-    // Both Miuix-dressed looks, not just [ThemePrefs.UI_STYLE_MIUIX]: 柔光玻璃 is
-    // the same screens and must see the same rows, or half of its settings would
-    // go missing the moment the material changed.
     val miuixStyle = uiStyle != ThemePrefs.UI_STYLE_MATERIAL
 
     val modeEntries = stringArrayResource(R.array.theme_mode_entries)
-    // 界面风格只剩两项（Material 3 / Miuix）——柔光玻璃挪到「Miuix样式」里当 OS 4。
+    val miuixModeEntries = stringArrayResource(R.array.miuix_theme_mode_entries)
     val uiStyleEntries = stringArrayResource(R.array.ui_style_entries)
-    val miuixFlavorEntries = stringArrayResource(R.array.miuix_flavor_entries)
-    val styleEntries = stringArrayResource(R.array.palette_style_entries)
-    val specEntries = stringArrayResource(R.array.color_spec_entries)
-    // 强调色's menu: entry 0 is the stored 0 (跟随壁纸), the rest are
-    // [MIUIX_ACCENT_OPTIONS] in order. One list for labels, one for values, the
-    // same index over both — the mapping the pick writes through.
-    val accentEntries = stringArrayResource(R.array.miuix_accent_entries)
-    val accentValues = remember { listOf(0) + MIUIX_ACCENT_OPTIONS.toList() }
     // 语言下拉：选项是各自的原生名（简体中文 / English），不翻译，所以这份
     // 数组只有 values/ 一份定义。
     val languageEntries = stringArrayResource(R.array.language_entries)
     // 「事件记录上限行数」的下拉：标签数组与 [Prefs.RECORD_ROWS_CHOICES] 同序。
     val recordRowsEntries = stringArrayResource(R.array.record_rows_entries)
 
-    // The two appearance menus are scoped by each other, because the settings
-    // are not independent: the 2025 spec covers four palette styles and nothing
-    // else (`Scheme.Variant.supportsExpressive2025`), and the 2026 spec covers
-    // exactly one style — CMF, whose scheme rejects every other spec version.
-    //
-    // The spec menu stays complete — every spec is always listed, because it
-    // is the primary setting and the way *out* of any pairing: picking a spec
-    // migrates the style to one that can run it (see ThemePrefs.setSpecVersion;
-    // 2026 ⇒ CMF and the palette row locks, 2025 ⇒ an incompatible style moves
-    // to Tonal Spot). The palette menu, the subordinate one, lists only what
-    // the spec in effect can render, and locks entirely under 2026.
-    //
-    // Note neither list can strand the current value: an in-effect 2025 implies
-    // by construction a style that supports it (the write side migrates), so
-    // that style is always in the filtered list; CMF implies 2026.
-    val paletteVariants = Scheme.Variant.entries.filter {
-        when (colorSpec) {
-            ThemePrefs.SPEC_2025 -> it.supportsExpressive2025
-            // The row is locked here; the full list keeps CMF, its shown value,
-            // indexable.
-            ThemePrefs.SPEC_2026 -> true
-            // 2021 runs everything except CMF — that style belongs to 2026
-            // alone, and the spec menu above is its only door.
-            else -> it != Scheme.Variant.CMF
-        }
+    val themeSummary = run {
+        val modeIndex = ALL_THEME_MODES.indexOf(themeMode).coerceAtLeast(0)
+        if (miuixStyle) {
+            miuixModeEntries.getOrNull(modeIndex + if (miuixMonet) ALL_THEME_MODES.size else 0)
+        } else {
+            modeEntries.getOrNull(modeIndex)
+        } ?: ""
     }
-    val paletteStyleNow = variantAt(paletteStyle)
-    val specValues = listOf(ThemePrefs.SPEC_2021, ThemePrefs.SPEC_2025, ThemePrefs.SPEC_2026)
 
     val hideText = stringResource(R.string.hide_icon_toast)
     val showText = stringResource(R.string.show_icon_toast)
@@ -1114,24 +1092,6 @@ private fun AboutBody(
                     first = true,
                     last = false
                 )
-                // 预测性返回：返回手势要不要“跟手预览”。它管的是 Activity 的页面栈
-                // （[MainActivity] 的 AppPages）——那一层只认 compose 出来的 handler
-                // 顺序，所以这里写偏好 + 通过 [AboutActions.onPredictiveBackChange]
-                // 把新值交上去，不另存一份本地镜像去猜页面栈该长什么样。
-                // 与「中间区域横向拖拽返回」无关：那个手势本应用没有提供。
-                SettingsSwitchCard(
-                    iconRes = R.drawable.ic_swipe_left,
-                    title = stringResource(R.string.predictive_back),
-                    description = stringResource(R.string.about_sub_predictive_back),
-                    checked = predictiveBack,
-                    onCheckedChange = { checked ->
-                        Prefs.writePredictiveBack(context, checked)
-                        predictiveBack = checked
-                        actions.onPredictiveBackChange(checked)
-                    },
-                    first = false,
-                    last = false
-                )
                 // 语言选择交给平台的 LocaleManager：写下去系统自己持久化并重建
                 // 界面，本应用不落偏好。未选择时的默认（ currentIndex 的取值）
                 // 走资源回退——values/ 英文、values-zh/ 简体中文，任意中文变体
@@ -1151,183 +1111,28 @@ private fun AboutBody(
 
         item {
             SectionTitle(R.string.about_section_theme)
-            val visibleModes = ALL_THEME_MODES
             SettingsGroup {
-                PopupCard(
+                NavCard(
                     iconRes = R.drawable.ic_theme_mode,
-                    title = stringResource(R.string.theme_mode),
-                    subtitle = stringResource(R.string.about_sub_theme_mode),
-                    entries = visibleModes.map { modeEntries[it] },
-                    currentIndex = visibleModes.indexOf(themeMode),
+                    title = stringResource(R.string.theme_settings),
+                    subtitle = themeSummary,
                     first = true,
                     last = false,
-                    onPick = { index ->
-                        AppearanceState.setThemeMode(context, visibleModes[index])
-                        actions.onAppearanceChange()
-                    }
+                    onClick = actions.onThemeSettings
                 )
                 PopupCard(
                     iconRes = R.drawable.ic_ui_style,
                     title = stringResource(R.string.ui_style),
                     subtitle = stringResource(R.string.about_sub_ui_style),
                     entries = uiStyleEntries.toList(),
-                    // 菜单只有 Material 3 / Miuix 两项，而 [uiStyle] 是合并后的
-                    // 有效观感（Miuix 的两种款式分别是 1 和 2），所以取「是不是
-                    // Material」当索引，而不是把 2 直接喂进来。
-                    currentIndex = if (uiStyle == ThemePrefs.UI_STYLE_MATERIAL) 0 else 1,
+                    currentIndex = if (miuixStyle) 1 else 0,
                     first = false,
-                    last = false,
+                    last = true,
                     onPick = { index ->
                         AppearanceState.setUiStyle(context, index)
                         actions.onAppearanceChange()
                     }
                 )
-                // 「Miuix样式」：Miuix 风格下才有的第二行，OS 3 是库自身的观感，
-                // OS 4 是柔光玻璃材质（原先界面风格里的第三个选项）。Material 3
-                // 没有这两种款式可言，行随风格一起收起。
-                if (miuixStyle) {
-                    PopupCard(
-                        iconRes = R.drawable.ic_tune,
-                        title = stringResource(R.string.miuix_flavor),
-                        subtitle = stringResource(R.string.about_sub_miuix_flavor),
-                        entries = miuixFlavorEntries.toList(),
-                        currentIndex = miuixFlavor,
-                        first = false,
-                        last = false,
-                        onPick = { index ->
-                            AppearanceState.setMiuixFlavor(context, index)
-                            actions.onAppearanceChange()
-                        }
-                    )
-                }
-                // Only the Miuix look reads these. Under the app's own look the colours
-                // come from its engine and 动态颜色 below is the switch for them, so a
-                // second Monet row would offer a choice that changes nothing — and the
-                // one that does change something would be a row away from it.
-                if (miuixStyle) {
-                    // The floating-bar row belongs to the Miuix look alone: the
-                    // SoftGlass look always floats its own glass tab bar, so the
-                    // switch would name a choice the home frame is not offering.
-                    val barRowVisible = uiStyle == ThemePrefs.UI_STYLE_MIUIX
-                    // One switch, two pieces of chrome. Off gives the library's
-                    // docked pane and MIUIX's DEFAULT title bar; on lifts the
-                    // foot into the texture-blur glass capsule AND puts the
-                    // glass band behind the title bar (see PageScaffold). The
-                    // description says so — this row is not only about the foot.
-                    if (barRowVisible) {
-                        SettingsSwitchCard(
-                            iconRes = R.drawable.ic_ui_style,
-                            title = stringResource(R.string.miuix_floating_bar),
-                            description = stringResource(R.string.about_sub_miuix_floating_bar),
-                            checked = floatingBar,
-                            onCheckedChange = { checked ->
-                                AppearanceState.setFloatingBar(context, checked)
-                                actions.onAppearanceChange()
-                            },
-                            first = false,
-                            // 莫奈颜色 always follows, so this row never closes the group.
-                            last = false
-                        )
-                    }
-                    SettingsSwitchCard(
-                        iconRes = R.drawable.ic_dynamic_color,
-                        title = stringResource(R.string.miuix_monet),
-                        description = stringResource(R.string.about_sub_miuix_monet),
-                        checked = miuixMonet,
-                        onCheckedChange = { checked ->
-                            AppearanceState.setMiuixMonet(context, checked)
-                            actions.onAppearanceChange()
-                        },
-                        first = false,
-                        // Closes the group unless the accent row takes the foot —
-                        // that row only exists while Monet is on.
-                        last = !miuixMonet
-                    )
-                    // The key colour the Monet derivation starts from, offered as the
-                    // reference manager (KernelSU's colour palette) offers its own:
-                    // one menu, "follow the wallpaper" first, the preset swatches
-                    // behind it. The row means nothing with Monet off — the palette
-                    // is then Miuix's own HyperOS scheme, which no key colour
-                    // reaches — so it only exists while the switch above is on,
-                    // exactly the way the Material body hides its seed grid while
-                    // dynamic colour runs.
-                    if (miuixMonet) {
-                        PopupCard(
-                            iconRes = R.drawable.ic_palette_style,
-                            title = stringResource(R.string.miuix_accent),
-                            subtitle = stringResource(R.string.about_sub_miuix_accent),
-                            entries = accentEntries.toList(),
-                            currentIndex = accentValues.indexOf(miuixAccent)
-                                .takeIf { it >= 0 } ?: 0,
-                            first = false,
-                            last = true,
-                            onPick = { index ->
-                                AppearanceState.setMiuixAccent(context, accentValues[index])
-                                actions.onAppearanceChange()
-                            }
-                        )
-                    }
-                }
-                // Material only, on screen: these are the app's own colour engine's
-                // controls and the Miuix look is not dressed by that engine. Hidden here
-                // but still read by it, so a seed or a palette family picked while in
-                // Material carries across instead of being silently dropped — the why is
-                // argued at MiuixStyleTheme, where the reads live.
-                if (!miuixStyle) {
-                    DynamicColorCard(
-                        dynamic = dynamic,
-                        seed = seed,
-                        first = false,
-                        last = false,
-                        onDynamicChange = { checked ->
-                            AppearanceState.setDynamicColor(context, checked)
-                            actions.onAppearanceChange()
-                        },
-                        onSeedChange = { color ->
-                            AppearanceState.setSeedColor(context, color)
-                            actions.onAppearanceChange()
-                        }
-                    )
-                    PopupCard(
-                        iconRes = R.drawable.ic_palette_style,
-                        title = stringResource(R.string.palette_style),
-                        subtitle = stringResource(R.string.about_sub_palette_style),
-                        // Entry index == Scheme.Variant.ordinal, which is how the
-                        // string array is written; [paletteVariants] is that list minus
-                        // whatever the spec in effect cannot render.
-                        entries = paletteVariants.map { styleEntries[it.ordinal] },
-                        currentIndex = paletteVariants.indexOf(paletteStyleNow),
-                        first = false,
-                        last = false,
-                        // Spec 2026 adopted CMF: the row shows the locked pair, dimmed
-                        // and inert — the spec menu is the only way to move either.
-                        enabled = colorSpec != ThemePrefs.SPEC_2026,
-                        onPick = { index ->
-                            // Mapping through the filtered list is what keeps the write
-                            // honest: the index is a position in *this* menu, not an
-                            // ordinal. The setter refreshes the resolved spec with it —
-                            // changing the style can put the spec out of reach (see
-                            // ThemePrefs.specVersion), so the spec row re-reads the
-                            // resolved value instead of keeping its own copy — the two
-                            // rows can only ever move together.
-                            AppearanceState.setPaletteStyle(context, paletteVariants[index])
-                            actions.onAppearanceChange()
-                        }
-                    )
-                    PopupCard(
-                        iconRes = R.drawable.ic_color_spec,
-                        title = stringResource(R.string.color_spec),
-                        subtitle = stringResource(R.string.about_sub_color_spec),
-                        entries = specValues.map { specEntries[it] },
-                        currentIndex = specValues.indexOf(colorSpec),
-                        first = false,
-                        last = true,
-                        onPick = { index ->
-                            AppearanceState.setSpecVersion(context, specValues[index])
-                            actions.onAppearanceChange()
-                        }
-                    )
-                }
             }
         }
 
@@ -1543,7 +1348,7 @@ private fun AboutBody(
  * card instead of under it.
  */
 @Composable
-private fun PopupCard(
+internal fun PopupCard(
     iconRes: Int,
     title: String,
     subtitle: String,
@@ -1553,357 +1358,25 @@ private fun PopupCard(
     last: Boolean,
     onPick: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    // False dims the row to M3's disabled ink and kills the tap (ripple and
-    // haptic included, via [GroupRow]'s null onClick). Used by the palette
-    // row while Spec 2026 is in effect: the spec *is* CMF, so the row states
-    // a fact instead of offering a choice — the way out is the spec menu
-    // (see the caller). No such case exists under the Miuix look, whose
-    // appearance rows are a different set; the delegation above is always
-    // reached enabled.
+    // False dims the row to M3's disabled ink, removes click affordance and
+    // marks it disabled for accessibility. Used by the palette row while
+    // Spec 2026 is in effect (locked to CMF).
     enabled: Boolean = true
 ) {
-    // Under the Miuix look this row is the shared menu row: the value, the
-    // up-down arrow beside it, and Miuix's own popup. The Material body below
-    // differs only in chrome, so nothing is lost by delegating.
-    if (LocalUiStyle.current.isMiuixBased) {
-        SettingsMenuCard(
-            iconRes = iconRes,
-            title = title,
-            description = subtitle,
-            entries = entries,
-            currentIndex = currentIndex,
-            onPick = onPick,
-            modifier = modifier,
-            first = first,
-            last = last
-        )
-        return
-    }
-    var expanded by remember { mutableStateOf(false) }
-    val shapes = LocalAppShapes.current
-    val current = entries.getOrNull(currentIndex) ?: ""
-
-    Box(modifier = modifier.fillMaxWidth()) {
-        GroupRow(
-            first = first,
-            last = last,
-            // Locked rows lose the click affordance entirely — a disabled M3
-            // control is inert, not a button that swallows taps.
-            onClick = if (enabled) ({ expanded = true }) else null
-        ) {
-            Row(
-                // M3's disabled ink: onSurface at 38%, applied over the whole
-                // row — title, subtitle and the current-value accent together.
-                modifier = Modifier.alpha(if (enabled) 1f else 0.38f),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                RowIcon(painter = painterResource(iconRes))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = title,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                    Text(
-                        // Two-line item: 24 + 20 of type against GroupRow's
-                        // 14/14 is the 72dp token, so no gap between the lines.
-                        text = subtitle,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-                // The accent, like the XML's `md_primary`: this is the one
-                // place on the page the active choice is named, so it has to
-                // move with the seed the rest of the page took.
-                Text(
-                    modifier = Modifier.padding(start = 12.dp),
-                    text = current,
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-        }
-        // A DropdownMenu is a popup, and its anchor is the zero-size node the
-        // popup leaves behind — so *where inside this Box that node lands* is
-        // what the panel is measured from. Bottom-end puts it at the card's
-        // bottom-right corner, which is where the hand-built panel was: the
-        // position provider then prefers "menu end aligned to anchor end", so
-        // the panel sits back from the card's right edge. Left at the default
-        // top-start it aligned to the card's left edge and opened over the
-        // card's own top rows.
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .wrapContentSize(Alignment.BottomEnd)
-        ) {
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false },
-                // Intrinsic width + full-width rows: the menu measures from its
-                // widest label, and every row then stretches to that same
-                // width. Left to size themselves, short options draw a ripple
-                // and a selected plate narrower than the panel — the two
-                // "颜色规格" rows were visibly not the same size.
-                modifier = Modifier
-                    .width(IntrinsicSize.Max)
-                    .defaultMinSize(minWidth = MENU_MIN_WIDTH),
-                // The group radius, not the menu's own: the panel is drawn on
-                // the page's card language, and M3's default menu corner is
-                // much tighter than anything else on this screen.
-                shape = shapes.menu,
-                // Popup level, as every dropdown — see LocalAppSurfaces. This
-                // is M3's own menu default (`MenuTokens.ContainerColor` =
-                // `surfaceContainer`), the same level as the page; the panel's
-                // own tone is what separates it from the card it lands on,
-                // never an outline.
-                containerColor = LocalAppSurfaces.current.popup,
-                // Negative on purpose: the provider *adds* the offset to the
-                // chosen candidate, and the candidate we land on is
-                // "menu end at anchor end", so a negative X is what pulls the
-                // panel back off the card's right edge.
-                offset = DpOffset(x = -MENU_EDGE_INSET, y = MENU_ANCHOR_GAP)
-            ) {
-                entries.forEachIndexed { index, label ->
-                    if (index > 0) {
-                        Spacer(modifier = Modifier.height(MENU_ITEM_GAP))
-                    }
-                    MenuItemRow(
-                        label = label,
-                        modifier = Modifier.fillMaxWidth(),
-                        minWidth = MENU_MIN_WIDTH,
-                        selected = index == currentIndex,
-                        onClick = {
-                            expanded = false
-                            onPick(index)
-                        }
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Dynamic color plus its seed grid. While the switch is on the palette follows
- * the wallpaper, so the seeds would be meaningless — they are hidden, exactly
- * as the XML did. The grid joins and leaves with an expand/collapse so the
- * appearance reads as this card opening up rather than a block teleporting in.
- */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun DynamicColorCard(
-    dynamic: Boolean,
-    seed: Int,
-    first: Boolean,
-    last: Boolean,
-    onDynamicChange: (Boolean) -> Unit,
-    onSeedChange: (Int) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val shape = connectedGroupShape(first, last)
-    val motion = MaterialTheme.motionScheme
-    val stateLine = stringResource(
-        if (dynamic) R.string.about_sub_dynamic_color_on
-        else R.string.about_sub_dynamic_color_off
-    )
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = LocalAppSurfaces.current.card,
-        shape = shape
-    ) {
-        val view = LocalView.current
-        // Same contract as [SettingsSwitchCard]: one toggle path for the row
-        // and the switch itself, haptic exactly once per flip. `toggleable`
-        // like the shared card too, so the row announces its state.
-        val toggle: () -> Unit = {
-            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-            onDynamicChange(!dynamic)
-        }
-        Column {
-            Row(
-                modifier = Modifier
-                    // See [MenuItemRow]: the clip has to come before
-                    // the click, or the ripple is a rectangle.
-                    .clip(shape)
-                    .toggleable(
-                        value = dynamic,
-                        role = Role.Switch,
-                        onValueChange = { toggle() }
-                    )
-                    .height(72.dp)
-                    .padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                RowIcon(painter = painterResource(R.drawable.ic_dynamic_color))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.dynamic_color),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                    Text(
-                        // The row is a fixed 72dp with 14/14 of padding: a
-                        // 24dp label plus bodyMedium's 20dp line is 44, which
-                        // fills the token exactly. At 12sp the pair left 4dp
-                        // of slack and the row read a notch loose.
-                        text = stateLine,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-                Switch(
-                    modifier = Modifier.padding(start = 12.dp),
-                    checked = dynamic,
-                    onCheckedChange = { toggle() },
-                    colors = appSwitchColors(),
-                    thumbContent = { SwitchThumbMark(checked = dynamic) }
-                )
-            }
-            AnimatedVisibility(
-                visible = !dynamic,
-                // The theme's own motion, not a hard-coded 250/200ms pair. On
-                // the Expressive spec these are the springs the surrounding
-                // library components already move with, so the grid opens the
-                // way the switch itself flips; on the 2021 spec they are the
-                // standard curves. Pin the durations and this card becomes the
-                // one place on the page that still animates like the old theme.
-                enter = expandVertically(animationSpec = motion.defaultSpatialSpec()) +
-                    fadeIn(animationSpec = motion.defaultEffectsSpec()),
-                exit = shrinkVertically(animationSpec = motion.defaultSpatialSpec()) +
-                    fadeOut(animationSpec = motion.defaultEffectsSpec())
-            ) {
-                SeedGrid(
-                    selected = seed,
-                    onPick = onSeedChange,
-                    modifier = Modifier.padding(
-                        start = 16.dp, end = 16.dp, bottom = 16.dp
-                    )
-                )
-            }
-        }
-    }
-}
-
-/**
- * The preset seeds, six per row. The cell is the touch target so it stays at
- * least 36dp even when a narrow screen shrinks the dot inside it.
- */
-@Composable
-private fun SeedGrid(selected: Int, onPick: (Int) -> Unit, modifier: Modifier = Modifier) {
-    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
-        val cell = maxOf(36.dp, maxWidth / SEED_COLUMNS)
-        val dot = minOf(44.dp, cell - 8.dp)
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SEED_COLORS.toList().chunked(SEED_COLUMNS).forEach { row ->
-                Row {
-                    row.forEach { color ->
-                        Box(
-                            modifier = Modifier
-                                .size(cell)
-                                .clip(CircleShape)
-                                .clickable { onPick(color) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            SeedDot(seed = color, selected = color == selected, dotSize = dot)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * A seed preview: a circle split into the tonal ramp the seed generates — dark
- * on the left, light on the right, mid tone in the bottom-right quadrant — so
- * each option hints at the palette it produces. The active one wears a primary
- * ring and a check on its dark half, where it stays readable.
- */
-@Composable
-private fun SeedDot(seed: Int, selected: Boolean, dotSize: androidx.compose.ui.unit.Dp) {
-    val ringColor = MaterialTheme.colorScheme.primary
-    val tones = remember(seed) { seedTones(seed) }
-    Canvas(modifier = Modifier.size(dotSize)) {
-        val stroke = 2.dp.toPx()
-        val radius = size.minDimension / 2f - stroke
-        val cx = size.width / 2f
-        val cy = size.height / 2f
-        val box = Size(radius * 2f, radius * 2f)
-        val corner = Offset(cx - radius, cy - radius)
-        drawCircle(color = tones.light, radius = radius, center = Offset(cx, cy))
-        drawArc(
-            color = tones.mid, startAngle = 0f, sweepAngle = 90f, useCenter = true,
-            topLeft = corner, size = box
-        )
-        drawArc(
-            color = tones.dark, startAngle = 90f, sweepAngle = 180f, useCenter = true,
-            topLeft = corner, size = box
-        )
-        if (selected) {
-            drawCircle(
-                color = ringColor, radius = radius + stroke / 2f,
-                center = Offset(cx, cy), style = Stroke(width = stroke)
-            )
-            val check = Path().apply {
-                val kx = cx - radius * 0.45f
-                moveTo(kx - radius * 0.28f, cy)
-                lineTo(kx - radius * 0.05f, cy + radius * 0.23f)
-                lineTo(kx + radius * 0.36f, cy - radius * 0.26f)
-            }
-            drawPath(
-                path = check, color = Color.White,
-                style = Stroke(
-                    width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round
-                )
-            )
-        }
-    }
-}
-
-private class SeedTones(val dark: Color, val mid: Color, val light: Color)
-
-/**
- * The three tones of a seed's ramp. Chroma is floored so near-grey seeds still
- * read as a ramp instead of three identical greys.
- */
-private fun seedTones(seed: Int): SeedTones {
-    val hct = Hct.fromInt(seed)
-    val hue = hct.hue
-    val chroma = maxOf(hct.chroma, 8.0)
-    return SeedTones(
-        dark = Color(Hct.from(hue, chroma, 40.0).toInt()),
-        mid = Color(Hct.from(hue, chroma, 80.0).toInt()),
-        light = Color(Hct.from(hue, chroma, 90.0).toInt())
+    SettingsMenuCard(
+        iconRes = iconRes,
+        title = title,
+        description = subtitle,
+        entries = entries,
+        currentIndex = currentIndex,
+        onPick = onPick,
+        modifier = modifier,
+        first = first,
+        last = last,
+        enabled = enabled,
+        alignValueToSwitchSlot = false
     )
 }
-
-private fun variantAt(index: Int): Scheme.Variant {
-    val values = Scheme.Variant.values()
-    return if (index >= 0 && index < values.size) values[index] else Scheme.Variant.TONAL_SPOT
-}
-
-/** Preset seeds offered when dynamic color is off (MD3-friendly hues). */
-private val SEED_COLORS = intArrayOf(
-    0xFF6750A4.toInt(), // Material baseline purple (default)
-    0xFFB3261E.toInt(), // red
-    0xFFBF360C.toInt(), // deep orange
-    0xFFE65100.toInt(), // orange
-    0xFF9A6200.toInt(), // amber
-    0xFF827717.toInt(), // olive
-    0xFF558B2F.toInt(), // lime
-    0xFF2E7D32.toInt(), // green
-    0xFF006A6A.toInt(), // teal
-    0xFF00838F.toInt(), // cyan
-    0xFF0277BD.toInt(), // light blue
-    0xFF0B57D0.toInt(), // blue
-    0xFF3949AB.toInt(), // indigo
-    0xFF5E35B1.toInt(), // deep purple
-    0xFFAD1457.toInt(), // pink
-    0xFF5F5E62.toInt(), // neutral grey
-)
-
-/** Six keeps the block to three rows on a phone. */
-private const val SEED_COLUMNS = 6
 
 @Preview(name = "About — light", showBackground = true)
 @Preview(

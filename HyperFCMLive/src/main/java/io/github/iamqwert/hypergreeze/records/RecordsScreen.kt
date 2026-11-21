@@ -17,7 +17,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ScrollState
@@ -102,13 +101,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.iamqwert.hypergreeze.FcmAppScan
 import io.github.iamqwert.hypergreeze.R
-import io.github.iamqwert.hypergreeze.theme.AppearanceState
 import io.github.iamqwert.hypergreeze.theme.LocalAppSurfaces
 import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
-import io.github.iamqwert.hypergreeze.theme.UiStyle
 import io.github.iamqwert.hypergreeze.ui.AppDialog
 import io.github.iamqwert.hypergreeze.ui.GroupRow
-import io.github.iamqwert.hypergreeze.ui.MiuixDockedTabRow
 import io.github.iamqwert.hypergreeze.ui.MiuixMetrics
 import io.github.iamqwert.hypergreeze.ui.MiuixScrollBar
 import io.github.iamqwert.hypergreeze.ui.GROUP_ROW_GAP
@@ -119,6 +115,7 @@ import io.github.iamqwert.hypergreeze.ui.SectionTitle
 import io.github.iamqwert.hypergreeze.ui.SectionTitleText
 import io.github.iamqwert.hypergreeze.ui.SettingsGroup
 import io.github.iamqwert.hypergreeze.ui.softglass.MiuixCapsuleTabRow
+import io.github.iamqwert.hypergreeze.ui.softglass.MiuixCapsuleTabRowDefaults
 import io.github.iamqwert.hypergreeze.ui.connectedGroupShape
 import io.github.iamqwert.hypergreeze.ui.androidVersion
 import io.github.iamqwert.hypergreeze.ui.deviceName
@@ -132,7 +129,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.basic.TabRowWithContour as MiuixTabRowWithContour
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Share
@@ -528,72 +524,37 @@ fun RecordsScreen(
             }
         },
         barExtension = if (LocalUiStyle.current.isMiuixBased) { {
-            // Both levels answer the same floating-bar switch as the bar:
-            // docked → the library's rows, glass band → capsules sampling the
-            // page's own recorded layer from OUTSIDE the recorded body (see
-            // [useDefaultMiuixTabRow]).
-            //
-            // Two strips are one control stack: between them sits the tighter
-            // [STRIP_GAP], while the foot under the last one keeps the chrome
-            // breath — the same 16dp the page leaves above the bottom bar. The
-            // page strip alone (状态) keeps that breath at its foot instead, or
-            // the gap under the single strip would halve as well.
+            // Both levels stay pinned in the bar's glass band: keeping the
+            // six-category strip outside the inner HorizontalPager prevents the
+            // whole strip from sliding/bouncing with page transitions.
             val eventsStripTargeted =
                 PageTab.entries[pagePagerState.targetPage] == PageTab.Events
             RecordsPageTabRow(
-                selected = PageTab.entries[pagePagerState.currentPage],
+                selected = PageTab.entries[pagePagerState.targetPage],
                 onSelect = { tab ->
                     pagerScope.launch { pagePagerState.springAnimateToPage(tab.ordinal) }
                 },
                 modifier = Modifier.padding(
                     start = inset,
                     end = inset,
+                    top = 6.dp,
                     bottom = if (eventsStripTargeted) STRIP_GAP else STRIP_BREATH
                 )
             )
             AnimatedVisibility(
                 visible = eventsStripTargeted,
-                // Anchored to the bar: the strip reveals downward from under
-                // it and folds back up into it — never a gap between the two.
-                //
-                // The enter leg carries no fade, and neither leg clips,
-                // because both were making the strip's soft shadow arrive a
-                // beat late. Measured on device at 10x animator scale, in the
-                // gap the shadow falls into (16dp then, [STRIP_GAP] now):
-                //
-                //  - with the old `fadeIn` the gap read 243.9 (its unfilled
-                //    value) for the whole transition and only dropped to 240.9
-                //    once the animation settled; the list also showed THROUGH
-                //    the half-faded plate. The capsule's shadow is a
-                //    `Modifier.dropShadow` RenderEffect, and under a layer
-                //    whose alpha is still ramping it does not land;
-                //  - `expandVertically` also clips the subtree to the growing
-                //    rect, and the shadow lives OUTSIDE the plate's outline
-                //    (24dp ambient), so the half that falls up into that gap
-                //    was cut away until the clip was released.
-                //
-                // Without either, the gap reads 240.9 and the plate's side
-                // gutter 244.5 from the first frame. That is legitimate here
-                // because the plate never moves: a fixed 45dp shape at a fixed
-                // spot, with only the SPACE under it animating — so it and its
-                // shadow can come in at final geometry and full strength while
-                // the content below travels out from under them. The exit
-                // keeps its fade: a strip leaving may dissolve, and the
-                // dissolve is what covers the shadow leaving with it.
                 enter = expandVertically(expandFrom = Alignment.Top, clip = false),
                 exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top, clip = false)
             ) {
                 EventsTabRow(
-                    selected = EventTab.entries[eventPagerState.currentPage],
+                    selected = EventTab.entries[eventPagerState.targetPage],
                     onSelect = { tab ->
                         pagerScope.launch { eventPagerState.springAnimateToPage(tab.ordinal) }
                     },
-                    // The foot under the second strip takes the SAME gap as the
-                    // space between the two strips — strip, gap, strip, gap,
-                    // content — instead of the wider chrome breath, which now
-                    // stays only where a single strip ends the chrome (状态).
                     modifier = Modifier.padding(
-                        start = inset, end = inset, bottom = STRIP_GAP
+                        start = inset,
+                        end = inset,
+                        bottom = STRIP_BREATH
                     )
                 )
             }
@@ -803,39 +764,18 @@ private fun exportFileName(): String {
 /**
  * The top-level 状态/事件 strip.
  *
- * Three shapes, one `selectedTabIndex` riding the page pager
+ * Two shapes, one `selectedTabIndex` riding the page pager
  * ([MiuixRecordsPagerBody]):
  *  - Material — M3's primary tab row of leading-icon tabs
  *    ([RecordsLeadingIconTab]: `insights` before 状态, `receipt_long` before
  *    事件). Two tabs fill the width, so no scrolling is involved.
- *  - Plain MIUIX with its DOCKED bar (悬浮底栏 off) — [MiuixDockedTabRow], the
- *    library's own look at its defaults: 42dp, one outlined slot per tab, the
- *    selected one a squircle plate. It is drawn here rather than borrowed
- *    because the library's row lets a sideways drag slide it out of place; see
- *    that component for the measurement and the reason a pointer-level fix was
- *    rejected.
- *  - 柔光玻璃, and plain MIUIX with the floating bar ON — the glass capsule
- *    ([MiuixCapsuleTabRow]), pinned inside the title bar's gradient band as
- *    [PageScaffold]'s `barExtension`, refracting the rows passing under it.
+ *  - Miuix (OS 4 柔光玻璃) — the glass capsule ([MiuixCapsuleTabRow]), pinned
+ *    inside the title bar's progressive pane as [PageScaffold]'s `barExtension`,
+ *    refracting the rows passing under it.
  *
  * The Material look keeps its strip in the page column: M3 has no bar of this
  * shape to mount it in, and its rows own their divider there.
- *
- * The two Miuix levels (状态/事件 and the six categories) answer this same
- * question through [useDefaultMiuixTabRow], so a switch flip cannot leave one
- * of them in the other shape.
  */
-@Composable
-private fun useDefaultMiuixTabRow(): Boolean {
-    // The same state [PageScaffold] reads for the bar: floating OFF keeps the
-    // library's default solid bar, and the library's own strip belongs under
-    // it. Floating ON (or 柔光玻璃, which always floats) lifts the bar onto a
-    // gradient band, and the glass capsule belongs in that band.
-    if (LocalUiStyle.current != UiStyle.Miuix) return false
-    val floatingBar by AppearanceState.floatingBar
-    return !floatingBar
-}
-
 @Composable
 private fun RecordsPageTabRow(
     selected: PageTab,
@@ -843,20 +783,6 @@ private fun RecordsPageTabRow(
     modifier: Modifier = Modifier
 ) {    val labels = PageTab.entries.map { stringResource(it.labelRes) }
     if (LocalUiStyle.current.isMiuixBased) {
-        if (useDefaultMiuixTabRow()) {
-            // The library's row as it looks at its defaults — 42dp, 12dp
-            // corners, one outlined slot per tab with a plate under the
-            // selected one — but built here instead of borrowed: that row is a
-            // `LazyRow` with an overscroll effect that lets a sideways drag
-            // slide the whole strip out of place. See [MiuixDockedTabRow].
-            MiuixDockedTabRow(
-                tabs = labels,
-                selectedTabIndex = selected.ordinal,
-                onTabSelected = { onSelect(PageTab.entries[it]) },
-                modifier = modifier
-            )
-            return
-        }
         MiuixCapsuleTabRow(
             tabs = labels,
             selectedTabIndex = selected.ordinal,
@@ -1729,30 +1655,14 @@ private fun EventsTabRow(
 ) {
     val labels = EventTab.entries.map { stringResource(it.labelRes) }
     if (LocalUiStyle.current.isMiuixBased) {
-        if (useDefaultMiuixTabRow()) {
-            // The library's CONTOUR row, not its plain one: same docked
-            // family (one squircle plate, the selected one filled), but with
-            // no per-slot label padding — see the KDoc above for the 1.5dp this
-            // row was losing every label to. Only the floor is overridden;
-            // height, corners, the 5dp gap and the 5dp contour stay the
-            // library's own (45dp), which is also the height the capsule
-            // takes when the floating bar is on, so that switch no longer
-            // moves this strip by 3dp.
-            MiuixTabRowWithContour(
-                tabs = labels,
-                selectedTabIndex = selected.ordinal,
-                onTabSelected = { onSelect(EventTab.entries[it]) },
-                minWidth = MiuixMetrics.CategoryTabMinWidth,
-                modifier = modifier
-            )
-            return
-        }
         MiuixCapsuleTabRow(
             tabs = labels,
             selectedTabIndex = selected.ordinal,
             onTabSelected = { onSelect(EventTab.entries[it]) },
-            // Same as the page strip: the page's own recorded layer is the
-            // backdrop, so this row frosts the content passing under the band.
+            itemHorizontalPadding = MiuixCapsuleTabRowDefaults.CompactItemHorizontalPadding,
+            // Pinned in PageScaffold.barExtension outside pageBackdrop, so the
+            // capsule samples the scrolling list beneath it just like
+            // RecordsPageTabRow.
             modifier = modifier
         )
         return
@@ -3491,22 +3401,10 @@ private const val MIN_REFRESH_VISIBLE_MS = 420L
 /** The window the status page's one-sentence verdict counts closes in. */
 private const val VERDICT_WINDOW_MS = 60L * 60 * 1000
 
-/**
- * The breath under a SINGLE strip — [MiuixMetrics.ChromeBreath], the same 16dp
- * the apps page's search capsule keeps and the lists keep at their foot, and
- * the same 16dp the page leaves above the bottom bar. Only 状态 ends its chrome
- * with one strip, so only that page reads it; 事件 ends with two and uses
- * [STRIP_GAP] at both seams.
- */
-private val STRIP_BREATH = MiuixMetrics.ChromeBreath
+/** Bottom padding below the pinned tab strip, matching MIUIX `IconPage`'s `12.dp`. */
+private val STRIP_BREATH = 12.dp
 
-/**
- * The rhythm between stacked strips — half the chrome breath — and, on 事件,
- * under the last one as well: strip, [STRIP_GAP], strip, [STRIP_GAP], content.
- * The two levels are one control stack (page switch over category switch), not
- * two unrelated bars, and at the full 16dp both they and the space around them
- * took a large bite out of the content under a large title.
- */
+/** Gap between the primary 状态/事件 strip and the pinned six-category strip. */
 private val STRIP_GAP = 8.dp
 
 /** Logcat tag for the event list's scroll diagnostics. */

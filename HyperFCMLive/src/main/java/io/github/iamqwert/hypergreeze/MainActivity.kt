@@ -1,5 +1,8 @@
 package io.github.iamqwert.hypergreeze
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.SpringSpec
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
@@ -45,6 +48,7 @@ import io.github.iamqwert.hypergreeze.ui.AboutScreen
 import io.github.iamqwert.hypergreeze.ui.AboutTabScreen
 import io.github.iamqwert.hypergreeze.ui.AppListStore
 import io.github.iamqwert.hypergreeze.ui.ExperimentScreen
+import io.github.iamqwert.hypergreeze.ui.ThemeSettingsScreen
 import io.github.iamqwert.hypergreeze.ui.HomeShell
 import io.github.iamqwert.hypergreeze.records.RecordsScreen
 import io.github.iamqwert.hypergreeze.ui.HomeTab
@@ -68,6 +72,14 @@ import top.yukonga.miuix.kmp.nav.core.NavDisplay
 import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
 import top.yukonga.miuix.kmp.nav.core.rememberNavBackStack
 import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import io.github.iamqwert.hypergreeze.theme.AppearanceState
+import top.yukonga.miuix.kmp.nav.transition.NavMotion
+import top.yukonga.miuix.kmp.nav.transition.NavSettleSpec
+import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
+import top.yukonga.miuix.kmp.nav.transition.NavTransition
+import top.yukonga.miuix.kmp.nav.transition.NavTransitionScope
 import top.yukonga.miuix.kmp.nav.transition.NavTransitions
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -452,6 +464,7 @@ class MainActivity : AppCompatActivity() {
      * layers is the surface of whichever theme is in force, and input is closed for
      * the duration of a transition under Miuix only.
      */
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
     @Composable
     private fun AppPages() {
         val backStack = rememberNavBackStack<Route>(Route.Main)
@@ -466,12 +479,47 @@ class MainActivity : AppCompatActivity() {
             if (miuix) MiuixTheme.colorScheme.surface else MaterialTheme.colorScheme.background
         // Read off the window insets, like the library's own effect does.
         val systemCorner = rememberNavSystemCornerRadius()
+        // Miuix keeps its own default transition untouched; Material keeps the
+        // same 1:1 predictive-back slide geometry while driving settle stiffness
+        // from MaterialTheme.motionScheme (Expressive vs Standard 2021), critically
+        // damped so a full-screen page never overshoots past d = 0.
+        val m3Spatial = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+        val navTransition = remember(miuix, m3Spatial) {
+            if (miuix) {
+                NavTransitions.MiuixDefault
+            } else {
+                val stiffness = (m3Spatial as? SpringSpec)?.stiffness ?: Spring.StiffnessMediumLow
+                val settle = NavSettleSpec.Spring(
+                    dampingRatio = 1f,
+                    stiffness = stiffness,
+                    clampOvershoot = true,
+                )
+                val m3Motion = NavMotion(
+                    commit = settle,
+                    cancel = settle,
+                    programmatic = settle,
+                )
+                object : NavTransition {
+                    override val opaqueDepth: Float = NavTransitions.MiuixDefault.opaqueDepth
+                    override val motion: NavMotion = m3Motion
+                    override fun androidx.compose.ui.Modifier.transformEntry(
+                        scope: NavTransitionScope
+                    ): androidx.compose.ui.Modifier = with(NavTransitions.MiuixDefault) {
+                        transformEntry(scope)
+                    }
+                }
+            }
+        }
+        val enableSwipeBack by AppearanceState.enableSwipeBack
+        val swipeBackDirection = when {
+            !enableSwipeBack -> NavSwipeDirection.None
+            LocalLayoutDirection.current == LayoutDirection.Rtl -> NavSwipeDirection.RightToLeft
+            else -> NavSwipeDirection.LeftToRight
+        }
         NavDisplay(
             backStack = backStack,
             onBack = { pages.pop() },
-            // The library's default preset — the same one KernelSU's manager runs,
-            // and in both of its looks; nothing here overrides it.
-            transition = NavTransitions.MiuixDefault,
+            transition = navTransition,
             effects = NavDisplayEffects(
                 // KernelSU passes exactly this: the leading-edge clip at the
                 // device's own screen corner. The remaining switches stay at the
@@ -489,9 +537,16 @@ class MainActivity : AppCompatActivity() {
             ),
         ) {
             entry<Route.Main> { HomeRoot(pages) }
-            entry<Route.About> { AboutPage(pages) }
-            entry<Route.Licenses> { LicensesScreen(onBack = { pages.pop() }) }
-            entry<Route.Experiment> { ExperimentScreen(onBack = { pages.pop() }) }
+            entry<Route.About>(swipeDismiss = swipeBackDirection) { AboutPage(pages) }
+            entry<Route.Licenses>(swipeDismiss = swipeBackDirection) { LicensesScreen(onBack = { pages.pop() }) }
+            entry<Route.Experiment>(swipeDismiss = swipeBackDirection) { ExperimentScreen(onBack = { pages.pop() }) }
+            entry<Route.ThemeSettings>(swipeDismiss = swipeBackDirection) {
+                ThemeSettingsScreen(
+                    onBack = { pages.pop() },
+                    onAppearanceChange = aboutDelegate::applyAppearanceChange,
+                    onPredictiveBackChange = { enabled -> predictiveBack = enabled }
+                )
+            }
         }
         // 「预测性返回」开关只关这一件事：系统的返回手势还要不要**跟手预览**。
         // NavDisplay 内部的 `PredictiveBackHandlerWithSessions(enabled =
@@ -540,12 +595,6 @@ class MainActivity : AppCompatActivity() {
                     versionName = moduleVersionName,
                     versionCode = moduleVersionCode,
                     onDiagnostics = { openFcmDiagnostics() },
-                    onHelp = {
-                        // The guide lives on GitHub, in the app's own locale —
-                        // the same URL the shortcut and the about page's help
-                        // row open.
-                        UiUtils.openUrl(this, AboutDelegate.helpUrl(this))
-                    },
                     onAbout = {
                         // A real page, like licences: it slides in over the home
                         // and the home stays underneath it, so its predictive back
@@ -645,9 +694,11 @@ class MainActivity : AppCompatActivity() {
      */
     private fun aboutActions(pages: Navigator): AboutActions = AboutActions(
         onViewSource = { aboutDelegate.openLink(AboutDelegate.REPO_URL) },
+        onHelp = { UiUtils.openUrl(this, AboutDelegate.helpUrl(this)) },
         onLicense = { aboutDelegate.openLink(AboutDelegate.GPL3_URL) },
         onLicenses = { pages.push(Route.Licenses) },
         onExperiment = { pages.push(Route.Experiment) },
+        onThemeSettings = { pages.push(Route.ThemeSettings) },
         onExport = aboutDelegate::exportConfig,
         onImport = aboutDelegate::importConfig,
         onCheckUpdate = aboutDelegate::checkForUpdates,
@@ -675,6 +726,7 @@ class MainActivity : AppCompatActivity() {
             onBack = { pages.pop() },
             actions = AboutActions(
                 onViewSource = { aboutDelegate.openLink(AboutDelegate.REPO_URL) },
+                onHelp = { UiUtils.openUrl(this, AboutDelegate.helpUrl(this)) },
                 onLicense = { aboutDelegate.openLink(AboutDelegate.GPL3_URL) },
                 onLicenses = { pages.push(Route.Licenses) },
                 onExperiment = {},
@@ -2062,10 +2114,10 @@ class MainActivity : AppCompatActivity() {
             candidates.addAll(markers.receive)
             for (pkg in candidates) {
                 if (FcmAppScan.isFcmClient(
-                        markers.iid.contains(pkg),          // ②
-                        markers.messaging.contains(pkg),    // ③
-                        markers.receive.contains(pkg),      // ④
-                        markers.googleReceive.contains(pkg) // ⑤
+                        hasIidService = markers.iid.contains(pkg),
+                        hasMessagingEvent = markers.messaging.contains(pkg),
+                        hasC2dmSendReceive = markers.c2dmSendReceive.contains(pkg),
+                        hasGooglePushReceiver = markers.googleReceive.contains(pkg)
                     )
                 ) {
                     support.fcm.add(pkg)

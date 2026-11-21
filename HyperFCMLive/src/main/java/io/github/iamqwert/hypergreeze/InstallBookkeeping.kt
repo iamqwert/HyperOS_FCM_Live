@@ -26,6 +26,14 @@ import java.lang.reflect.Executable
 internal class InstallBookkeeping(private val module: XposedModule) {
 
     /**
+     * Guards the install-pass counters, [installPassCollecting] and the two
+     * collection buffers: [WifiWeakSignalSwitch]'s boot-retry thread can call
+     * [logSkipOtherGeneration] concurrently with the end-of-pass flush on the
+     * install thread. Never held while calling `module.logGated`.
+     */
+    private val lock = Any()
+
+    /**
      * True only between the start and the end of an install pass.
      *
      * A late arrival lands after [flushOtherGenerationAbsent] has run: the wifi
@@ -34,7 +42,13 @@ internal class InstallBookkeeping(private val module: XposedModule) {
      * closed. Such a line is printed on its own instead of being buffered for a
      * flush that may never come (the next one is a hot reload or a reboot away).
      */
+    @Volatile
     internal var installPassCollecting = false
+        set(value) {
+            synchronized(lock) {
+                field = value
+            }
+        }
 
     /**
      * Counts behind the end-of-install summary line.
@@ -79,7 +93,9 @@ internal class InstallBookkeeping(private val module: XposedModule) {
 
     internal fun hookE(executable: Executable): XposedInterface.HookBuilder {
         val builder = module.hook(executable)
-        hooksInstalled++
+        synchronized(lock) {
+            hooksInstalled++
+        }
         if (module.apiVersion >= 102) {
             builder.setId(executable.toGenericString())
         }
@@ -88,7 +104,9 @@ internal class InstallBookkeeping(private val module: XposedModule) {
 
     /** This generation is expected to carry it, and does not. Counted and logged. */
     internal fun logSkip(message: String) {
-        hookTargetsAbsent++
+        synchronized(lock) {
+            hookTargetsAbsent++
+        }
         module.logGated(Log.INFO, HookerSupport.TAG, message)
     }
 
@@ -114,12 +132,18 @@ internal class InstallBookkeeping(private val module: XposedModule) {
      * are merged.
      */
     internal fun logSkipOtherGeneration(symbol: String) {
-        hookTargetsAbsentOtherGeneration++
-        if (!installPassCollecting) {
-            module.logGated(Log.DEBUG, HookerSupport.TAG, "cross-generation target(s) absent (1), skip: $symbol")
-            return
+        val logImmediately = synchronized(lock) {
+            hookTargetsAbsentOtherGeneration++
+            if (!installPassCollecting) {
+                true
+            } else {
+                otherGenerationAbsent.add(symbol)
+                false
+            }
         }
-        otherGenerationAbsent.add(symbol)
+        if (logImmediately) {
+            module.logGated(Log.DEBUG, HookerSupport.TAG, "cross-generation target(s) absent (1), skip: $symbol")
+        }
     }
 
     /**
@@ -130,25 +154,35 @@ internal class InstallBookkeeping(private val module: XposedModule) {
      * process gets its own `Hooker` instance, so the list holds exactly one pass.
      */
     internal fun flushOtherGenerationAbsent() {
-        if (otherGenerationAbsent.isEmpty()) return
+        val snapshot = synchronized(lock) {
+            if (otherGenerationAbsent.isEmpty()) return
+            val copy = ArrayList(otherGenerationAbsent)
+            otherGenerationAbsent.clear()
+            copy
+        }
         module.logGated(
             Log.DEBUG, HookerSupport.TAG,
-            "cross-generation target(s) absent (${otherGenerationAbsent.size}), skip: " +
-                otherGenerationAbsent.joinToString(", ")
+            "cross-generation target(s) absent (${snapshot.size}), skip: " +
+                snapshot.joinToString(", ")
         )
-        otherGenerationAbsent.clear()
     }
 
     /** Collects one [probeFindings] entry; see the field for why they are merged. */
     internal fun recordProbe(finding: String) {
-        probeFindings.add(finding)
+        synchronized(lock) {
+            probeFindings.add(finding)
+        }
     }
 
     /** One line for every read-only probe answered during this install pass. */
     internal fun flushProbes() {
-        if (probeFindings.isEmpty()) return
-        module.logGated(Log.INFO, HookerSupport.TAG, "probe: " + probeFindings.joinToString(" "))
-        probeFindings.clear()
+        val snapshot = synchronized(lock) {
+            if (probeFindings.isEmpty()) return
+            val copy = ArrayList(probeFindings)
+            probeFindings.clear()
+            copy
+        }
+        module.logGated(Log.INFO, HookerSupport.TAG, "probe: " + snapshot.joinToString(" "))
     }
 
     internal fun logSummary(process: String) {
@@ -177,15 +211,33 @@ internal class InstallBookkeeping(private val module: XposedModule) {
         private set
 
     private fun summaryLine(process: String): String {
-        val crossGeneration = hookTargetsAbsentOtherGeneration
-        return "HyperFCMLive active in $process: " +
-            "$hooksInstalled hook(s) installed, " +
-            "$hookTargetsAbsent target(s) absent on this ROM" +
-            if (crossGeneration == 0) {
-                ""
-            } else {
-                ", $crossGeneration cross-generation (expected)"
-            }
+        val installed: Int
+        val absent: Int
+        val crossGeneration: Int
+        synchronized(lock) {
+            installed = hooksInstalled
+            absent = hookTargetsAbsent
+            crossGeneration = hookTargetsAbsentOtherGeneration
+        }
+        return formatSummary(process, installed, absent, crossGeneration)
+    }
+
+    internal companion object {
+        internal fun formatSummary(
+            process: String,
+            installed: Int,
+            absent: Int,
+            crossGeneration: Int
+        ): String {
+            return "HyperFCMLive active in $process: " +
+                "$installed hook(s) installed, " +
+                "$absent target(s) absent on this ROM" +
+                if (crossGeneration == 0) {
+                    ""
+                } else {
+                    ", $crossGeneration cross-generation (expected)"
+                }
+        }
     }
 
     /** Runs one group; a throw inside it cannot reach the groups behind it. */

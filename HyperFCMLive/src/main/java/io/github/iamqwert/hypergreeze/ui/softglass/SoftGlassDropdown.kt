@@ -1,65 +1,54 @@
 package io.github.iamqwert.hypergreeze.ui.softglass
 
-// MIUIX's NEW dropdown, rebuilt on the 0.9.4 classpath.
+// MIUIX's NEW dropdown, aligned with miuix-glass (`GlassDropdownPopup` +
+// `GlassPopupSurface` + `GlassMotion`) on the 0.9.4 classpath.
 //
-// The library ships it in miuix-glass (`top.yukonga.miuix.kmp.glass`), which
-// publishes no 0.9.4 artifact — miuix-glass-android/0.9.4/*.pom is a 404. What
-// is reproduced here is that component's contract, read off
-// GlassDropdownPreference / GlassDropdownPopup / GlassPopupItem:
-//
-//  - the panel is glass, 24dp corner radius, 8dp of vertical content padding,
-//    200–288dp wide and 416dp tall before it scrolls;
-//  - a row is 44dp tall, 20dp of horizontal ink inset, body1 Medium, and the
-//    current option is the accent with a 24dp tick (reserved even when
-//    unselected, so labels do not shift);
-//  - a press is a 15dp rounded plate inset 7dp, 10% black/white;
-//  - opening is the library's arc: the panel grows from the anchor-side corner
-//    (69% of its width) while its radius relaxes 4dp → 24dp, on a size spring
-//    and a quicker position spring, with a 50ms linear fade;
-//  - closing reverses it and blurs itself 30dp on the way out;
-//  - there is NO window dim — the new style leaves the page legible behind it —
-//    and the full-page layer exists only to take the outside tap.
-//
-// Two things are the module's, not the library's: the host (0.9.4's public
-// `MiuixPopupUtils.PopupLayout`, the same host the library's overlay popups
-// use, so glass samples the page layer rather than a separate window) and the
-// backdrop, which callers hand in because the popup is composed above the page
-// and cannot read the page's composition local.
+//  - panel: 24dp corner radius, 8dp vertical content padding, 200–288dp wide,
+//    416dp tall before scrolling;
+//  - row: 44dp min height, 20dp horizontal ink inset, body1 Medium, selected
+//    option tinted with primary + 24dp check slot;
+//  - press: 15dp rounded plate inset 7dp, 10% black/white, snap down +
+//    folmeSpring(1f, 0.15f) release;
+//  - open/close motion: dual-spring arc (`arcBounds` + `arcPosition`) where
+//    width starts at 69% and aspect ratio at 0.2 (flat capsule) while corner
+//    radius relaxes 4dp → 24dp, panel hidden for the first 10% of travel,
+//    50ms linear fade in / 200ms fade out, and one-sided 30dp blur on exit;
+//  - measured synchronously in one custom Layout pass so the first frame has
+//    settled bounds immediately (no 1-frame hidden delay eating the 50ms fade);
+//  - transition state lives INSIDE PopupLayout so mounting never drops the
+//    opening spring, and host unmount waits for exit settle (`onDismissFinished`).
 
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.core.Transition
+import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.captionBar
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -68,9 +57,11 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -82,24 +73,31 @@ import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
 import kotlin.math.roundToInt
+import top.yukonga.miuix.kmp.anim.folmeSpring
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
@@ -108,13 +106,13 @@ import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.MiuixPopupUtils.Companion.PopupLayout
 
-/** The numbers of MIUIX's glass dropdown, one constant per value. */
+/** The numbers of MIUIX's glass dropdown, matching `GlassDropdownDefaults` & `GlassMotion`. */
 object SoftGlassDropdownDefaults {
 
-    /** Settled panel corner radius — the library's `GlassDropdownDefaults`. */
+    /** Settled panel corner radius — `GlassDropdownDefaults.CornerRadius`. */
     val CornerRadius = 24.dp
 
-    /** Radius the panel opens from; it relaxes to [CornerRadius]. */
+    /** Radius the panel opens from — `GlassDropdownDefaults.StartCornerRadius`. */
     val StartCornerRadius = 4.dp
 
     val MinWidth = 200.dp
@@ -144,39 +142,49 @@ object SoftGlassDropdownDefaults {
 
     val ItemPressRadius = 15.dp
 
-    /** Width the panel opens from, as a fraction of its settled width. */
-    private const val StartWidth = 0.69f
+    /** Width the panel opens from, as a fraction of its settled width (`ARC_START_WIDTH`). */
+    internal const val ArcStartWidth = 0.69f
 
-    /** How far the panel blurs itself as it leaves, in dp. */
+    /** Initial height/width aspect ratio (`ARC_START_RATIO`). */
+    internal const val ArcStartRatio = 0.2f
+
+    /** Size progress threshold below which the opening panel stays transparent (`ARC_VISIBLE_FRACTION`). */
+    internal const val ArcVisibleFraction = 0.1f
+
+    /** How far the panel blurs itself as it leaves, in dp (`ARC_EXIT_BLUR_DP`). */
     internal const val ExitBlurDp = 30f
 
-    /** The panel's size spring (response ≈ 0.35s) and its quicker centre spring. */
-    internal fun boundsSpring(entering: Boolean) = spring<Float>(
-        dampingRatio = 0.8f,
-        stiffness = if (entering) 320f else 800f,
-        visibilityThreshold = 0.0015f,
+    private const val TransformVisibilityThreshold = 0.0015f
+
+    /** `GlassMotion.arcBounds` with Folme settle threshold. */
+    internal fun arcBoundsSpring(entering: Boolean): SpringSpec<Float> = folmeSpring(
+        damping = 0.8f,
+        response = if (entering) 0.35f else 0.22f,
+        visibilityThreshold = TransformVisibilityThreshold,
     )
 
-    internal fun positionSpring(entering: Boolean) = spring<Float>(
-        dampingRatio = 0.8f,
-        stiffness = if (entering) 800f else 320f,
-        visibilityThreshold = 0.0015f,
+    /** `GlassMotion.arcPosition` with Folme settle threshold. */
+    internal fun arcPositionSpring(entering: Boolean): SpringSpec<Float> = folmeSpring(
+        damping = 0.8f,
+        response = if (entering) 0.22f else 0.35f,
+        visibilityThreshold = TransformVisibilityThreshold,
     )
 
-    internal fun cornerSpring() = spring<Float>(
-        dampingRatio = 0.8f,
-        stiffness = 320f,
-        visibilityThreshold = 0.01f,
-    )
-
+    /** `GlassMotion.arcFade`: 50ms linear in, 200ms linear out. */
     internal fun fadeSpec(entering: Boolean) = tween<Float>(
         durationMillis = if (entering) 50 else 200,
         easing = LinearEasing,
     )
 
-    /** One-sided: sharp on the way in, blurred on the way out. */
+    /** `GlassMotion.arcBlur`: sharp on the way in, 200ms blur on the way out. */
     internal fun sharpnessSpec(entering: Boolean) =
         if (entering) snap<Float>() else tween(durationMillis = 200, easing = LinearEasing)
+
+    /** `GlassMotion.popupPressExit`: critically damped release on menu rows. */
+    internal fun pressExitSpring(): SpringSpec<Color> = folmeSpring(
+        damping = 1f,
+        response = 0.15f,
+    )
 }
 
 /**
@@ -184,12 +192,6 @@ object SoftGlassDropdownDefaults {
  *
  * Call with the row's window bounds ([Rect] from `boundsInWindow()`), the page
  * layer the panel may sample, and the option rows ([SoftGlassDropdownItem]).
- * The host is 0.9.4's public popup layout, so the panel is composed above every
- * page layer — the backdrop handed in here is the page's own record, never the
- * panel itself.
- *
- * There is deliberately no window dim: the new MIUIX style keeps the page
- * legible. The full-page layer under the panel only takes the outside tap.
  */
 @Composable
 fun SoftGlassDropdownMenu(
@@ -200,32 +202,24 @@ fun SoftGlassDropdownMenu(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    // Scaffold hosts compose after opening was requested, so the transition
-    // starts closed — otherwise the first frame would already be at rest and
-    // the opening would have no motion at all.
-    val visibility = remember { MutableTransitionState(false) }
-    LaunchedEffect(show) { visibility.targetState = show }
-    val transition = rememberTransition(visibility, label = "softGlassDropdown")
-
-    // `currentState` is the observable half; `Transition.isRunning` is backed by
-    // a plain field and would never re-evaluate this when the exit settles, so
-    // the host would stay mounted over the page.
-    val active by remember(show, transition) {
-        derivedStateOf { show || transition.currentState }
+    // Keep the host mounted from the moment `show` flips true until the inner
+    // exit transition actually settles (`onDismissFinished`). The transition
+    // itself lives inside [PopupLayout] so entering always starts at 0f on the
+    // first frame the host composes.
+    var mounted by remember { mutableStateOf(false) }
+    if (show && !mounted) {
+        mounted = true
     }
     val hostVisible = remember { mutableStateOf(false) }
-    LaunchedEffect(active) { hostVisible.value = active }
+    hostVisible.value = mounted
 
-    // Back closes through the same door as a pick or an outside tap. The popup
-    // host's own handler is off below: it would hide the host without telling
-    // the row, leaving the row's `expanded` true after the panel vanished.
     NavigationBackHandler(
         state = rememberNavigationEventState(currentInfo = NavigationEventInfo.None),
-        isBackEnabled = active,
+        isBackEnabled = show,
         onBackCompleted = onDismissRequest
     )
 
-    if (!active) return
+    if (!mounted) return
 
     PopupLayout(
         visible = hostVisible,
@@ -238,9 +232,9 @@ fun SoftGlassDropdownMenu(
         SoftGlassDropdownHost(
             show = show,
             onDismissRequest = onDismissRequest,
+            onDismissFinished = { mounted = false },
             anchorBounds = anchorBounds,
             backdrop = backdrop,
-            transition = transition,
             modifier = modifier,
             content = content
         )
@@ -251,131 +245,233 @@ fun SoftGlassDropdownMenu(
 private fun SoftGlassDropdownHost(
     show: Boolean,
     onDismissRequest: () -> Unit,
+    onDismissFinished: () -> Unit,
     anchorBounds: Rect,
     backdrop: LayerBackdrop?,
-    transition: Transition<Boolean>,
     modifier: Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val progress by transition.animateFloat(
-        transitionSpec = {
-            if (targetState) {
-                SoftGlassDropdownDefaults.boundsSpring(entering = true)
-            } else {
-                SoftGlassDropdownDefaults.boundsSpring(entering = false)
-            }
-        },
-        label = "softGlassDropdownProgress"
-    ) { if (it) 1f else 0f }
-    val fade by transition.animateFloat(
-        transitionSpec = { SoftGlassDropdownDefaults.fadeSpec(targetState) },
-        label = "softGlassDropdownFade"
-    ) { if (it) 1f else 0f }
-    val sharpness by transition.animateFloat(
-        transitionSpec = { SoftGlassDropdownDefaults.sharpnessSpec(targetState) },
-        label = "softGlassDropdownSharpness"
-    ) { if (it) 1f else 0f }
-    val cornerRadius by transition.animateFloat(
-        transitionSpec = { SoftGlassDropdownDefaults.cornerSpring() },
-        label = "softGlassDropdownCorner"
-    ) {
-        if (it) SoftGlassDropdownDefaults.CornerRadius.value
-        else SoftGlassDropdownDefaults.StartCornerRadius.value
-    }
+    val currentOnDismissRequest by rememberUpdatedState(onDismissRequest)
+    val currentOnDismissFinished by rememberUpdatedState(onDismissFinished)
 
-    var panelSize by remember { mutableStateOf(IntSize.Zero) }
-    var hostOrigin by remember { mutableStateOf(Offset.Zero) }
+    // Starts closed inside the host so the very first frame runs the full
+    // entering spring from 0f → 1f.
+    val visibility = remember { MutableTransitionState(false) }
+    LaunchedEffect(show) {
+        visibility.targetState = show
+    }
+    val transition = rememberTransition(visibility, label = "softGlassDropdown")
+    val sizeProgress = transition.animateFloat(
+        transitionSpec = { SoftGlassDropdownDefaults.arcBoundsSpring(targetState) },
+        label = "softGlassDropdownSize",
+    ) { if (it) 1f else 0f }
+    val positionProgress = transition.animateFloat(
+        transitionSpec = { SoftGlassDropdownDefaults.arcPositionSpring(targetState) },
+        label = "softGlassDropdownPosition",
+    ) { if (it) 1f else 0f }
+    val fade = transition.animateFloat(
+        transitionSpec = { SoftGlassDropdownDefaults.fadeSpec(targetState) },
+        label = "softGlassDropdownFade",
+    ) { if (it) 1f else 0f }
+    val sharpness = transition.animateFloat(
+        transitionSpec = { SoftGlassDropdownDefaults.sharpnessSpec(targetState) },
+        label = "softGlassDropdownSharpness",
+    ) { if (it) 1f else 0f }
+
+    val active by remember(show, sizeProgress) {
+        derivedStateOf { show || sizeProgress.value > 0.0001f }
+    }
+    LaunchedEffect(show, active) {
+        if (!show && !active) {
+            currentOnDismissFinished()
+        }
+    }
+    if (!active) return
+
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
-    val windowSize = LocalWindowInfo.current.containerSize
-    val statusTop = WindowInsets.statusBars.getTop(density).toFloat()
-    val navBottom = WindowInsets.navigationBars.getBottom(density).toFloat()
-    val marginPx = with(density) { SoftGlassDropdownDefaults.SafeMargin.toPx() }
-    val placement = remember(
-        anchorBounds,
-        panelSize,
-        windowSize,
-        statusTop,
-        navBottom,
-        marginPx,
-        layoutDirection
+    val displayCutout = WindowInsets.displayCutout
+    val statusBars = WindowInsets.statusBars
+    val navigationBars = WindowInsets.navigationBars
+    val captionBar = WindowInsets.captionBar
+    val containerSize = LocalWindowInfo.current.containerSize
+    val windowBounds = remember(
+        layoutDirection,
+        density,
+        displayCutout,
+        statusBars,
+        navigationBars,
+        captionBar,
+        containerSize
     ) {
-        placeSoftGlassDropdown(
-            anchor = anchorBounds,
-            size = Size(panelSize.width.toFloat(), panelSize.height.toFloat()),
-            margin = marginPx,
-            window = Rect(
-                left = 0f,
-                top = statusTop,
-                right = windowSize.width.toFloat(),
-                bottom = windowSize.height - navBottom
-            ),
-            direction = layoutDirection
+        with(density) {
+            IntRect(
+                left = displayCutout.getLeft(this, layoutDirection),
+                top = statusBars.getTop(this),
+                right = containerSize.width - displayCutout.getRight(this, layoutDirection),
+                bottom = containerSize.height - navigationBars.getBottom(this) - captionBar.getBottom(this),
+            )
+        }
+    }
+    val windowRect = remember(windowBounds) {
+        Rect(
+            windowBounds.left.toFloat(),
+            windowBounds.top.toFloat(),
+            windowBounds.right.toFloat(),
+            windowBounds.bottom.toFloat(),
         )
     }
-    // The library measures the arc from the value's own corner: the panel grows
-    // out of the edge nearest the anchor, so the motion reads as the row opening.
-    val originX = if (anchorBounds.center.x <= windowSize.width / 2f) 0f else 1f
-    val originY = if (placement.alignTop) 0f else 1f
-    val measured = panelSize != IntSize.Zero
-    val scale = (0.69f + (1f - 0.69f) * progress.coerceAtLeast(0f)).coerceAtLeast(0f)
-    val blurPx = with(density) {
-        ((1f - sharpness.coerceIn(0f, 1f)) * SoftGlassDropdownDefaults.ExitBlurDp).dp.toPx()
+
+    val hostOrigin = remember { mutableStateOf(Offset.Zero) }
+    val measured = remember { MeasuredDropdownPanel() }
+    val shape = remember(measured) {
+        val corner = MeasuredDropdownCorner(measured)
+        RoundedCornerShape(corner, corner, corner, corner)
     }
-    val shape = RoundedCornerShape(cornerRadius.dp)
     val isDark = MiuixTheme.colorScheme.onSurface.luminance() > 0.5f
 
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxSize()
-            .onGloballyPositioned { hostOrigin = it.positionInWindow() }
-    ) {
-        // The page behind the panel: no dim, only the outside tap.
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Full-page outside-tap dismiss layer (no dim).
         Box(
             modifier = Modifier
-                .matchParentSize()
-                .pointerInput(show) {
-                    detectTapGestures { if (show) onDismissRequest() }
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        down.consume()
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            val released = change.changedToUp()
+                            change.consume()
+                            if (!change.pressed) {
+                                if (released) currentOnDismissRequest()
+                                break
+                            }
+                        }
+                    }
                 }
         )
-        Box(
-            modifier = Modifier
-                .offset(placement, hostOrigin)
-                .onSizeChanged { panelSize = it }
+
+        Layout(
+            modifier = modifier
+                .onGloballyPositioned { hostOrigin.value = it.positionInWindow() }
+                .layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints)
+                    layout(constraints.maxWidth, constraints.maxHeight) {
+                        placeable.place(
+                            (measured.rect.left - hostOrigin.value.x).roundToInt(),
+                            (measured.rect.top - hostOrigin.value.y).roundToInt(),
+                        )
+                    }
+                }
                 .graphicsLayer {
-                    alpha = if (measured) fade else 0f
-                    scaleX = scale
-                    scaleY = scale
-                    transformOrigin = TransformOrigin(originX, originY)
-                    renderEffect = if (measured && blurPx > 0.5f) {
+                    val t = sizeProgress.value.coerceAtLeast(0f)
+                    alpha = if (show && t <= SoftGlassDropdownDefaults.ArcVisibleFraction) {
+                        0f
+                    } else {
+                        fade.value
+                    }
+                    val blurPx = (1f - sharpness.value.coerceIn(0f, 1f)) *
+                        SoftGlassDropdownDefaults.ExitBlurDp * this.density
+                    renderEffect = if (blurPx > 0.5f) {
                         BlurEffect(blurPx, blurPx, TileMode.Decal)
                     } else {
                         null
                     }
                 }
-        ) {
-            SoftGlassSurface(
-                modifier = Modifier
-                    .widthIn(
-                        min = SoftGlassDropdownDefaults.MinWidth,
-                        max = SoftGlassDropdownDefaults.MaxWidth
-                    )
-                    .width(IntrinsicSize.Max)
-                    .defaultMinSize(minWidth = SoftGlassDropdownDefaults.MinWidth)
-                    .softGlassShadow(shape = shape, isDark = isDark),
-                shape = shape,
-                cornerRadius = cornerRadius.dp,
-                recipe = SoftGlassRecipes.floatingNavigation(LocalSoftGlassSpec.current.fineTuning),
-                backdrop = backdrop
-            ) {
+                .softGlassShadow(shape = shape, isDark = isDark)
+                .clip(shape)
+                .then(
+                    if (show) {
+                        Modifier
+                    } else {
+                        Modifier
+                            .clearAndSetSemantics { }
+                            .pointerInput(Unit) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        awaitPointerEvent(PointerEventPass.Initial)
+                                            .changes
+                                            .forEach { it.consume() }
+                                    }
+                                }
+                            }
+                    }
+                ),
+            content = {
+                SoftGlassSurface(
+                    shape = shape,
+                    cornerRadius = measured.cornerRadius,
+                    recipe = SoftGlassRecipes.floatingNavigation(LocalSoftGlassSpec.current.fineTuning),
+                    backdrop = backdrop,
+                    content = {}
+                )
                 Column(
                     modifier = Modifier
-                        .widthIn(max = SoftGlassDropdownDefaults.MaxWidth)
-                        .heightIn(max = SoftGlassDropdownDefaults.MaxHeight)
                         .verticalScroll(rememberScrollState())
                         .padding(vertical = SoftGlassDropdownDefaults.ContentPaddingVertical),
                     content = content
                 )
+            }
+        ) { measurables, constraints ->
+            val safeMarginPx = SoftGlassDropdownDefaults.SafeMargin.roundToPx()
+            val safeInset = safeMarginPx * 2
+            val widest = SoftGlassDropdownDefaults.MaxWidth.roundToPx()
+                .coerceAtMost((constraints.maxWidth - safeInset).coerceAtLeast(0))
+            val narrowest = SoftGlassDropdownDefaults.MinWidth.roundToPx().coerceAtMost(widest)
+            val tallest = SoftGlassDropdownDefaults.MaxHeight.roundToPx()
+                .coerceAtMost((constraints.maxHeight - safeInset).coerceAtLeast(0))
+
+            val width = measurables[1].maxIntrinsicWidth(tallest).coerceIn(narrowest, widest)
+            val viewportHeight = measurables[1].minIntrinsicHeight(width).coerceAtMost(tallest)
+            val foreground = measurables[1].measure(
+                Constraints(minWidth = width, maxWidth = width, minHeight = 0, maxHeight = viewportHeight)
+            )
+            val endSize = Size(foreground.width.toFloat(), foreground.height.toFloat())
+
+            val origin = hostOrigin.value
+            val placementBounds = Rect(
+                left = maxOf(windowRect.left, origin.x),
+                top = maxOf(windowRect.top, origin.y),
+                right = minOf(windowRect.right, origin.x + constraints.maxWidth)
+                    .coerceAtLeast(windowRect.left),
+                bottom = minOf(windowRect.bottom, origin.y + constraints.maxHeight)
+                    .coerceAtLeast(windowRect.top),
+            )
+            val frame = arcDropdownFrame(
+                anchor = anchorBounds,
+                end = endSize,
+                window = placementBounds,
+                margin = SoftGlassDropdownDefaults.SafeMargin.toPx(),
+                sizeFraction = sizeProgress.value.coerceAtLeast(0f),
+                positionFraction = positionProgress.value.coerceAtLeast(0f),
+                startRadius = SoftGlassDropdownDefaults.StartCornerRadius,
+                endRadius = SoftGlassDropdownDefaults.CornerRadius,
+                direction = layoutDirection,
+            )
+            measured.rect = frame.rect
+            measured.cornerRadius = frame.cornerRadius
+
+            val panelWidth = frame.rect.width.roundToInt().coerceAtLeast(0)
+            val panelHeight = frame.rect.height.roundToInt().coerceAtLeast(0)
+            val localLeft = frame.rect.left - origin.x
+            val localTop = frame.rect.top - origin.y
+
+            val background = measurables[0].measure(Constraints.fixed(panelWidth, panelHeight))
+            layout(panelWidth, panelHeight) {
+                background.place(0, 0)
+                foreground.placeWithLayer(0, 0) {
+                    transformOrigin = TransformOrigin(0f, 0f)
+                    val fraction = SoftGlassDropdownDefaults.ArcStartWidth +
+                        (1f - SoftGlassDropdownDefaults.ArcStartWidth) *
+                        sizeProgress.value.coerceAtLeast(0f)
+                    val scale = fraction.coerceAtLeast(0f)
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = localLeft - localLeft.roundToInt()
+                    translationY = localTop - localTop.roundToInt()
+                }
             }
         }
     }
@@ -403,11 +499,10 @@ fun SoftGlassDropdownItem(
     }
     val pressFill by animateColorAsState(
         targetValue = if (pressed) pressedColor else Color.Transparent,
-        // Snap down, spring out — the library's own `popupPressExit`.
         animationSpec = if (pressed) {
             snap()
         } else {
-            spring(dampingRatio = 1f, stiffness = 1200f)
+            SoftGlassDropdownDefaults.pressExitSpring()
         },
         label = "softGlassDropdownItemPress"
     )
@@ -422,12 +517,14 @@ fun SoftGlassDropdownItem(
             .heightIn(min = SoftGlassDropdownDefaults.ItemMinHeight)
             .padding(horizontal = SoftGlassDropdownDefaults.ItemPressInset)
             .drawBehind {
-                drawRoundRect(
-                    color = pressFill,
-                    cornerRadius = CornerRadius(
-                        SoftGlassDropdownDefaults.ItemPressRadius.toPx()
+                if (pressFill.alpha > 0f) {
+                    drawRoundRect(
+                        color = pressFill,
+                        cornerRadius = CornerRadius(
+                            SoftGlassDropdownDefaults.ItemPressRadius.toPx()
+                        )
                     )
-                )
+                }
             }
             .selectable(
                 selected = selected,
@@ -464,11 +561,27 @@ fun SoftGlassDropdownItem(
     }
 }
 
-/** Places the panel: end-aligned to the anchor, then flipped up if there is no room. */
 private data class SoftGlassDropdownPlacement(
     val rect: Rect,
     val alignTop: Boolean
 )
+
+private data class SoftGlassDropdownFrame(
+    val rect: Rect,
+    val cornerRadius: Dp
+)
+
+private class MeasuredDropdownPanel {
+    var rect: Rect = Rect.Zero
+    var cornerRadius: Dp = SoftGlassDropdownDefaults.CornerRadius
+}
+
+private class MeasuredDropdownCorner(
+    private val measured: MeasuredDropdownPanel
+) : CornerSize {
+    override fun toPx(shapeSize: Size, density: Density): Float =
+        with(density) { measured.cornerRadius.toPx() }
+}
 
 private fun placeSoftGlassDropdown(
     anchor: Rect,
@@ -487,8 +600,6 @@ private fun placeSoftGlassDropdown(
         minLeft,
         (window.right - size.width - margin).coerceAtLeast(minLeft)
     )
-    // The demo's own vertical rule: open downward when the panel fits below the
-    // anchor, otherwise pick the side with more room.
     val minTop = minOf(window.top + margin, anchor.top).coerceAtLeast(window.top)
     val below = window.bottom - margin - anchor.top
     val above = anchor.bottom - minTop
@@ -504,15 +615,51 @@ private fun placeSoftGlassDropdown(
     )
 }
 
-/** The panel's window offset, mapped into the popup host's own coordinates. */
-private fun Modifier.offset(
-    placement: SoftGlassDropdownPlacement,
-    hostOrigin: Offset
-): Modifier = this.then(
-    Modifier.offset {
-        IntOffset(
-            (placement.rect.left - hostOrigin.x).roundToInt(),
-            (placement.rect.top - hostOrigin.y).roundToInt()
-        )
+/**
+ * Interpolates size and centre independently for `GlassDropdownPopup`'s curved
+ * arc motion (flat 69%-wide capsule opening out to full width and height).
+ */
+private fun arcDropdownFrame(
+    anchor: Rect,
+    end: Size,
+    window: Rect,
+    margin: Float,
+    sizeFraction: Float,
+    positionFraction: Float,
+    startRadius: Dp,
+    endRadius: Dp,
+    direction: LayoutDirection,
+): SoftGlassDropdownFrame {
+    val placement = placeSoftGlassDropdown(anchor, end, margin, window, direction)
+    val startWidth = end.width * SoftGlassDropdownDefaults.ArcStartWidth
+    val startHeight = startWidth * SoftGlassDropdownDefaults.ArcStartRatio
+    val width = startWidth + (end.width - startWidth) * sizeFraction
+    val endRatio = if (end.width > 0f) end.height / end.width else 1f
+    val ratio = SoftGlassDropdownDefaults.ArcStartRatio +
+        (endRatio - SoftGlassDropdownDefaults.ArcStartRatio) * sizeFraction
+    val height = ratio * width
+
+    val alignLeft = direction == LayoutDirection.Rtl
+    val startCenterX = if (alignLeft) {
+        placement.rect.left + startWidth / 2f
+    } else {
+        placement.rect.right - startWidth / 2f
     }
-)
+    val startCenterY = if (placement.alignTop) {
+        placement.rect.top + startHeight / 2f
+    } else {
+        placement.rect.bottom - startHeight / 2f
+    }
+    val centerX = startCenterX + (placement.rect.center.x - startCenterX) * positionFraction
+    val centerY = startCenterY + (placement.rect.center.y - startCenterY) * positionFraction
+    val radius = startRadius + (endRadius - startRadius) * sizeFraction
+    return SoftGlassDropdownFrame(
+        rect = Rect(
+            left = centerX - width / 2f,
+            top = centerY - height / 2f,
+            right = centerX + width / 2f,
+            bottom = centerY + height / 2f,
+        ),
+        cornerRadius = radius,
+    )
+}

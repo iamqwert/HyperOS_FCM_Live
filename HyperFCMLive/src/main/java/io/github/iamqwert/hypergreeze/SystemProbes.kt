@@ -35,27 +35,21 @@ internal object SystemProbes {
      * settled statically — asking the live framework is the only way to tell a
      * working path from a no-op reflection stub.
      */
-    internal fun probeSleepModeUidRule(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        logSkip: (String) -> Unit,
-        recordProbe: (String) -> Unit
-    ) {
+    internal fun probeSleepModeUidRule(env: HookEnv) {
         val name = "updateSleepModeUidRule"
         try {
-            val cm = classLoader.loadClass("android.net.ConnectivityManager")
+            val cm = env.classLoader.loadClass("android.net.ConnectivityManager")
             cm.getDeclaredMethod(name, java.lang.Integer.TYPE, java.lang.Boolean.TYPE)
             // The lookup pins the exact parameter list, so "present" already means
             // "present with the signature the caller below needs".
-            recordProbe("ConnectivityManager#$name=present")
+            env.recordProbe("ConnectivityManager#$name=present")
         } catch (e: NoSuchMethodException) {
-            recordProbe("ConnectivityManager#$name=ABSENT(gateA3)")
+            env.recordProbe("ConnectivityManager#$name=ABSENT(gateA3)")
         } catch (e: ClassNotFoundException) {
-            logSkip("ConnectivityManager absent, sleep-mode probe skip")
+            env.logSkip("ConnectivityManager absent, sleep-mode probe skip")
         }
         probeReflectiveMethod(
-            module, recordProbe, logSkip,
-            classLoader,
+            env,
             "android.net.ConnectivityManager",
             "enableSleepModeChain",
             java.lang.Boolean.TYPE
@@ -73,22 +67,19 @@ internal object SystemProbes {
      * still reported on its own line: that is a finding, not a routine reading.
      */
     private fun probeReflectiveMethod(
-        module: XposedInterface,
-        recordProbe: (String) -> Unit,
-        logSkip: (String) -> Unit,
-        classLoader: ClassLoader,
+        env: HookEnv,
         className: String,
         methodName: String,
         vararg parameterTypes: Class<*>
     ) {
         val key = "${className.substringAfterLast('.')}#$methodName"
         try {
-            classLoader.loadClass(className).getDeclaredMethod(methodName, *parameterTypes)
-            recordProbe("$key=present")
+            env.classLoader.loadClass(className).getDeclaredMethod(methodName, *parameterTypes)
+            env.recordProbe("$key=present")
         } catch (e: NoSuchMethodException) {
-            recordProbe("$key=ABSENT")
+            env.recordProbe("$key=ABSENT")
         } catch (e: ClassNotFoundException) {
-            logSkip("$className absent, $methodName probe skip")
+            env.logSkip("$className absent, $methodName probe skip")
         }
     }
 
@@ -102,22 +93,17 @@ internal object SystemProbes {
      * assembled at runtime from a custom feature flag, a platform check and a
      * cloud switch.
      */
-    internal fun probePacketFilterSupport(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        logSkip: (String) -> Unit,
-        recordProbe: (String) -> Unit
-    ) {
+    internal fun probePacketFilterSupport(env: HookEnv) {
         try {
             val policy =
-                classLoader.loadClass("com.miui.powerinsight.packetfilter.FilterEnablePolicy")
+                env.classLoader.loadClass("com.miui.powerinsight.packetfilter.FilterEnablePolicy")
             val supported =
                 policy.getDeclaredMethod("isSupportPacketFilter").invoke(null) as? Boolean
-            recordProbe("packet-filter=$supported")
+            env.recordProbe("packet-filter=$supported")
         } catch (e: ClassNotFoundException) {
-            logSkip("FilterEnablePolicy absent, packet filter probe skip")
+            env.logSkip("FilterEnablePolicy absent, packet filter probe skip")
         } catch (e: NoSuchMethodException) {
-            logSkip("FilterEnablePolicy#isSupportPacketFilter absent, probe skip")
+            env.logSkip("FilterEnablePolicy#isSupportPacketFilter absent, probe skip")
         }
     }
 
@@ -187,23 +173,18 @@ internal object SystemProbes {
      * reflective read returns the final list (and triggers class init if the
      * class has not been touched yet). Nothing is modified here.
      */
-    internal fun probeGmsInMessageApp(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        logSkip: (String) -> Unit,
-        recordProbe: (String) -> Unit
-    ) {
+    internal fun probeGmsInMessageApp(env: HookEnv) {
         try {
-            val clazz = classLoader.loadClass("com.miui.server.greeze.AurogonImmobulusMode")
+            val clazz = env.classLoader.loadClass("com.miui.server.greeze.AurogonImmobulusMode")
             val field = clazz.getDeclaredField("mMessageApp")
             field.isAccessible = true
             val list = field.get(null) as? Collection<*>
             val present = list?.contains(HookerSupport.GMS_PACKAGE_NAME) ?: false
-            recordProbe("mMessageApp=${list?.size ?: -1},gms=$present")
+            env.recordProbe("mMessageApp=${list?.size ?: -1},gms=$present")
         } catch (e: NoSuchFieldException) {
-            logSkip("AurogonImmobulusMode#mMessageApp absent, probe skip")
+            env.logSkip("AurogonImmobulusMode#mMessageApp absent, probe skip")
         } catch (e: ClassNotFoundException) {
-            logSkip("AurogonImmobulusMode absent, mMessageApp probe skip")
+            env.logSkip("AurogonImmobulusMode absent, mMessageApp probe skip")
         }
     }
 }

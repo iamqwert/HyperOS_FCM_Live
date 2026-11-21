@@ -15,6 +15,7 @@ internal object HookerSupport {
     const val ACTION_REMOTE_INTENT = "com.google.android.c2dm.intent.RECEIVE"
     const val ACTION_MESSAGING_EVENT = "com.google.firebase.MESSAGING_EVENT"
     const val ACTION_INSTANCE_ID_EVENT = "com.google.firebase.INSTANCE_ID_EVENT"
+    const val PERMISSION_C2DM_SEND = "com.google.android.c2dm.permission.SEND"
     const val FCM_MESSAGING_SERVICE_CLASS =
         "com.google.firebase.messaging.FirebaseMessagingService"
     const val FCM_IID_RECEIVER_CLASS =
@@ -53,6 +54,12 @@ internal object HookerSupport {
      */
     internal const val SLEEP_CONTROLLER_CLASS =
         "com.miui.powerkeeper.statemachine.PhoneSleepModeController"
+    internal const val PAD_SLEEP_CONTROLLER_CLASS =
+        "com.miui.powerkeeper.statemachine.PadSleepModeController"
+    internal val SLEEP_CONTROLLER_CLASSES = setOf(
+        SLEEP_CONTROLLER_CLASS,
+        PAD_SLEEP_CONTROLLER_CLASS
+    )
 
     /**
      * WiFi scorer behind the relaxed weak-signal switch.
@@ -143,6 +150,8 @@ internal object HookerSupport {
     internal const val ALLOWLIST_REGISTER_MAX_ATTEMPTS = 120
     internal const val FCM_CACHE_TTL_MS = 5L * 60L * 1000L
     internal const val FCM_CACHE_MAX = 256
+    /** Post-c2dm anti-refreeze grace aligned with GMS's 10s high-priority temp allowlist. */
+    internal const val C2DM_FREEZE_DELAY_MS = 10_000L
 
     internal fun targetPackageOf(intent: Intent): String? {
         val pkg = intent.getPackage()
@@ -151,5 +160,65 @@ internal object HookerSupport {
         }
         val component = intent.component
         return component?.packageName
+    }
+
+    internal fun addIfAbsent(list: MutableList<Any?>, value: String) {
+        if (!list.contains(value)) {
+            list.add(value)
+        }
+    }
+
+    /**
+     * Enumerate all Android users (including MIUI Dual Apps / XSpace userId=999
+     * and work profiles). Falls back to `UserManager.userProfiles` if `getUsers()`
+     * is unavailable or denied.
+     */
+    internal fun allUserHandles(context: Context): List<android.os.UserHandle> {
+        val um = context.getSystemService(Context.USER_SERVICE) as? android.os.UserManager
+            ?: return emptyList()
+        try {
+            val getUsers = um.javaClass.getMethod("getUsers")
+            val users = getUsers.invoke(um) as? List<*>
+            if (!users.isNullOrEmpty()) {
+                val result = ArrayList<android.os.UserHandle>(users.size)
+                for (u in users) {
+                    if (u == null) continue
+                    val handle = u.javaClass.getMethod("getUserHandle").invoke(u)
+                    if (handle is android.os.UserHandle) {
+                        result.add(handle)
+                    }
+                }
+                if (result.isNotEmpty()) return result
+            }
+        } catch (ignored: Throwable) {
+        }
+        return try {
+            um.userProfiles ?: emptyList()
+        } catch (ignored: Throwable) {
+            emptyList()
+        }
+    }
+
+    /** Extract numeric userId from a [android.os.UserHandle] (0 on failure). */
+    internal fun userIdOf(handle: android.os.UserHandle): Int {
+        return try {
+            handle.javaClass.getMethod("getIdentifier").invoke(handle) as? Int ?: handle.hashCode()
+        } catch (ignored: Throwable) {
+            handle.hashCode()
+        }
+    }
+
+    /** Create a [Context] scoped to [userHandle] via hidden `Context#createContextAsUser`. */
+    internal fun createContextForUser(context: Context, userHandle: android.os.UserHandle): Context? {
+        return try {
+            val method = Context::class.java.getMethod(
+                "createContextAsUser",
+                android.os.UserHandle::class.java,
+                Int::class.javaPrimitiveType
+            )
+            method.invoke(context, userHandle, 0) as? Context
+        } catch (ignored: Throwable) {
+            null
+        }
     }
 }

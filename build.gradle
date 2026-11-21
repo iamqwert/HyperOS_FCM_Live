@@ -9,15 +9,16 @@ buildscript {
     configurations.classpath {
         resolutionStrategy {
             force 'com.google.guava:guava:33.8.0-jre'
+            // AGP 9.x's built-in Kotlin pulls KGP 2.2.10 by default, which cannot
+            // read Kotlin 2.4.x metadata (Miuix 0.9.4+). Force KGP to 2.4.21 so
+            // built-in Kotlin + new DSL work cleanly and stay ready for AGP 10.
+            force 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21'
         }
     }
 }
 
 plugins {
     id 'com.android.application' version '9.5.1' apply false
-    // Standalone Kotlin 2.4.20 — AGP's built-in Kotlin is stuck at 2.2.10, see
-    // gradle.properties for the POM-verified evidence and the opt-out pair.
-    id 'org.jetbrains.kotlin.android' version '2.4.21' apply false
     // Route keys are `@Serializable` (the back stack is persisted by serializing
     // it). Published in lockstep with the compiler it plugs into, hence the same
     // version — the module applies it without a version, from here.

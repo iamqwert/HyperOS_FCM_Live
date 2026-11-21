@@ -430,7 +430,7 @@ private fun readLicenseText(context: Context, rawRes: Int): String {
 
 /**
  * Maps a row to the LICENSE body as published on that project's repository.
- * Shared SPDX texts live in one raw file each; the three MIT reference projects
+ * Shared SPDX texts live in one raw file each; the MIT reference projects
  * ship their own copyright line, so they keep a dedicated copy. Repositories
  * carrying no LICENSE file are shown as 「—」 and never reach this function.
  *
@@ -442,6 +442,8 @@ internal fun licenseRawFor(name: String, licenseLabel: String): Int = when {
     name == "ReedGAOOO/FCMGuard-HyperOS" -> R.raw.license_mit_fcmguard
     name == "1812z/HyperIsland" -> R.raw.license_mit_hyperisland
     name == "E3N-glotm/HyperOS-FCM-Unified-Guard" -> R.raw.license_mit_unifiedguard
+    name == "ByteJuno/fcmfix-coloros" -> R.raw.license_mit_fcmfix_coloros
+    name == "kooritea/fcmfix" -> R.raw.license_mit_fcmfix
     licenseLabel.contains("Apache") -> R.raw.license_apache2
     licenseLabel.contains("GPL") -> R.raw.license_gpl3
     licenseLabel.contains("MIT") -> R.raw.license_mit
@@ -576,15 +578,25 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  * `releaseRuntimeClasspath`: no drift, and no rows added or removed — every
  * row still resolves to the version it states, and nothing new reached the
  * graph beyond what the rows above already attribute.
+ *
+ * The 2026-11-21 pass (4.6.0) re-audited `releaseRuntimeClasspath` and
+ * `mapping/release/mapping.txt`. Five versions drifted and were aligned:
+ * - AndroidX Annotation: 1.10.0 → **1.9.1**
+ * - AndroidX Collection: 1.6.0 → **1.5.0**
+ * - AndroidX Compose Material3: 1.5.0-beta01 → **1.5.0-rc01**
+ * - AndroidX Core: 1.19.1 → **1.18.0**
+ * - Kotlinx Serialization: 1.12.0 → **1.13.0**
+ * `kotlinx-collections-immutable:0.5.1` (transitive behind `miuix-nav`) has
+ * 0 surviving classes in `mapping.txt`, so it stays off the list.
  */
 private val DEPS = arrayOf(
     arrayOf("AndroidX Activity", "1.13.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Annotation", "1.10.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Annotation", "1.9.1", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX AppCompat", "1.8.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Arch Core", "2.2.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Collection", "1.6.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Collection", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Compose Foundation", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose Material3", "1.5.0-beta01", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose Material3", "1.5.0-rc01", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Compose UI", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
     // Separate repository, so ANDROIDX_URL does not cover it. Only on the
     // classpath behind Material Components, but its code does survive R8.
@@ -594,7 +606,7 @@ private val DEPS = arrayOf(
         "Apache License 2.0",
         "https://github.com/androidx/constraintlayout"
     ),
-    arrayOf("AndroidX Core", "1.19.1", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Core", "1.18.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Interpolator", "1.0.0", "Apache License 2.0", ANDROIDX_URL),
     // Miuix's responsive-layout chain (material3-window-size-class): real code
     // in the APK, 12 classes of it (window + window-core), verified against the
@@ -615,12 +627,12 @@ private val DEPS = arrayOf(
         "https://github.com/Kotlin/kotlinx.coroutines"
     ),
     // Route keys are @Serializable (nav/Route.kt) and the back stack is persisted
-    // by serializing them, so the runtime is load-bearing: 127 kotlinx.serialization
+    // by serializing them, so the runtime is load-bearing: 148 kotlinx.serialization
     // classes survive in mapping/release/mapping.txt (the 2026-10-09 "R8 removes
     // all of it" note below no longer holds).
     arrayOf(
         "Kotlinx Serialization",
-        "1.12.0",
+        "1.13.0",
         "Apache License 2.0",
         "https://github.com/Kotlin/kotlinx.serialization"
     ),
@@ -675,10 +687,8 @@ private val REFERENCES = arrayOf(
     arrayOf("AritxOnly/F1Info", "GPL-3.0", "https://github.com/AritxOnly/F1Info/releases"),
     arrayOf("billtv/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/billtv/HyperOS_FCM_Live"),
     // A sibling repair in the same family as the ColorOS row at the foot of this
-    // list: FCM tuned for ColorOS 16/17 (国行), derived from kooritea/fcmfix. No
-    // LICENSE file in the repository — shown as 「—」, so a tap opens the project
-    // itself like the other unlicensed rows.
-    arrayOf("ByteJuno/fcmfix-coloros", "—", "https://github.com/ByteJuno/fcmfix-coloros"),
+    // list: FCM tuned for ColorOS 16/17 (国行), derived from kooritea/fcmfix.
+    arrayOf("ByteJuno/fcmfix-coloros", "MIT License", "https://github.com/ByteJuno/fcmfix-coloros"),
     arrayOf("dingwen07/hyperos-fcm-fix", "GPL-3.0", "https://github.com/dingwen07/hyperos-fcm-fix"),
     // The sibling implementation P7 was measured against: the same delivery chain,
     // repaired without LSPosed — static patches on services/miui-services plus a
@@ -702,10 +712,8 @@ private val REFERENCES = arrayOf(
     arrayOf("Kwensiu/DPIS", "GPL-3.0", "https://github.com/Kwensiu/DPIS"),
     // The retired GCM reconnect repair (4.1.1) followed this module's catch-up
     // shape: a stale-connection check after the heartbeat timer's countdown
-    // expires, then a GCM_RECONNECT broadcast. No LICENSE file in the
-    // repository — shown as 「—」, the row links to the project like the other
-    // unlicensed ones.
-    arrayOf("kooritea/fcmfix", "—", "https://github.com/kooritea/fcmfix"),
+    // expires, then a GCM_RECONNECT broadcast.
+    arrayOf("kooritea/fcmfix", "MIT License", "https://github.com/kooritea/fcmfix"),
     // The title-bar glass ([MiuixGlassTopAppBar]) is this app's own app-bar
     // construction: the list underlaps the bar, and that underlap is what the
     // blur samples.

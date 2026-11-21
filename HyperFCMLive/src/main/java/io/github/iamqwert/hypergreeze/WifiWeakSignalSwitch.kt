@@ -69,20 +69,27 @@ internal object WifiWeakSignalSwitch {
      * binder of a service whose implementation comes from the same jar.
      */
     private val wifiScorerResolved = AtomicBoolean(false)
+    private val hookGeneration = AtomicLong(0L)
     // Two throttles, not one: clamping and handing back are opposite verdicts,
     // and sharing a window between them lets whichever is louder starve the
     // other — which would leave the rarer one looking like it never happened.
     private val lastWifiScoreClampLogMs = AtomicLong(0L)
     private val lastWifiScoreSkipLogMs = AtomicLong(0L)
 
-    internal fun hook(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        logSkipOtherGeneration: (String) -> Unit
-    ) {
-        if (tryHookWifiScorer(module, classLoader, hookE, logSkip)) {
+    /**
+     * Clears the resolved latch before a hot-reload re-install so the hook is
+     * re-attached after `onHotReloaded` unhooks the previous handle, and bumps
+     * [hookGeneration] so any still-running boot-retry thread from the previous
+     * pass exits instead of hooking with a stale module reference.
+     */
+    internal fun resetForHotReload() {
+        hookGeneration.incrementAndGet()
+        wifiScorerResolved.set(false)
+    }
+
+    internal fun hook(env: HookEnv) {
+        val gen = hookGeneration.get()
+        if (tryHookWifiScorer(env, gen)) {
             return
         }
         // Nothing to hook yet: at system_server start the WiFi service has not
@@ -96,13 +103,18 @@ internal object WifiWeakSignalSwitch {
                 } catch (ignored: InterruptedException) {
                     return@Thread
                 }
-                if (tryHookWifiScorer(module, classLoader, hookE, logSkip)) {
+                if (hookGeneration.get() != gen) {
+                    return@Thread
+                }
+                if (tryHookWifiScorer(env, gen)) {
                     return@Thread
                 }
             }
-            logSkipOtherGeneration(
-                "AmlMiuiThirdPartScorer (unreachable after retry)"
-            )
+            if (hookGeneration.get() == gen) {
+                env.logSkipOtherGeneration(
+                    "AmlMiuiThirdPartScorer (unreachable after retry)"
+                )
+            }
         }, "fcmlive-wifi-scorer")
         waiter.isDaemon = true
         waiter.start()
@@ -110,32 +122,31 @@ internal object WifiWeakSignalSwitch {
 
     /** Installs the scorer hook if the class can be reached this time. */
     private fun tryHookWifiScorer(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit
+        env: HookEnv,
+        gen: Long
     ): Boolean {
-        if (wifiScorerResolved.get()) {
+        if (hookGeneration.get() != gen || wifiScorerResolved.get()) {
             return true
         }
-        val scorerClass = resolveWifiScorerClass(classLoader) ?: return false
+        val module = env.module
+        val scorerClass = resolveWifiScorerClass(env.classLoader) ?: return false
         val notifyMethod = try {
             scorerClass.getDeclaredMethod(HookerSupport.WIFI_SCORER_NOTIFY_METHOD)
         } catch (t: Throwable) {
-            logSkip("AmlMiuiThirdPartScorer#notifyScoreAndIsUsable absent, wifi-weak-signal switch skip")
+            env.logSkip("AmlMiuiThirdPartScorer#notifyScoreAndIsUsable absent, wifi-weak-signal switch skip")
             wifiScorerResolved.set(true)
             return true
         }
         val scoreField = try {
             scorerClass.getDeclaredField(HookerSupport.WIFI_SCORER_SCORE_FIELD)
         } catch (t: Throwable) {
-            logSkip("AmlMiuiThirdPartScorer#mLegacyIntScore absent, wifi-weak-signal switch skip")
+            env.logSkip("AmlMiuiThirdPartScorer#mLegacyIntScore absent, wifi-weak-signal switch skip")
             wifiScorerResolved.set(true)
             return true
         }
         notifyMethod.isAccessible = true
         scoreField.isAccessible = true
-        hookE(notifyMethod).intercept { chain: XposedInterface.Chain ->
+        env.hookE(notifyMethod).intercept { chain: XposedInterface.Chain ->
             if (!isWifiWeakSignalSwitchRelaxed(module)) {
                 chain.proceed()
             } else {
@@ -290,42 +301,18 @@ internal object WifiWeakSignalSwitch {
     }
 
     /**
-     * The flag lives in the shared config group and is read lazily at each
-     * score update: the class has no broadcast receiver, and updates arrive on
-     * its own handler thread, so the read frequency is that of score updates,
-     * not of general connectivity traffic.
+     * Served from [AllowlistGate]'s broadcast-refreshed snapshot (fail-closed
+     * default off), avoiding per-score `getRemotePreferences` IPC on the WiFi
+     * scorer handler thread.
      */
-    private fun isWifiWeakSignalSwitchRelaxed(module: XposedInterface): Boolean {
-        return try {
-            module.getRemotePreferences(Prefs.GROUP_CONFIG)
-                .also { HookLog.refresh(it) }
-                .getBoolean(Prefs.KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED, false)
-        } catch (ignored: Throwable) {
-            // Fail closed: an unreadable switch must not start deciding how the
-            // ROM judges its own WiFi link.
-            false
-        }
-    }
+    private fun isWifiWeakSignalSwitchRelaxed(module: XposedInterface): Boolean =
+        AllowlistGate.isWifiWeakSignalSwitchRelaxed(module)
 
     /**
-     * The floor the sub-option chose, read at the same lazy cadence as the
-     * master flag.
-     *
-     * Unreadable or off-list both land on the default — the narrowest floor
-     * rather than the widest. The two failures are the opposite direction to
-     * guess in, and only one of them is recoverable by reading it again; if the
-     * list ever loses a value, an unrestorable read here means the module
-     * quietly starts covering depths nobody chose.
+     * The floor the sub-option chose, served from the same broadcast-refreshed
+     * snapshot and already sanitized to [Prefs.WIFI_WEAK_SIGNAL_FLOOR_DEFAULT]
+     * on invalid/absent values.
      */
-    private fun readWifiWeakSignalFloor(module: XposedInterface): Int {
-        return try {
-            Prefs.sanitizeWeakSignalFloor(
-                module.getRemotePreferences(Prefs.GROUP_CONFIG)
-                    .also { HookLog.refresh(it) }
-                    .getInt(Prefs.KEY_WIFI_WEAK_SIGNAL_FLOOR, Prefs.WIFI_WEAK_SIGNAL_FLOOR_DEFAULT)
-            )
-        } catch (ignored: Throwable) {
-            Prefs.WIFI_WEAK_SIGNAL_FLOOR_DEFAULT
-        }
-    }
+    private fun readWifiWeakSignalFloor(module: XposedInterface): Int =
+        AllowlistGate.wifiWeakSignalFloor(module)
 }

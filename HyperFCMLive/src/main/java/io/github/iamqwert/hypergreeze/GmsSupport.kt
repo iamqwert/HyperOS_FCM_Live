@@ -2,9 +2,13 @@ package io.github.iamqwert.hypergreeze
 
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.HandlerThread
 import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import java.lang.reflect.Executable
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The GMS support / observation subsystem (P1–P4), extracted verbatim from
@@ -24,11 +28,29 @@ import java.lang.reflect.Executable
 internal object GmsSupport {
 
     /** Count of suppressed `enablemiuistandby enable` commands (standby firewall chain). */
-    private var standbyFirewallSkipCount = 0
+    private val standbyFirewallSkipCount = AtomicInteger(0)
 
     /** Guards userTable write-back against re-entry via hooked config writers. */
+    private val userTableReassertInFlight = AtomicBoolean(false)
+
+    /** Serial background worker for blocking provider / Settings / Chimera IPC. */
     @Volatile
-    private var userTableReassertInFlight = false
+    private var ioHandler: Handler? = null
+
+    private fun backgroundIoHandler(): Handler {
+        val existing = ioHandler
+        if (existing != null) return existing
+        synchronized(this) {
+            if (ioHandler == null) {
+                val thread = HandlerThread("fcmlive-gms-io").apply {
+                    isDaemon = true
+                    start()
+                }
+                ioHandler = Handler(thread.looper)
+            }
+            return ioHandler!!
+        }
+    }
 
     /**
      * PowerKeeper's GMS network-control surface, which differs wholesale
@@ -55,16 +77,9 @@ internal object GmsSupport {
      * for methods OS4 never had. Conversely, an INFO-level [logSkip] from this
      * file means a target the *current* generation should carry is missing.
      */
-    internal fun hookGmsObserver(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        logSkipOtherGeneration: (String) -> Unit,
-        recordProbe: (String) -> Unit,
-        isGmsUid: (Int) -> Boolean,
-        forceBooleanArg: (Class<*>, String, Boolean, String, Int) -> Unit
-    ) {
+    internal fun hookGmsObserver(env: HookEnv) {
+        val module = env.module
+        val classLoader = env.classLoader
         try {
             val NetdExecutorClass = classLoader.loadClass("com.miui.powerkeeper.utils.NetdExecutor")
             // OS3-only (cross-generation): the "gms_wall" REJECT chain this
@@ -77,14 +92,14 @@ internal object GmsSupport {
                     "initGmsChain",
                     String::class.java, Int::class.javaPrimitiveType, String::class.java
                 )
-                hookE(initGmsChainMethod).intercept { chain: XposedInterface.Chain ->
+                env.hookE(initGmsChainMethod).intercept { chain: XposedInterface.Chain ->
                     val args = chain.args.toTypedArray()
                     args[2] = "ACCEPT"
                     chain.proceed(args)
                 }
                 module.deoptimize(initGmsChainMethod)
             } catch (e: NoSuchMethodException) {
-                logSkipOtherGeneration("NetdExecutor#initGmsChain")
+                env.logSkipOtherGeneration("NetdExecutor#initGmsChain")
             }
             // P2 (`NetdExecutor#setGmsDnsBlockerState` → false) was removed on
             // 2026-10-30. The method still resolves on OS4, but a full-dex scan
@@ -102,7 +117,7 @@ internal object GmsSupport {
                     "setGmsChainState",
                     String::class.java, Boolean::class.javaPrimitiveType
                 )
-                hookE(setGmsChainStateMethod).intercept { chain: XposedInterface.Chain ->
+                env.hookE(setGmsChainStateMethod).intercept { chain: XposedInterface.Chain ->
                     val args = chain.args.toTypedArray()
                     // NetdExecutor.setGmsChainState(chain, enable): enable==true 下发
                     // "set_chain_state <chain> enable"，配合 initGmsChain(gms_wall, uid, "REJECT")
@@ -114,7 +129,7 @@ internal object GmsSupport {
                 }
                 module.deoptimize(setGmsChainStateMethod)
             } catch (e: NoSuchMethodException) {
-                logSkipOtherGeneration("NetdExecutor#setGmsChainState")
+                env.logSkipOtherGeneration("NetdExecutor#setGmsChainState")
             }
             try {
                 val executeMethod = NetdExecutorClass.getDeclaredMethod(
@@ -124,7 +139,7 @@ internal object GmsSupport {
                 )
                 val executeReturn = executeMethod.returnType
                 val skipValue = skipValueFor(executeReturn)
-                hookE(executeMethod).intercept { chain: XposedInterface.Chain ->
+                env.hookE(executeMethod).intercept { chain: XposedInterface.Chain ->
                     val args = chain.args.toTypedArray()
                     if (args.size >= 4 && args[2] is String && args[3] is Array<*>) {
                         val cmd = args[2] as String
@@ -142,7 +157,7 @@ internal object GmsSupport {
                             // Unparseable uid also passes through — never
                             // rewrite what cannot be proven to be GMS.
                             val uid = cmdArgs[0]?.toString()?.toIntOrNull() ?: -1
-                            if (isGmsUid(uid)) {
+                            if (env.isGmsUid(uid)) {
                                 val rewritten = cmdArgs.copyOf()
                                 rewritten[1] = "allow"
                                 args[3] = rewritten
@@ -153,7 +168,7 @@ internal object GmsSupport {
                         if ("enablemiuistandby" == cmd && cmdArgs.isNotEmpty() &&
                             "enable" == cmdArgs[0].toString()
                         ) {
-                            val skipped = ++standbyFirewallSkipCount
+                            val skipped = standbyFirewallSkipCount.incrementAndGet()
                             if (skipped == 1 || skipped % 10 == 0) {
                                 module.logGated(
                                     Log.INFO, HookerSupport.TAG,
@@ -170,9 +185,9 @@ internal object GmsSupport {
                 // static signature fact as the other probe findings, and it was
                 // the only probe in this process printing on a line of its own.
                 val skipText = skipValue?.toString() ?: "null"
-                recordProbe("NetdExecutor#execute->${executeReturn.name},skip=$skipText")
+                env.recordProbe("NetdExecutor#execute->${executeReturn.name},skip=$skipText")
             } catch (e: NoSuchMethodException) {
-                logSkip("NetdExecutor#execute not found, skip command-level GMS net hooks")
+                env.logSkip("NetdExecutor#execute not found, skip command-level GMS net hooks")
             }
         } catch (e: ClassNotFoundException) {
             module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook NetdExecutor", e)
@@ -188,7 +203,7 @@ internal object GmsSupport {
             for (legacyName in arrayOf(
                 "updateGmsAlarm", "updateGmsNetWork", "updateGoogleReletivesWakelock"
             )) {
-                forceBooleanArg(GmsObserverClass, legacyName, false, "GmsObserver", Log.DEBUG)
+                env.forceBooleanArg(GmsObserverClass, legacyName, false, "GmsObserver", Log.DEBUG)
             }
             // OS3-only (cross-generation): the hard "disable GMS" entry.
             // Absent on OS4, which has no local state machine to gate it.
@@ -199,16 +214,16 @@ internal object GmsSupport {
             for (alwaysSkip in arrayOf("disableGms")) {
                 try {
                     val disableMethod = GmsObserverClass.getDeclaredMethod(alwaysSkip)
-                    hookE(disableMethod).intercept { _: XposedInterface.Chain -> null }
+                    env.hookE(disableMethod).intercept { _: XposedInterface.Chain -> null }
                     module.deoptimize(disableMethod)
                 } catch (e: NoSuchMethodException) {
-                    logSkipOtherGeneration("GmsObserver#$alwaysSkip")
+                    env.logSkipOtherGeneration("GmsObserver#$alwaysSkip")
                 }
             }
             // OS3-only (cross-generation): the three flag setters of the local
             // state machine. Absent on OS4 for the same reason as above.
             for (limitFlag in arrayOf("updateGmsEnabled", "updateGmsState", "updateGmsInstalled")) {
-                forceBooleanArg(GmsObserverClass, limitFlag, false, "GmsObserver", Log.DEBUG)
+                env.forceBooleanArg(GmsObserverClass, limitFlag, false, "GmsObserver", Log.DEBUG)
             }
             // OS4's limit path (`updateFrameworkGmsNetStatus` → greeze
             // `updateGmsNetStatus`) is deliberately NOT hooked here any more
@@ -230,7 +245,7 @@ internal object GmsSupport {
             // P10/P11 remain removed: `c`'s only call edge is this callback, and
             // googleNetworkDisconnect's callback ends in the same place, so P9
             // covers both.
-            forceBooleanArg(
+            env.forceBooleanArg(
                 GmsObserverClass, "onGoogleReachabilityChanged", true, "GmsObserver", Log.INFO
             )
         } catch (e: ClassNotFoundException) {
@@ -269,15 +284,10 @@ internal object GmsSupport {
     @Volatile
     private var sScenarioAlignedLogged = false
 
-    internal fun hookScenarioCompiler(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkipOtherGeneration: (String) -> Unit,
-        getSystemContext: () -> Context?
-    ) {
+    internal fun hookScenarioCompiler(env: HookEnv) {
+        val module = env.module
         val configureClass =
-            classLoader.loadClass("com.miui.powerkeeper.provider.PowerKeeperAppConfigure")
+            env.classLoader.loadClass("com.miui.powerkeeper.provider.PowerKeeperAppConfigure")
         val pkgField = configureClass.getDeclaredField("pkg")
         pkgField.isAccessible = true
         val scenarioField = configureClass.getDeclaredField("scenario")
@@ -292,11 +302,11 @@ internal object GmsSupport {
                 m.name == "fillScenarioContent" && m.parameterCount == paramCount
             }
             if (method == null) {
-                logSkipOtherGeneration("PowerKeeperAppConfigure#fillScenarioContent($paramCount args)")
+                env.logSkipOtherGeneration("PowerKeeperAppConfigure#fillScenarioContent($paramCount args)")
                 continue
             }
 
-            hookE(method).intercept { chain: XposedInterface.Chain ->
+            env.hookE(method).intercept { chain: XposedInterface.Chain ->
                 chain.proceed()
                 try {
                     val cfg = chain.getArg(2) ?: return@intercept null
@@ -317,11 +327,7 @@ internal object GmsSupport {
                                 "(the compiler reaches this hook; no rewrite needed)"
                         )
                     }
-                    try {
-                        ensureGmsUserTableBgControl(module, getSystemContext)
-                    } catch (t: Throwable) {
-                        module.logGated(Log.WARN, HookerSupport.TAG, "P3: userTable write-back failed", t)
-                    }
+                    postEnsureGmsUserTableBgControl(module, env::systemContext)
                 } catch (t: Throwable) {
                     module.logGated(Log.ERROR, HookerSupport.TAG, "P3: failed to rewrite GMS scenario", t)
                 }
@@ -352,14 +358,9 @@ internal object GmsSupport {
     @Volatile
     private var sFreezeableAnsweredLogged = false
 
-    internal fun hookGreezerNoRestrict(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        logSkipOtherGeneration: (String) -> Unit,
-        isGmsUid: (Int) -> Boolean
-    ) {
+    internal fun hookGreezerNoRestrict(env: HookEnv) {
+        val module = env.module
+        val classLoader = env.classLoader
         // Primary: isNoRestrictApp(pkg) — boolean, no constant guessing needed.
         // Returning true means "GMS is in the no-restrict set", so every freeze
         // path that consults mNoRestrictAppSet (Aurogon quick-freeze and
@@ -371,7 +372,7 @@ internal object GmsSupport {
                 val isNoRestrictAppMethod = aurogonClass.getDeclaredMethod(
                     "isNoRestrictApp", String::class.java
                 )
-                hookE(isNoRestrictAppMethod).intercept { chain: XposedInterface.Chain ->
+                env.hookE(isNoRestrictAppMethod).intercept { chain: XposedInterface.Chain ->
                     val pkg = chain.getArg(0)
                     if (HookerSupport.GMS_PACKAGE_NAME == pkg) {
                         if (!sFreezeGateAnsweredLogged) {
@@ -388,7 +389,7 @@ internal object GmsSupport {
                 }
                 module.deoptimize(isNoRestrictAppMethod)
             } catch (e: NoSuchMethodException) {
-                logSkip("AurogonImmobulusMode#isNoRestrictApp absent, skip")
+                env.logSkip("AurogonImmobulusMode#isNoRestrictApp absent, skip")
             }
 
             // OS4: isNoRestrictFreezeable(pkg, reason) — false means "do not freeze".
@@ -396,7 +397,7 @@ internal object GmsSupport {
                 val isNoRestrictFreezeableMethod = aurogonClass.getDeclaredMethod(
                     "isNoRestrictFreezeable", String::class.java, Int::class.javaPrimitiveType
                 )
-                hookE(isNoRestrictFreezeableMethod).intercept { chain: XposedInterface.Chain ->
+                env.hookE(isNoRestrictFreezeableMethod).intercept { chain: XposedInterface.Chain ->
                     val pkg = chain.getArg(0)
                     if (HookerSupport.GMS_PACKAGE_NAME == pkg) {
                         if (!sFreezeableAnsweredLogged) {
@@ -413,7 +414,7 @@ internal object GmsSupport {
                 }
                 module.deoptimize(isNoRestrictFreezeableMethod)
             } catch (e: NoSuchMethodException) {
-                logSkipOtherGeneration("AurogonImmobulusMode#isNoRestrictFreezeable")
+                env.logSkipOtherGeneration("AurogonImmobulusMode#isNoRestrictFreezeable")
             }
 
             // triggerQuickFreeze(uid, reason) — skip GMS entirely.
@@ -421,13 +422,13 @@ internal object GmsSupport {
                 m.name == "triggerQuickFreeze" && m.parameterCount == 2
             }
             if (triggerQuickFreezeMethods.isEmpty()) {
-                logSkip("AurogonImmobulusMode#triggerQuickFreeze(I,I) absent, skip")
+                env.logSkip("AurogonImmobulusMode#triggerQuickFreeze(I,I) absent, skip")
             } else {
                 for (method in triggerQuickFreezeMethods) {
                     method.isAccessible = true
-                    hookE(method).intercept { chain: XposedInterface.Chain ->
+                    env.hookE(method).intercept { chain: XposedInterface.Chain ->
                         val uid = chain.getArg(0)
-                        if (uid is Int && isGmsUid(uid)) {
+                        if (uid is Int && env.isGmsUid(uid)) {
                             return@intercept skipValueFor(method.returnType)
                         }
                         chain.proceed()
@@ -437,7 +438,7 @@ internal object GmsSupport {
                 module.logGated(Log.INFO, HookerSupport.TAG, "AurogonImmobulusMode#triggerQuickFreeze hooked")
             }
         } catch (e: ClassNotFoundException) {
-            logSkip("AurogonImmobulusMode class absent, skip")
+            env.logSkip("AurogonImmobulusMode class absent, skip")
         } catch (e: Throwable) {
             module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook AurogonImmobulusMode", e)
         }
@@ -452,13 +453,13 @@ internal object GmsSupport {
                 m.name == "isAllowFreeze" && m.parameterCount == 1
             }
             if (isAllowFreezeMethods.isEmpty()) {
-                logSkip("PolicyMaker#isAllowFreeze absent, skip")
+                env.logSkip("PolicyMaker#isAllowFreeze absent, skip")
             } else {
                 for (method in isAllowFreezeMethods) {
                     method.isAccessible = true
-                    hookE(method).intercept { chain: XposedInterface.Chain ->
+                    env.hookE(method).intercept { chain: XposedInterface.Chain ->
                         val uid = chain.getArg(0)
-                        if (uid is Int && isGmsUid(uid)) {
+                        if (uid is Int && env.isGmsUid(uid)) {
                             return@intercept skipValueFor(method.returnType)
                         }
                         chain.proceed()
@@ -468,7 +469,7 @@ internal object GmsSupport {
                 }
             }
         } catch (e: ClassNotFoundException) {
-            logSkip("PolicyMaker class absent, skip")
+            env.logSkip("PolicyMaker class absent, skip")
         } catch (e: Throwable) {
             module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to hook PolicyMaker#isAllowFreeze", e)
         }
@@ -507,6 +508,49 @@ internal object GmsSupport {
      */
     @Volatile
     private var sMilletPresentLogged = false
+
+    /**
+     * Offloads [ensureGmsInMilletSetting] (which touches ContentResolver,
+     * Settings.System and blocking Chimera recovery) off the hook callback
+     * thread onto the serial [backgroundIoHandler].
+     */
+    internal fun postEnsureGmsInMilletSetting(
+        module: XposedInterface,
+        getSystemContext: () -> Context?
+    ) {
+        try {
+            backgroundIoHandler().post {
+                try {
+                    ensureGmsInMilletSetting(module, getSystemContext)
+                } catch (t: Throwable) {
+                    module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to repair MILLET_NO_RESTRICT_APP", t)
+                }
+            }
+        } catch (t: Throwable) {
+            module.logGated(Log.WARN, HookerSupport.TAG, "Failed to schedule MILLET_NO_RESTRICT_APP repair", t)
+        }
+    }
+
+    /**
+     * Offloads [ensureGmsUserTableBgControl] off the `fillScenarioContent` hook
+     * chain so provider query/update/insert IPC never blocks PowerKeeper.
+     */
+    internal fun postEnsureGmsUserTableBgControl(
+        module: XposedInterface,
+        getSystemContext: () -> Context?
+    ) {
+        try {
+            backgroundIoHandler().post {
+                try {
+                    ensureGmsUserTableBgControl(module, getSystemContext)
+                } catch (t: Throwable) {
+                    module.logGated(Log.WARN, HookerSupport.TAG, "P3: userTable write-back failed", t)
+                }
+            }
+        } catch (t: Throwable) {
+            module.logGated(Log.WARN, HookerSupport.TAG, "P3: failed to schedule userTable write-back", t)
+        }
+    }
 
     internal fun ensureGmsInMilletSetting(
         module: XposedInterface,
@@ -552,8 +596,7 @@ internal object GmsSupport {
         module: XposedInterface,
         getSystemContext: () -> Context?
     ) {
-        if (userTableReassertInFlight) return
-        userTableReassertInFlight = true
+        if (!userTableReassertInFlight.compareAndSet(false, true)) return
         try {
             val pk = getPowerKeeperContext()
             val sys = getSystemContext()
@@ -564,54 +607,95 @@ internal object GmsSupport {
             }
             module.logGated(Log.INFO, HookerSupport.TAG, "userTable: ensure GMS bgControl via ${if (pk != null) "powerkeeper" else "system"}")
             val uri = android.net.Uri.parse(HookerSupport.USER_TABLE_URI)
-            var current: String? = null
+            val existingByUser = LinkedHashMap<Int, String?>()
             try {
                 context.contentResolver.query(
                     uri,
-                    arrayOf(HookerSupport.COL_BG_CONTROL),
+                    arrayOf(HookerSupport.COL_USER_ID, HookerSupport.COL_BG_CONTROL),
                     "${HookerSupport.COL_PKG_NAME} = ?",
                     arrayOf(HookerSupport.GMS_PACKAGE_NAME),
                     null
                 )?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        current = cursor.getString(0)
+                    while (cursor.moveToNext()) {
+                        val userId = if (cursor.isNull(0)) 0 else cursor.getInt(0)
+                        val bgControl = cursor.getString(1)
+                        existingByUser[userId] = bgControl
                     }
                 }
             } catch (t: Throwable) {
                 module.logGated(Log.WARN, HookerSupport.TAG, "userTable: query failed", t)
                 return
             }
-            module.logGated(Log.INFO, HookerSupport.TAG, "userTable: GMS current bgControl=$current")
-            if (current == HookerSupport.BG_CONTROL_NO_RESTRICT) return
+            val targetUserIds = collectGmsTargetUserIds(context, existingByUser.keys)
+            module.logGated(
+                Log.INFO, HookerSupport.TAG,
+                "userTable: GMS current rows=$existingByUser targetUsers=$targetUserIds"
+            )
+            for (userId in targetUserIds) {
+                val current = existingByUser[userId]
+                if (current == HookerSupport.BG_CONTROL_NO_RESTRICT) continue
 
-            val values = android.content.ContentValues()
-            values.put(HookerSupport.COL_BG_CONTROL, HookerSupport.BG_CONTROL_NO_RESTRICT)
-            try {
-                val updated = context.contentResolver.update(
-                    uri,
-                    values,
-                    "${HookerSupport.COL_PKG_NAME} = ?",
-                    arrayOf(HookerSupport.GMS_PACKAGE_NAME)
-                )
-                module.logGated(Log.INFO, HookerSupport.TAG, "userTable: update $current -> ${HookerSupport.BG_CONTROL_NO_RESTRICT} count=$updated")
-                if (updated > 0) return
-            } catch (t: Throwable) {
-                module.logGated(Log.WARN, HookerSupport.TAG, "userTable: update failed", t)
-            }
-            values.put(HookerSupport.COL_PKG_NAME, HookerSupport.GMS_PACKAGE_NAME)
-            values.put(HookerSupport.COL_USER_ID, 0)
-            values.put(HookerSupport.COL_LAST_CONFIGURED, System.currentTimeMillis())
-            try {
-                val inserted = context.contentResolver.insert(uri, values)
-                module.logGated(Log.INFO, HookerSupport.TAG, "userTable: insert result=$inserted")
-            } catch (t: Throwable) {
-                module.logGated(Log.WARN, HookerSupport.TAG, "userTable: insert GMS row failed", t)
+                val values = android.content.ContentValues()
+                values.put(HookerSupport.COL_BG_CONTROL, HookerSupport.BG_CONTROL_NO_RESTRICT)
+                if (existingByUser.containsKey(userId)) {
+                    try {
+                        val updated = context.contentResolver.update(
+                            uri,
+                            values,
+                            "${HookerSupport.COL_PKG_NAME} = ? AND ${HookerSupport.COL_USER_ID} = ?",
+                            arrayOf(HookerSupport.GMS_PACKAGE_NAME, userId.toString())
+                        )
+                        module.logGated(
+                            Log.INFO, HookerSupport.TAG,
+                            "userTable: update user=$userId $current -> ${HookerSupport.BG_CONTROL_NO_RESTRICT} count=$updated"
+                        )
+                        if (updated > 0) continue
+                    } catch (t: Throwable) {
+                        module.logGated(Log.WARN, HookerSupport.TAG, "userTable: update failed for user=$userId", t)
+                    }
+                }
+                values.put(HookerSupport.COL_PKG_NAME, HookerSupport.GMS_PACKAGE_NAME)
+                values.put(HookerSupport.COL_USER_ID, userId)
+                values.put(HookerSupport.COL_LAST_CONFIGURED, System.currentTimeMillis())
+                try {
+                    val inserted = context.contentResolver.insert(uri, values)
+                    module.logGated(Log.INFO, HookerSupport.TAG, "userTable: insert user=$userId result=$inserted")
+                } catch (t: Throwable) {
+                    module.logGated(Log.WARN, HookerSupport.TAG, "userTable: insert GMS row failed for user=$userId", t)
+                }
             }
         } catch (t: Throwable) {
             module.logGated(Log.WARN, HookerSupport.TAG, "userTable: ensure failed", t)
         } finally {
-            userTableReassertInFlight = false
+            userTableReassertInFlight.set(false)
         }
+    }
+
+    /**
+     * Collect every userId whose PowerKeeper `userTable` should keep a GMS
+     * `noRestrict` row: always user 0, every userId already present in
+     * `existingUserIds`, plus any secondary user (e.g. XSpace userId=999 or
+     * work profile) where GMS is actually installed.
+     */
+    private fun collectGmsTargetUserIds(
+        context: Context,
+        existingUserIds: Set<Int>
+    ): Set<Int> {
+        val targets = LinkedHashSet<Int>()
+        targets.add(0)
+        targets.addAll(existingUserIds)
+        for (handle in HookerSupport.allUserHandles(context)) {
+            val uid = HookerSupport.userIdOf(handle)
+            if (uid == 0 || targets.contains(uid)) continue
+            val userCtx = HookerSupport.createContextForUser(context, handle) ?: continue
+            try {
+                userCtx.packageManager.getApplicationInfo(HookerSupport.GMS_PACKAGE_NAME, 0)
+                targets.add(uid)
+            } catch (ignored: Throwable) {
+                // GMS not installed in this secondary user; do not insert a row.
+            }
+        }
+        return targets
     }
 
     /**
@@ -688,7 +772,7 @@ internal object GmsSupport {
         }
     }
 
-    private fun skipValueFor(returnType: Class<*>): Any? {
+    internal fun skipValueFor(returnType: Class<*>): Any? {
         if (returnType == Void.TYPE || !returnType.isPrimitive) {
             return null
         }

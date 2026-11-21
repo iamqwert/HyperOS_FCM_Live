@@ -49,6 +49,14 @@ class ModuleLogicTest {
             R.raw.license_mit_hyperisland,
             licenseRawFor("1812z/HyperIsland", "Unknown")
         )
+        assertEquals(
+            R.raw.license_mit_fcmfix_coloros,
+            licenseRawFor("ByteJuno/fcmfix-coloros", "MIT License")
+        )
+        assertEquals(
+            R.raw.license_mit_fcmfix,
+            licenseRawFor("kooritea/fcmfix", "MIT License")
+        )
     }
 
     @Test
@@ -102,5 +110,75 @@ class ModuleLogicTest {
         assertFalse(allowlistSenderIsForeign(null, shellUid))
         // Any other unnamed uid is foreign.
         assertTrue(allowlistSenderIsForeign(null, 10123))
+    }
+
+    // ---------- FcmAppScan.isFcmClient ----------
+
+    @Test
+    fun fcmClientAcceptsIidOrMessagingOrC2dmSendOrGooglePushAlone() {
+        assertTrue(FcmAppScan.isFcmClient(hasIidService = true, hasMessagingEvent = false, hasC2dmSendReceive = false, hasGooglePushReceiver = false))
+        assertTrue(FcmAppScan.isFcmClient(hasIidService = false, hasMessagingEvent = true, hasC2dmSendReceive = false, hasGooglePushReceiver = false))
+        assertTrue(FcmAppScan.isFcmClient(hasIidService = false, hasMessagingEvent = false, hasC2dmSendReceive = true, hasGooglePushReceiver = false))
+        assertTrue(FcmAppScan.isFcmClient(hasIidService = false, hasMessagingEvent = false, hasC2dmSendReceive = false, hasGooglePushReceiver = true))
+        assertTrue(FcmAppScan.isFcmClient(hasIidService = false, hasMessagingEvent = false, hasC2dmSendReceive = true, hasGooglePushReceiver = true))
+    }
+
+    @Test
+    fun fcmClientRejectsBareReceiveOrNothing() {
+        assertFalse(FcmAppScan.isFcmClient(hasIidService = false, hasMessagingEvent = false, hasC2dmSendReceive = false, hasGooglePushReceiver = false))
+    }
+
+    // ---------- HookerSupport.isGooglePushReceiverClass ----------
+
+    @Test
+    fun googlePushReceiverMatchesOnlyGnpCoreNamespaceAndSuffix() {
+        assertTrue(
+            HookerSupport.isGooglePushReceiverClass(
+                "com.google.android.libraries.notifications.entrypoints.gcm.GcmBroadcastReceiverPushReceiver"
+            )
+        )
+        assertTrue(
+            HookerSupport.isGooglePushReceiverClass(
+                "com.google.android.libraries.notifications.PushReceiver"
+            )
+        )
+        assertFalse(HookerSupport.isGooglePushReceiverClass(null))
+        assertFalse(HookerSupport.isGooglePushReceiverClass(""))
+        assertFalse(HookerSupport.isGooglePushReceiverClass("com.example.PushReceiver"))
+        assertFalse(HookerSupport.isGooglePushReceiverClass("com.google.android.libraries.notifications.OtherReceiver"))
+    }
+
+    // ---------- GmsSupport.skipValueFor ----------
+
+    @Test
+    fun skipValueForReturnsTypedZerosAndNullForVoidOrObjects() {
+        assertEquals(null, GmsSupport.skipValueFor(Void.TYPE))
+        assertEquals(null, GmsSupport.skipValueFor(String::class.java))
+        assertEquals(false, GmsSupport.skipValueFor(Boolean::class.javaPrimitiveType!!))
+        assertEquals(0, GmsSupport.skipValueFor(Int::class.javaPrimitiveType!!))
+        assertEquals(0L, GmsSupport.skipValueFor(Long::class.javaPrimitiveType!!))
+        assertEquals(0.toShort(), GmsSupport.skipValueFor(Short::class.javaPrimitiveType!!))
+        assertEquals(0.toByte(), GmsSupport.skipValueFor(Byte::class.javaPrimitiveType!!))
+        assertEquals(0.toChar(), GmsSupport.skipValueFor(Char::class.javaPrimitiveType!!))
+        assertEquals(0f, GmsSupport.skipValueFor(Float::class.javaPrimitiveType!!))
+        assertEquals(0.0, GmsSupport.skipValueFor(Double::class.javaPrimitiveType!!))
+    }
+
+    // ---------- InstallBookkeeping.formatSummary ----------
+
+    @Test
+    fun formatSummaryOmitsCrossGenerationClauseWhenZero() {
+        assertEquals(
+            "HyperFCMLive active in system_server: 12 hook(s) installed, 0 target(s) absent on this ROM",
+            InstallBookkeeping.formatSummary("system_server", installed = 12, absent = 0, crossGeneration = 0)
+        )
+    }
+
+    @Test
+    fun formatSummaryIncludesCrossGenerationClauseWhenNonZero() {
+        assertEquals(
+            "HyperFCMLive active in com.miui.powerkeeper: 6 hook(s) installed, 1 target(s) absent on this ROM, 10 cross-generation (expected)",
+            InstallBookkeeping.formatSummary("com.miui.powerkeeper", installed = 6, absent = 1, crossGeneration = 10)
+        )
     }
 }

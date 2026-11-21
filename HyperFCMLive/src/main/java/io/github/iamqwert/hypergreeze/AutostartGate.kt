@@ -83,43 +83,26 @@ internal object AutostartGate {
      * rather than by position, because the two shapes place it differently.
      */
     internal fun hookAutostartGate(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        logSkipOtherGeneration: (String) -> Unit,
-        systemContext: () -> Context?,
+        env: HookEnv,
         // One switch per checkpoint since 2026-11-01: the section master is
         // read by the caller, so each lambda already means "master && this
         // rung".
         isServiceReleaseEnabled: () -> Boolean,
         isProcessReleaseEnabled: () -> Boolean
     ) {
-        hookServiceStart(
-            module, classLoader, hookE, logSkip, logSkipOtherGeneration,
-            systemContext, isServiceReleaseEnabled
-        )
-        hookProcessStart(
-            module, classLoader, hookE, logSkip, systemContext, isProcessReleaseEnabled
-        )
+        hookServiceStart(env, isServiceReleaseEnabled)
+        hookProcessStart(env, isProcessReleaseEnabled)
     }
 
     private fun hookServiceStart(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        logSkipOtherGeneration: (String) -> Unit,
-        systemContext: () -> Context?,
+        env: HookEnv,
         isReleaseEnabled: () -> Boolean
     ) {
+        val module = env.module
         val stubClass = try {
-            classLoader.loadClass(AUTOSTART_STUB_CLASS)
+            env.classLoader.loadClass(AUTOSTART_STUB_CLASS)
         } catch (ignored: ClassNotFoundException) {
-            logSkipOtherGeneration(
-                "$AUTOSTART_STUB_CLASS absent on this generation, " +
-                    "$ALLOW_START_SERVICE_METHOD not hooked"
-            )
+            env.logSkipOtherGeneration("AutoStartManagerServiceStubImpl#$ALLOW_START_SERVICE_METHOD")
             return
         }
         val methods: List<Method> = stubClass.declaredMethods.filter {
@@ -127,12 +110,12 @@ internal object AutostartGate {
                 it.returnType == Boolean::class.javaPrimitiveType
         }
         if (methods.isEmpty()) {
-            logSkip("$AUTOSTART_STUB_CLASS#$ALLOW_START_SERVICE_METHOD absent, skip")
+            env.logSkip("$AUTOSTART_STUB_CLASS#$ALLOW_START_SERVICE_METHOD absent, skip")
             return
         }
         for (method in methods) {
             method.isAccessible = true
-            hookE(method).intercept { chain: XposedInterface.Chain ->
+            env.hookE(method).intercept { chain: XposedInterface.Chain ->
                 val result = chain.proceed()
                 try {
                     if (java.lang.Boolean.FALSE == result && isReleaseEnabled()) {
@@ -142,7 +125,7 @@ internal object AutostartGate {
                         // so those keep the ROM's denial.
                         val target = intent?.component?.packageName ?: intent?.getPackage()
                         if (target != null &&
-                            AllowlistGate.moduleAppliesTo(module, systemContext, target)
+                            AllowlistGate.moduleAppliesTo(module, env::systemContext, target)
                         ) {
                             // One-shot: this fires only when the ROM actually
                             // denied, so silence means "the gate never had to
@@ -187,17 +170,14 @@ internal object AutostartGate {
      * `chain.proceed()` runs first, so the appop read still happens.
      */
     private fun hookProcessStart(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        systemContext: () -> Context?,
+        env: HookEnv,
         isReleaseEnabled: () -> Boolean
     ) {
+        val module = env.module
         val processManagerClass = try {
-            classLoader.loadClass(PROCESS_MANAGER_CLASS)
+            env.classLoader.loadClass(PROCESS_MANAGER_CLASS)
         } catch (ignored: ClassNotFoundException) {
-            logSkip("$PROCESS_MANAGER_CLASS absent, $ALLOW_AUTO_START_METHOD not hooked")
+            env.logSkip("$PROCESS_MANAGER_CLASS absent, $ALLOW_AUTO_START_METHOD not hooked")
             return
         }
         val methods: List<Method> = processManagerClass.declaredMethods.filter {
@@ -206,18 +186,18 @@ internal object AutostartGate {
                 it.parameterCount == 2
         }
         if (methods.isEmpty()) {
-            logSkip("$PROCESS_MANAGER_CLASS#$ALLOW_AUTO_START_METHOD absent, skip")
+            env.logSkip("$PROCESS_MANAGER_CLASS#$ALLOW_AUTO_START_METHOD absent, skip")
             return
         }
         for (method in methods) {
             method.isAccessible = true
-            hookE(method).intercept { chain: XposedInterface.Chain ->
+            env.hookE(method).intercept { chain: XposedInterface.Chain ->
                 val result = chain.proceed()
                 try {
                     if (java.lang.Boolean.FALSE == result && isReleaseEnabled()) {
                         val target = chain.getArg(0) as? String
                         if (target != null &&
-                            AllowlistGate.moduleAppliesTo(module, systemContext, target)
+                            AllowlistGate.moduleAppliesTo(module, env::systemContext, target)
                         ) {
                             if (!processStartGateBypassLogged) {
                                 processStartGateBypassLogged = true

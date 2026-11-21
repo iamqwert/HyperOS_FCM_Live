@@ -96,27 +96,21 @@ internal object PowerKeeperHooks {
      * a uid restriction, and it only fires on sleep-mode exit or a
      * MILLET_NO_RESTRICT_APP repair, neither of which recurs on its own.
      */
-    internal fun hookAppStandbyUidState(
-        module: XposedInterface,
-        packageName: String,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        isGmsUid: (Int) -> Boolean
-    ) {
+    internal fun hookAppStandbyUidState(env: HookEnv, packageName: String) {
+        val module = env.module
         try {
             val appStandbyControllerClass =
-                classLoader.loadClass("com.miui.powerkeeper.controller.AppStandbyController")
+                env.classLoader.loadClass("com.miui.powerkeeper.controller.AppStandbyController")
             try {
                 val setUidStateMethod = appStandbyControllerClass.getDeclaredMethod(
                     "setUidState",
                     Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType
                 )
-                hookE(setUidStateMethod).intercept { chain: XposedInterface.Chain ->
+                env.hookE(setUidStateMethod).intercept { chain: XposedInterface.Chain ->
                     val args = chain.args.toTypedArray()
                     if (args.size > 1 && args[0] is Int) {
                         val uid = args[0] as Int
-                        if (isGmsUid(uid) && java.lang.Boolean.TRUE != args[1]) {
+                        if (env.isGmsUid(uid) && java.lang.Boolean.TRUE != args[1]) {
                             args[1] = true
                             module.logGated(
                                 Log.INFO, HookerSupport.TAG,
@@ -137,10 +131,10 @@ internal object PowerKeeperHooks {
                         " (pkg=$packageName, userId=${android.os.Process.myUid() / 100000})"
                 )
             } catch (e: NoSuchMethodException) {
-                logSkip("AppStandbyController#setUidState absent, skip")
+                env.logSkip("AppStandbyController#setUidState absent, skip")
             }
         } catch (e: ClassNotFoundException) {
-            logSkip("AppStandbyController class absent, skip")
+            env.logSkip("AppStandbyController class absent, skip")
         }
     }
 
@@ -167,13 +161,9 @@ internal object PowerKeeperHooks {
     //   helper. Condition to change: a generation that reads the list without
     //   going through UserConfigureHelper — and even then, another query-time
     //   hook beats a persisted write, which would outlive the module.
-    internal fun hookNoRestrictList(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        systemContext: () -> Context?
-    ) {
+    internal fun hookNoRestrictList(env: HookEnv) {
+        val module = env.module
+        val classLoader = env.classLoader
         // Source-level: ensure getNoRestrictApps() always returns GMS.
         try {
             val userConfigureHelperClass =
@@ -181,19 +171,19 @@ internal object PowerKeeperHooks {
             val getNoRestrictAppsMethod = userConfigureHelperClass.getDeclaredMethod(
                 "getNoRestrictApps", Context::class.java
             )
-            hookE(getNoRestrictAppsMethod).intercept { chain: XposedInterface.Chain ->
+            env.hookE(getNoRestrictAppsMethod).intercept { chain: XposedInterface.Chain ->
                 val result = chain.proceed()
                 try {
                     if (result is MutableList<*>) {
                         @Suppress("UNCHECKED_CAST")
                         val list = result as MutableList<Any?>
                         val had = list.contains(HookerSupport.GMS_PACKAGE_NAME)
-                        addIfAbsent(list, HookerSupport.GMS_PACKAGE_NAME)
+                        HookerSupport.addIfAbsent(list, HookerSupport.GMS_PACKAGE_NAME)
                         noRestrictQueryVerdict(module, had, list.size)
                     } else if (result is List<*>) {
                         val had = result.contains(HookerSupport.GMS_PACKAGE_NAME)
                         val copy = ArrayList<Any?>(result)
-                        addIfAbsent(copy, HookerSupport.GMS_PACKAGE_NAME)
+                        HookerSupport.addIfAbsent(copy, HookerSupport.GMS_PACKAGE_NAME)
                         noRestrictQueryVerdict(module, had, copy.size)
                         return@intercept copy
                     }
@@ -209,9 +199,9 @@ internal object PowerKeeperHooks {
             }
             module.deoptimize(getNoRestrictAppsMethod)
         } catch (e: NoSuchMethodException) {
-            logSkip("UserConfigureHelper#getNoRestrictApps absent, skip")
+            env.logSkip("UserConfigureHelper#getNoRestrictApps absent, skip")
         } catch (e: ClassNotFoundException) {
-            logSkip("UserConfigureHelper class absent, skip")
+            env.logSkip("UserConfigureHelper class absent, skip")
         }
 
         // P15 (the UserConfigureHelper writer heuristic: force setBgControl args
@@ -236,19 +226,15 @@ internal object PowerKeeperHooks {
             val dealNoRestrictAppMethod = activeStateControllerClass.getDeclaredMethod(
                 "dealNoRestrictApp"
             )
-            hookE(dealNoRestrictAppMethod).intercept { chain: XposedInterface.Chain ->
+            env.hookE(dealNoRestrictAppMethod).intercept { chain: XposedInterface.Chain ->
                 chain.proceed()
-                try {
-                    GmsSupport.ensureGmsInMilletSetting(module, systemContext)
-                } catch (t: Throwable) {
-                    module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to repair MILLET_NO_RESTRICT_APP", t)
-                }
+                GmsSupport.postEnsureGmsInMilletSetting(module, env::systemContext)
             }
             module.deoptimize(dealNoRestrictAppMethod)
         } catch (e: NoSuchMethodException) {
-            logSkip("ActiveStateController#dealNoRestrictApp absent, skip")
+            env.logSkip("ActiveStateController#dealNoRestrictApp absent, skip")
         } catch (e: ClassNotFoundException) {
-            logSkip("ActiveStateController class absent, skip")
+            env.logSkip("ActiveStateController class absent, skip")
         }
     }
 
@@ -277,64 +263,12 @@ internal object PowerKeeperHooks {
         )
     }
 
-    private fun addIfAbsent(list: MutableList<Any?>, value: String) {
-        if (!list.contains(value)) {
-            list.add(value)
-        }
-    }
-
-    /**
-     * Experiment (default off): keep WeChat out of the AOSP battery-optimization
-     * whitelist — the Doze "user" section Settings shows as 未优化, persisted
-     * to /data/system/deviceidle.xml.
-     *
-     * **Why a push module ships this at all** (field experience from the Chinese
-     * community, recorded here because "why" is not derivable from the code):
-     * for a WeChat that is meant to keep receiving FCM, the wanted end state is
-     * **「优化」— not 「不优化」**. WeChat only enters the cached-process path and
-     * gets delivered through the ordinary FCM route when the system considers it
-     * optimizable; leaving it doze-exempt sends it down a different route and the
-     * push does not arrive. 澎湃（HyperOS 的国内版策略）默认、而且每次电源模式
-     * 变化都会把微信重新写成「不优化」, so the manual switch alone is not enough:
-     * the user must (1) turn this experiment on and (2) set WeChat to 「优化」
-     * themselves — this hook is what keeps step 2 from being undone. It reads
-     * "opposite to the module's goal" only if the goal is mis-stated as "make
-     * WeChat exempt"; the actual goal is "let WeChat be delivered", and on this
-     * ROM that means optimizable.
-     *
-     * ROM forensics (OS4 V816): `com.miui.powerkeeper.controller
-     * .DeviceIdleController$1` hardcodes the domestic (non-international
-     * build) always-white set to WeChat / QQ / QQ-lite / deskclock. On every
-     * power-mode change the controller resolves those packages to appIds and
-     * reaches `DeviceIdlePolicyHelper.e` → `c` →
-     * `CommonAdapter.addPowerSaveWhitelistApps` — the single invoke in this
-     * process into the AOSP `IDeviceIdleController.addPowerSaveWhitelistApps`
-     * binder, the call that both flips the app to "not optimized" in Settings
-     * and writes deviceidle.xml. So a manual "optimized" pick survives exactly
-     * one cycle: the next power-mode change re-adds WeChat and writes it back.
-     * The cloud feature `doze_whitelist_apps` only reaches the feature
-     * database; the whitelist write itself still funnels through this method.
-     *
-     * The hook removes WeChat from the argument array and passes the rest
-     * through untouched — QQ, the clock and every cloud entry behave as
-     * before, and the forced-doze remove/restore pairing above this funnel is
-     * unaffected (an add that never happened needs no removal). It does not
-     * remove an entry already stored in deviceidle.xml: clearing that is one
-     * manual flip of WeChat back to "optimized" in Settings, after which this
-     * hook is what keeps it from coming back. The filter runs behind the cheap
-     * gates (switch off → pass, WeChat not in the array → pass), so its cost
-     * is bounded by how rarely powerkeeper touches the whitelist at all.
-     */
-    internal fun hookWechatDozeKeepout(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit
-    ) {
+    internal fun hookWechatDozeKeepout(env: HookEnv) {
+        val module = env.module
         val adapterClass = try {
-            classLoader.loadClass("com.miui.powerkeeper.utils.CommonAdapter")
+            env.classLoader.loadClass("com.miui.powerkeeper.utils.CommonAdapter")
         } catch (t: Throwable) {
-            logSkip("CommonAdapter absent, doze-keepout skip")
+            env.logSkip("CommonAdapter absent, doze-keepout skip")
             return
         }
         // Found by name and arity rather than by parameter types: the first
@@ -344,11 +278,11 @@ internal object PowerKeeperHooks {
             it.name == "addPowerSaveWhitelistApps" && it.parameterTypes.size == 2
         }
         if (addMethod == null) {
-            logSkip("CommonAdapter#addPowerSaveWhitelistApps absent, doze-keepout skip")
+            env.logSkip("CommonAdapter#addPowerSaveWhitelistApps absent, doze-keepout skip")
             return
         }
         addMethod.isAccessible = true
-        hookE(addMethod).intercept { chain: XposedInterface.Chain ->
+        env.hookE(addMethod).intercept { chain: XposedInterface.Chain ->
             val pkgs = chain.getArg(1) as? Array<String>
             if (pkgs == null || !isWechatDozeKeepoutEnabled(module)) {
                 return@intercept chain.proceed()

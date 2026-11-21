@@ -27,18 +27,26 @@ internal object FcmAppScan {
 
     /** Error labels passed to [onQueryError]; the app side logs them verbatim. */
     const val ERROR_MESSAGING = "Failed to query FCM messaging services"
-    const val ERROR_INSTANCE_ID = "Failed to query instance-id receivers"
+    const val ERROR_INSTANCE_ID = "Failed to query instance-id services"
     const val ERROR_C2DM = "Failed to query C2DM receivers"
 
     /**
-     * The raw marker sets, one per manifest query. Kept separate rather than
-     * merged into a package→flags map because the admission rule (see
-     * [isFcmClient]) counts *kinds* of markers, not their sum.
+     * The raw marker sets, one per manifest query.
+     *
+     * - [iid]: packages declaring a `com.google.firebase.INSTANCE_ID_EVENT` `<service>`
+     *   (legacy FirebaseInstanceIdService / third-party IID services).
+     * - [messaging]: packages declaring a `com.google.firebase.MESSAGING_EVENT` `<service>`.
+     * - [receive]: all packages declaring a `com.google.android.c2dm.intent.RECEIVE` `<receiver>`.
+     * - [c2dmSendReceive]: subset of [receive] whose receiver requires
+     *   `com.google.android.c2dm.permission.SEND` (standard GMS-authenticated FCM/GCM entrypoints,
+     *   excluding unrelated legacy receivers such as `android`'s `MasterClearReceiver`).
+     * - [googleReceive]: subset of [receive] resolving to Google's GnpCore `PushReceiver`.
      */
     class Markers(
         @JvmField val iid: Set<String>,
         @JvmField val messaging: Set<String>,
         @JvmField val receive: Set<String>,
+        @JvmField val c2dmSendReceive: Set<String>,
         @JvmField val googleReceive: Set<String>,
         /** True when at least one query threw; the results are then partial. */
         @JvmField val failed: Boolean
@@ -56,9 +64,10 @@ internal object FcmAppScan {
         pm: PackageManager,
         onQueryError: (label: String, t: Throwable) -> Unit
     ): Markers {
-        val byIidReceiver = HashSet<String>()
+        val byIidService = HashSet<String>()
         val byMessagingEvent = HashSet<String>()
         val byReceive = HashSet<String>()
+        val byC2dmSendReceive = HashSet<String>()
         val byGooglePushReceiver = HashSet<String>()
         var failed = false
         try {
@@ -76,12 +85,14 @@ internal object FcmAppScan {
             onQueryError(ERROR_MESSAGING, t)
         }
         try {
-            val receivers = pm.queryBroadcastReceivers(
+            // INSTANCE_ID_EVENT is declared on <service> (FirebaseInstanceIdService
+            // and legacy wrappers), never on a BroadcastReceiver.
+            val services = pm.queryIntentServices(
                 Intent(HookerSupport.ACTION_INSTANCE_ID_EVENT),
                 PackageManager.ResolveInfoFlags.of(0)
             )
-            for (ri in receivers) {
-                ri.activityInfo?.let { byIidReceiver.add(it.packageName) }
+            for (ri in services) {
+                ri.serviceInfo?.let { byIidService.add(it.packageName) }
             }
         } catch (t: Throwable) {
             failed = true
@@ -95,6 +106,9 @@ internal object FcmAppScan {
             for (ri in receivers) {
                 val info = ri.activityInfo ?: continue
                 byReceive.add(info.packageName)
+                if (info.permission == HookerSupport.PERMISSION_C2DM_SEND) {
+                    byC2dmSendReceive.add(info.packageName)
+                }
                 if (HookerSupport.isGooglePushReceiverClass(info.name)) {
                     byGooglePushReceiver.add(info.packageName)
                 }
@@ -104,50 +118,33 @@ internal object FcmAppScan {
             onQueryError(ERROR_C2DM, t)
         }
         return Markers(
-            byIidReceiver, byMessagingEvent, byReceive, byGooglePushReceiver, failed
+            byIidService,
+            byMessagingEvent,
+            byReceive,
+            byC2dmSendReceive,
+            byGooglePushReceiver,
+            failed
         )
     }
 
     /**
-     * The one rule, in one place: **any two of ②③④, or ② alone, ③ alone, or ⑤ alone.**
+     * Admission rule:
+     * - [hasIidService] (`com.google.firebase.INSTANCE_ID_EVENT` service), OR
+     * - [hasMessagingEvent] (`com.google.firebase.MESSAGING_EVENT` service), OR
+     * - [hasC2dmSendReceive] (`com.google.android.c2dm.intent.RECEIVE` receiver gated by
+     *   `com.google.android.c2dm.permission.SEND`), OR
+     * - [hasGooglePushReceiver] (`com.google.android.libraries.notifications.*PushReceiver`).
      *
-     * Written out as an explicit table rather than as arithmetic on a count,
-     * because the accepted shapes are not a count — "② alone" and "③ alone"
-     * are each one marker while ②+③ is two, and `④ alone` has to be rejected
-     * even though it is also one marker. A boolean table says that;
-     * `sum >= 2 || has2 || has3` hides it.
-     *
-     * ⑤ — the RECEIVE receiver resolves to Google's notifications-platform
-     * PushReceiver — is accepted alone: Google's own apps carry that
-     * entrypoint and none of the Firebase SDK markers, and the class
-     * namespace is a merged Google library that third-party apps do not
-     * reproduce.
+     * Bare `c2dm.intent.RECEIVE` without `com.google.android.c2dm.permission.SEND` (e.g.
+     * `android`'s `MasterClearReceiver`, gated by `MASTER_CLEAR`) is rejected.
      */
     fun isFcmClient(
-        hasIidReceiver: Boolean,
+        hasIidService: Boolean,
         hasMessagingEvent: Boolean,
-        hasReceive: Boolean,
+        hasC2dmSendReceive: Boolean,
         hasGooglePushReceiver: Boolean
-    ): Boolean {
-        // ②③④: any two.
-        val amongActions =
-            (hasIidReceiver && hasMessagingEvent) ||
-                (hasIidReceiver && hasReceive) ||
-                (hasMessagingEvent && hasReceive)
-        if (amongActions) {
-            return true
-        }
-        // ② alone or ③ alone.
-        if (hasIidReceiver || hasMessagingEvent) {
-            return true
-        }
-        // ⑤ alone: Google's own push entrypoint.
-        if (hasGooglePushReceiver) {
-            return true
-        }
-        // Everything else: ④ alone, or nothing.
-        return false
-    }
+    ): Boolean =
+        hasIidService || hasMessagingEvent || hasC2dmSendReceive || hasGooglePushReceiver
 
     /**
      * The marker-derived FCM-client set: every package the admission rule
@@ -167,16 +164,50 @@ internal object FcmAppScan {
         val fcm = HashSet<String>()
         for (pkg in candidates) {
             if (isFcmClient(
-                    markers.iid.contains(pkg),          // ②
-                    markers.messaging.contains(pkg),    // ③
-                    markers.receive.contains(pkg),      // ④
-                    markers.googleReceive.contains(pkg) // ⑤
+                    hasIidService = markers.iid.contains(pkg),
+                    hasMessagingEvent = markers.messaging.contains(pkg),
+                    hasC2dmSendReceive = markers.c2dmSendReceive.contains(pkg),
+                    hasGooglePushReceiver = markers.googleReceive.contains(pkg)
                 )
             ) {
                 fcm.add(pkg)
             }
         }
         return fcm
+    }
+
+    /**
+     * Single-package counterpart of [queryFcmPackages]: runs the exact same
+     * three manifest queries scoped to [packageName] and evaluates them through
+     * [isFcmClient], so `ProcessCleanerHooks` and the app list / auto-check
+     * scan can never drift on which packages count as FCM clients.
+     */
+    fun declaresFcm(pm: PackageManager, packageName: String): Boolean {
+        val iidIntent = Intent(HookerSupport.ACTION_INSTANCE_ID_EVENT).setPackage(packageName)
+        val hasIidService = pm.queryIntentServices(iidIntent, 0).isNotEmpty()
+        val msgIntent = Intent(HookerSupport.ACTION_MESSAGING_EVENT).setPackage(packageName)
+        val hasMessagingEvent = pm.queryIntentServices(msgIntent, 0).isNotEmpty()
+        var hasC2dmSendReceive = false
+        var hasGooglePushReceiver = false
+        val receiveIntent = Intent(HookerSupport.ACTION_REMOTE_INTENT).setPackage(packageName)
+        for (ri in pm.queryBroadcastReceivers(receiveIntent, 0)) {
+            val info = ri.activityInfo ?: continue
+            if (info.permission == HookerSupport.PERMISSION_C2DM_SEND) {
+                hasC2dmSendReceive = true
+            }
+            if (HookerSupport.isGooglePushReceiverClass(info.name)) {
+                hasGooglePushReceiver = true
+            }
+            if (hasC2dmSendReceive && hasGooglePushReceiver) {
+                break
+            }
+        }
+        return isFcmClient(
+            hasIidService = hasIidService,
+            hasMessagingEvent = hasMessagingEvent,
+            hasC2dmSendReceive = hasC2dmSendReceive,
+            hasGooglePushReceiver = hasGooglePushReceiver
+        )
     }
 
     /**

@@ -1,7 +1,6 @@
 package io.github.iamqwert.hypergreeze.ui
 
 import android.view.HapticFeedbackConstants
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.OverscrollEffect
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -42,11 +41,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchColors
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
@@ -68,13 +66,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.boundsInWindow
@@ -85,6 +83,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -95,24 +94,19 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import io.github.iamqwert.hypergreeze.R
-import io.github.iamqwert.hypergreeze.theme.AppearanceState
 import io.github.iamqwert.hypergreeze.theme.LocalAppShapes
 import io.github.iamqwert.hypergreeze.theme.LocalAppSurfaces
 import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
 import io.github.iamqwert.hypergreeze.theme.ThemeEngine
-import io.github.iamqwert.hypergreeze.theme.UiStyle
 import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassBackdrop
 import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassSpec
 import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassDropdownItem
 import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassDropdownMenu
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassIconButton
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassRecipes
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.BackdropEffectScope
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurBlendMode
 import top.yukonga.miuix.kmp.blur.BlurColors
-import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.colorControls
 import top.yukonga.miuix.kmp.blur.layerBackdrop
@@ -126,18 +120,10 @@ import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
-import top.yukonga.miuix.kmp.basic.TopAppBar as MiuixTopAppBar
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar as MiuixSmallTopAppBar
-import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.basic.ArrowRight
-import top.yukonga.miuix.kmp.icon.extended.Back
-import top.yukonga.miuix.kmp.overlay.OverlayListPopup
-import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -558,7 +544,7 @@ internal fun softGlassBarMaterialProgress(fraction: Float): Float {
 }
 
 /** The settle the plate's material progress animates along, as the reference runs it. */
-internal val SOFT_GLASS_REVEAL_FADE = tween<Float>(durationMillis = 280, easing = FastOutSlowInEasing)
+internal val SOFT_GLASS_REVEAL_FADE = tween<Float>(durationMillis = 350, easing = LinearEasing)
 
 /**
  * The glass tints' dark read. The app's own palette owns darkness — it can force
@@ -1295,7 +1281,20 @@ fun SettingsMenuCard(
     menuMinWidth: Dp = MENU_MIN_WIDTH,
     /** Group slot, as in [SettingsSwitchCard]; the defaults are a lone row. */
     first: Boolean = true,
-    last: Boolean = true
+    last: Boolean = true,
+    /**
+     * False dims the Material row to M3's 38% disabled ink, removes click
+     * affordance and declares `disabled()` semantics (e.g. the palette row
+     * locked to CMF under Spec 2026). Unused under Miuix-based styles.
+     */
+    enabled: Boolean = true,
+    /**
+     * When true (default), holds the trailing value inside [TRAILING_SLOT_WIDTH]
+     * so short numeric values align vertically with neighbouring switch tracks.
+     * Pass false for multi-word labels (e.g. appearance pickers) that need
+     * their natural width. Material-only.
+     */
+    alignValueToSwitchSlot: Boolean = true
 ) {
     if (softGlassChrome()) {
         // 柔光玻璃 wears MIUIX's NEW dropdown (miuix-glass's
@@ -1355,37 +1354,6 @@ fun SettingsMenuCard(
         }
         return
     }
-    if (LocalUiStyle.current.isMiuixBased) {
-        // The bar has to be told this popup is open: its veil lands inside the
-        // layer the floating pill records, and glass over that layer washes the
-        // pill out with the page instead of leaving it untouched behind the
-        // popup. See [PopupOverlay].
-        val overlayKey = remember { Any() }
-        DisposableEffect(overlayKey) {
-            onDispose { PopupOverlay.clear(overlayKey) }
-        }
-        // The menu's option rows tick on the way down, like every other popup
-        // under this look — the pick lands in the preference's own callback.
-        val view = LocalView.current
-        MiuixCardSurface(shape = connectedGroupShape(first, last), modifier = modifier) {
-            // Miuix's own dropdown row: the value with the up-down arrow beside
-            // it, a menu whose selected entry is blue with a check, and the page
-            // dimmed behind the popup. Needs the Miuix Scaffold, which
-            // [PageScaffold] supplies under this look.
-            OverlayDropdownPreference(
-                items = entries,
-                selectedIndex = currentIndex,
-                title = title,
-                summary = description.ifEmpty { null },
-                onSelectedIndexChange = { picked ->
-                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                    onPick(picked)
-                },
-                onExpandedChange = { PopupOverlay.report(overlayKey, it) }
-            )
-        }
-        return
-    }
     var expanded by remember { mutableStateOf(false) }
     val shapes = LocalAppShapes.current
     val shape = connectedGroupShape(first, last)
@@ -1401,13 +1369,20 @@ fun SettingsMenuCard(
                 modifier = Modifier
                     // See [MenuItemRow]: the clip has to come before the click.
                     .clip(shape)
-                    .clickable(role = Role.Button) {
-                        // The opening tap of a value menu — the same light
-                        // confirm the overflow buttons fire (KEYBOARD_TAP),
-                        // so every menu in the app opens with one tick.
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        expanded = true
-                    }
+                    .then(
+                        if (enabled) {
+                            Modifier.clickable(role = Role.Button) {
+                                // The opening tap of a value menu — the same light
+                                // confirm the overflow buttons fire (KEYBOARD_TAP),
+                                // so every menu in the app opens with one tick.
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                expanded = true
+                            }
+                        } else {
+                            Modifier.semantics { disabled() }
+                        }
+                    )
+                    .alpha(if (enabled) 1f else 0.38f)
                     .padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1428,23 +1403,32 @@ fun SettingsMenuCard(
                         )
                     }
                 }
-                // The value is held in the slot a switch would occupy
-                // ([TRAILING_SLOT_WIDTH]) so the description beside it wraps at
-                // the same column as the switch rows — and inside that slot it
-                // is centred on the switch's own track rather than pushed to
-                // the card's edge, which is what puts the number on the same
-                // vertical axis as the switch on the row above instead of
-                // sitting under the switch's right half.
-                Box(
-                    modifier = Modifier
-                        .width(TRAILING_SLOT_WIDTH)
-                        .padding(start = SWITCH_TRAILING_GAP),
-                    contentAlignment = Alignment.Center
-                ) {
-                    // Same accent role as the appearance rows: the one place on
-                    // the page the active choice is named, so it moves with the
-                    // seed.
+                if (alignValueToSwitchSlot) {
+                    // The value is held in the slot a switch would occupy
+                    // ([TRAILING_SLOT_WIDTH]) so the description beside it wraps at
+                    // the same column as the switch rows — and inside that slot it
+                    // is centred on the switch's own track rather than pushed to
+                    // the card's edge, which is what puts the number on the same
+                    // vertical axis as the switch on the row above instead of
+                    // sitting under the switch's right half.
+                    Box(
+                        modifier = Modifier
+                            .width(TRAILING_SLOT_WIDTH)
+                            .padding(start = SWITCH_TRAILING_GAP),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Same accent role as the appearance rows: the one place on
+                        // the page the active choice is named, so it moves with the
+                        // seed.
+                        Text(
+                            text = current,
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                } else {
                     Text(
+                        modifier = Modifier.padding(start = 12.dp),
                         text = current,
                         color = MaterialTheme.colorScheme.primary,
                         style = MaterialTheme.typography.bodyMedium
@@ -1550,18 +1534,6 @@ fun NavCard(
             if (trailing != null) {
                 trailing()
             }
-            if (LocalUiStyle.current.isMiuixBased) {
-                // The Miuix "this leads somewhere" mark: a chevron after the
-                // trailing slot, in the quiet grey of the bar's other affordances.
-                Spacer(modifier = Modifier.width(8.dp))
-                Image(
-                    imageVector = MiuixIcons.Basic.ArrowRight,
-                    contentDescription = null,
-                    colorFilter = ColorFilter.tint(
-                        MiuixTheme.colorScheme.onSurfaceVariantActions
-                    )
-                )
-            }
         }
     }
 }
@@ -1665,14 +1637,11 @@ internal fun MiuixSwitchSlice(
             role = Role.Switch,
             endActions = {
                 key(generation) {
-                    // The library's switch rows leave 8dp between the control and
-                    // the row's own 16dp inside margin (SwitchPreference's end
-                    // padding) — without it the switch sits tighter to the card
-                    // edge than every library row.
+                    // Flush against BasicComponent's 16dp inside margin, matching
+                    // SwitchPreference, ArrowPreference and DropdownArrowEndAction.
                     MiuixSwitch(
                         checked = checked,
-                        onCheckedChange = { toggle() },
-                        modifier = Modifier.padding(end = MiuixMetrics.SwitchEndGap)
+                        onCheckedChange = { toggle() }
                     )
                 }
             }
@@ -1746,15 +1715,10 @@ fun MiuixSliderCard(
 const val TOP_BAR_PLATE_ALPHA = 0.6f
 
 /**
- * Whether the chrome a Miuix page draws for itself — its bar's controls — wears
- * 柔光玻璃. True only under [UiStyle.SoftGlass]: the material is what that style
- * *is*, so a page wearing it while the pick says plain Miuix would be the style
- * row lying about what it does. The bar's own pane is not this — it stays the
- * frost on the bars this look draws for itself (see [MiuixGlassTopAppBar]); this answers for
- * the controls that sit on it.
+ * Whether the chrome a page draws wears 柔光玻璃 (OS 4 Miuix).
  */
 @Composable
-internal fun softGlassChrome(): Boolean = LocalUiStyle.current == UiStyle.SoftGlass
+internal fun softGlassChrome(): Boolean = LocalUiStyle.current.isMiuixBased
 
 /**
  * The layer a Miuix page records so its OWN chrome has something to refract.
@@ -1780,87 +1744,6 @@ internal fun rememberPageLayerBackdrop(): LayerBackdrop {
         drawContent()
     }
 }
-
-/**
- * The leading control of a Miuix page bar.
- *
- * Bare is the library's own composition and what every Miuix page shipped with.
- * The glass is 柔光玻璃's: the same 44dp plate the rest of that look's chrome
- * wears ([SoftGlassIconButton]), which the bar carries as its sibling of the
- * page's recorded layer — see [rememberPageLayerBackdrop] for why that has to be
- * the page's own layer rather than the shell's. The plate is the look's chrome
- * for a bar with content under it, so its material fades with the page's
- * collapse ([LocalSoftGlassBarReveal]) — the reference's own construction, one
- * control whose glass plate breathes over a glyph that never changes identity,
- * not two controls cross-fading.
- *
- * The glyph keeps the bare control's ink and size in both, so the material is the
- * only difference between the two.
- */
-@Composable
-private fun MiuixBackControl(
-    description: String,
-    onClick: () -> Unit,
-    glass: Boolean
-) {
-    val glyph: @Composable () -> Unit = {
-        Icon(
-            imageVector = MiuixIcons.Back,
-            contentDescription = description,
-            tint = MiuixTheme.colorScheme.onSurface,
-            modifier = Modifier.size(24.dp)
-        )
-    }
-    if (glass) {
-        // One control, the reference way: the plate's material alpha rides the
-        // collapse progress, so at the page's top this reads as a bare glyph —
-        // same button, same spot, the glass simply not there yet.
-        val reveal by animateFloatAsState(
-            targetValue = LocalSoftGlassBarReveal.current,
-            animationSpec = SOFT_GLASS_REVEAL_FADE
-        )
-        SoftGlassIconButton(
-            onClick = onClick,
-            recipe = SoftGlassRecipes.floatingNavigation(LocalSoftGlassSpec.current.fineTuning),
-            materialAlpha = reveal,
-            content = glyph
-        )
-    } else {
-        IconButton(onClick = onClick, content = glyph)
-    }
-}
-
-/** The OS 3 bar's frost: the demo's `BlurredBar` radius, in dp. */
-private const val FROST_BAR_BLUR = 25f
-
-/**
- * How much of the page colour the frost keeps over the blurred rows beneath —
- * the demo's own 0.8, high enough to keep the title legible.
- */
-private const val FROST_BAR_TINT_ALPHA = 0.8f
-
-/**
- * The OS 3 title bar's frost, the demo's `BlurredBar` recipe: a backdrop blur
- * of [FROST_BAR_BLUR] with the page colour blended over it at
- * [FROST_BAR_TINT_ALPHA]. The bar drawn on top stays transparent — the frost is
- * its surface — and the page body is the recorded layer (see
- * [rememberPageLayerBackdrop]).
- */
-@Composable
-private fun Modifier.frostedBar(backdrop: LayerBackdrop): Modifier = this
-    .fillMaxWidth()
-    .textureBlur(
-        backdrop = backdrop,
-        shape = RectangleShape,
-        blurRadius = FROST_BAR_BLUR,
-        colors = BlurDefaults.blurColors(
-            blendColors = listOf(
-                BlendColorEntry(
-                    MaterialTheme.colorScheme.background.copy(alpha = FROST_BAR_TINT_ALPHA)
-                )
-            )
-        )
-    )
 
 /**
  * The page frame every secondary page uses, in whichever shell the app is
@@ -1959,27 +1842,9 @@ fun PageScaffold(
     if (LocalUiStyle.current.isMiuixBased) {
         val title = stringResource(titleRes)
         val scrollBehavior = MiuixScrollBehavior()
-        // The page's own layer, and the controls that read it, described where
-        // they are built below. The record serves two readers — 柔光玻璃's pane
-        // and plates, and the OS 3 bar's frost — and is skipped only by the
-        // floating OS 3 frame, which wears neither: a record costs a RenderNode
-        // capture whether or not it is drawn.
-        val chromeGlass = softGlassChrome()
-        // The floating-bar row is a Miuix-look toggle with a second job: it
-        // also picks that look's title bar. Off — the frosted bar (the demo's
-        // BlurredBar recipe, the page's layer blurred behind a transparent
-        // bar); on — [MiuixGlassTopAppBar]'s band, the same glass style
-        // 柔光玻璃 wears. Reading the state here subscribes the bar to the row,
-        // so the two change together without a restart.
-        val floatingBar by AppearanceState.floatingBar
-        // Bar assignment:
-        //  - every 柔光玻璃 page, and every plain Miuix page with the floating
-        //    bar ON, wears the glass band — the records page included, whose
-        //    strips mount INSIDE it as [MiuixGlassTopAppBar]'s bottomContent;
-        //  - the remaining plain Miuix pages wear the frosted bar, with the
-        //    about page still compact.
-        val useGlassBar = chromeGlass || floatingBar
+        val blurEnabled = LocalSoftGlassSpec.current.enabled
         val pageBackdrop = rememberPageLayerBackdrop()
+        val activeBackdrop = if (blurEnabled) pageBackdrop else null
         MiuixScaffold(
             modifier = modifier,
             // The page colour on both the scaffold and the bar, not Miuix's
@@ -1987,153 +1852,31 @@ fun PageScaffold(
             // defaults would disagree with it behind the content and in the bar.
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                // The leading control, whichever bar wears it. The library's own
-                // arrow in the library's own bare button — every floating-plate
-                // attempt here OUTSIDE the soft-glass material (grey outline,
-                // bright puck with halo, the library's FAB, a painted crescent
-                // shadow) ended in mud one way or another, so the bare control
-                // stays the icon it was. 柔光玻璃 is the one plate that is not a
-                // hand-rolled attempt: it is the material the rest of that look
-                // is milled from — see [MiuixBackControl].
-                val backControl: @Composable () -> Unit = if (showBack) {
-                    {
-                        val description = stringResource(io.github.iamqwert.hypergreeze.R.string.back)
-                        MiuixBackControl(
-                            description = description,
-                            onClick = onBack,
-                            glass = chromeGlass
-                        )
-                    }
-                } else {
-                    {}
-                }
-                // The bar never paints itself: the glass band and the OS 3
-                // frost are each its surface, and a solid bar colour would sit
-                // on top of them.
-                val barColor = Color.Transparent
-                // The bars share one composition-local envelope: the controls
-                // on the bar — its leading control and the page's own actions —
-                // read the page's OWN layer and the look's reveal. The provider
-                // wraps the bar alone, because only the bar reads it; the page
-                // body is the recorded node and reads nothing. The reveal is the
-                // look's bare-at-the-top rule: the plates appear once the page
-                // has scrolled under the bar.
-                val reveal = softGlassBarMaterialProgress(
-                    barScrollProgress?.invoke() ?: scrollBehavior.state.collapsedFraction
-                )
+                val travel = barScrollProgress?.invoke()
+                    ?: scrollBehavior.state.collapsedFraction
+                val reveal = softGlassBarMaterialProgress(travel)
                 CompositionLocalProvider(
-                    LocalSoftGlassBackdrop provides pageBackdrop,
+                    LocalSoftGlassBackdrop provides activeBackdrop,
                     LocalSoftGlassBarReveal provides reveal
                 ) {
-                    if (barExtension != null) {
-                        if (useGlassBar) {
-                            // ONE gradient over the whole pinned chrome: the
-                            // strips mount as the bar's bottomContent, so the
-                            // band measures over title bar AND strips and
-                            // overhangs their foot. No solid paint anywhere —
-                            // rows travel under both and fade out together.
-                            val travel = barScrollProgress?.invoke()
-                                ?: scrollBehavior.state.collapsedFraction
-                            MiuixGlassTopAppBar(
-                                title = title,
-                                scrolled = travel > 0f,
-                                showBack = showBack,
-                                backDescription = stringResource(
-                                    io.github.iamqwert.hypergreeze.R.string.back
-                                ),
-                                onBack = onBack,
-                                scrollBehavior = scrollBehavior,
-                                actions = actions,
-                                bottomContent = barExtension,
-                                scrollProgress = barScrollProgress
-                            )
+                    MiuixGlassTopAppBar(
+                        title = title,
+                        scrolled = travel > 0f,
+                        showBack = showBack,
+                        backDescription = stringResource(
+                            io.github.iamqwert.hypergreeze.R.string.back
+                        ),
+                        onBack = onBack,
+                        scrollBehavior = scrollBehavior,
+                        actions = actions,
+                        bottomContent = barExtension,
+                        compactTitleAlpha = if (barExtension == null && compactBar && barScrollProgress != null) {
+                            { ((travel - 0.35f) / 0.65f).coerceIn(0f, 1f) }
                         } else {
-                            // OS 3 bar: the demo's BlurredBar recipe — one
-                            // frost over title bar AND pinned strips, with the
-                            // strips riding INSIDE it, so content travelling
-                            // under the chrome reads as one blurred pane rather
-                            // than a clear bar meeting a solid row.
-                            Box(modifier = Modifier.frostedBar(pageBackdrop)) {
-                                Column {
-                                    MiuixTopAppBar(
-                                        title = title,
-                                        largeTitle = title,
-                                        color = barColor,
-                                        navigationIcon = backControl,
-                                        actions = actions,
-                                        scrollBehavior = scrollBehavior
-                                    )
-                                    barExtension.invoke(this)
-                                }
-                            }
-                        }
-                    } else if (!useGlassBar) {
-                        // OS 3 bar: the demo's BlurredBar recipe — the page's
-                        // own layer blurred 25dp behind a transparent bar.
-                        // Plain Miuix with the floating bar OFF lands here; the
-                        // about page keeps its compact title, whose hero still
-                        // drives that title's arrival.
-                        val travel = barScrollProgress?.invoke()
-                            ?: scrollBehavior.state.collapsedFraction
-                        Box(modifier = Modifier.frostedBar(pageBackdrop)) {
-                            if (compactBar && barScrollProgress != null) {
-                                MiuixSmallTopAppBar(
-                                    title = title,
-                                    titleColor = MiuixTheme.colorScheme.onSurface.copy(
-                                        alpha = ((travel - 0.35f) / 0.65f).coerceIn(0f, 1f)
-                                    ),
-                                    color = barColor,
-                                    navigationIcon = backControl,
-                                    actions = actions,
-                                    scrollBehavior = scrollBehavior
-                                )
-                            } else {
-                                MiuixTopAppBar(
-                                    title = title,
-                                    largeTitle = title,
-                                    color = barColor,
-                                    navigationIcon = backControl,
-                                    actions = actions,
-                                    scrollBehavior = scrollBehavior
-                                )
-                            }
-                        }
-                    } else {
-                        // The glass BAND: 柔光玻璃 on every page, and plain
-                        // Miuix when its floating bar is ON. The travel
-                        // driving the band and its control plate is the page's
-                        // own reading when it hands one in (the about page,
-                        // whose hero drives everything), else the bar's own
-                        // collapse fraction.
-                        val travel = barScrollProgress?.invoke()
-                            ?: scrollBehavior.state.collapsedFraction
-                        MiuixGlassTopAppBar(
-                            title = title,
-                            scrolled = travel > 0f,
-                            showBack = showBack,
-                            backDescription = stringResource(
-                                io.github.iamqwert.hypergreeze.R.string.back
-                            ),
-                            onBack = onBack,
-                            scrollBehavior = scrollBehavior,
-                            actions = actions,
-                            // The compact bar's title rides the page's travel,
-                            // the same ramp the control plate's reveal uses.
-                            compactTitleAlpha = if (compactBar && barScrollProgress != null) {
-                                { ((travel - 0.35f) / 0.65f).coerceIn(0f, 1f) }
-                            } else {
-                                null
-                            },
-                            // The page's own travel, when it hands one in: the
-                            // pane must not read a scroll behavior the page's
-                            // bar is pinned flat (the about page) or inherited
-                            // from another tab (the records page).
-                            scrollProgress = barScrollProgress
-                            // The bar samples no layer: 柔光玻璃 still records
-                            // one, but only its control plate reads it, through
-                            // the composition local above.
-                        )
-                    }
+                            null
+                        },
+                        scrollProgress = barScrollProgress
+                    )
                 }
             }
         ) { innerPadding ->
@@ -2159,24 +1902,13 @@ fun PageScaffold(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    // The body alone, and the bar above is composed OUTSIDE this
-                    // node — that is what lets the bar's controls read the layer
-                    // without the cycle; see [rememberPageLayerBackdrop]. Every
-                    // Miuix frame records now: 柔光玻璃's pane and plates read it,
-                    // the OS 3 bar's glass controls read it, and the OS 3 frost
-                    // blurs it.
-                    .layerBackdrop(pageBackdrop)
+                    .then(if (blurEnabled) Modifier.layerBackdrop(pageBackdrop) else Modifier)
                     // The bar reads the list's scroll through this connection;
                     // the page bodies all scroll, so putting it here covers them
                     // all without each page having to opt in.
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
             ) {
-                // Behind the body and under the glass bar — 柔光玻璃's pane and
-                // plates read it back through the recorded layer above. The
-                // provider is handed to the rows too (not to anything drawn on
-                // the record): a settings menu's popup is composed above this
-                // page, so the row captures the layer and takes it there.
-                CompositionLocalProvider(LocalSoftGlassBackdrop provides pageBackdrop) {
+                CompositionLocalProvider(LocalSoftGlassBackdrop provides activeBackdrop) {
                     background?.invoke(this)
                     content(bodyPadding)
                 }

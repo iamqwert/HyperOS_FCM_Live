@@ -28,26 +28,14 @@ object ThemePrefs {
 
     /** Which look the app is dressed in. See [UiStyle]. */
     const val UI_STYLE_MATERIAL = 0
-    /** Miuix: HyperOS row language — no leading icons, text to the margin. */
+    /** Miuix (OS 4 柔光玻璃): HyperOS row language — no leading icons, text to the margin. */
     const val UI_STYLE_MIUIX = 1
-    /** Miuix's own screens, milled from the 柔光玻璃 material. See [UiStyle.SoftGlass]. */
-    const val UI_STYLE_SOFT_GLASS = 2
-
-    /** 「Miuix样式」OS 3: the library's own look, i.e. [UI_STYLE_MIUIX]. */
-    const val MIUIX_FLAVOR_OS3 = 0
-    /** 「Miuix样式」OS 4: the 柔光玻璃 material, i.e. [UI_STYLE_SOFT_GLASS]. */
-    const val MIUIX_FLAVOR_OS4 = 1
+    /** Legacy value written by earlier builds for 柔光玻璃; migrated to [UI_STYLE_MIUIX]. */
+    const val UI_STYLE_SOFT_GLASS_LEGACY = 2
 
     private const val KEY_UI_STYLE = "ui_style"
-    /**
-     * Which HyperOS generation the Miuix look imitates. Only read while
-     * [KEY_UI_STYLE] is [UI_STYLE_MIUIX]: 界面风格 is now one pick (Material 3
-     * or Miuix) and this is the second row under it, 「Miuix样式」. Stored apart
-     * rather than as a third style so [uiStyle] can keep handing the renderers
-     * the same [UI_STYLE_MATERIAL] / [UI_STYLE_MIUIX] / [UI_STYLE_SOFT_GLASS]
-     * triple they already switch on.
-     */
-    private const val KEY_MIUIX_FLAVOR = "miuix_flavor"
+    /** Retired: OS 3 vs OS 4 flavor key, removed now that Miuix is OS 4 only. */
+    private const val KEY_MIUIX_FLAVOR_RETIRED = "miuix_flavor"
     /** Updating installs within this window of their first install read as fresh. */
     private const val UPGRADE_TOLERANCE_MS = 5_000L
     /** Monet inside the Miuix style only; the Material style has 动态颜色. */
@@ -59,26 +47,27 @@ object ThemePrefs {
      * [KEY_MIUIX_MONET] is on.
      */
     private const val KEY_MIUIX_ACCENT = "miuix_accent"
-    /**
-     * Whether the Miuix home foot floats: off is the library's docked pane, on
-     * is the texture-blur glass capsule hovered over the list. Only the Miuix
-     * look reads this — the SoftGlass look always floats its own glass tab bar,
-     * so the row is hidden there and the value ignored.
-     *
-     * This key was briefly replaced by a material row (`miuix_bar_material`);
-     * that experiment is reverted, and the first read migrates the material
-     * pick back (1 — 柔光玻璃 — means floating, anything else means docked) and
-     * removes the dead key. See [floatingBar].
-     */
-    private const val KEY_FLOATING_BAR = "miuix_floating_bar"
-    /** Retired: the material row this key outlived; see [KEY_FLOATING_BAR]. */
-    private const val KEY_BAR_MATERIAL = "miuix_bar_material"
+    /** Retired: OS 3 floating-bar toggle keys, removed with the OS 3 Miuix style. */
+    private const val KEY_FLOATING_BAR_RETIRED = "miuix_floating_bar"
+    private const val KEY_BAR_MATERIAL_RETIRED = "miuix_bar_material"
 
     private const val KEY_THEME_MODE = "theme_mode"
     private const val KEY_PALETTE_STYLE = "palette_style"
     private const val KEY_SPEC = "color_spec"
     private const val KEY_DYNAMIC_COLOR = "dynamic_color"
     private const val KEY_SEED_COLOR = "seed_color"
+    private const val KEY_ENABLE_BLUR = "enable_blur"
+    private const val KEY_ENABLE_PAGE_USER_SCROLL = "enable_page_user_scroll"
+    private const val KEY_PAGER_GESTURE_MODE = "pager_gesture_mode"
+    private const val KEY_DENSITY_SCALE = "density_scale"
+    private const val KEY_ENABLE_SWIPE_BACK = "enable_swipe_back"
+
+    const val MIN_DENSITY_SCALE = 0.8f
+    const val MAX_DENSITY_SCALE = 1.1f
+    const val DEFAULT_DENSITY_SCALE = 1.0f
+
+    const val PAGER_GESTURE_DEFAULT = 0
+    const val PAGER_GESTURE_CROSS_AXIS = 1
 
     /** Default style matches what Android's own Monet engine generates. */
     private val DEFAULT_STYLE = Scheme.Variant.TONAL_SPOT.ordinal
@@ -108,74 +97,44 @@ object ThemePrefs {
     }
 
     /**
-     * 界面风格 as it is now offered: [UI_STYLE_MATERIAL] or [UI_STYLE_MIUIX].
+     * 界面风格: [UI_STYLE_MATERIAL] or [UI_STYLE_MIUIX] (OS 4 柔光玻璃).
      *
-     * This is the value stored under [KEY_UI_STYLE]; 柔光玻璃 is no longer a
-     * style of its own but Miuix's OS 4 款式 (see [miuixFlavor]). A
-     * [UI_STYLE_SOFT_GLASS] written by an earlier build is migrated here on
-     * first read — style becomes Miuix, 款式 becomes OS 4 — and the key is
-     * rewritten so the conversion happens once.
+     * A legacy [UI_STYLE_SOFT_GLASS_LEGACY] (`2`) written by an earlier build
+     * is migrated here to [UI_STYLE_MIUIX] on first read, and retired OS 3
+     * keys (`miuix_flavor`, `miuix_floating_bar`, `miuix_bar_material`) are
+     * cleaned up.
      *
      * The KEY_UI_STYLE default is decided once, on the first read that finds the
      * key missing, and then written down: an install that has been *updated* onto
-     * a MIUIX-capable build keeps [UI_STYLE_MATERIAL] — the look its user chose
-     * by never being offered another — while a fresh install starts on Miuix with
-     * the OS 4 款式. From then on the stored values alone decide, so either
-     * side's own change persists the ordinary way.
+     * a MIUIX-capable build keeps [UI_STYLE_MATERIAL], while a fresh install
+     * starts on [UI_STYLE_MIUIX].
      */
     @JvmStatic
-    fun uiStyleBase(context: Context): Int {
+    fun uiStyle(context: Context): Int {
         val p = prefs(context)
         if (!p.contains(KEY_UI_STYLE)) {
             val fresh = !isUpgradeFromPreMiuixBuild(context)
-            val editor =
-                p.edit()
-                    .putInt(KEY_UI_STYLE, if (fresh) UI_STYLE_MIUIX else UI_STYLE_MATERIAL)
-            if (fresh) editor.putInt(KEY_MIUIX_FLAVOR, MIUIX_FLAVOR_OS4)
-            editor.apply()
-            return if (fresh) UI_STYLE_MIUIX else UI_STYLE_MATERIAL
+            val initial = if (fresh) UI_STYLE_MIUIX else UI_STYLE_MATERIAL
+            p.edit().putInt(KEY_UI_STYLE, initial).apply()
+            return initial
         }
         val stored = p.getInt(KEY_UI_STYLE, UI_STYLE_MATERIAL)
-        // A build before 「Miuix样式」 existed stored 柔光玻璃 in this very key.
-        if (stored == UI_STYLE_SOFT_GLASS) {
+        if (stored == UI_STYLE_SOFT_GLASS_LEGACY ||
+            p.contains(KEY_MIUIX_FLAVOR_RETIRED) ||
+            p.contains(KEY_FLOATING_BAR_RETIRED) ||
+            p.contains(KEY_BAR_MATERIAL_RETIRED)
+        ) {
+            val normalized = if (stored == UI_STYLE_MATERIAL) UI_STYLE_MATERIAL else UI_STYLE_MIUIX
             p.edit()
-                .putInt(KEY_UI_STYLE, UI_STYLE_MIUIX)
-                .putInt(KEY_MIUIX_FLAVOR, MIUIX_FLAVOR_OS4)
+                .putInt(KEY_UI_STYLE, normalized)
+                .remove(KEY_MIUIX_FLAVOR_RETIRED)
+                .remove(KEY_FLOATING_BAR_RETIRED)
+                .remove(KEY_BAR_MATERIAL_RETIRED)
                 .apply()
-            return UI_STYLE_MIUIX
+            return normalized
         }
         return if (stored == UI_STYLE_MIUIX) UI_STYLE_MIUIX else UI_STYLE_MATERIAL
     }
-
-    /**
-     * 「Miuix样式」: [MIUIX_FLAVOR_OS3] or [MIUIX_FLAVOR_OS4], only meaningful
-     * while 界面风格 is Miuix. An install that stored Miuix before the row
-     * existed has no value here and reads as OS 3 — the look it already had.
-     */
-    @JvmStatic
-    fun miuixFlavor(context: Context): Int {
-        // Resolve the style first: its first read is what writes the fresh
-        // install's default 款式 and migrates a legacy 柔光玻璃 pick.
-        uiStyleBase(context)
-        val stored = prefs(context).getInt(KEY_MIUIX_FLAVOR, MIUIX_FLAVOR_OS3)
-        return if (stored == MIUIX_FLAVOR_OS4) MIUIX_FLAVOR_OS4 else MIUIX_FLAVOR_OS3
-    }
-
-    /**
-     * The look a renderer switches on, joined back into the legacy
-     * [UI_STYLE_MATERIAL] / [UI_STYLE_MIUIX] / [UI_STYLE_SOFT_GLASS] triple:
-     * Material 3 as stored, Miuix split by 款式 — OS 3 is [UI_STYLE_MIUIX],
-     * OS 4 is [UI_STYLE_SOFT_GLASS]. Every non-settings caller reads this
-     * (window chrome, per-Activity tips, the theme root), so the extra
-     * preference stays in one place instead of being spelled out at each site.
-     */
-    @JvmStatic
-    fun uiStyle(context: Context): Int =
-        when {
-            uiStyleBase(context) == UI_STYLE_MATERIAL -> UI_STYLE_MATERIAL
-            miuixFlavor(context) == MIUIX_FLAVOR_OS4 -> UI_STYLE_SOFT_GLASS
-            else -> UI_STYLE_MIUIX
-        }
 
     /**
      * Whether this install ran a build from before the Miuix look existed.
@@ -206,35 +165,14 @@ object ThemePrefs {
     }
 
     /**
-     * Writes 界面风格. Only Material 3 and Miuix are offered now; a legacy
-     * [UI_STYLE_SOFT_GLASS] is still accepted — the settings backup carries the
-     * old numbers — and folds into Miuix with the OS 4 款式.
-     *
-     * The 款式 is untouched by a pick that does not name one, so a user who
-     * leaves Miuix for Material 3 and comes back lands on the material they
-     * left, not on whichever one the switch happened to default to.
+     * Writes 界面风格. Only Material 3 and Miuix (OS 4 柔光玻璃) are offered;
+     * a legacy [UI_STYLE_SOFT_GLASS_LEGACY] (from older backups) folds into
+     * [UI_STYLE_MIUIX].
      */
     @JvmStatic
     fun setUiStyle(context: Context, style: Int) {
-        val base = if (style == UI_STYLE_MATERIAL) UI_STYLE_MATERIAL else UI_STYLE_MIUIX
-        val p = prefs(context)
-        val editor = p.edit().putInt(KEY_UI_STYLE, base)
-        // First arrival on Miuix from a build without the row: give it a value.
-        if (!p.contains(KEY_MIUIX_FLAVOR)) editor.putInt(KEY_MIUIX_FLAVOR, MIUIX_FLAVOR_OS3)
-        if (style == UI_STYLE_SOFT_GLASS) editor.putInt(KEY_MIUIX_FLAVOR, MIUIX_FLAVOR_OS4)
-        editor.apply()
-    }
-
-    /** Writes 「Miuix样式」. Other values read back as [MIUIX_FLAVOR_OS3]. */
-    @JvmStatic
-    fun setMiuixFlavor(context: Context, flavor: Int) {
-        prefs(context)
-            .edit()
-            .putInt(
-                KEY_MIUIX_FLAVOR,
-                if (flavor == MIUIX_FLAVOR_OS4) MIUIX_FLAVOR_OS4 else MIUIX_FLAVOR_OS3
-            )
-            .apply()
+        val normalized = if (style == UI_STYLE_MATERIAL) UI_STYLE_MATERIAL else UI_STYLE_MIUIX
+        prefs(context).edit().putInt(KEY_UI_STYLE, normalized).apply()
     }
 
     /**
@@ -271,34 +209,6 @@ object ThemePrefs {
     @JvmStatic
     fun setMiuixAccent(context: Context, color: Int) {
         prefs(context).edit().putInt(KEY_MIUIX_ACCENT, color).apply()
-    }
-
-    /**
-     * Whether the Miuix home foot floats. Off — the default — is the library's
-     * docked pane; on is the texture-blur glass capsule. Only the Miuix look
-     * reads this: the Material look always docks its own bar, and the SoftGlass
-     * look always floats its own glass tab bar, so neither is allowed to
-     * disagree with what their frame builds.
-     *
-     * The first read on an install that ran the brief material-row build
-     * migrates that row's pick back into this switch — 柔光玻璃 (1) was the
-     * floating foot, Miuix (0) the docked one — and removes the dead key, so a
-     * capsule the user put in place is not handed back the pane.
-     */
-    @JvmStatic
-    fun floatingBar(context: Context): Boolean {
-        val p = prefs(context)
-        if (!p.contains(KEY_FLOATING_BAR) && p.contains(KEY_BAR_MATERIAL)) {
-            val migrated = p.getInt(KEY_BAR_MATERIAL, 0) == 1
-            p.edit().putBoolean(KEY_FLOATING_BAR, migrated).remove(KEY_BAR_MATERIAL).apply()
-            return migrated
-        }
-        return p.getBoolean(KEY_FLOATING_BAR, false)
-    }
-
-    @JvmStatic
-    fun setFloatingBar(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_FLOATING_BAR, enabled).apply()
     }
 
     /**
@@ -406,6 +316,58 @@ object ThemePrefs {
     @JvmStatic
     fun setSeedColor(context: Context, color: Int) {
         prefs(context).edit().putInt(KEY_SEED_COLOR, color).apply()
+    }
+
+    @JvmStatic
+    fun enableBlur(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ENABLE_BLUR, true)
+
+    @JvmStatic
+    fun setEnableBlur(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_ENABLE_BLUR, enabled).apply()
+    }
+
+    @JvmStatic
+    fun enablePageUserScroll(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ENABLE_PAGE_USER_SCROLL, true)
+
+    @JvmStatic
+    fun setEnablePageUserScroll(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_ENABLE_PAGE_USER_SCROLL, enabled).apply()
+    }
+
+    @JvmStatic
+    fun pagerGestureMode(context: Context): Int {
+        val stored = prefs(context).getInt(KEY_PAGER_GESTURE_MODE, PAGER_GESTURE_CROSS_AXIS)
+        return if (stored == PAGER_GESTURE_DEFAULT) PAGER_GESTURE_DEFAULT else PAGER_GESTURE_CROSS_AXIS
+    }
+
+    @JvmStatic
+    fun setPagerGestureMode(context: Context, mode: Int) {
+        val normalized = if (mode == PAGER_GESTURE_DEFAULT) PAGER_GESTURE_DEFAULT else PAGER_GESTURE_CROSS_AXIS
+        prefs(context).edit().putInt(KEY_PAGER_GESTURE_MODE, normalized).apply()
+    }
+
+    @JvmStatic
+    fun normalizeDensityScale(value: Float): Float =
+        if (value.isFinite()) value.coerceIn(MIN_DENSITY_SCALE, MAX_DENSITY_SCALE) else DEFAULT_DENSITY_SCALE
+
+    @JvmStatic
+    fun densityScale(context: Context): Float =
+        normalizeDensityScale(prefs(context).getFloat(KEY_DENSITY_SCALE, DEFAULT_DENSITY_SCALE))
+
+    @JvmStatic
+    fun setDensityScale(context: Context, scale: Float) {
+        prefs(context).edit().putFloat(KEY_DENSITY_SCALE, normalizeDensityScale(scale)).apply()
+    }
+
+    @JvmStatic
+    fun enableSwipeBack(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ENABLE_SWIPE_BACK, false)
+
+    @JvmStatic
+    fun setEnableSwipeBack(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_ENABLE_SWIPE_BACK, enabled).apply()
     }
 
     /** Resolved dark/light for the current mode (MODE_SYSTEM reads the device). */

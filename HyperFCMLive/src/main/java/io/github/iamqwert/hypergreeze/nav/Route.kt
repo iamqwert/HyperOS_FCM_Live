@@ -40,4 +40,8 @@ sealed interface Route : NavKey {
     /** The experiment switches, opened from a settings page's 「实验性功能」 row. */
     @Serializable
     data object Experiment : Route
+
+    /** Theme & appearance settings, opened from the settings page's 「主题设置」 row. */
+    @Serializable
+    data object ThemeSettings : Route
 }

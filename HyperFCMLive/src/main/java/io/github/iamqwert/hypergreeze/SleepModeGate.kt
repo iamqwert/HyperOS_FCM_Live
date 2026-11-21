@@ -110,37 +110,27 @@ internal object SleepModeGate {
      * sleep-exit reconnect would have run unhooked and unreported.
      */
     internal fun hookSleepModeNetworkPolicy(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        logSkipOtherGeneration: (String) -> Unit,
-        getSystemContext: () -> Context?,
-        gmsUid: () -> Int?,
+        env: HookEnv,
         recoverGmsConnection: (Context) -> Unit
     ) {
+        val module = env.module
         val serviceClass = try {
-            classLoader.loadClass("com.android.server.net.MiuiNetworkPolicyManagerService")
+            env.classLoader.loadClass("com.android.server.net.MiuiNetworkPolicyManagerService")
         } catch (e: ClassNotFoundException) {
-            logSkip("MiuiNetworkPolicyManagerService class absent, skip")
+            env.logSkip("MiuiNetworkPolicyManagerService class absent, skip")
             return
         }
         val whitelistField = try {
             serviceClass.getDeclaredField("mSleepModeWhitelistUids")
                 .also { it.isAccessible = true }
         } catch (e: NoSuchFieldException) {
-            logSkipOtherGeneration(
+            env.logSkipOtherGeneration(
                 "MiuiNetworkPolicyManagerService.mSleepModeWhitelistUids (sleep-whitelist arm)"
             )
             null
         }
-        val whitelistArmed = armSleepModeWhitelist(
-            module, serviceClass, whitelistField, hookE, logSkipOtherGeneration, gmsUid
-        )
-        val chainArmed = armSleepModeChain(
-            module, serviceClass, whitelistField, hookE, logSkipOtherGeneration,
-            getSystemContext, gmsUid, recoverGmsConnection
-        )
+        val whitelistArmed = armSleepModeWhitelist(env, serviceClass, whitelistField)
+        val chainArmed = armSleepModeChain(env, serviceClass, whitelistField, recoverGmsConnection)
         // One install-time line for both arms, so "no sentinel fired" is never
         // the only evidence: the log states which arms exist on this ROM and
         // what a FIRED line would mean.
@@ -160,25 +150,23 @@ internal object SleepModeGate {
      * @return true when the injection hook is installed.
      */
     private fun armSleepModeWhitelist(
-        module: XposedInterface,
+        env: HookEnv,
         serviceClass: Class<*>,
-        whitelistField: Field?,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkipOtherGeneration: (String) -> Unit,
-        gmsUid: () -> Int?
+        whitelistField: Field?
     ): Boolean {
         if (whitelistField == null) return false
+        val module = env.module
         val applyMethod = try {
             serviceClass.getDeclaredMethod("setSleepModeWhitelistUidRules")
         } catch (e: NoSuchMethodException) {
-            logSkipOtherGeneration(
+            env.logSkipOtherGeneration(
                 "MiuiNetworkPolicyManagerService#setSleepModeWhitelistUidRules " +
                     "(sleep-whitelist arm)"
             )
             return false
         }
         applyMethod.isAccessible = true
-        hookE(applyMethod).intercept { chain: XposedInterface.Chain ->
+        env.hookE(applyMethod).intercept { chain: XposedInterface.Chain ->
             if (!sSleepWhitelistPathFired) {
                 sSleepWhitelistPathFired = true
                 module.logGated(
@@ -190,7 +178,7 @@ internal object SleepModeGate {
                 )
             }
             try {
-                addGmsToSleepModeWhitelist(module, whitelistField, chain.thisObject, gmsUid)
+                addGmsToSleepModeWhitelist(module, whitelistField, chain.thisObject, env::gmsUid)
             } catch (t: Throwable) {
                 module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to extend sleep-mode network whitelist", t)
             }
@@ -207,27 +195,24 @@ internal object SleepModeGate {
      * @return true when the chain hook is installed.
      */
     private fun armSleepModeChain(
-        module: XposedInterface,
+        env: HookEnv,
         serviceClass: Class<*>,
         whitelistField: Field?,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkipOtherGeneration: (String) -> Unit,
-        getSystemContext: () -> Context?,
-        gmsUid: () -> Int?,
         recoverGmsConnection: (Context) -> Unit
     ): Boolean {
+        val module = env.module
         val chainMethod = try {
             serviceClass.getDeclaredMethod(
                 "enableSleepModeChain", Boolean::class.javaPrimitiveType
             )
         } catch (e: NoSuchMethodException) {
-            logSkipOtherGeneration(
+            env.logSkipOtherGeneration(
                 "MiuiNetworkPolicyManagerService#enableSleepModeChain"
             )
             return false
         }
         chainMethod.isAccessible = true
-        hookE(chainMethod).intercept { chain: XposedInterface.Chain ->
+        env.hookE(chainMethod).intercept { chain: XposedInterface.Chain ->
             val enabling = chain.getArg(0) == true
             if (enabling) {
                 // Matching entry for the exit branch's nudge gate: without this,
@@ -284,7 +269,7 @@ internal object SleepModeGate {
                         "Sleep mode exited: GMS not whitelisted (network was cut), " +
                             "nudging GMS to reconnect"
                     )
-                    val context = getSystemContext()
+                    val context = env.systemContext()
                     if (context != null) {
                         // No throttle any more: the decision to send here is the
                         // whitelist flag itself ("the network was actually cut"), and
@@ -293,7 +278,10 @@ internal object SleepModeGate {
                         // cooldown/cap ladder for its own triggers; that subsystem was
                         // removed on 2026-10-30 (see FCM_HOOK_TECH_DOC.md §5.8), so the
                         // action belongs here, in the only place that still decides it.
-                        Thread { recoverGmsConnection(context) }.start()
+                        Thread({ recoverGmsConnection(context) }, "fcmlive-sleep-recover").apply {
+                            isDaemon = true
+                            start()
+                        }
                     }
                 } else {
                     // Exit with no entry seen this boot: `sGmsKeptOnSleepWhitelist`
@@ -471,17 +459,14 @@ internal object SleepModeGate {
      *    comes from the `Sleep-mode legacy per-uid chain armed: …` line and
      *    the two `legacy path FIRED` sentinels, not from this switch.
      */
-    internal fun hookSleepModeNetworkKeepalive(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit
-    ) {
+    internal fun hookSleepModeNetworkKeepalive(env: HookEnv) {
+        val module = env.module
+        val classLoader = env.classLoader
         val wifiMethod = try {
             classLoader.loadClass("android.net.wifi.WifiManager")
                 .getDeclaredMethod("setWifiEnabled", Boolean::class.javaPrimitiveType)
         } catch (t: Throwable) {
-            logSkip("WifiManager#setWifiEnabled absent, sleep-keepalive WiFi skip")
+            env.logSkip("WifiManager#setWifiEnabled absent, sleep-keepalive WiFi skip")
             null
         }
         val dataMethod = try {
@@ -492,7 +477,7 @@ internal object SleepModeGate {
                     Boolean::class.javaPrimitiveType
                 )
         } catch (t: Throwable) {
-            logSkip("CommonAdapter#setDataEnabled absent, sleep-keepalive data skip")
+            env.logSkip("CommonAdapter#setDataEnabled absent, sleep-keepalive data skip")
             null
         }
 
@@ -516,7 +501,7 @@ internal object SleepModeGate {
         }
 
         wifiMethod.isAccessible = true
-        hookE(wifiMethod).intercept { chain: XposedInterface.Chain ->
+        env.hookE(wifiMethod).intercept { chain: XposedInterface.Chain ->
             val enabling = chain.getArg(0) == true
             if (enabling || !calledFromSleepApply()) {
                 return@intercept chain.proceed()
@@ -540,7 +525,7 @@ internal object SleepModeGate {
         module.deoptimize(wifiMethod)
 
         dataMethod.isAccessible = true
-        hookE(dataMethod).intercept { chain: XposedInterface.Chain ->
+        env.hookE(dataMethod).intercept { chain: XposedInterface.Chain ->
             val enabling = chain.getArg(1) == true
             if (enabling || !calledFromSleepApply()) {
                 return@intercept chain.proceed()
@@ -581,10 +566,10 @@ internal object SleepModeGate {
         )
     }
 
-    /** True when the current call stack is a sleep-mode entry applying its config. */
+    /** True when the current call stack is a phone or pad sleep-mode entry applying its config. */
     private fun calledFromSleepApply(): Boolean {
         for (frame in Thread.currentThread().stackTrace) {
-            if (HookerSupport.SLEEP_CONTROLLER_CLASS == frame.className &&
+            if (frame.className in HookerSupport.SLEEP_CONTROLLER_CLASSES &&
                 HookerSupport.SLEEP_APPLY_METHOD == frame.methodName
             ) {
                 return true

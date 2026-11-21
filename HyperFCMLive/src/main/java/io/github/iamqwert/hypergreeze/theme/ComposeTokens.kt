@@ -7,7 +7,7 @@
  *   spills outside the shape.
  * - A FAB needs an explicit FAB_CLEARANCE (88.dp) above the list; the
  *   scaffold does not reserve it.
- * - material3 is pinned to 1.5.0-beta01, which does not accept
+ * - material3 is pinned to 1.5.0-rc01, which does not accept
  *   `menuAnchorPosition`: right-aligned dropdowns are done with
  *   `matchParentSize().wrapContentSize(BottomEnd)` instead.
  * - Icons — **BOTTOM LINE: every icon in this app is a Material Symbols
@@ -200,6 +200,7 @@ internal fun motionSchemeFor(expressive: Boolean): MotionScheme =
  * runtime consumer left, and a second copy of the same numbers is not a
  * cross-check — it is a copy that drifts, and one that ships in the APK.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 val HyperFCMLiveTypography = Typography(
     displayLarge = TextStyle(
         fontWeight = FontWeight.Normal,
@@ -291,24 +292,117 @@ val HyperFCMLiveTypography = Typography(
         lineHeight = 16.sp,
         letterSpacing = 0.5.sp
     ),
+    // M3 Expressive emphasized scale — official 1.5 token slots.
+    displayLargeEmphasized = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 57.sp,
+        lineHeight = 64.sp,
+        letterSpacing = (-0.25).sp
+    ),
+    displayMediumEmphasized = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 45.sp,
+        lineHeight = 52.sp,
+        letterSpacing = 0.sp
+    ),
+    displaySmallEmphasized = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 36.sp,
+        lineHeight = 44.sp,
+        letterSpacing = 0.sp
+    ),
+    headlineLargeEmphasized = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 32.sp,
+        lineHeight = 40.sp,
+        letterSpacing = 0.sp
+    ),
+    headlineMediumEmphasized = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 28.sp,
+        lineHeight = 36.sp,
+        letterSpacing = 0.sp
+    ),
+    headlineSmallEmphasized = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 24.sp,
+        lineHeight = 32.sp,
+        letterSpacing = 0.sp
+    ),
+    titleLargeEmphasized = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
+        letterSpacing = 0.sp
+    ),
+    titleMediumEmphasized = TextStyle(
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.15.sp
+    ),
+    titleSmallEmphasized = TextStyle(
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.1.sp
+    ),
+    bodyLargeEmphasized = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.5.sp
+    ),
+    bodyMediumEmphasized = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.25.sp
+    ),
+    bodySmallEmphasized = TextStyle(
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.4.sp
+    ),
+    labelLargeEmphasized = TextStyle(
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.1.sp
+    ),
+    labelMediumEmphasized = TextStyle(
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.5.sp
+    ),
+    labelSmallEmphasized = TextStyle(
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.5.sp
+    ),
 )
 
 /**
- * The generic shape scale — the M3 corner-radius tokens, restated here in dp.
+ * The generic shape scale — the M3 & M3 Expressive corner-radius tokens,
+ * restated here in dp (including the three 1.5 expressive steps:
+ * `largeIncreased` 20dp, `extraLargeIncreased` 32dp, `extraExtraLarge` 48dp).
  *
- * Both generations deliberately share these five values. M3 Expressive did not
- * redefine the original scale — the May 2025 update *added* three higher steps
- * (`Large increased` 20dp, `Extra large increased` 32dp, `Extra extra large`
- * 48dp) and moved components onto them. The lower five steps still mean exactly
- * what they meant in 2021, so the token definitions stay put and the App roles
- * below are what actually shifts.
+ * The lower five steps stay put across generations while [AppShapes] below
+ * shifts component-role mappings between Baseline (2021) and Expressive (2025+).
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 val HyperFCMLiveShapes = Shapes(
     extraSmall = RoundedCornerShape(4.dp),
     small = RoundedCornerShape(8.dp),
     medium = RoundedCornerShape(12.dp),
     large = RoundedCornerShape(16.dp),
+    largeIncreased = RoundedCornerShape(20.dp),
     extraLarge = RoundedCornerShape(28.dp),
+    extraLargeIncreased = RoundedCornerShape(32.dp),
+    extraExtraLarge = RoundedCornerShape(48.dp),
 )
 
 /**

@@ -55,6 +55,33 @@ object ThemeEngine {
         if (cached != null && key == sCacheKey) {
             return cached
         }
+        val built = buildPalette(seed, variant, dark, spec)
+        sCached = built
+        sCacheKey = key
+        return built
+    }
+
+    /**
+     * Derives the palette for an explicit light/dark mode using the user's
+     * current seed, dynamic-color toggle, palette style and color spec —
+     * without touching [sCached]. Used by the Material 3 theme-mode preview
+     * cards so both light and dark thumbnails reflect live palette choices.
+     */
+    @JvmStatic
+    fun paletteForDarkMode(context: Context, dark: Boolean): AppPalette {
+        val variant = ThemePrefs.paletteStyle(context)
+        val spec = ThemePrefs.specVersion(context)
+        val dynamic = ThemePrefs.dynamicColor(context)
+        val seed = seed(context, dynamic)
+        return buildPalette(seed, variant, dark, spec)
+    }
+
+    private fun buildPalette(
+        seed: Int,
+        variant: Scheme.Variant,
+        dark: Boolean,
+        spec: Int,
+    ): AppPalette {
         // All three spec versions map through: 2026 is the CMF style's own
         // layer (ThemePrefs.specVersion only ever hands it back for CMF), and
         // folding it into 2021 here is what used to silently skip the whole
@@ -65,10 +92,7 @@ object ThemeEngine {
             ThemePrefs.SPEC_2026 -> Scheme.Spec.SPEC_2026
             else -> Scheme.Spec.SPEC_2021
         }
-        val built = AppPalette(Scheme.create(seed, variant, dark, specEnum), dark)
-        sCached = built
-        sCacheKey = key
-        return built
+        return AppPalette(Scheme.create(seed, variant, dark, specEnum), dark)
     }
 
     /**

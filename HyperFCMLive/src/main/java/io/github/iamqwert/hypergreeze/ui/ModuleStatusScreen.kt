@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
@@ -35,6 +36,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
@@ -92,8 +94,6 @@ fun ModuleStatusScreen(
     versionCode: Long,
     /** Opens the FCM diagnostics page — the reference app keeps its entry on the home too. */
     onDiagnostics: () -> Unit,
-    /** Opens the user guide, in the browser. */
-    onHelp: () -> Unit,
     /** Opens the about page. */
     onAbout: () -> Unit,
     /** Runs the release check; the outcome comes back to this page to present. */
@@ -255,16 +255,8 @@ fun ModuleStatusScreen(
                 }
                 Spacer(modifier = Modifier.height(pageGap))
                 SettingsGroup {
-                    NavCard(
-                        iconRes = R.drawable.ic_help,
-                        title = stringResource(R.string.help_guide),
-                        subtitle = "",
-                        onClick = onHelp,
-                        first = true,
-                        last = false
-                    )
-                    // The middle row: the same manual check the about page
-                    // runs, with the stored badge riding before the chevron.
+                    // The same manual check the about page runs, with the
+                    // stored badge riding before the chevron.
                     NavCard(
                         iconRes = R.drawable.ic_check_update,
                         title = stringResource(R.string.check_for_updates),
@@ -285,19 +277,19 @@ fun ModuleStatusScreen(
                                 }
                             }
                         },
-                        first = false,
+                        first = true,
                         last = false,
                         trailing = {
                             when {
-                                // The busy state takes the slot: a badge next to
-                                // a spinner would claim there is both something
-                                // new and something running.
-                                checking -> CircularProgressIndicator(
+                                // The busy state takes the slot under Miuix; Material
+                                // acknowledges the check via Snackbar (see above) and
+                                // must not render Miuix's indicator here.
+                                checking && miuixNow -> CircularProgressIndicator(
                                     modifier = Modifier.padding(start = 8.dp),
                                     size = 18.dp,
                                     strokeWidth = 2.dp
                                 )
-                                updateBadge -> UpdateBadgeDot(
+                                !checking && updateBadge -> UpdateBadgeDot(
                                     description = stringResource(R.string.update_badge_desc),
                                     modifier = Modifier.padding(start = 8.dp)
                                 )
@@ -339,6 +331,7 @@ fun ModuleStatusScreen(
  * (已激活 / 未激活), the version line sits underneath, and the service's API
  * level rides on the right as a pill.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun StatusHero(
     active: Boolean,
@@ -372,9 +365,10 @@ private fun StatusHero(
     } else {
         MaterialTheme.colorScheme.onErrorContainer
     }
+    val shape = LocalAppShapes.current.card
     Surface(
         color = container,
-        shape = LocalAppShapes.current.card,
+        shape = shape,
         modifier = Modifier
             .fillMaxWidth()
             // Inactive is a question the user wants answered again, not a
@@ -383,12 +377,16 @@ private fun StatusHero(
             // so the card stays inert.
             .then(
                 if (!active) {
+                    // Clip before clickable so the M3 ripple stays inside the
+                    // rounded card (see ComposeTokens.kt red lines).
                     // Explicit Role.Button: the default Clickable role is
                     // already Button, so this is documentation, not a fix —
                     // the re-check card reads as a button to TalkBack either
                     // way. Stated so the contract survives a refactor to
                     // another gesture modifier that might not set a role.
-                    Modifier.clickable(role = Role.Button, onClick = onRecheck)
+                    Modifier
+                        .clip(shape)
+                        .clickable(role = Role.Button, onClick = onRecheck)
                 } else {
                     Modifier
                 }
@@ -415,8 +413,7 @@ private fun StatusHero(
                         if (active) R.string.status_activated else R.string.status_not_activated
                     ),
                     color = ink,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold
+                    style = MaterialTheme.typography.titleLargeEmphasized
                 )
                 Text(
                     text = stringResource(

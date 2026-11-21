@@ -64,6 +64,32 @@ internal object AllowlistGate {
     /** Coalesces the scan bursts a stream of installs would otherwise cause. */
     private val sAutoScanQueued = AtomicBoolean(false)
 
+    // ---- system_server experiment switch snapshots ----
+    //
+    // Refreshed on every [loadAllowlistFromRemotePrefs] call (boot, hot reload,
+    // and every [Prefs.ACTION_ALLOWLIST_CHANGED] broadcast, which every writer
+    // in Prefs.kt emits). Keeping them in memory avoids hitting
+    // getRemotePreferences() on hot paths (broadcast / service / autostart /
+    // WiFi scorer). All default fail-closed (disabled / narrowest floor).
+
+    @Volatile
+    private var sSmartPowerRelease = false
+
+    @Volatile
+    private var sGreezeNetRelease = false
+
+    @Volatile
+    private var sAutostartServiceRelease = false
+
+    @Volatile
+    private var sAutostartProcessRelease = false
+
+    @Volatile
+    private var sWifiWeakSignalSwitchRelaxed = false
+
+    @Volatile
+    private var sWifiWeakSignalFloor = Prefs.WIFI_WEAK_SIGNAL_FLOOR_DEFAULT
+
     internal fun loadAllowlistFromRemotePrefs(module: XposedInterface) {
         try {
             val prefs = module.getRemotePreferences(Prefs.GROUP_CONFIG)
@@ -86,6 +112,7 @@ internal object AllowlistGate {
             }
             sAllowlist = loaded
             loadAutoCheckConfig(module, prefs)
+            loadExperimentSwitchSnapshots(prefs)
             sAllowlistFreshMs = SystemClock.uptimeMillis()
             sAllowlistFailureStreak = 0
         } catch (e: Exception) {
@@ -132,6 +159,56 @@ internal object AllowlistGate {
         }
         sAutoCheckEnabled = enabled
         sAutoBaseline = baseline
+    }
+
+    private fun loadExperimentSwitchSnapshots(prefs: SharedPreferences) {
+        sSmartPowerRelease = prefs.getBoolean(Prefs.KEY_SMARTPOWER_RELEASE, false)
+        sGreezeNetRelease = prefs.getBoolean(Prefs.KEY_GREEZE_NET_RELEASE, false)
+        sAutostartServiceRelease = prefs.getBoolean(Prefs.KEY_AUTOSTART_SERVICE_RELEASE, false)
+        sAutostartProcessRelease = prefs.getBoolean(Prefs.KEY_AUTOSTART_PROCESS_RELEASE, false)
+        sWifiWeakSignalSwitchRelaxed =
+            prefs.getBoolean(Prefs.KEY_WIFI_WEAK_SIGNAL_SWITCH_RELAXED, false)
+        sWifiWeakSignalFloor = Prefs.sanitizeWeakSignalFloor(
+            prefs.getInt(Prefs.KEY_WIFI_WEAK_SIGNAL_FLOOR, Prefs.WIFI_WEAK_SIGNAL_FLOOR_DEFAULT)
+        )
+    }
+
+    private fun maybeScheduleStaleConfigReload(module: XposedInterface) {
+        if (!allowlistReceiverRegistered &&
+            SystemClock.uptimeMillis() - sAllowlistFreshMs >= HookerSupport.ALLOWLIST_STALE_MS
+        ) {
+            requestAllowlistReload(module)
+        }
+    }
+
+    internal fun isSmartPowerReleaseEnabled(module: XposedInterface): Boolean {
+        maybeScheduleStaleConfigReload(module)
+        return sSmartPowerRelease
+    }
+
+    internal fun isGreezeNetReleaseEnabled(module: XposedInterface): Boolean {
+        maybeScheduleStaleConfigReload(module)
+        return sGreezeNetRelease
+    }
+
+    internal fun isAutostartServiceReleaseEnabled(module: XposedInterface): Boolean {
+        maybeScheduleStaleConfigReload(module)
+        return sAutostartServiceRelease
+    }
+
+    internal fun isAutostartProcessReleaseEnabled(module: XposedInterface): Boolean {
+        maybeScheduleStaleConfigReload(module)
+        return sAutostartProcessRelease
+    }
+
+    internal fun isWifiWeakSignalSwitchRelaxed(module: XposedInterface): Boolean {
+        maybeScheduleStaleConfigReload(module)
+        return sWifiWeakSignalSwitchRelaxed
+    }
+
+    internal fun wifiWeakSignalFloor(module: XposedInterface): Int {
+        maybeScheduleStaleConfigReload(module)
+        return sWifiWeakSignalFloor
     }
 
     /**
@@ -213,13 +290,34 @@ internal object AllowlistGate {
             return
         }
         val sys = systemContext() ?: return
-        val fcm = try {
-            FcmAppScan.queryFcmPackages(sys.packageManager) { label, t ->
-                module.logGated(Log.WARN, HookerSupport.TAG, label, t)
-            }
+        val fcm = HashSet<String>()
+        try {
+            fcm.addAll(
+                FcmAppScan.queryFcmPackages(sys.packageManager) { label, t ->
+                    module.logGated(Log.WARN, HookerSupport.TAG, label, t)
+                }
+            )
         } catch (t: Throwable) {
             module.logGated(Log.WARN, HookerSupport.TAG, "auto-check scan failed", t)
             return
+        }
+        // Also scan secondary users (e.g. MIUI Dual Apps / XSpace userId=999,
+        // work profiles) so FCM clients installed only outside user 0 are picked up.
+        for (userHandle in HookerSupport.allUserHandles(sys)) {
+            if (HookerSupport.userIdOf(userHandle) == 0) continue
+            try {
+                val userContext = HookerSupport.createContextForUser(sys, userHandle) ?: continue
+                fcm.addAll(
+                    FcmAppScan.queryFcmPackages(userContext.packageManager) { label, t ->
+                        module.logGated(Log.WARN, HookerSupport.TAG, "$label ($userHandle)", t)
+                    }
+                )
+            } catch (t: Throwable) {
+                module.logGated(
+                    Log.WARN, HookerSupport.TAG,
+                    "auto-check scan failed for $userHandle (non-fatal)", t
+                )
+            }
         }
         val widened = HashSet(fcm)
         widened.removeAll(baseline)
@@ -493,6 +591,7 @@ internal object AllowlistGate {
             }
             val packageFilter = IntentFilter(Intent.ACTION_PACKAGE_ADDED)
             packageFilter.addAction(Intent.ACTION_PACKAGE_REPLACED)
+            packageFilter.addDataScheme("package")
             sys.registerReceiver(
                 packageReceiver, packageFilter, null, handler, Context.RECEIVER_EXPORTED
             )

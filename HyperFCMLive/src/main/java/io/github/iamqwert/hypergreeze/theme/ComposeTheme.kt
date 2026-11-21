@@ -11,13 +11,18 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import io.github.iamqwert.hypergreeze.AppLocale
 import io.github.iamqwert.hypergreeze.mcu.Scheme
 import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassSpec
@@ -85,14 +90,30 @@ fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
     // each look's pages saved is retained by the holder and restored when that
     // look comes back: switching 界面风格 reads as re-dressing the same page,
     // not as landing on a fresh one.
+    // Keep the hosted content tree (AppPages / NavDisplay) alive across a
+    // style branch swap via movableContentOf: tearing down and recreating
+    // NavDisplay in the same frame disposes its entry NavigationEventDispatcher
+    // while incoming NavigationEventHandler DisposableEffects still register
+    // against it, crashing with "This NavigationEventDispatcher has already
+    // been disposed". Moving the content preserves NavDisplay, its back stack
+    // and its dispatcher while re-skinning the theme wrapper around it.
+    val densityScale by AppearanceState.densityScale
+    val currentDensity = LocalDensity.current
+    val appDensity = remember(currentDensity, densityScale) {
+        Density(
+            density = currentDensity.density * densityScale,
+            fontScale = currentDensity.fontScale,
+        )
+    }
+    val latestContent by rememberUpdatedState(content)
+    val stableContent = remember { movableContentOf { latestContent() } }
     val styleScope = rememberSaveableStateHolder()
-    styleScope.SaveableStateProvider(style) {
-        when (style) {
-            // One renderer for both Miuix-dressed looks, told apart only by the
-            // style it hands down: 柔光玻璃 is the same screens wearing a different
-            // material, so it must not become a second copy of these screens.
-            UiStyle.Miuix, UiStyle.SoftGlass -> MiuixStyleTheme(style, content)
-            UiStyle.Material -> MaterialStyleTheme(content)
+    CompositionLocalProvider(LocalDensity provides appDensity) {
+        styleScope.SaveableStateProvider(style) {
+            when (style) {
+                UiStyle.Miuix -> MiuixStyleTheme(style, stableContent)
+                UiStyle.Material -> MaterialStyleTheme(stableContent)
+            }
         }
     }
 }
@@ -358,7 +379,11 @@ private fun MiuixStyleTheme(style: UiStyle, content: @Composable () -> Unit) {
                 // each one decides for itself whether to wear it, and none of them
                 // runs under Material, which is the only place this provider does
                 // not reach.
-                LocalSoftGlassSpec provides MIUIX_SOFT_GLASS,
+                LocalSoftGlassSpec provides if (AppearanceState.enableBlur.value) {
+                    MIUIX_SOFT_GLASS
+                } else {
+                    MIUIX_SOFT_GLASS_DISABLED
+                },
                 LocalUiStyle provides style
             ) {
                 content()
@@ -376,6 +401,12 @@ private fun MiuixStyleTheme(style: UiStyle, content: @Composable () -> Unit) {
  */
 private val MIUIX_SOFT_GLASS = createSoftGlassSpec(
     enabled = true,
+    blurRadius = SoftGlassTuning.DefaultBlurRadius,
+    fineTuning = SoftGlassFineTuning.Default,
+)
+
+private val MIUIX_SOFT_GLASS_DISABLED = createSoftGlassSpec(
+    enabled = false,
     blurRadius = SoftGlassTuning.DefaultBlurRadius,
     fineTuning = SoftGlassFineTuning.Default,
 )

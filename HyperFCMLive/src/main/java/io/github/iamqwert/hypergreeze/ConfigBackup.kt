@@ -454,19 +454,9 @@ internal object ConfigBackup {
                 "Appearance",
                 "ui_style",
                 ThemePrefs::uiStyle,
-                valid = { it in ThemePrefs.UI_STYLE_MATERIAL..ThemePrefs.UI_STYLE_SOFT_GLASS },
+                valid = { it in ThemePrefs.UI_STYLE_MATERIAL..ThemePrefs.UI_STYLE_SOFT_GLASS_LEGACY },
                 appearance = true
             ) { c, style -> ThemePrefs.setUiStyle(c, style) },
-            // 「Miuix样式」ridden alongside 界面风格: without it, importing a Miuix
-            // backup into an install that had picked the other 款式 would keep
-            // this install's material instead of the file's.
-            number(
-                "Appearance",
-                "miuix_flavor",
-                ThemePrefs::miuixFlavor,
-                valid = { it in ThemePrefs.MIUIX_FLAVOR_OS3..ThemePrefs.MIUIX_FLAVOR_OS4 },
-                appearance = true
-            ) { c, flavor -> ThemePrefs.setMiuixFlavor(c, flavor) },
             number(
                 "Appearance",
                 "theme_mode",
@@ -516,10 +506,36 @@ internal object ConfigBackup {
             ) { c, accent -> ThemePrefs.setMiuixAccent(c, accent) },
             toggle(
                 "Appearance",
-                "miuix_floating_bar",
-                ThemePrefs::floatingBar,
+                "enable_blur",
+                ThemePrefs::enableBlur,
                 appearance = true
-            ) { c, on -> ThemePrefs.setFloatingBar(c, on) }
+            ) { c, on -> ThemePrefs.setEnableBlur(c, on) },
+            toggle(
+                "Appearance",
+                "enable_page_user_scroll",
+                ThemePrefs::enablePageUserScroll,
+                appearance = true
+            ) { c, on -> ThemePrefs.setEnablePageUserScroll(c, on) },
+            number(
+                "Appearance",
+                "pager_gesture_mode",
+                ThemePrefs::pagerGestureMode,
+                valid = { it in ThemePrefs.PAGER_GESTURE_DEFAULT..ThemePrefs.PAGER_GESTURE_CROSS_AXIS },
+                appearance = true
+            ) { c, mode -> ThemePrefs.setPagerGestureMode(c, mode) },
+            number(
+                "Appearance",
+                "density_scale_pct",
+                { (ThemePrefs.densityScale(it) * 100f).toInt() },
+                valid = { it in 80..110 },
+                appearance = true
+            ) { c, pct -> ThemePrefs.setDensityScale(c, pct / 100f) },
+            toggle(
+                "Appearance",
+                "enable_swipe_back",
+                ThemePrefs::enableSwipeBack,
+                appearance = true
+            ) { c, on -> ThemePrefs.setEnableSwipeBack(c, on) }
         )
     }
 }

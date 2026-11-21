@@ -1,8 +1,10 @@
 package io.github.iamqwert.hypergreeze.theme
 
 import android.content.Context
+import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import io.github.iamqwert.hypergreeze.mcu.Scheme
@@ -40,16 +42,9 @@ object AppearanceState {
     val themeMode: MutableIntState = mutableIntStateOf(ThemePrefs.MODE_SYSTEM)
 
     /**
-     * The look in force, as [ThemePrefs.uiStyle] resolves it:
-     * [ThemePrefs.UI_STYLE_MATERIAL], [ThemePrefs.UI_STYLE_MIUIX] or
-     * [ThemePrefs.UI_STYLE_SOFT_GLASS] — the last two are Miuix with the OS 3
-     * and OS 4 款式 respectively. The 界面风格 row itself shows only the first
-     * two; the 款式 row below it reads [miuixFlavor].
+     * The look in force: [ThemePrefs.UI_STYLE_MATERIAL] or [ThemePrefs.UI_STYLE_MIUIX].
      */
     val uiStyle: MutableIntState = mutableIntStateOf(ThemePrefs.UI_STYLE_MATERIAL)
-
-    /** 「Miuix样式」: [ThemePrefs.MIUIX_FLAVOR_OS3] or [ThemePrefs.MIUIX_FLAVOR_OS4]. */
-    val miuixFlavor: MutableIntState = mutableIntStateOf(ThemePrefs.MIUIX_FLAVOR_OS3)
 
     /** Whether colors follow the wallpaper; when off, [seedColor] wins. */
     val dynamicColor: MutableState<Boolean> = mutableStateOf(true)
@@ -69,12 +64,20 @@ object AppearanceState {
     /** The Miuix 强调色 as ARGB; 0 means "follow the wallpaper". */
     val miuixAccent: MutableIntState = mutableIntStateOf(0)
 
-    /**
-     * Whether the Miuix home foot floats — off is the docked pane, on is the
-     * texture-blur glass capsule. Only the Miuix look reads this; the SoftGlass
-     * look always floats its own glass tab bar and never consults the switch.
-     */
-    val floatingBar: MutableState<Boolean> = mutableStateOf(false)
+    /** Whether Miuix glass blur effects are enabled. */
+    val enableBlur: MutableState<Boolean> = mutableStateOf(true)
+
+    /** Whether swiping horizontally switches bottom-nav pages. */
+    val enablePageUserScroll: MutableState<Boolean> = mutableStateOf(true)
+
+    /** Pager gesture interception mode: 0 = Default, 1 = Cross-Axis. */
+    val pagerGestureMode: MutableIntState = mutableIntStateOf(ThemePrefs.PAGER_GESTURE_CROSS_AXIS)
+
+    /** Global UI density scale multiplier (0.8f..1.1f). */
+    val densityScale: MutableFloatState = mutableFloatStateOf(ThemePrefs.DEFAULT_DENSITY_SCALE)
+
+    /** Whether in-page horizontal swipe-to-dismiss is enabled on pushed routes. */
+    val enableSwipeBack: MutableState<Boolean> = mutableStateOf(false)
 
     /**
      * Re-read every value from disk. Idempotent and cheap: assigning the value
@@ -85,14 +88,17 @@ object AppearanceState {
     fun hydrate(context: Context) {
         themeMode.intValue = ThemePrefs.themeMode(context)
         uiStyle.intValue = ThemePrefs.uiStyle(context)
-        miuixFlavor.intValue = ThemePrefs.miuixFlavor(context)
         dynamicColor.value = ThemePrefs.dynamicColor(context)
         seedColor.intValue = ThemePrefs.seedColor(context)
         paletteStyle.intValue = ThemePrefs.paletteStyle(context).ordinal
         colorSpec.intValue = ThemePrefs.specVersion(context)
         miuixMonet.value = ThemePrefs.miuixMonet(context)
         miuixAccent.intValue = ThemePrefs.miuixAccent(context)
-        floatingBar.value = ThemePrefs.floatingBar(context)
+        enableBlur.value = ThemePrefs.enableBlur(context)
+        enablePageUserScroll.value = ThemePrefs.enablePageUserScroll(context)
+        pagerGestureMode.intValue = ThemePrefs.pagerGestureMode(context)
+        densityScale.floatValue = ThemePrefs.densityScale(context)
+        enableSwipeBack.value = ThemePrefs.enableSwipeBack(context)
     }
 
     @JvmStatic
@@ -105,22 +111,6 @@ object AppearanceState {
     @JvmStatic
     fun setUiStyle(context: Context, style: Int) {
         ThemePrefs.setUiStyle(context, style)
-        // Re-read instead of storing the argument: the write folds a legacy
-        // 柔光玻璃 into Miuix + OS 4, so the effective look is not the number
-        // that came in.
-        uiStyle.intValue = ThemePrefs.uiStyle(context)
-        miuixFlavor.intValue = ThemePrefs.miuixFlavor(context)
-        ThemeEngine.invalidate()
-    }
-
-    /**
-     * Writes 「Miuix样式」. [uiStyle] follows because the 款式 *is* the material
-     * half of the effective style: OS 3 renders as Miuix, OS 4 as 柔光玻璃.
-     */
-    @JvmStatic
-    fun setMiuixFlavor(context: Context, flavor: Int) {
-        ThemePrefs.setMiuixFlavor(context, flavor)
-        miuixFlavor.intValue = ThemePrefs.miuixFlavor(context)
         uiStyle.intValue = ThemePrefs.uiStyle(context)
         ThemeEngine.invalidate()
     }
@@ -172,6 +162,20 @@ object AppearanceState {
         ThemeEngine.invalidate()
     }
 
+    /**
+     * Atomically updates both [themeMode] and [miuixMonet] from Miuix's
+     * 6-entry color-mode menu (System/Light/Dark + Monet variants) with a
+     * single [ThemeEngine.invalidate].
+     */
+    @JvmStatic
+    fun setMiuixColorMode(context: Context, mode: Int, monet: Boolean) {
+        ThemePrefs.setThemeMode(context, mode)
+        ThemePrefs.setMiuixMonet(context, monet)
+        themeMode.intValue = mode
+        miuixMonet.value = monet
+        ThemeEngine.invalidate()
+    }
+
     @JvmStatic
     fun setMiuixAccent(context: Context, color: Int) {
         ThemePrefs.setMiuixAccent(context, color)
@@ -180,9 +184,34 @@ object AppearanceState {
     }
 
     @JvmStatic
-    fun setFloatingBar(context: Context, enabled: Boolean) {
-        ThemePrefs.setFloatingBar(context, enabled)
-        floatingBar.value = enabled
+    fun setEnableBlur(context: Context, enabled: Boolean) {
+        ThemePrefs.setEnableBlur(context, enabled)
+        enableBlur.value = enabled
         ThemeEngine.invalidate()
+    }
+
+    @JvmStatic
+    fun setEnablePageUserScroll(context: Context, enabled: Boolean) {
+        ThemePrefs.setEnablePageUserScroll(context, enabled)
+        enablePageUserScroll.value = enabled
+    }
+
+    @JvmStatic
+    fun setPagerGestureMode(context: Context, mode: Int) {
+        ThemePrefs.setPagerGestureMode(context, mode)
+        pagerGestureMode.intValue = ThemePrefs.pagerGestureMode(context)
+    }
+
+    @JvmStatic
+    fun setDensityScale(context: Context, scale: Float) {
+        val normalized = ThemePrefs.normalizeDensityScale(scale)
+        ThemePrefs.setDensityScale(context, normalized)
+        densityScale.floatValue = normalized
+    }
+
+    @JvmStatic
+    fun setEnableSwipeBack(context: Context, enabled: Boolean) {
+        ThemePrefs.setEnableSwipeBack(context, enabled)
+        enableSwipeBack.value = enabled
     }
 }

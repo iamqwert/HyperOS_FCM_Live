@@ -30,6 +30,18 @@ internal object AlarmGate {
     @Volatile
     private var alarmGateSeenLogged = false
 
+    /** One-shot: confirms alignAlarmLocked skipped screen-off alignment for a GMS alarm. */
+    @Volatile
+    private var alarmAlignBypassLogged = false
+
+    /** One-shot: confirms adjustAlarmLocked skipped screen-off/offline deferral for a GMS alarm. */
+    @Volatile
+    private var alarmAdjustBypassLogged = false
+
+    /** One-shot: confirms isExemptFromSsru exempted a GMS alarm the ROM would have gated. */
+    @Volatile
+    private var alarmSsruExemptLogged = false
+
     /**
      * §5 alarm delivery gate — action list item 3.3 (P1, no hard gate).
      *
@@ -54,24 +66,19 @@ internal object AlarmGate {
      * so the allow path gains no new behaviour and no other app is affected.
      * GMS and GSF share a uid, so one uid check covers both.
      */
-    internal fun hookAlarmGate(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        logSkipOtherGeneration: (String) -> Unit,
-        isGmsUid: (Int) -> Boolean
-    ) {
+    internal fun hookAlarmGate(env: HookEnv) {
+        val module = env.module
+        val classLoader = env.classLoader
         val alarmClass = try {
             classLoader.loadClass("com.android.server.alarm.Alarm")
         } catch (e: ClassNotFoundException) {
-            logSkip("com.android.server.alarm.Alarm absent, alarm gate skip")
+            env.logSkip("com.android.server.alarm.Alarm absent, alarm gate skip")
             return
         }
         val creatorUidField: Field = try {
             alarmClass.getDeclaredField("creatorUid")
         } catch (e: NoSuchFieldException) {
-            logSkip("Alarm#creatorUid absent, alarm gate skip")
+            env.logSkip("Alarm#creatorUid absent, alarm gate skip")
             return
         }
         creatorUidField.isAccessible = true
@@ -83,6 +90,7 @@ internal object AlarmGate {
         // First hit wins: the Impl overrides the Stub, so virtual dispatch only
         // ever enters the Impl. Hooking the base as well would add a hook that
         // can never be entered — it only inflates the install summary.
+        var stubClass: Class<*>? = null
         var methods: List<Method> = emptyList()
         for (name in HookerSupport.ALARM_GATE_CLASS_NAMES) {
             val clazz = try {
@@ -90,77 +98,226 @@ internal object AlarmGate {
             } catch (ignored: ClassNotFoundException) {
                 continue
             }
+            if (stubClass == null) {
+                stubClass = clazz
+            }
             val found = clazz.declaredMethods.filter { m ->
                 m.name == "checkAlarmIsAllowedSend" &&
                     m.parameterCount == 2 &&
                     m.returnType == Boolean::class.javaPrimitiveType
             }
             if (found.isNotEmpty()) {
+                stubClass = clazz
                 methods = found
                 break
             }
         }
         if (methods.isEmpty()) {
-            logSkipOtherGeneration("checkAlarmIsAllowedSend (alarm gate)")
-            return
-        }
-        for (method in methods) {
-            val field = creatorUidField
-            method.isAccessible = true
-            hookE(method).intercept { chain: XposedInterface.Chain ->
-                val result = chain.proceed()
-                try {
-                    if (java.lang.Boolean.FALSE == result) {
-                        val alarm = chain.getArg(1)
-                        if (alarm != null) {
-                            val uid = field.getInt(alarm)
-                            if (isGmsUid(uid)) {
-                                // One-shot INFO: the only way to tell "the ROM
-                                // actually denies GMS alarms here" apart from
-                                // "the gate is never reached".
-                                if (!alarmGateBypassLogged) {
-                                    alarmGateBypassLogged = true
+            env.logSkipOtherGeneration("checkAlarmIsAllowedSend (alarm gate)")
+        } else {
+            for (method in methods) {
+                val field = creatorUidField
+                method.isAccessible = true
+                env.hookE(method).intercept { chain: XposedInterface.Chain ->
+                    val result = chain.proceed()
+                    try {
+                        if (java.lang.Boolean.FALSE == result) {
+                            val alarm = chain.getArg(1)
+                            if (alarm != null) {
+                                val uid = field.getInt(alarm)
+                                if (env.isGmsUid(uid)) {
+                                    // One-shot INFO: the only way to tell "the ROM
+                                    // actually denies GMS alarms here" apart from
+                                    // "the gate is never reached".
+                                    if (!alarmGateBypassLogged) {
+                                        alarmGateBypassLogged = true
+                                        module.logGated(
+                                            Log.INFO, HookerSupport.TAG,
+                                            "checkAlarmIsAllowedSend: re-allowed denied GMS alarm" +
+                                                " (creatorUid=$uid)"
+                                        )
+                                    }
+                                    return@intercept true
+                                }
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to evaluate alarm gate", t)
+                    }
+                    try {
+                        // Counterpart of the one-shot above: proves the gate is
+                        // actually reached for GMS alarms when the ROM allows them,
+                        // so a silent log later means "never denied", not "never run".
+                        if (java.lang.Boolean.TRUE == result && !alarmGateSeenLogged) {
+                            val alarm = chain.getArg(1)
+                            if (alarm != null) {
+                                val uid = field.getInt(alarm)
+                                if (env.isGmsUid(uid)) {
+                                    alarmGateSeenLogged = true
                                     module.logGated(
                                         Log.INFO, HookerSupport.TAG,
-                                        "checkAlarmIsAllowedSend: re-allowed denied GMS alarm" +
+                                        "checkAlarmIsAllowedSend: GMS alarm allowed by ROM" +
                                             " (creatorUid=$uid)"
                                     )
                                 }
-                                return@intercept true
                             }
                         }
+                    } catch (t: Throwable) {
+                        module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to evaluate alarm gate (allow path)", t)
                     }
-                } catch (t: Throwable) {
-                    module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to evaluate alarm gate", t)
+                    result
                 }
-                try {
-                    // Counterpart of the one-shot above: proves the gate is
-                    // actually reached for GMS alarms when the ROM allows them,
-                    // so a silent log later means "never denied", not "never run".
-                    if (java.lang.Boolean.TRUE == result && !alarmGateSeenLogged) {
-                        val alarm = chain.getArg(1)
-                        if (alarm != null) {
-                            val uid = field.getInt(alarm)
-                            if (isGmsUid(uid)) {
-                                alarmGateSeenLogged = true
+                module.deoptimize(method)
+                module.logGated(
+                    Log.INFO, HookerSupport.TAG,
+                    "checkAlarmIsAllowedSend hooked on ${method.declaringClass.simpleName}"
+                )
+            }
+        }
+
+        // CN ROMs omit GMS from AlarmManagerServiceStubImpl.ADJUST_WHITE_LIST:
+        // framework-ext-res puts com.google.android.gms in ADJUST_WHITE_LIST_GLOBAL
+        // (0x11030001), which init() only merges when Build.IS_INTERNATIONAL_BUILD
+        // is true. Hook the three OS3/OS4 alarm policy points directly by creatorUid
+        // so hot-reload works without re-running init() and GSF (shared uid) is
+        // covered alongside GMS.
+        val resolvedStub = stubClass ?: return
+        hookAlarmSkipForGms(
+            env = env,
+            stubClass = resolvedStub,
+            alarmClass = alarmClass,
+            creatorUidField = creatorUidField,
+            methodName = "alignAlarmLocked",
+            logTag = "alignAlarmLocked: skipped screen-off alignment for GMS alarm",
+            alreadyLogged = { alarmAlignBypassLogged },
+            markLogged = { alarmAlignBypassLogged = true }
+        )
+        hookAlarmSkipForGms(
+            env = env,
+            stubClass = resolvedStub,
+            alarmClass = alarmClass,
+            creatorUidField = creatorUidField,
+            methodName = "adjustAlarmLocked",
+            logTag = "adjustAlarmLocked: skipped screen-off/offline deferral for GMS alarm",
+            alreadyLogged = { alarmAdjustBypassLogged },
+            markLogged = { alarmAdjustBypassLogged = true }
+        )
+        hookSsruExemption(env, resolvedStub, alarmClass, creatorUidField)
+    }
+
+    /**
+     * Entry-point bypass returning `false` ("not modified") for GMS alarms.
+     *
+     * Must intercept *before* `chain.proceed()` because both `alignAlarmLocked`
+     * and `adjustAlarmLocked` mutate `Alarm` in place (`windowLength`,
+     * `whenElapsed`, `policyElapsed[5]`) before returning `true`. Returning
+     * `false` at entry matches the ROM's own `ADJUST_WHITE_LIST` early exit.
+     */
+    private fun hookAlarmSkipForGms(
+        env: HookEnv,
+        stubClass: Class<*>,
+        alarmClass: Class<*>,
+        creatorUidField: Field,
+        methodName: String,
+        logTag: String,
+        alreadyLogged: () -> Boolean,
+        markLogged: () -> Unit
+    ) {
+        val module = env.module
+        val method = try {
+            stubClass.getDeclaredMethod(methodName, alarmClass)
+        } catch (ignored: NoSuchMethodException) {
+            env.logSkip("${stubClass.simpleName}#$methodName absent, skip")
+            return
+        }
+        if (method.returnType != Boolean::class.javaPrimitiveType) {
+            env.logSkip("${stubClass.simpleName}#$methodName unexpected return type ${method.returnType.name}, skip")
+            return
+        }
+        method.isAccessible = true
+        env.hookE(method).intercept { chain: XposedInterface.Chain ->
+            try {
+                val alarm = chain.getArg(0)
+                if (alarm != null) {
+                    val uid = creatorUidField.getInt(alarm)
+                    if (env.isGmsUid(uid)) {
+                        if (!alreadyLogged()) {
+                            markLogged()
+                            module.logGated(
+                                Log.INFO, HookerSupport.TAG,
+                                "$logTag (creatorUid=$uid)"
+                            )
+                        }
+                        return@intercept false
+                    }
+                }
+            } catch (t: Throwable) {
+                module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to evaluate $methodName", t)
+            }
+            chain.proceed()
+        }
+        module.deoptimize(method)
+        module.logGated(
+            Log.INFO, HookerSupport.TAG,
+            "$methodName hooked on ${method.declaringClass.simpleName}"
+        )
+    }
+
+    /**
+     * SSRU alarm exemption (`isExemptFromSsru(Alarm)Z`).
+     *
+     * Read-only predicate consulted by both `timeBasedOnSsruLocked(Alarm)`
+     * (which otherwise pushes `policyElapsed[4]` out by 1 year when budget is
+     * exhausted) and `AlarmManagerService$AlarmThread#run`. Runs the ROM's
+     * body first and widens only a `false` verdict for GMS/GSF uids.
+     */
+    private fun hookSsruExemption(
+        env: HookEnv,
+        stubClass: Class<*>,
+        alarmClass: Class<*>,
+        creatorUidField: Field
+    ) {
+        val module = env.module
+        val method = try {
+            stubClass.getDeclaredMethod("isExemptFromSsru", alarmClass)
+        } catch (ignored: NoSuchMethodException) {
+            env.logSkip("${stubClass.simpleName}#isExemptFromSsru absent, skip")
+            return
+        }
+        if (method.returnType != Boolean::class.javaPrimitiveType) {
+            env.logSkip("${stubClass.simpleName}#isExemptFromSsru unexpected return type ${method.returnType.name}, skip")
+            return
+        }
+        method.isAccessible = true
+        env.hookE(method).intercept { chain: XposedInterface.Chain ->
+            val result = chain.proceed()
+            try {
+                if (java.lang.Boolean.FALSE == result) {
+                    val alarm = chain.getArg(0)
+                    if (alarm != null) {
+                        val uid = creatorUidField.getInt(alarm)
+                        if (env.isGmsUid(uid)) {
+                            if (!alarmSsruExemptLogged) {
+                                alarmSsruExemptLogged = true
                                 module.logGated(
                                     Log.INFO, HookerSupport.TAG,
-                                    "checkAlarmIsAllowedSend: GMS alarm allowed by ROM" +
+                                    "isExemptFromSsru: exempted GMS alarm from SSRU" +
                                         " (creatorUid=$uid)"
                                 )
                             }
+                            return@intercept true
                         }
                     }
-                } catch (t: Throwable) {
-                    module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to evaluate alarm gate (allow path)", t)
                 }
-                result
+            } catch (t: Throwable) {
+                module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to evaluate isExemptFromSsru", t)
             }
-            module.deoptimize(method)
-            module.logGated(
-                Log.INFO, HookerSupport.TAG,
-                "checkAlarmIsAllowedSend hooked on ${method.declaringClass?.simpleName}"
-            )
+            result
         }
+        module.deoptimize(method)
+        module.logGated(
+            Log.INFO, HookerSupport.TAG,
+            "isExemptFromSsru hooked on ${method.declaringClass.simpleName}"
+        )
     }
 }

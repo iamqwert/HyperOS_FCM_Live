@@ -42,6 +42,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -113,9 +114,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import io.github.iamqwert.hypergreeze.R
-import io.github.iamqwert.hypergreeze.theme.AppearanceState
 import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
-import io.github.iamqwert.hypergreeze.theme.UiStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 
@@ -124,9 +123,6 @@ import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
-import top.yukonga.miuix.kmp.basic.PopupPositionProvider
-import top.yukonga.miuix.kmp.basic.DropdownImpl
-import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Close
@@ -137,19 +133,12 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.state.ToggleableState
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
-import top.yukonga.miuix.kmp.basic.ListPopupColumn
-import top.yukonga.miuix.kmp.basic.TopAppBar as MiuixTopAppBar
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
-import top.yukonga.miuix.kmp.overlay.OverlayListPopup
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Checkbox as MiuixCheckbox
-import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
 import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassBackdrop
+import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassSpec
 import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassDropdownItem
 import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassDropdownMenu
 import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassIconButton
@@ -292,13 +281,9 @@ fun MainScreen(
         // The system's own pull-to-refresh, the circle with the refresh text,
         // stays the M3 spinner's counterpart.
         val scrollBehavior = MiuixScrollBehavior()
-        // The page's own layer for its own chrome — the bar's controls. Recorded
-        // over the list below and not over the bar, so the controls that read it
-        // are its siblings rather than its contents; see
-        // [rememberPageLayerBackdrop] for why that has to be this page's layer
-        // and not the shell's.
-        val chromeGlass = softGlassChrome()
+        val blurEnabled = LocalSoftGlassSpec.current.enabled
         val pageBackdrop = rememberPageLayerBackdrop()
+        val activeBackdrop = if (blurEnabled) pageBackdrop else null
 
         // The capsule's top inset, the reference's own ride ([IconPage]'s
         // dynamicTopPadding): 12dp while the large title stands, collapsing to
@@ -406,7 +391,7 @@ fun MainScreen(
                 // bare-at-the-top rule: the plates appear once the list has
                 // scrolled under the bar.
                 CompositionLocalProvider(
-                    LocalSoftGlassBackdrop provides pageBackdrop,
+                    LocalSoftGlassBackdrop provides activeBackdrop,
                     LocalSoftGlassBarReveal provides softGlassBarMaterialProgress(
                         scrollBehavior.state.collapsedFraction
                     )
@@ -433,7 +418,7 @@ fun MainScreen(
                     // The list alone; the bar above is composed outside this node,
                     // which is what lets its controls read the layer — see
                     // [rememberPageLayerBackdrop].
-                    .then(if (chromeGlass) Modifier.layerBackdrop(pageBackdrop) else Modifier)
+                    .then(if (blurEnabled) Modifier.layerBackdrop(pageBackdrop) else Modifier)
                     // The bar's collapse and its band's fade-in both read this
                     // connection. The page has no pinned chrome of its own now,
                     // so it collapses exactly like every other Miuix page.
@@ -639,43 +624,6 @@ fun MainScreen(
     }
 }
 
-/**
- * Where the overflow panel lands: the anchor's end edge, clamped inside the
- * window.
- *
- * The library's default provider is start-aligned and unclamped; anchored to the
- * overflow button at the screen's right corner it measured the panel rightwards
- * and its right edge ran into the window edge. This is the provider KernelSU's
- * manager uses for the same menu, kept verbatim.
- */
-private val OverflowMenuPositionProvider = object : top.yukonga.miuix.kmp.basic.PopupPositionProvider {
-    override fun calculatePosition(
-        anchorBounds: IntRect,
-        windowBounds: IntRect,
-        layoutDirection: LayoutDirection,
-        popupContentSize: IntSize,
-        popupMargin: IntRect,
-        alignment: top.yukonga.miuix.kmp.basic.PopupPositionProvider.Align
-    ): IntOffset {
-        val offsetX = anchorBounds.right - popupContentSize.width - popupMargin.right
-        val offsetY = anchorBounds.bottom + popupMargin.top
-        return IntOffset(
-            x = offsetX.coerceIn(
-                windowBounds.left,
-                (windowBounds.right - popupContentSize.width - popupMargin.right)
-                    .coerceAtLeast(windowBounds.left)
-            ),
-            y = offsetY.coerceIn(
-                (windowBounds.top + popupMargin.top)
-                    .coerceAtMost(windowBounds.bottom - popupContentSize.height - popupMargin.bottom),
-                windowBounds.bottom - popupContentSize.height - popupMargin.bottom
-            )
-        )
-    }
-
-    override fun getMargins(): PaddingValues = PaddingValues(start = 20.dp)
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainTopBar(
@@ -696,13 +644,6 @@ fun MainTopBar(
     m3ScrollBehavior: androidx.compose.material3.TopAppBarScrollBehavior? = null
 ) {
     if (LocalUiStyle.current.isMiuixBased) {
-        // The search capsule is no longer a bar slot: MainScreen mounts it as
-        // the list's first item, so it travels up with the rows. With nothing
-        // pinned under the bar, this page can wear the same gradient band as
-        // every other Miuix page. Plain MIUIX still follows the floating-bar
-        // row and keeps the library's default bar when that row is off.
-        val floatingBar by AppearanceState.floatingBar
-        val useGlassBar = softGlassChrome() || floatingBar
         // MainScreen always hands one in; the fallback only protects the
         // signature for the M3 call site, which never enters this branch.
         val behavior = scrollBehavior ?: MiuixScrollBehavior()
@@ -725,7 +666,6 @@ fun MainTopBar(
                 )
             }
         }
-        val emptyControl: @Composable () -> Unit = {}
         // Batch mode keeps the resting bar's own shape: the same collapsing
         // large title, with the count in the title slot — 「应用」 simply
         // becomes 「已选择 N 项」. The mode's controls stay at the bar's right
@@ -738,10 +678,7 @@ fun MainTopBar(
                     allVisibleSelected = state.allVisibleSelected,
                     onSelectAll = actions.onSelectAll
                 )
-                // The bar packs its actions edge to edge, which the 24dp ink
-                // buttons absorb but the 柔光玻璃 44dp glass discs do not —
-                // two of them parked adjacent read as one blob.
-                if (softGlassChrome()) Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(8.dp))
                 BarIconButton(onClick = {
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                     actions.onBatchSave()
@@ -765,36 +702,21 @@ fun MainTopBar(
                         actions.onStartMultiSelect()
                     }
                 )
-                // Same air the batch bar gets: under 柔光玻璃 these are 44dp
-                // glass discs parked rim to rim without it.
-                if (softGlassChrome()) Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(8.dp))
                 OverflowMenu(state.overflow, actions)
             }
         }
-        if (useGlassBar) {
-            MiuixGlassTopAppBar(
-                title = state.title,
-                scrolled = scrolled,
-                showBack = false,
-                backDescription = "",
-                onBack = {},
-                scrollBehavior = behavior,
-                modifier = modifier,
-                actions = barActions,
-                navigationIcon = if (state.multiSelect) leading else null
-            )
-        } else {
-            Column(modifier = modifier.background(MaterialTheme.colorScheme.background)) {
-                MiuixTopAppBar(
-                    title = state.title,
-                    largeTitle = state.title,
-                    color = MaterialTheme.colorScheme.background,
-                    navigationIcon = if (state.multiSelect) leading else emptyControl,
-                    actions = barActions,
-                    scrollBehavior = behavior
-                )
-            }
-        }
+        MiuixGlassTopAppBar(
+            title = state.title,
+            scrolled = scrolled,
+            showBack = false,
+            backDescription = "",
+            onBack = {},
+            scrollBehavior = behavior,
+            modifier = modifier,
+            actions = barActions,
+            navigationIcon = if (state.multiSelect) leading else null
+        )
         return
     }
     if (state.multiSelect) {
@@ -1027,14 +949,10 @@ fun TopBarIconButton(
 }
 
 /**
- * A home-bar icon control, in whichever material the bar's own look is milled
- * from: the library's bare button on both plain looks, the 柔光玻璃 plate under
- * [UiStyle.SoftGlass] — the same material, sizes, glyph ink and press language
- * everywhere else in that look, so a bar cannot end up half dressed. The plate
- * is chrome for a bar with content under it, so its material fades with the
- * page's collapse ([LocalSoftGlassBarReveal]) — the reference's own
- * construction, one control whose glass plate breathes over a glyph that never
- * changes identity, not two controls cross-fading.
+ * A home-bar icon control wearing the 柔光玻璃 plate under [UiStyle.Miuix].
+ * The plate is chrome for a bar with content under it, so its material fades
+ * with the page's collapse ([LocalSoftGlassBarReveal]) — one control whose
+ * glass plate breathes over a glyph that never changes identity.
  *
  * The plates sample the PAGE's own layer, carried here by [MainScreen] and
  * [PageScaffold] (see [rememberPageLayerBackdrop]) rather than read off the
@@ -1047,36 +965,26 @@ private fun BarIconButton(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    if (softGlassChrome()) {
-        // One control, the reference way: the plate's material alpha rides the
-        // collapse progress, so at the page's top this reads as a bare glyph —
-        // same button, same spot, the glass simply not there yet.
-        val reveal by animateFloatAsState(
-            targetValue = LocalSoftGlassBarReveal.current,
-            animationSpec = SOFT_GLASS_REVEAL_FADE
-        )
-        SoftGlassIconButton(
-            onClick = onClick,
-            modifier = modifier,
-            materialAlpha = reveal,
-            content = content
-        )
-    } else {
-        MiuixIconButton(onClick = onClick, modifier = modifier, content = content)
-    }
+    // One control, the reference way: the plate's material alpha rides the
+    // collapse progress, so at the page's top this reads as a bare glyph —
+    // same button, same spot, the glass simply not there yet.
+    val reveal by animateFloatAsState(
+        targetValue = LocalSoftGlassBarReveal.current,
+        animationSpec = SOFT_GLASS_REVEAL_FADE
+    )
+    SoftGlassIconButton(
+        onClick = onClick,
+        modifier = modifier,
+        materialAlpha = reveal,
+        content = content
+    )
 }
 
 /**
  * The batch bar's selection control, in the reference home bar's own top-right
  * language: a [BarIconButton] wearing the library's SelectAll glyph,
  * opening the selection menu — 全选 / 取消全选 as two option rows, the current
- * state carrying the check, a pick collapsing the panel. The same panel, row
- * type and dim treatment as [OverflowMenu] (this is its machinery with two
- * rows); only the anchor differs.
- *
- * It exists because the words could not: 全选 widening to 取消全选 shoved the
- * 「已选择 N 项」 title sideways on every flip. A glyph holds one width for
- * both states, so the title never moves.
+ * state carrying the check, a pick collapsing the panel.
  */
 @Composable
 private fun BatchSelectMenu(
@@ -1085,17 +993,6 @@ private fun BatchSelectMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val view = LocalView.current
-    val isSoftGlass = softGlassChrome()
-    // The page dim behind the panel, reported to the shell's bars exactly as
-    // [OverflowMenu] reports its own — see [PopupOverlay]. 柔光玻璃's new menu
-    // has no veil, so it reports nothing.
-    val overlayKey = remember { Any() }
-    DisposableEffect(overlayKey) {
-        onDispose { PopupOverlay.clear(overlayKey) }
-    }
-    LaunchedEffect(expanded, isSoftGlass) {
-        if (!isSoftGlass) PopupOverlay.report(overlayKey, expanded)
-    }
     var anchorBounds by remember { mutableStateOf(Rect.Zero) }
     Box(modifier = Modifier.onGloballyPositioned { anchorBounds = it.boundsInWindow() }) {
         BarIconButton(onClick = {
@@ -1103,10 +1000,6 @@ private fun BatchSelectMenu(
             expanded = true
         }) {
             Icon(
-                // Same weight as the bar's own copy of this glyph (see the
-                // resting bar's note): the popup row and the control that opens
-                // it are one control in two states, and a weight change between
-                // them would read as the glyph growing when the panel opens.
                 imageVector = MiuixIcons.Normal.SelectAll,
                 contentDescription = stringResource(
                     if (allVisibleSelected) R.string.deselect_all else R.string.select_all
@@ -1115,76 +1008,30 @@ private fun BatchSelectMenu(
                 modifier = Modifier.size(24.dp)
             )
         }
-        if (isSoftGlass) {
-            // 柔光玻璃: the library's new glass menu, the current state marked
-            // with the accent and a tick — see [SoftGlassDropdownMenu].
-            SoftGlassDropdownMenu(
-                show = expanded,
-                onDismissRequest = { expanded = false },
-                anchorBounds = anchorBounds,
-                backdrop = LocalSoftGlassBackdrop.current
-            ) {
-                SoftGlassDropdownItem(
-                    text = stringResource(R.string.select_all),
-                    selected = allVisibleSelected,
-                    onClick = {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        expanded = false
-                        if (!allVisibleSelected) onSelectAll()
-                    }
-                )
-                SoftGlassDropdownItem(
-                    text = stringResource(R.string.deselect_all),
-                    selected = !allVisibleSelected,
-                    onClick = {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        expanded = false
-                        if (allVisibleSelected) onSelectAll()
-                    }
-                )
-            }
-        } else {
-            OverlayListPopup(
-                show = expanded,
-                onDismissRequest = { expanded = false },
-                // End-aligned at the screen's right corner and clamped inside the
-                // window — [OverflowMenuPositionProvider], the same provider the
-                // overflow uses.
-                popupPositionProvider = OverflowMenuPositionProvider,
-                alignment = top.yukonga.miuix.kmp.basic.PopupPositionProvider.Align.TopEnd
-            ) {
-                // Two option rows in the menu's own language: the check marks the
-                // state the list is in right now. Each row drives toward its own
-                // state, so a pick that is already current simply collapses.
-                ListPopupColumn {
-                    DropdownImpl(
-                        item = DropdownItem(text = stringResource(R.string.select_all)),
-                        optionSize = 2,
-                        isSelected = allVisibleSelected,
-                        index = 0,
-                        isFirst = true,
-                        isLast = false,
-                        onSelectedIndexChange = {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            expanded = false
-                            if (!allVisibleSelected) onSelectAll()
-                        }
-                    )
-                    DropdownImpl(
-                        item = DropdownItem(text = stringResource(R.string.deselect_all)),
-                        optionSize = 2,
-                        isSelected = !allVisibleSelected,
-                        index = 1,
-                        isFirst = false,
-                        isLast = true,
-                        onSelectedIndexChange = {
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            expanded = false
-                            if (allVisibleSelected) onSelectAll()
-                        }
-                    )
+        SoftGlassDropdownMenu(
+            show = expanded,
+            onDismissRequest = { expanded = false },
+            anchorBounds = anchorBounds,
+            backdrop = LocalSoftGlassBackdrop.current
+        ) {
+            SoftGlassDropdownItem(
+                text = stringResource(R.string.select_all),
+                selected = allVisibleSelected,
+                onClick = {
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    expanded = false
+                    if (!allVisibleSelected) onSelectAll()
                 }
-            }
+            )
+            SoftGlassDropdownItem(
+                text = stringResource(R.string.deselect_all),
+                selected = !allVisibleSelected,
+                onClick = {
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    expanded = false
+                    if (allVisibleSelected) onSelectAll()
+                }
+            )
         }
     }
 }
@@ -1223,20 +1070,6 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
     // window, which can neither dim what is behind it nor mark the current value
     // without putting a plate behind it.
     if (LocalUiStyle.current.isMiuixBased) {
-        val isSoftGlass = softGlassChrome()
-        // This popup dims the page behind it exactly as the settings rows'
-        // dropdowns do, so the shell's bars have to hear about it: the veil is
-        // drawn inside the layer the glass would sample, and a bar reading a veil
-        // as its own backdrop is a bar lighting up over the popup instead of
-        // standing behind it. See [PopupOverlay]. 柔光玻璃's new dropdown has no
-        // veil (it is composed above every page layer), so it reports nothing.
-        val overlayKey = remember { Any() }
-        DisposableEffect(overlayKey) {
-            onDispose { PopupOverlay.clear(overlayKey) }
-        }
-        LaunchedEffect(expanded, isSoftGlass) {
-            if (!isSoftGlass) PopupOverlay.report(overlayKey, expanded)
-        }
         // The filter button ticks like every other operation control on this
         // bar (see MainTopBar's note).
         val view = LocalView.current
@@ -1261,14 +1094,6 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 expanded = true
             }) {
-                // The library's sort glyph — the arrow-and-rows mark the
-                // reference apps carry in this slot. The ink is the bar's own
-                // (onSurface): the library's onBackgroundVariant is a caption
-                // tone, and HyperOS puts no washed grey on its bar icons.
-                // The NORMAL weight, not the Regular default: measured against
-                // the settings gear's ring (≈1.66dp of stroke at 24dp) the
-                // Regular rows run 1.78dp and read heavier than every glyph
-                // beside them; Normal's 1.62dp sits on the gear.
                 Icon(
                     imageVector = MiuixIcons.Normal.Sort,
                     contentDescription = moreLabel,
@@ -1276,71 +1101,22 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
                     modifier = Modifier.size(24.dp)
                 )
             }
-            if (isSoftGlass) {
-                // 柔光玻璃 wears MIUIX's NEW anchored menu: a glass panel that
-                // grows out of the button's corner, the current row in the
-                // accent with a tick. See [SoftGlassDropdownMenu].
-                SoftGlassDropdownMenu(
-                    show = expanded,
-                    onDismissRequest = { expanded = false },
-                    anchorBounds = anchorBounds,
-                    backdrop = LocalSoftGlassBackdrop.current
-                ) {
-                    toggleLabels.forEachIndexed { index, label ->
-                        SoftGlassDropdownItem(
-                            text = label,
-                            selected = toggled[index],
-                            onClick = {
-                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                expanded = false
-                                toggles[index]()
-                            }
-                        )
-                    }
-                }
-            } else {
-                OverlayListPopup(
-                    show = expanded,
-                    onDismissRequest = { expanded = false },
-                    // End-aligned to the anchor and clamped inside the window: the
-                    // default start-aligned provider measures the panel from the
-                    // anchor's left edge, and at the screen's right corner that put
-                    // the panel's right edge against (and past) the window edge.
-                    // This is KernelSU's MenuPositionProvider, verbatim.
-                    popupPositionProvider = OverflowMenuPositionProvider,
-                    alignment = top.yukonga.miuix.kmp.basic.PopupPositionProvider.Align.TopEnd
-                ) {
-                    // Selection is the accent plus a check, the menu's own language
-                    // (the reference apps' sort and mode menus) — a checkbox plate on
-                    // top of it would be the same bit drawn twice.
-                    // The library's own option rows, so the panel gets what it is
-                    // built with: the larger padding above the first row and below the
-                    // last (a menu whose ink touches the panel edge reads as a list
-                    // with no lid), the accent plus a check on the current value, and
-                    // the chevron-and-button role for the row that navigates rather
-                    // than toggles.
-                    // Settings no longer lives here — it moved to the bar's leading
-                    // edge. The divider that separated the toggles from it went with
-                    // it: the remaining rows answer the same yes/no kind, and
-                    // a rule under them read as a seam pointing at nothing.
-                    val rowCount = toggleLabels.size
-                    ListPopupColumn {
-                        toggleLabels.forEachIndexed { index, label ->
-                            DropdownImpl(
-                                item = DropdownItem(text = label),
-                                optionSize = rowCount,
-                                isSelected = toggled[index],
-                                index = index,
-                                isFirst = index == 0,
-                                isLast = index == toggleLabels.lastIndex,
-                                onSelectedIndexChange = {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                    expanded = false
-                                    toggles[index]()
-                                }
-                            )
+            SoftGlassDropdownMenu(
+                show = expanded,
+                onDismissRequest = { expanded = false },
+                anchorBounds = anchorBounds,
+                backdrop = LocalSoftGlassBackdrop.current
+            ) {
+                toggleLabels.forEachIndexed { index, label ->
+                    SoftGlassDropdownItem(
+                        text = label,
+                        selected = toggled[index],
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            expanded = false
+                            toggles[index]()
                         }
-                    }
+                    )
                 }
             }
         }
@@ -1784,9 +1560,24 @@ private fun LazyItemScope.AppRow(
                 // allowlist glyph, which under batch semantics would be a readout
                 // that never moves while the tap rewrites something else. Silent in
                 // the a11y tree for the same reason — the row carries the state.
+                //
+                // When selectedWash is true the card wears primaryContainer, so the
+                // box pairs with onPrimaryContainer / primaryContainer (>=4.54:1
+                // across all 144 palette combos) instead of default primary (which
+                // drops below 2:1 on MONOCHROME light).
+                val scheme = MaterialTheme.colorScheme
                 Checkbox(
                     checked = rowSelected,
                     onCheckedChange = null,
+                    colors = if (selectedWash) {
+                        CheckboxDefaults.colors(
+                            checkedColor = scheme.onPrimaryContainer,
+                            checkmarkColor = scheme.primaryContainer,
+                            uncheckedColor = scheme.onPrimaryContainer
+                        )
+                    } else {
+                        CheckboxDefaults.colors()
+                    },
                     modifier = Modifier.clearAndSetSemantics {}
                 )
             } else if (exempt) {

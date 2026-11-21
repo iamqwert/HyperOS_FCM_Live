@@ -2,6 +2,7 @@ package io.github.iamqwert.hypergreeze
 
 import android.content.Intent
 import android.content.pm.ResolveInfo
+import android.os.SystemClock
 import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import java.lang.reflect.Executable
@@ -74,6 +75,59 @@ internal object GreezeHooks {
     @Volatile
     private var gmsWakeUpListAllowedLogged = false
 
+    /** One-shot: confirms triggerGMSLimitAction was suppressed before pruning GMS allowlist. */
+    @Volatile
+    private var gmsLimitActionSuppressedLogged = false
+
+    /** One-shot: confirms post-c2dm tryDelayFreeze extended the anti-refreeze grace window. */
+    @Volatile
+    private var c2dmFreezeDelayLogged = false
+
+    /** One-shot: confirms isJobRestrict allowed a post-c2dm job within the 10s wake window. */
+    @Volatile
+    private var c2dmJobAllowedLogged = false
+
+    /**
+     * Per-uid deadline (`SystemClock.uptimeMillis()`) for the short post-c2dm
+     * wake window during which `GreezeManagerService#isJobRestrict(uid)` is
+     * relaxed for allowlisted FCM apps (aligned with [HookerSupport.C2DM_FREEZE_DELAY_MS]).
+     */
+    private val c2dmWakeDeadlines = HashMap<Int, Long>()
+
+    private fun recordC2dmWakeWindow(uid: Int) {
+        val now = SystemClock.uptimeMillis()
+        val deadline = now + HookerSupport.C2DM_FREEZE_DELAY_MS
+        synchronized(c2dmWakeDeadlines) {
+            if (c2dmWakeDeadlines.size >= 64) {
+                val it = c2dmWakeDeadlines.entries.iterator()
+                while (it.hasNext()) {
+                    if (it.next().value <= now) {
+                        it.remove()
+                    }
+                }
+                if (c2dmWakeDeadlines.size >= 64) {
+                    c2dmWakeDeadlines.clear()
+                }
+            }
+            val existing = c2dmWakeDeadlines[uid]
+            if (existing == null || deadline > existing) {
+                c2dmWakeDeadlines[uid] = deadline
+            }
+        }
+    }
+
+    private fun isInC2dmWakeWindow(uid: Int): Boolean {
+        val now = SystemClock.uptimeMillis()
+        synchronized(c2dmWakeDeadlines) {
+            val deadline = c2dmWakeDeadlines[uid] ?: return false
+            if (now < deadline) {
+                return true
+            }
+            c2dmWakeDeadlines.remove(uid)
+            return false
+        }
+    }
+
     /**
      * greeze (`com.miui.server.greeze.GreezeManagerService`): the ROM's freeze /
      * broadcast-policy engine, and this module's largest system_server surface.
@@ -110,31 +164,21 @@ internal object GreezeHooks {
      * fixes the wording for that case ("not observed in this window", never
      * "not needed").
      */
-    internal fun hookGreezeManagerService(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        isGmsUid: (Int) -> Boolean,
-        forceBooleanArg: (Class<*>, String, Boolean, String, Int) -> Unit,
-        systemContext: () -> android.content.Context?,
-        findMethod: (Class<*>, String, Array<Class<*>?>) -> Method?
-    ) {
+    internal fun hookGreezeManagerService(env: HookEnv) {
+        val module = env.module
         val GreezeManagerServiceClass =
-            classLoader.loadClass("com.miui.server.greeze.GreezeManagerService")
+            env.classLoader.loadClass("com.miui.server.greeze.GreezeManagerService")
         try {
-            val isAllowBroadcastMethod = findMethod(
+            val isAllowBroadcastMethod = env.findMethod(
                 GreezeManagerServiceClass,
                 "isAllowBroadcast",
-                arrayOf(
-                    Int::class.javaPrimitiveType, String::class.java,
-                    Int::class.javaPrimitiveType, String::class.java, String::class.java
-                )
+                Int::class.javaPrimitiveType, String::class.java,
+                Int::class.javaPrimitiveType, String::class.java, String::class.java
             )
-            val getPackageNameFromUidMethod = findMethod(
+            val getPackageNameFromUidMethod = env.findMethod(
                 GreezeManagerServiceClass,
                 "getPackageNameFromUid",
-                arrayOf(Int::class.javaPrimitiveType)
+                Int::class.javaPrimitiveType
             )
             getPackageNameFromUidMethod?.isAccessible = true
             if (getPackageNameFromUidMethod == null) {
@@ -148,7 +192,7 @@ internal object GreezeHooks {
                 module.logGated(Log.ERROR, HookerSupport.TAG, "GreezeManagerService#isAllowBroadcast absent, skip")
             } else {
                 val uidLookup = getPackageNameFromUidMethod
-                hookE(isAllowBroadcastMethod).intercept { chain: XposedInterface.Chain ->
+                env.hookE(isAllowBroadcastMethod).intercept { chain: XposedInterface.Chain ->
                     // Argument order taken from the disassembly of the only caller
                     // (GreezeManagerService, offset 00f4), not from the parameter
                     // names, because everything below depends on it:
@@ -180,7 +224,7 @@ internal object GreezeHooks {
                         // the caller's Slog output, but callerUid always is. Same
                         // gate, sturdier key — the two paths are counted separately
                         // so the log shows which one actually carried the decision.
-                        val callerUidIsGms = callerUid is Int && isGmsUid(callerUid)
+                        val callerUidIsGms = callerUid is Int && env.isGmsUid(callerUid)
                         val calleeIsGms = HookerSupport.GMS_PACKAGE_NAME == calleePkgName ||
                             HookerSupport.GMS_PERSISTENT_PROCESS_NAME == calleePkgName
                         // The c2dm allow lives in isRestrictReceiver (S10). The
@@ -236,49 +280,106 @@ internal object GreezeHooks {
         // isAllowBroadcast's entry. No sample ever existed; the residual face is
         // cloud-gated, which is the module's own exemption rule for keeping a hook.
 
-        // S4 (`triggerGMSLimitAction` → false / clear `mGmsLimitEnabled`) was
-        // removed on 2026-10-30 (second pass). OS4 dex: the class carries only
-        // the no-arg overload (miui-services idx 7120, no (Z) form), and its
-        // three callers are lambda$updateGmsNetStatus$3 (posts only on
-        // status==true, which the S5 pin below makes unreachable), H#handleMessage
-        // what=10 (no sender in this dex) and handleDumpGMS — the manual
-        // `dumpsys greezer gms limit` debug command. With the automatic face
-        // dead, the hook's only live trigger was that command. S5 is the layer
-        // that actually holds; if it ever reports absent (INFO in the install
-        // summary), re-evaluate bringing S4 back.
+        // S4 (`triggerGMSLimitAction()V`): restored after verifying that
+        // `GreezeManagerService$12$1#run()` sends `mHandler.sendEmptyMessageDelayed(10, 10000L)`
+        // when `isGmsApp(uid) && !mScreenOn`, and `H#handleMessage` what=10 invokes
+        // `triggerGMSLimitAction()` directly on both OS3 and OS4. When `mGmsLimitEnabled`
+        // is true, the method calls `removeAurogonAllowList("com.google.android.gms")`
+        // before `triggerQuickFreeze(uid, 0)` — suppressing the entry prevents GMS from
+        // being stripped out of the Aurogon allowlist as well as skipping quick-freeze.
+        try {
+            val triggerGmsLimitMethod =
+                GreezeManagerServiceClass.getDeclaredMethod("triggerGMSLimitAction")
+            triggerGmsLimitMethod.isAccessible = true
+            env.hookE(triggerGmsLimitMethod).intercept { _: XposedInterface.Chain ->
+                if (!gmsLimitActionSuppressedLogged) {
+                    gmsLimitActionSuppressedLogged = true
+                    module.logGated(
+                        Log.INFO, HookerSupport.TAG,
+                        "GreezeManagerService#triggerGMSLimitAction: suppressed GMS limit action"
+                    )
+                }
+                null
+            }
+            module.deoptimize(triggerGmsLimitMethod)
+            module.logGated(
+                Log.INFO, HookerSupport.TAG,
+                "GreezeManagerService#triggerGMSLimitAction hooked"
+            )
+        } catch (e: NoSuchMethodException) {
+            env.logSkip("GreezeManagerService#triggerGMSLimitAction absent, skip")
+        }
+
         // S5's target is OS4-only: the OS3 dex has no `updateGmsNetStatus`
         // (verified 2026-10-30), so a miss there is a cross-generation fact,
         // not a same-generation gap — hence DEBUG, which keeps the OS3 install
         // summary's "absent on this ROM" count honest.
-        forceBooleanArg(
+        env.forceBooleanArg(
             GreezeManagerServiceClass,
             "updateGmsNetStatus",
             false,
             "GreezeManagerService",
             Log.DEBUG
         )
+
+        // Post-c2dm job window: during LaunchMode / ImmobulusMode, Greeze's
+        // `isJobRestrict(uid)` can block WorkManager/JobScheduler jobs scheduled
+        // right after an FCM broadcast arrives. Narrowed strictly to allowlisted
+        // uids within the 10s window recorded by `checkApplicationAutoStart` /
+        // `isRestrictReceiver`; outside that window the ROM's verdict is untouched.
+        try {
+            val isJobRestrictMethod = GreezeManagerServiceClass.getDeclaredMethod(
+                "isJobRestrict",
+                Int::class.javaPrimitiveType
+            )
+            isJobRestrictMethod.isAccessible = true
+            env.hookE(isJobRestrictMethod).intercept { chain: XposedInterface.Chain ->
+                val result = chain.proceed()
+                try {
+                    if (java.lang.Boolean.TRUE == result) {
+                        val uid = chain.getArg(0)
+                        if (uid is Int && isInC2dmWakeWindow(uid)) {
+                            if (!c2dmJobAllowedLogged) {
+                                c2dmJobAllowedLogged = true
+                                module.logGated(
+                                    Log.INFO, HookerSupport.TAG,
+                                    "GreezeManagerService#isJobRestrict: allowed post-c2dm job " +
+                                        "for uid=$uid (within ${HookerSupport.C2DM_FREEZE_DELAY_MS}ms window)"
+                                )
+                            }
+                            return@intercept false
+                        }
+                    }
+                } catch (t: Throwable) {
+                    module.logGated(
+                        Log.ERROR, HookerSupport.TAG,
+                        "GreezeManagerService#isJobRestrict hook failed", t
+                    )
+                }
+                result
+            }
+            module.deoptimize(isJobRestrictMethod)
+            module.logGated(
+                Log.INFO, HookerSupport.TAG,
+                "GreezeManagerService#isJobRestrict hooked (post-c2dm 10s window only)"
+            )
+        } catch (e: NoSuchMethodException) {
+            env.logSkip("GreezeManagerService#isJobRestrict absent, skip")
+        }
     }
 
     internal fun hookDomesticPolicyManager(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        isGmsUid: (Int) -> Boolean,
-        netReleaseEnabled: () -> Boolean,
-        allowlistPackageForUid: (Int) -> String?
+        env: HookEnv,
+        netReleaseEnabled: () -> Boolean
     ) {
         val DomesticPolicyManagerClass =
-            classLoader.loadClass("com.miui.server.greeze.DomesticPolicyManager")
+            env.classLoader.loadClass("com.miui.server.greeze.DomesticPolicyManager")
         // S6 (`DomesticPolicyManager#deferBroadcast` counter) was removed on
         // 2026-10-30: a c2dm reaching the ROM deferral policy is already visible
         // as "not allowed upstream", and the counter had no consumer after the
         // broadcast-gate summary went away.
 
-        hookDomesticRestrictNet(
-            module, DomesticPolicyManagerClass, hookE, logSkip,
-            isGmsUid, netReleaseEnabled, allowlistPackageForUid
-        )
+        hookDomesticRestrictNet(env, DomesticPolicyManagerClass, netReleaseEnabled)
     }
 
     /**
@@ -333,21 +434,18 @@ internal object GreezeHooks {
      * existing policy.
      */
     private fun hookDomesticRestrictNet(
-        module: XposedInterface,
+        env: HookEnv,
         domesticPolicyManagerClass: Class<*>,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        isGmsUid: (Int) -> Boolean,
-        netReleaseEnabled: () -> Boolean,
-        allowlistPackageForUid: (Int) -> String?
+        netReleaseEnabled: () -> Boolean
     ) {
+        val module = env.module
         try {
             val isRestrictNetMethod = domesticPolicyManagerClass.getDeclaredMethod(
                 "isRestrictNet", Int::class.javaPrimitiveType
             )
-            hookE(isRestrictNetMethod).intercept { chain: XposedInterface.Chain ->
+            env.hookE(isRestrictNetMethod).intercept { chain: XposedInterface.Chain ->
                 val uid = chain.getArg(0)
-                if (uid is Int && isGmsUid(uid)) {
+                if (uid is Int && env.isGmsUid(uid)) {
                     // Dedicated one-shot: this fires once per boot, and it is the
                     // only evidence that the Domestic restrict-net branch is real.
                     if (!gmsRestrictNetLogged) {
@@ -360,7 +458,7 @@ internal object GreezeHooks {
                     return@intercept false
                 }
                 if (uid is Int && netReleaseEnabled()) {
-                    val checkedPkg = allowlistPackageForUid(uid)
+                    val checkedPkg = env.allowlistPackageForUid(uid)
                     if (checkedPkg != null) {
                         // Detail budget: one line per uid, ever — the summary
                         // tick carries the volume, so repeating the same names
@@ -386,7 +484,7 @@ internal object GreezeHooks {
                     "checked apps follow greeze_net_release"
             )
         } catch (e: NoSuchMethodException) {
-            logSkip("DomesticPolicyManager#isRestrictNet absent, skip")
+            env.logSkip("DomesticPolicyManager#isRestrictNet absent, skip")
         }
     }
 
@@ -419,26 +517,21 @@ internal object GreezeHooks {
      * (0x40 set on the main chain's first gate, absent from `freezeAction`'s
      * own two gates).
      */
-    internal fun hookUdpPackageRestrict(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        isGmsUid: (Int) -> Boolean
-    ) {
+    internal fun hookUdpPackageRestrict(env: HookEnv) {
+        val module = env.module
         try {
             val greezeManagerServiceClass =
-                classLoader.loadClass("com.miui.server.greeze.GreezeManagerService")
+                env.classLoader.loadClass("com.miui.server.greeze.GreezeManagerService")
             val udpPackageRestrictMethod = greezeManagerServiceClass.getDeclaredMethod(
                 "udpPackageRestrict",
                 Int::class.javaPrimitiveType,
                 Boolean::class.javaPrimitiveType
             )
             udpPackageRestrictMethod.isAccessible = true
-            hookE(udpPackageRestrictMethod).intercept { chain: XposedInterface.Chain ->
+            env.hookE(udpPackageRestrictMethod).intercept { chain: XposedInterface.Chain ->
                 val uid = chain.getArg(0)
                 val allow = chain.getArg(1) == true
-                if (uid is Int && allow && isGmsUid(uid)) {
+                if (uid is Int && allow && env.isGmsUid(uid)) {
                     if (!gmsUdpFilterLogged) {
                         gmsUdpFilterLogged = true
                         module.logGated(
@@ -453,19 +546,16 @@ internal object GreezeHooks {
             module.deoptimize(udpPackageRestrictMethod)
             module.logGated(Log.INFO, HookerSupport.TAG, "GreezeManagerService#udpPackageRestrict hooked for GMS")
         } catch (e: ClassNotFoundException) {
-            logSkip("GreezeManagerService absent, udpPackageRestrict skip")
+            env.logSkip("GreezeManagerService absent, udpPackageRestrict skip")
         } catch (e: NoSuchMethodException) {
-            logSkip("GreezeManagerService#udpPackageRestrict absent, skip")
+            env.logSkip("GreezeManagerService#udpPackageRestrict absent, skip")
         }
     }
 
-    internal fun hookListAppsManager(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder
-    ) {
+    internal fun hookListAppsManager(env: HookEnv) {
+        val module = env.module
         val ListAppsManagerClass =
-            classLoader.loadClass("com.miui.server.greeze.power.ListAppsManager")
+            env.classLoader.loadClass("com.miui.server.greeze.power.ListAppsManager")
         // SYSTEM_BLACK_LIST is deliberately NOT touched any more (2026-10-30).
         // The OS4 dex settles the polarity the earlier revision could only
         // guess at:
@@ -497,7 +587,7 @@ internal object GreezeHooks {
         // nothing after the first call.
         if (useDataField != null) {
             for (constructor in ListAppsManagerClass.declaredConstructors) {
-                hookE(constructor).intercept { chain: XposedInterface.Chain ->
+                env.hookE(constructor).intercept { chain: XposedInterface.Chain ->
                     try {
                         chain.proceed()
                     } finally {
@@ -576,20 +666,20 @@ internal object GreezeHooks {
         }
     }
 
-    internal fun hookBroadcastQueueModernStubImpl(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        systemContext: () -> android.content.Context?,
-        isGmsUid: (Int) -> Boolean
-    ) {
+    internal fun hookBroadcastQueueModernStubImpl(env: HookEnv) {
+        val module = env.module
+        val classLoader = env.classLoader
         val BroadcastQueueModernStubImplClass =
             classLoader.loadClass("com.android.server.am.BroadcastQueueModernStubImpl")
         val BroadcastQueueClass = classLoader.loadClass("com.android.server.am.BroadcastQueue")
         val BroadcastRecordClass = classLoader.loadClass("com.android.server.am.BroadcastRecord")
         val callerPackageField = BroadcastRecordClass.getDeclaredField("callerPackage")
         callerPackageField.isAccessible = true
+        val callingUidField = try {
+            BroadcastRecordClass.getDeclaredField("callingUid").also { it.isAccessible = true }
+        } catch (ignored: NoSuchFieldException) {
+            null
+        }
         val intentField = BroadcastRecordClass.getDeclaredField("intent")
         intentField.isAccessible = true
         val checkApplicationAutoStartMethod = BroadcastQueueModernStubImplClass.getDeclaredMethod(
@@ -598,25 +688,35 @@ internal object GreezeHooks {
             BroadcastRecordClass,
             ResolveInfo::class.java
         )
-        hookE(checkApplicationAutoStartMethod).intercept { chain: XposedInterface.Chain ->
+        env.hookE(checkApplicationAutoStartMethod).intercept { chain: XposedInterface.Chain ->
             try {
                 val broadcastRecord = chain.getArg(1)
                 val callerPackage = callerPackageField.get(broadcastRecord) as? String
+                val callerPkgIsGms = HookerSupport.GMS_PACKAGE_NAME == callerPackage
+                val callerUidIsGms = !callerPkgIsGms && callingUidField != null &&
+                    env.isGmsUid(callingUidField.getInt(broadcastRecord))
                 val intent = intentField.get(broadcastRecord) as? Intent
+                val resolveInfo = chain.getArg(2) as? ResolveInfo
                 val targetPackage = intent?.let { HookerSupport.targetPackageOf(it) }
-                if (callerPackage != null &&
-                    HookerSupport.GMS_PACKAGE_NAME == callerPackage &&
+                    ?: resolveInfo?.activityInfo?.applicationInfo?.packageName
+                    ?: resolveInfo?.activityInfo?.packageName
+                if ((callerPkgIsGms || callerUidIsGms) &&
                     intent != null &&
                     HookerSupport.ACTION_REMOTE_INTENT == intent.action &&
                     targetPackage != null &&
-                    AllowlistGate.moduleAppliesTo(module, systemContext, targetPackage)
+                    AllowlistGate.moduleAppliesTo(module, env::systemContext, targetPackage)
                 ) {
+                    val calleeUid = resolveInfo?.activityInfo?.applicationInfo?.uid
+                    if (calleeUid != null) {
+                        recordC2dmWakeWindow(calleeUid)
+                    }
                     if (!broadcastGateAutostartAllowedLogged) {
                         broadcastGateAutostartAllowedLogged = true
                         module.logGated(
                             Log.INFO, HookerSupport.TAG,
                             "checkApplicationAutoStart: c2dm allowed for callee=$targetPackage " +
-                                "(answered at method entry, before MIUIOP 10008 is read)"
+                                "(matchedBy=${if (callerPkgIsGms) "callerPkg" else "callerUid"}, " +
+                                "answered at method entry, before MIUIOP 10008 is read)"
                         )
                     }
                     return@intercept true
@@ -672,7 +772,44 @@ internal object GreezeHooks {
                 Int::class.javaPrimitiveType,
                 String::class.java
             )
-            hookE(isRestrictReceiverMethod).intercept { chain: XposedInterface.Chain ->
+            // OS3/OS4 both declare isUidFrozen(int)Z; checking it avoids posting
+            // redundant thawUidAsync runnables for already-unfrozen receivers.
+            val isUidFrozenMethod = env.findMethod(
+                GreezeManagerServiceClass,
+                "isUidFrozen",
+                Int::class.javaPrimitiveType
+            )?.also { it.isAccessible = true }
+            // OS3/OS4 anti-refreeze grace helper: Greeze's own thawUidAsync only
+            // grants 2000ms via ActionExecute#tryDelayFreeze(uid, 2000L, false).
+            // Extending to 10s (aligned with GMS's 10s Doze temp_allowlist) lets
+            // the target app finish TLS handshake / message fetch after wake.
+            // tryDelayFreeze takes max(existing, now + delay), so it never
+            // truncates a longer ROM-granted grace window.
+            val powerStrategyModeField = try {
+                GreezeManagerServiceClass.getDeclaredField("mPowerStrategyMode")
+                    .also { it.isAccessible = true }
+            } catch (ignored: NoSuchFieldException) {
+                null
+            }
+            val getActionExecuteMethod = try {
+                classLoader.loadClass("com.miui.server.greeze.power.PowerStrategyMode")
+                    .getDeclaredMethod("getActionExecute")
+                    .also { it.isAccessible = true }
+            } catch (ignored: Throwable) {
+                null
+            }
+            val tryDelayFreezeMethod = try {
+                classLoader.loadClass("com.miui.server.greeze.power.ActionExecute")
+                    .getDeclaredMethod(
+                        "tryDelayFreeze",
+                        Int::class.javaPrimitiveType,
+                        Long::class.javaPrimitiveType,
+                        Boolean::class.javaPrimitiveType
+                    ).also { it.isAccessible = true }
+            } catch (ignored: Throwable) {
+                null
+            }
+            env.hookE(isRestrictReceiverMethod).intercept { chain: XposedInterface.Chain ->
                 try {
                     val intent = chain.getArg(0) as? Intent
                     val callerUid = chain.getArg(1)
@@ -686,12 +823,13 @@ internal object GreezeHooks {
                     // without it a c2dm whose caller package string came through
                     // empty would fall through to the ROM's freeze policy.
                     val callerPkgIsGms = HookerSupport.GMS_PACKAGE_NAME == callerPackage
-                    val callerUidIsGms = callerUid is Int && isGmsUid(callerUid)
+                    val callerUidIsGms = callerUid is Int && env.isGmsUid(callerUid)
                     if ((callerPkgIsGms || callerUidIsGms) &&
                         intent != null &&
                         HookerSupport.ACTION_REMOTE_INTENT == intent.action &&
-                        AllowlistGate.moduleAppliesTo(module, systemContext, calleePackage)
+                        AllowlistGate.moduleAppliesTo(module, env::systemContext, calleePackage)
                     ) {
+                        recordC2dmWakeWindow(calleeUid)
                         if (!broadcastGateAllowedLogged) {
                             broadcastGateAllowedLogged = true
                             module.logGated(
@@ -701,13 +839,55 @@ internal object GreezeHooks {
                                     "matchedBy=${if (callerPkgIsGms) "callerPkg" else "callerUid"})"
                             )
                         }
-                        // Caller uid 1000 and a reason string follow the ROM's own
-                        // thawUidAsync calls. The native allowed path thaws with
-                        // "broadcast"; this hook deliberately keeps "bc_action"
-                        // (what the ROM's cached-broadcast early exits use) so a
-                        // module-triggered thaw stays distinguishable in greeze
-                        // history from a native one.
-                        thawUidAsyncMethod.invoke(chain.thisObject, calleeUid, 1000, "bc_action")
+                        if (powerStrategyModeField != null &&
+                            getActionExecuteMethod != null &&
+                            tryDelayFreezeMethod != null
+                        ) {
+                            try {
+                                val mode = powerStrategyModeField.get(chain.thisObject)
+                                val actionExecute =
+                                    if (mode != null) getActionExecuteMethod.invoke(mode) else null
+                                if (actionExecute != null) {
+                                    tryDelayFreezeMethod.invoke(
+                                        actionExecute,
+                                        calleeUid,
+                                        HookerSupport.C2DM_FREEZE_DELAY_MS,
+                                        true
+                                    )
+                                    if (!c2dmFreezeDelayLogged) {
+                                        c2dmFreezeDelayLogged = true
+                                        module.logGated(
+                                            Log.INFO, HookerSupport.TAG,
+                                            "isRestrictReceiver: extended anti-refreeze grace to " +
+                                                "${HookerSupport.C2DM_FREEZE_DELAY_MS}ms for " +
+                                                "callee=$calleePackage (uid=$calleeUid)"
+                                        )
+                                    }
+                                }
+                            } catch (t: Throwable) {
+                                module.logGated(
+                                    Log.WARN, HookerSupport.TAG,
+                                    "isRestrictReceiver: tryDelayFreeze failed (non-fatal)", t
+                                )
+                            }
+                        }
+                        // Only invoke thawUidAsync when the uid is actually frozen
+                        // (fall back to thawing if isUidFrozen is unavailable).
+                        val frozen = if (isUidFrozenMethod != null) {
+                            module.getInvoker(isUidFrozenMethod)
+                                .invoke(chain.thisObject, calleeUid) == true
+                        } else {
+                            true
+                        }
+                        if (frozen) {
+                            // Caller uid 1000 and a reason string follow the ROM's own
+                            // thawUidAsync calls. The native allowed path thaws with
+                            // "broadcast"; this hook deliberately keeps "bc_action"
+                            // (what the ROM's cached-broadcast early exits use) so a
+                            // module-triggered thaw stays distinguishable in greeze
+                            // history from a native one.
+                            thawUidAsyncMethod.invoke(chain.thisObject, calleeUid, 1000, "bc_action")
+                        }
                         return@intercept false
                     }
                 } catch (e: Exception) {
@@ -720,9 +900,9 @@ internal object GreezeHooks {
             }
             module.deoptimize(isRestrictReceiverMethod)
         } catch (e: NoSuchMethodException) {
-            logSkip("GreezeManagerService#isRestrictReceiver absent, skip")
+            env.logSkip("GreezeManagerService#isRestrictReceiver absent, skip")
         } catch (e: ClassNotFoundException) {
-            logSkip("GreezeManagerService absent, isRestrictReceiver not hooked")
+            env.logSkip("GreezeManagerService absent, isRestrictReceiver not hooked")
         }
     }
 
@@ -752,16 +932,13 @@ internal object GreezeHooks {
     // OS3 hedge only. The `gms.persistent` append was removed with it: that is a
     // process name, not a package, and can never match an entry of a package
     // list.
-    internal fun hookProcessPolicy(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder
-    ) {
-        val ProcessPolicyClass = classLoader.loadClass("com.android.server.am.ProcessPolicy")
+    internal fun hookProcessPolicy(env: HookEnv) {
+        val module = env.module
+        val ProcessPolicyClass = env.classLoader.loadClass("com.android.server.am.ProcessPolicy")
         val getWhiteListMethod = ProcessPolicyClass.getDeclaredMethod(
             "getWhiteList", Int::class.javaPrimitiveType
         )
-        hookE(getWhiteListMethod).intercept { chain: XposedInterface.Chain ->
+        env.hookE(getWhiteListMethod).intercept { chain: XposedInterface.Chain ->
             val result = chain.proceed()
             try {
                 val flags = chain.getArg(0)
@@ -771,7 +948,7 @@ internal object GreezeHooks {
                     // miui-services dex), so an in-place add on `source` would
                     // have no observer — that write used to sit here.
                     val whiteList = ArrayList<Any?>(result)
-                    addIfAbsent(whiteList, HookerSupport.GMS_PACKAGE_NAME)
+                    HookerSupport.addIfAbsent(whiteList, HookerSupport.GMS_PACKAGE_NAME)
                     return@intercept whiteList
                 }
             } catch (t: Throwable) {
@@ -780,12 +957,6 @@ internal object GreezeHooks {
             result
         }
         module.deoptimize(getWhiteListMethod)
-    }
-
-    private fun addIfAbsent(list: MutableList<Any?>, value: String) {
-        if (!list.contains(value)) {
-            list.add(value)
-        }
     }
 
     /**
@@ -806,24 +977,19 @@ internal object GreezeHooks {
      * depth rather than a claimed fix. Only the GMS uid is answered — every
      * other uid proceeds untouched.
      */
-    internal fun hookAllowWakeUpList(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder,
-        logSkip: (String) -> Unit,
-        isGmsUid: (Int) -> Boolean
-    ) {
+    internal fun hookAllowWakeUpList(env: HookEnv) {
+        val module = env.module
         try {
             val greezeManagerServiceClass =
-                classLoader.loadClass("com.miui.server.greeze.GreezeManagerService")
+                env.classLoader.loadClass("com.miui.server.greeze.GreezeManagerService")
             val isAllowWakeUpListMethod = greezeManagerServiceClass.getDeclaredMethod(
                 "isAllowWakeUpList", Int::class.javaPrimitiveType
             )
-            hookE(isAllowWakeUpListMethod).intercept { chain: XposedInterface.Chain ->
+            env.hookE(isAllowWakeUpListMethod).intercept { chain: XposedInterface.Chain ->
                 val result = chain.proceed()
                 try {
                     val uid = chain.getArg(0)
-                    if (uid is Int && isGmsUid(uid) && java.lang.Boolean.FALSE == result) {
+                    if (uid is Int && env.isGmsUid(uid) && java.lang.Boolean.FALSE == result) {
                         // One-shot only when the ROM actually denied: a logged
                         // "kept" claim on an already-allowed call would be a
                         // sentinel that proves nothing.
@@ -850,9 +1016,9 @@ internal object GreezeHooks {
                 "GreezeManagerService#isAllowWakeUpList hooked for GMS"
             )
         } catch (e: ClassNotFoundException) {
-            logSkip("GreezeManagerService class absent, isAllowWakeUpList skip")
+            env.logSkip("GreezeManagerService class absent, isAllowWakeUpList skip")
         } catch (e: NoSuchMethodException) {
-            logSkip("GreezeManagerService#isAllowWakeUpList absent, skip")
+            env.logSkip("GreezeManagerService#isAllowWakeUpList absent, skip")
         }
     }
 
@@ -871,18 +1037,15 @@ internal object GreezeHooks {
     // caller (`AlarmManagerService#triggerAlarmsLocked`) additionally requires
     // `isUidFrozen(creatorUid)`, which GMS never is on this device.
 
-    internal fun hookAwareResourceControl(
-        module: XposedInterface,
-        classLoader: ClassLoader,
-        hookE: (Executable) -> XposedInterface.HookBuilder
-    ) {
+    internal fun hookAwareResourceControl(env: HookEnv) {
+        val module = env.module
         val AwareResourceControlClass =
-            classLoader.loadClass("com.miui.server.greeze.power.AwareResourceControl")
+            env.classLoader.loadClass("com.miui.server.greeze.power.AwareResourceControl")
         val mNoNetworkBlackUidsField =
             AwareResourceControlClass.getDeclaredField("mNoNetworkBlackUids")
         mNoNetworkBlackUidsField.isAccessible = true
         for (constructor in AwareResourceControlClass.declaredConstructors) {
-            hookE(constructor).intercept { chain: XposedInterface.Chain ->
+            env.hookE(constructor).intercept { chain: XposedInterface.Chain ->
                 try {
                     chain.proceed()
                 } finally {

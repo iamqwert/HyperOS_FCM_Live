@@ -40,13 +40,6 @@ object MiuixMetrics {
     val PageGap = 12.dp
 
     /**
-     * The gap the library's own switch rows leave between the switch and the
-     * card's inside margin (`SwitchPreference`'s end padding). A hand-built row
-     * that omits it sits tighter to the edge than every library row beside it.
-     */
-    val SwitchEndGap = 8.dp
-
-    /**
      * The band the library's refresh header reserves but does not draw.
      *
      * `RefreshHeader` lays itself out at `circleSize + 36dp` (56dp at the
@@ -94,25 +87,4 @@ object MiuixMetrics {
      * used to breathe 12dp here, and the two pages' first lines did not meet.
      */
     val ChromeBreath = 16.dp
-
-    /**
-     * The six record categories under a DOCKED MIUIX bar, worn by the
-     * library's `TabRowWithContour`. The floor is the strip's ONLY override:
-     * the library clamps the row to its own 62dp minimum, six two-glyph labels
-     * then run past one phone width and the strip turns into a scrolling
-     * LazyRow, each slot far wider than its label needs.
-     *
-     * 40dp is the floor a two-glyph `body2` label needs plus air (14sp × a 1.1
-     * font scale ≈ 30.8dp of glyph), not a width anyone should expect to see:
-     * the row divides whatever it is given, which on a 400dp screen is ~56dp a
-     * slot. The floor only decides when the strip starts scrolling instead of
-     * squeezing, and scrolling is the graceful end of that road — the contour
-     * row has no per-slot padding, so a squeezed slot clips the label rather
-     * than the outline. The 5dp item gap and every other value stay the
-     * library's own.
-     *
-     * Only the second-level strip reads it; the two 状态/事件 tabs keep the
-     * library's own defaults, where the clamp is no hardship.
-     */
-    val CategoryTabMinWidth = 40.dp
 }
