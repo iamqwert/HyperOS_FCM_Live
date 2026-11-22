@@ -97,14 +97,14 @@
     <string name="follow_system">跟随系统</string>
     <string name="light_mode">浅色模式</string>
     <string name="dark_mode">深色模式</string>
-    <string name="miuix_monet_dynamic_color">莫奈动态取色</string>
+    <string name="miuix_monet_dynamic_color">莫奈取色</string>
     <string name="about_sub_miuix_monet">跟随壁纸为界面取色</string>
-    <string name="enable_blur_effect">启用模糊效果</string>
-    <string name="enable_page_user_scroll">启用页面滑动切换</string>
+    <string name="enable_blur_effect">模糊效果</string>
+    <string name="enable_page_user_scroll">页面滑动切换</string>
     <string name="pager_gesture_mode">页面手势模式</string>
     <string name="global_scale">全局缩放</string>
     <string name="global_scale_summary" formatted="false">调整整体界面显示缩放比例（80%–110%）</string>
-    <string name="enable_swipe_back">启用滑动返回</string>
+    <string name="enable_swipe_back">滑动返回</string>
     <string name="about_sub_enable_swipe_back">在二级页面横向滑动以返回上一页</string>
     <string-array name="pager_gesture_mode_entries">
         <item>默认</item>
