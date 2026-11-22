@@ -74,6 +74,10 @@ on:
         description: '同时发布 GitHub Release（默认勾选为否，仅构建 CI 产物）'
         type: boolean
         default: false
+      sync_lsposed_repo:
+        description: '发版时同步发布到 LSPosed 官方仓库（仅 publish_release 为 true 且已配置 LSPOSED_REPO_TOKEN 时生效）'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -230,3 +234,68 @@ jobs:
           files: |
             release/*.apk
           fail_on_unmatched_files: true
+
+  # Optional post-release sync to the official LSPosed Module Repository
+  # (Xposed-Modules-Repo/io.github.iamqwert.hypergreeze). Kept as a separate
+  # job after `release` so a token/network issue here never blocks the main
+  # repository release and can be re-run independently.
+  sync-lsposed-repo:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true' && github.event.inputs.sync_lsposed_repo == 'true'
+    needs: [build, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check token availability
+        id: token
+        env:
+          LSPOSED_REPO_TOKEN: ${{ secrets.LSPOSED_REPO_TOKEN }}
+        run: |
+          if [ -z "$LSPOSED_REPO_TOKEN" ]; then
+            echo "::warning::未配置 LSPOSED_REPO_TOKEN Secret，已跳过同步至 LSPosed 官方仓库"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.token.outputs.available == 'true'
+        uses: actions/checkout@v7
+
+      - name: Download release APK
+        if: steps.token.outputs.available == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: hyperos-fcm-live-release
+          path: release
+
+      - name: Publish to LSPosed Module Repository
+        if: steps.token.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.LSPOSED_REPO_TOKEN }}
+          TARGET_REPO: Xposed-Modules-Repo/io.github.iamqwert.hypergreeze
+        run: |
+          apk=$(ls release/*.apk | head -1)
+          base=$(basename "$apk")
+          # e.g. HyperFCMLive-4.6.0.60-release.apk -> versionName=4.6.0, versionCode=60
+          ver=${base#HyperFCMLive-}
+          ver=${ver%-release.apk}
+          version_name="${ver%.*}"
+          version_code="${ver##*.}"
+          lsposed_tag="${version_code}-${version_name}"
+
+          if gh release view "$lsposed_tag" --repo "$TARGET_REPO" >/dev/null 2>&1; then
+            echo "::warning::LSPosed 官方仓库已存在 Release ${lsposed_tag}，跳过重复发布"
+            exit 0
+          fi
+
+          python3 scripts/compose_release_notes.py "$version_name" CHANGELOG.md > section.md || true
+          if [ ! -s section.md ]; then
+            echo "- 详见主仓库 CHANGELOG.md" > section.md
+          fi
+
+          gh release create "$lsposed_tag" "$apk" \
+            --repo "$TARGET_REPO" \
+            --title "$version_name" \
+            --notes-file section.md
