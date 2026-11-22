@@ -24,10 +24,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import io.github.iamqwert.hypergreeze.R
 import io.github.iamqwert.hypergreeze.UpdateChecker
 import io.github.iamqwert.hypergreeze.theme.LocalAppShapes
+import io.github.iamqwert.hypergreeze.theme.LocalIsExpressive
 import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
 import io.github.iamqwert.hypergreeze.theme.UiStyle
 import kotlinx.coroutines.launch
@@ -350,6 +353,7 @@ private fun StatusHero(
         )
         return
     }
+    val expressive = LocalIsExpressive.current
     val motion = MaterialTheme.motionScheme
     val container by animateColorAsState(
         targetValue = if (active) {
@@ -360,6 +364,25 @@ private fun StatusHero(
         animationSpec = motion.defaultSpatialSpec(),
         label = "statusHeroContainer"
     )
+    val badgeContainer by animateColorAsState(
+        targetValue = if (active) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.error
+        },
+        animationSpec = motion.defaultSpatialSpec(),
+        label = "statusHeroBadgeContainer"
+    )
+    val badgeInk = if (active) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onError
+    }
+    val badgeShape = when {
+        !expressive -> CircleShape
+        active -> MaterialShapes.Cookie9Sided.toShape()
+        else -> MaterialShapes.Slanted.toShape()
+    }
     val ink = if (active) {
         MaterialTheme.colorScheme.onPrimaryContainer
     } else {
@@ -398,14 +421,21 @@ private fun StatusHero(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                painter = painterResource(
-                    if (active) R.drawable.ic_status_enabled else R.drawable.ic_status_disabled
-                ),
-                contentDescription = null,
-                tint = ink,
-                modifier = Modifier.size(28.dp)
-            )
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(badgeContainer, badgeShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painter = painterResource(
+                        if (active) R.drawable.ic_status_enabled else R.drawable.ic_status_disabled
+                    ),
+                    contentDescription = null,
+                    tint = badgeInk,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
             Spacer(modifier = Modifier.width(16.dp))
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
@@ -413,7 +443,11 @@ private fun StatusHero(
                         if (active) R.string.status_activated else R.string.status_not_activated
                     ),
                     color = ink,
-                    style = MaterialTheme.typography.titleLargeEmphasized
+                    style = if (expressive) {
+                        MaterialTheme.typography.titleLargeEmphasized
+                    } else {
+                        MaterialTheme.typography.titleLarge
+                    }
                 )
                 Text(
                     text = stringResource(

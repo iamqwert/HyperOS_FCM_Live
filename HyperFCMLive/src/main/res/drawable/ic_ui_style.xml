@@ -1,10 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Material Symbols "format_paint" (fill1, outlined family). Path data verbatim
+<!-- Material Symbols "style" (fill1, outlined family). Path data verbatim
      from fonts.gstatic.com (Apache-2.0); the source canvas is 960x960 with a
      -960 y origin, shifted down via the group.
-     The paint roller loaded with colour, not the app grid: this row picks how
-     the whole interface is painted (its Material / Miuix shell), and the apps
-     mark it borrowed said rows, not restyling.
      -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -14,6 +11,6 @@
     <group android:translateY="960">
         <path
             android:fillColor="@android:color/white"
-            android:pathData="M437-80q-24 0-42-17.5T377-140v-200H220q-24 0-42-18t-18-42v-303q0-55 39.5-96t95.5-41h505v440q0 24-18 42t-42 18H583v200q0 25-18 42.5T523-80h-86ZM220-554h520v-226h-56v171h-60v-171h-71v85h-60v-85H295q-32 0-53.5 23T220-703v149Z" />
+            android:pathData="m159-168-34-14q-31-13-41.5-45t3.5-63l72-156v278Zm160 88q-33 0-56.5-23.5T239-160v-240l106 294q3 7 6 13.5t8 12.5h-40Zm206-4q-32 12-62-3t-42-47L243-622q-12-32 2-62.5t46-41.5l302-110q32-12 62 3t42 47l178 488q12 32-2 62.5T827-194L525-84Zm-57.5-487.5Q479-583 479-600t-11.5-28.5Q456-640 439-640t-28.5 11.5Q399-617 399-600t11.5 28.5Q422-560 439-560t28.5-11.5Z" />
     </group>
 </vector>

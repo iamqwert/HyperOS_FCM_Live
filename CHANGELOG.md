@@ -1,8 +1,62 @@
 # Changelog
 
+## 4.6.0 (60)
+
+### 简体中文
+
+---
+
+> **重要提示**：本次更新更换了应用包名与签名信息，无法覆盖安装。启用新版本前请**先卸载旧版本**，避免新旧模块冲突；如需保留原有白名单与主要设置，可在卸载前先导出配置备份，安装新版并在 LSPosed 重新启用后再导入。
+
+#### 推送与保活增强
+
+- **强化息屏心跳与定时重连保护**：避免息屏、待机或系统省电预算耗尽时，系统大幅延后 GMS 的定时唤醒。
+- **防止推送唤醒后被重新冻结**：已勾选应用收到 FCM 推送后，自动给予短暂的防重新冻结宽限期，并放行窗口内的后台任务，确保应用被拉起后有足够时间接收消息。
+- **扩大后台防“强行停止”覆盖范围**：同时覆盖系统常规清理与内存压力清理两条路径；内存紧张时系统仍可正常回收进程释放内存，但不触发强行停止。
+- **完善 GMS 白名单防护**：防止系统触发限流策略时将 GMS 移出白名单；精简多余的后台拦截点。
+
+#### 界面与交互升级
+
+- **新增独立的「主题设置」页面**：将外观与交互选项统一归类，支持直观的主题预览，并新增多个自定义选项。
+- **Miuix 风格升级与整合**：采用新版 Miuix 玻璃视觉体系重构界面，不再支持原 OS 3 风格。
+- **Material 3 视觉与组件升级**：引入更丰富的 Material 3 Expressive 视觉组件、排版层级与统一填充风格图标；优化记录页分类切换与大屏/横屏侧边导航体验。
+- **应用名称统一**：应用内名称统一为 HyperGreeze。
+
+#### 其他变更
+
+- 更新「开放源代码许可」页面中的组件与版本信息。
+- 显式启用 APK v2 / v3 签名方案。
+
+### English
+
+---
+
+> **Important**: This release changes the application package name and signing key, so in-place upgrades are not possible. Please **uninstall the previous version** before enabling this release to avoid conflicts. To keep your allowlist and main settings, export a backup before uninstalling, then import it after installing and re-enabling the new module in LSPosed.
+
+#### Push & Keep-Alive Enhancements
+
+- **Stronger screen-off heartbeat & reconnect protection**: Prevents the system from heavily deferring GMS scheduled wakeups during screen-off, standby, or when system power-saving budgets are exhausted.
+- **Anti-refreeze grace period after push wake**: Grants allowlisted apps a brief anti-refreeze window upon receiving an FCM push and permits background jobs during that window, ensuring apps have enough time to fetch messages after waking.
+- **Broader force-stop prevention**: Covers both regular background cleanup and memory-pressure cleanup paths. Under memory pressure, the system can still reclaim processes normally without force-stopping allowlisted apps.
+- **Improved GMS allowlist protection**: Prevents system throttling actions from removing GMS from the allowlist, and removes redundant background hooks.
+
+#### UI & Interaction Upgrades
+
+- **Dedicated Theme Settings page**: Consolidates appearance and interaction options with visual theme previews and several new customization controls.
+- **Upgraded & unified Miuix style**: Rebuilt on the new Miuix glass visual stack; the legacy OS 3 style is no longer supported.
+- **Material 3 visual & component upgrades**: Expands Material 3 Expressive components, typography hierarchy, and filled icon styling; refines Records category switching and large-screen/landscape navigation rail behavior.
+- **Unified app name**: Standardized the in-app name to HyperGreeze.
+
+#### Other Changes
+
+- Updated dependency entries and version information on the Open-Source Licenses page.
+- Explicitly enabled APK Signature Scheme v2 / v3.
+
 ## 4.5.0 (58)
 
 ### 简体中文
+
+---
 
 #### 新增
 
@@ -13,6 +67,8 @@
 - 优化 MIUIX 系风格。
 
 ### English
+
+---
 
 #### Added
 

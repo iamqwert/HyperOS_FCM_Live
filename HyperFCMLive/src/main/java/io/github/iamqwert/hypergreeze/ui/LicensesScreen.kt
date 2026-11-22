@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -33,9 +35,13 @@ import top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.CardDefaults as MiuixCardDefaults
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
+import androidx.compose.ui.graphics.luminance
+import top.yukonga.miuix.kmp.basic.Text as MiuixText
+import top.yukonga.miuix.kmp.glass.GlassDialog
+import top.yukonga.miuix.kmp.glass.GlassDialogButton
+import top.yukonga.miuix.kmp.glass.GlassDialogButtonRole
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -331,6 +337,7 @@ private fun LicensesBody(
  * 「查看源代码」 left, filled 「关闭」 right — which on the View side needed
  * `layoutDialogButtons` to rebuild the framework's button bar.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun LicenseDialog(
     sheet: LicenseSheet,
@@ -367,7 +374,10 @@ private fun LicenseDialog(
         // a stray button above the prose. null when there is no repository.
         neutralButton = sheet.url?.let { url ->
             {
-                TextButton(onClick = { onOpenSource(url) }) {
+                TextButton(
+                    onClick = { onOpenSource(url) },
+                    shapes = ButtonDefaults.shapes(),
+                ) {
                     Text(sourceLabel)
                 }
             }
@@ -588,16 +598,28 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  * - Kotlinx Serialization: 1.12.0 → **1.13.0**
  * `kotlinx-collections-immutable:0.5.1` (transitive behind `miuix-nav`) has
  * 0 surviving classes in `mapping.txt`, so it stays off the list.
+ *
+ * The 2026-11-22 pass (4.6.0, post-Miuix 0.9.5-beta03 / Compose 1.13.0-rc01
+ * migration) re-audited `releaseRuntimeClasspath` and
+ * `mapping/release/mapping.txt`. Seven versions drifted and were aligned:
+ * - AndroidX Annotation: 1.9.1 → **1.10.0**
+ * - AndroidX Collection: 1.5.0 → **1.6.0**
+ * - AndroidX Compose Foundation / UI: 1.12.1 → **1.13.0-rc01**
+ * - AndroidX Core: 1.18.0 → **1.19.0**
+ * - Material Kolor Color Utilities: 5.0.1 → **6.0.0** (pulled by Miuix 0.9.5-beta03)
+ * - Miuix: 0.9.4 → **0.9.5-beta03**
+ * `kotlinx-collections-immutable:0.5.2` and `dev.drewhamilton.poko:poko-annotations:0.23.2`
+ * both have 0 surviving classes in `mapping.txt`, so they stay off the list.
  */
 private val DEPS = arrayOf(
     arrayOf("AndroidX Activity", "1.13.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Annotation", "1.9.1", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Annotation", "1.10.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX AppCompat", "1.8.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Arch Core", "2.2.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Collection", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose Foundation", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Collection", "1.6.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose Foundation", "1.13.0-rc01", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Compose Material3", "1.5.0-rc01", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose UI", "1.12.1", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose UI", "1.13.0-rc01", "Apache License 2.0", ANDROIDX_URL),
     // Separate repository, so ANDROIDX_URL does not cover it. Only on the
     // classpath behind Material Components, but its code does survive R8.
     arrayOf(
@@ -606,10 +628,10 @@ private val DEPS = arrayOf(
         "Apache License 2.0",
         "https://github.com/androidx/constraintlayout"
     ),
-    arrayOf("AndroidX Core", "1.18.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Core", "1.19.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Interpolator", "1.0.0", "Apache License 2.0", ANDROIDX_URL),
     // Miuix's responsive-layout chain (material3-window-size-class): real code
-    // in the APK, 12 classes of it (window + window-core), verified against the
+    // in the APK, 11 classes of it (window + window-core), verified against the
     // R8 mapping.
     arrayOf("AndroidX Window", "1.5.0", "Apache License 2.0", ANDROIDX_URL),
     // Test scope only — nothing from it is in any APK. Listed for the same
@@ -627,7 +649,7 @@ private val DEPS = arrayOf(
         "https://github.com/Kotlin/kotlinx.coroutines"
     ),
     // Route keys are @Serializable (nav/Route.kt) and the back stack is persisted
-    // by serializing them, so the runtime is load-bearing: 148 kotlinx.serialization
+    // by serializing them, so the runtime is load-bearing: 129 kotlinx.serialization
     // classes survive in mapping/release/mapping.txt (the 2026-10-09 "R8 removes
     // all of it" note below no longer holds).
     arrayOf(
@@ -654,20 +676,18 @@ private val DEPS = arrayOf(
     // the APK and each dresses a different half of the UI.
     arrayOf(
         "Material Kolor Color Utilities",
-        "5.0.1",
+        "6.0.0",
         "Apache License 2.0",
         "https://github.com/jordond/materialkolor"
     ),
-    // The Miuix look (界面风格 = Miuix). Bumped 0.9.1 → 0.9.4 on 2026-10-15, once
-    // the standalone KGP 2.4.20 lift removed the 0.9.1 metadata ceiling — the
-    // toolchain comment in build.gradle has the audit. One row for the project,
-    // though it ships as miuix-ui, miuix-core, miuix-preference, miuix-icons,
-    // miuix-blur (the floating bottom bar and the title bar's progressive pane),
-    // miuix-shader and miuix-squircle behind it, and miuix-nav (the navigation
-    // runtime the pages run through).
+    // The Miuix look (界面风格 = Miuix). Migrated 0.9.4 → 0.9.5-beta03 on
+    // 2026-11-22 for the official miuix-glass / miuix-glass-icons stack. One row
+    // for the project, though it ships as miuix-ui, miuix-core, miuix-preference,
+    // miuix-icons, miuix-blur, miuix-glass, miuix-glass-icons, miuix-material,
+    // miuix-squircle, and miuix-nav.
     arrayOf(
         "Miuix",
-        "0.9.4",
+        "0.9.5-beta03",
         "Apache License 2.0",
         "https://github.com/compose-miuix-ui/miuix"
     ),
@@ -776,27 +796,28 @@ private fun MiuixLicenseDialog(
     onDismiss: () -> Unit,
     onOpenSource: (String) -> Unit
 ) {
-    OverlayDialog(
+    GlassDialog(
         show = true,
         title = sheet.title,
-        onDismissRequest = onDismiss
+        backdrop = LocalPageBackdrop.current,
+        onDismissRequest = onDismiss,
     ) {
         val density = LocalDensity.current
+        val containerSize = LocalContainerSize.current ?: LocalWindowInfo.current.containerSize
         val bodyHeight = with(density) {
-            val px = LocalWindowInfo.current.containerSize.height
+            val px = containerSize.height
             if (px <= 0) Dp.Infinity else (px * 0.45f).toDp()
         }
+        val isDark = MiuixTheme.colorScheme.background.luminance() < 0.5f
+        val nestedCardColor = MiuixTheme.colorScheme.onBackground.copy(
+            alpha = if (isDark) 36f / 255f else 15f / 255f,
+        )
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Same ceiling idea as the Material dialog, measured from the window
-            // the dialog is actually in; 0.45 rather than 0.55 because the Miuix
-            // sheet is anchored to the foot and the buttons must stay below it.
             MiuixCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = bodyHeight),
-                colors = MiuixCardDefaults.defaultColors(
-                    color = MiuixTheme.colorScheme.surfaceContainerHighest
-                )
+                colors = MiuixCardDefaults.defaultColors(color = nestedCardColor),
             ) {
                 AppText(
                     modifier = Modifier
@@ -814,18 +835,27 @@ private fun MiuixLicenseDialog(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (sheet.url != null) {
-                    MiuixTextButton(
-                        text = sourceLabel,
+                    GlassDialogButton(
                         modifier = Modifier.weight(1f),
-                        onClick = { onOpenSource(sheet.url) }
+                        role = GlassDialogButtonRole.Normal,
+                        onClick = { onOpenSource(sheet.url) },
+                    ) {
+                        MiuixText(
+                            text = sourceLabel,
+                            style = MiuixTheme.textStyles.button,
+                        )
+                    }
+                }
+                GlassDialogButton(
+                    modifier = Modifier.weight(1f),
+                    role = GlassDialogButtonRole.Primary,
+                    onClick = onDismiss,
+                ) {
+                    MiuixText(
+                        text = closeLabel,
+                        style = MiuixTheme.textStyles.button,
                     )
                 }
-                MiuixTextButton(
-                    text = closeLabel,
-                    modifier = Modifier.weight(1f),
-                    onClick = onDismiss,
-                    colors = MiuixButtonDefaults.textButtonColorsPrimary()
-                )
             }
         }
     }

@@ -7,9 +7,15 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
@@ -17,6 +23,7 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -25,6 +32,10 @@ import androidx.compose.material3.ShortNavigationBar
 import androidx.compose.material3.ShortNavigationBarDefaults
 import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.Text
+import androidx.compose.material3.WideNavigationRail
+import androidx.compose.material3.WideNavigationRailItem
+import androidx.compose.material3.WideNavigationRailValue
+import androidx.compose.material3.rememberWideNavigationRailState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -45,17 +56,15 @@ import io.github.iamqwert.hypergreeze.R
 import io.github.iamqwert.hypergreeze.theme.AppearanceState
 import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
 import io.github.iamqwert.hypergreeze.theme.ThemePrefs
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassNavigationBar
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassNavigationBarDefaults
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassNavigationItem
-import io.github.iamqwert.hypergreeze.ui.softglass.softGlassNavigationBarBottomMargin
 import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.glass.GlassNavigationBar
+import top.yukonga.miuix.kmp.glass.GlassNavigationBarDefaults
+import top.yukonga.miuix.kmp.glass.GlassNavigationItem
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.GridView
-import top.yukonga.miuix.kmp.icon.extended.Home
-import top.yukonga.miuix.kmp.icon.extended.Notes
-import top.yukonga.miuix.kmp.icon.extended.Settings
+import top.yukonga.miuix.kmp.icon.glass.GridView
+import top.yukonga.miuix.kmp.icon.glass.HomeOutline
+import top.yukonga.miuix.kmp.icon.glass.NotesOutline
+import top.yukonga.miuix.kmp.icon.glass.SettingsOutline
 import top.yukonga.miuix.kmp.utils.PagerGestureNestedScrollConnection
 import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
 import top.yukonga.miuix.kmp.utils.pagerGestureOverride
@@ -91,17 +100,15 @@ enum class HomeTab(val titleRes: Int, val iconRes: Int, val iconFilledRes: Int) 
 }
 
 /**
- * The Miuix cut of each tab glyph: the library's own icon set — the marks
- * every Miuix-styled system app draws — not the Material Symbols the M3 bar
- * wears. One glyph per tab: selection under this look is the bar's own ink
- * treatment (tint on the selected item), not a fill swap between two cuts.
+ * The Miuix Glass cut of each tab glyph (`MiuixIcons.Glass.*`, native 28dp) shared
+ * between [GlassNavigationBar] and wide-screen [top.yukonga.miuix.kmp.glass.GlassNavigationRail].
  */
-private val HomeTab.miuixIcon: ImageVector
+internal val HomeTab.miuixGlassIcon: ImageVector
     get() = when (this) {
-        HomeTab.Modules -> MiuixIcons.Home
-        HomeTab.Apps -> MiuixIcons.GridView
-        HomeTab.Records -> MiuixIcons.Notes
-        HomeTab.Settings -> MiuixIcons.Settings
+        HomeTab.Modules -> MiuixIcons.Glass.HomeOutline
+        HomeTab.Apps -> MiuixIcons.Glass.GridView
+        HomeTab.Records -> MiuixIcons.Glass.NotesOutline
+        HomeTab.Settings -> MiuixIcons.Glass.SettingsOutline
     }
 
 /**
@@ -144,6 +151,85 @@ fun HomeShell(
     modifier: Modifier = Modifier,
     content: @Composable (HomeTab) -> Unit
 ) {
+    val containerSize = LocalContainerSize.current ?: LocalWindowInfo.current.containerSize
+    val platformDensity = LocalPlatformDensity.current ?: LocalDensity.current
+    val widthDp = with(platformDensity) { containerSize.width.toDp() }
+    val heightDp = with(platformDensity) { containerSize.height.toDp() }
+    val useWideRail = widthDp >= 600.dp
+    // Phone landscape (heightDp < 480dp) stays Collapsed so the rail doesn't eat a third of the screen;
+    // tablets / unfolded large screens (widthDp >= 840dp && heightDp >= 480dp, or >= 1200dp) expand.
+    val expandWideRail = widthDp >= 1200.dp || (widthDp >= 840.dp && heightDp >= 480.dp)
+    val stateHolder = rememberSaveableStateHolder()
+    val effectsSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+
+    val tabHost: @Composable (Modifier) -> Unit = { hostModifier ->
+        Box(modifier = hostModifier) {
+            // Standard Material 3 top-level navigation transition: Fade Through
+            // (fast, critically-damped cross-fade with a subtle 0.98 -> 1.0 scale)
+            // so tab switches are immediately interactive with zero pager hold.
+            AnimatedContent(
+                targetState = selected,
+                transitionSpec = {
+                    (fadeIn(animationSpec = effectsSpec) +
+                        scaleIn(initialScale = 0.98f, animationSpec = effectsSpec)) togetherWith
+                        fadeOut(animationSpec = effectsSpec)
+                },
+                label = "HomeTabFadeThrough"
+            ) { tab ->
+                stateHolder.SaveableStateProvider(tab) {
+                    content(tab)
+                }
+            }
+        }
+    }
+
+    if (useWideRail) {
+        val railState = rememberWideNavigationRailState(
+            initialValue = if (expandWideRail) {
+                WideNavigationRailValue.Expanded
+            } else {
+                WideNavigationRailValue.Collapsed
+            }
+        )
+        LaunchedEffect(expandWideRail) {
+            if (expandWideRail) railState.expand() else railState.collapse()
+        }
+        val railExpanded = railState.targetValue == WideNavigationRailValue.Expanded
+        Row(modifier = modifier.fillMaxSize()) {
+            WideNavigationRail(state = railState) {
+                HomeTab.entries.forEach { tab ->
+                    WideNavigationRailItem(
+                        railExpanded = railExpanded,
+                        selected = tab == selected,
+                        onClick = { onSelect(tab) },
+                        icon = {
+                            Icon(
+                                painter = painterResource(
+                                    if (tab == selected) tab.iconFilledRes else tab.iconRes
+                                ),
+                                contentDescription = null
+                            )
+                        },
+                        label = { Text(stringResource(tab.titleRes)) }
+                    )
+                }
+            }
+            CompositionLocalProvider(LocalFloatingBarClearance provides 0.dp) {
+                tabHost(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxSize()
+                        .consumeWindowInsets(
+                            WindowInsets.systemBars
+                                .union(WindowInsets.displayCutout)
+                                .only(WindowInsetsSides.Start)
+                        )
+                )
+            }
+        }
+        return
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         // The bar below is a reserved row here, so a page's viewport already
         // stops at the bar's top edge — but the last row of a list would still
@@ -152,31 +238,12 @@ fun HomeShell(
         // has at the top; it is the pages' business to spend it (see
         // [LocalFloatingBarClearance]), and every page does.
         CompositionLocalProvider(LocalFloatingBarClearance provides FLOATING_BAR_GAP) {
-            Box(
-                modifier = Modifier
+            tabHost(
+                Modifier
                     .weight(1f)
                     .fillMaxSize()
                     .consumeWindowInsets(ShortNavigationBarDefaults.windowInsets)
-            ) {
-                val stateHolder = rememberSaveableStateHolder()
-                val effectsSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
-                // Standard Material 3 top-level navigation transition: Fade Through
-                // (fast, critically-damped cross-fade with a subtle 0.98 -> 1.0 scale)
-                // so tab switches are immediately interactive with zero pager hold.
-                AnimatedContent(
-                    targetState = selected,
-                    transitionSpec = {
-                        (fadeIn(animationSpec = effectsSpec) +
-                            scaleIn(initialScale = 0.98f, animationSpec = effectsSpec)) togetherWith
-                            fadeOut(animationSpec = effectsSpec)
-                    },
-                    label = "HomeTabFadeThrough"
-                ) { tab ->
-                    stateHolder.SaveableStateProvider(tab) {
-                        content(tab)
-                    }
-                }
-            }
+            )
         }
         // The bar, on the expressive cut: [ShortNavigationBar] pads the
         // gesture inset INSIDE itself off the same container token the
@@ -255,30 +322,37 @@ fun MiuixHomeShell(
 ) {
     val stateHolder = rememberSaveableStateHolder()
     val density = LocalDensity.current
+    val useGlassRail = LocalUseGlassNavigationRail.current
+    val blurActive = isMiuixBlurActive()
     MiuixScaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0.dp)
     ) { _ ->
         Box(modifier = Modifier.fillMaxSize()) {
-            val blurEnabled by AppearanceState.enableBlur
-            val backdropSurface = MiuixTheme.colorScheme.surface
-            val backdrop = rememberLayerBackdrop {
-                drawRect(backdropSurface)
-                drawContent()
-            }
+            val backdrop = if (!useGlassRail) rememberMiuixSurfaceBackdrop(blurActive) else null
             val insetDp = with(density) {
                 WindowInsets.navigationBars.getBottom(this).toDp()
             }
-            val clearance = SoftGlassNavigationBarDefaults.Height +
-                softGlassNavigationBarBottomMargin(insetDp) +
-                FLOATING_BAR_GAP
+            val clearance = if (useGlassRail) {
+                0.dp
+            } else {
+                GlassNavigationBarDefaults.Height +
+                    glassNavigationBarBottomMargin(insetDp) +
+                    FLOATING_BAR_GAP
+            }
             CompositionLocalProvider(LocalFloatingBarClearance provides clearance) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .then(if (blurEnabled) Modifier.layerBackdrop(backdrop) else Modifier)
-                        .consumeWindowInsets(WindowInsets.navigationBars)
+                        .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
+                        .then(
+                            if (!useGlassRail) {
+                                Modifier.consumeWindowInsets(WindowInsets.navigationBars)
+                            } else {
+                                Modifier
+                            }
+                        )
                 ) {
                     AnimatedTabContent(
                         selected = selected,
@@ -288,20 +362,23 @@ fun MiuixHomeShell(
                     )
                 }
             }
-            SoftGlassNavigationBar(
-                items = HomeTab.entries.map { tab ->
-                    SoftGlassNavigationItem(
-                        icon = tab.miuixIcon,
+            if (!useGlassRail) {
+                val navItems = HomeTab.entries.map { tab ->
+                    GlassNavigationItem(
+                        icon = tab.miuixGlassIcon,
                         label = stringResource(tab.titleRes),
                     )
-                },
-                selectedIndex = selected.ordinal,
-                onSelect = { onSelect(HomeTab.entries[it]) },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(horizontal = SOFTGLASS_BAR_SIDE_INSET),
-                backdrop = if (blurEnabled) backdrop else null,
-            )
+                }
+                GlassNavigationBar(
+                    items = navItems,
+                    selectedIndex = selected.ordinal,
+                    onSelect = { onSelect(HomeTab.entries[it]) },
+                    backdrop = backdrop,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = SOFTGLASS_BAR_SIDE_INSET),
+                )
+            }
         }
     }
 }
@@ -425,6 +502,7 @@ private fun AnimatedTabContent(
             .fillMaxSize()
             .pagerGestureOverride(
                 pagerState = pagerState,
+                flingBehavior = flingBehavior,
                 mode = pagerGestureMode,
                 enabled = enablePageUserScroll,
             ),

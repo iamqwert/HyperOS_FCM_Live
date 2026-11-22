@@ -69,7 +69,7 @@
 - **未勾选的应用不放行**：未勾选应用维持系统原判，划掉最近任务会被强停
 - **不保活目标应用**：被推送唤醒后进入缓存进程、随后被冻结或回收均属正常，不影响下次推送
 - **睡眠模式默认不介入**：澎湃睡眠模式为整机断网，如需整夜不断连请在设置页开启「睡眠模式」选项
-- **代理不在模块管辖内**：使用 VPN / 代理时请按 [FCM 官方网络配置](https://firebase.google.com/docs/cloud-messaging/network-configuration) 对 `mtalk` 相关域名配置直连（详见 [使用帮助](HELP.md)），详见[为 FCM 配置网络  |  Firebase Cloud Messaging](https://firebase.google.com/docs/cloud-messaging/network-configuration?hl=zh-cn)
+- **代理不在模块管辖内**：使用 VPN / 代理时请按 [FCM 官方网络配置](https://firebase.google.com/docs/cloud-messaging/network-configuration) 对 `mtalk` 相关域名配置直连（详见 [使用帮助](HELP.md)）
 
 具体实现与钩点清单见 [技术文档（FCM_HOOK_TECH_DOC.md）](FCM_HOOK_TECH_DOC.md)。
 

@@ -498,6 +498,14 @@ internal fun appShapesFor(expressive: Boolean): AppShapes =
 val LocalAppShapes = staticCompositionLocalOf { AppShapes.Baseline }
 
 /**
+ * Whether the active Material colour spec is Expressive (2025 / 2026) rather than
+ * Material You (2021). Gates Expressive-only visual expressions such as
+ * `MaterialShapes` geometric badges and `*Emphasized` typography slots so picking
+ * Spec 2021 cleanly reverts to baseline circles and regular weights.
+ */
+val LocalIsExpressive = staticCompositionLocalOf { false }
+
+/**
  * The app's own container colors — the raised container and the panel that
  * lands on it.
  *

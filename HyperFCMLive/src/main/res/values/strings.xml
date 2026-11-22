@@ -96,14 +96,14 @@
     <string name="follow_system">Follow System</string>
     <string name="light_mode">Light Mode</string>
     <string name="dark_mode">Dark Mode</string>
-    <string name="miuix_monet_dynamic_color">Monet Dynamic Color</string>
+    <string name="miuix_monet_dynamic_color">Monet Color</string>
     <string name="about_sub_miuix_monet">Pick colors from your wallpaper</string>
-    <string name="enable_blur_effect">Enable Blur Effect</string>
-    <string name="enable_page_user_scroll">Enable Page User Scroll</string>
+    <string name="enable_blur_effect">Blur Effect</string>
+    <string name="enable_page_user_scroll">Page User Scroll</string>
     <string name="pager_gesture_mode">Pager Gesture Mode</string>
     <string name="global_scale">Global Scale</string>
     <string name="global_scale_summary" formatted="false">Adjust overall UI density scale (80%–110%)</string>
-    <string name="enable_swipe_back">Enable Swipe Back</string>
+    <string name="enable_swipe_back">Swipe Back</string>
     <string name="about_sub_enable_swipe_back">Swipe a pushed page to pop it; direction follows layout</string>
     <string-array name="pager_gesture_mode_entries">
         <item>Default</item>
