@@ -48,6 +48,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PlainTooltip
@@ -826,7 +827,7 @@ private fun InlineSearchCard(
  * fades in on scroll). Under Material the icons stay bare for the same
  * peer-row reason; only that look's `AppTopBar` back control wears a plate.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun TopBarIconButton(
     painter: Painter,
@@ -871,7 +872,11 @@ fun TopBarIconButton(
             },
             state = rememberTooltipState()
         ) {
-            IconButton(onClick = onClick, modifier = modifier) {
+            IconButton(
+                onClick = onClick,
+                shapes = IconButtonDefaults.shapes(),
+                modifier = modifier,
+            ) {
                 Icon(
                     painter = painter,
                     contentDescription = description,
@@ -1011,7 +1016,7 @@ private fun BatchSelectMenu(
  * There is deliberately no divider above "设置": the XML had none, and the three
  * toggles plus a navigation row are one list, not two.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun OverflowMenu(state: OverflowState, actions: MainActions) {
     val shapes = LocalAppShapes.current
@@ -1104,7 +1109,10 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
             },
             state = rememberTooltipState()
         ) {
-            IconButton(onClick = { expanded = true }) {
+            IconButton(
+                onClick = { expanded = true },
+                shapes = IconButtonDefaults.shapes(),
+            ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_more_vert),
                     contentDescription = moreLabel,

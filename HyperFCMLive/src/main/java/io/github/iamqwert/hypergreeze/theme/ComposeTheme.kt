@@ -197,6 +197,7 @@ private fun MaterialStyleTheme(content: @Composable () -> Unit) {
     ) {
         CompositionLocalProvider(
             LocalAppShapes provides appShapes,
+            LocalIsExpressive provides expressive,
             LocalAppSurfaces provides appSurfaces,
             LocalOverscrollFactory provides overscrollFactory,
             LocalUiStyle provides UiStyle.Material

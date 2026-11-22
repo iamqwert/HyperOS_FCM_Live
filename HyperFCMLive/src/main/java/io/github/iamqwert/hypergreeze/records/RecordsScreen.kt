@@ -23,6 +23,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.TargetedFlingBehavior
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -43,19 +44,27 @@ import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ContainedLoadingIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalToggleButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LeadingIconTab
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.SecondaryTabRow
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.ToggleButtonDefaults
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -82,7 +91,10 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -104,6 +116,7 @@ import androidx.compose.ui.unit.sp
 import io.github.iamqwert.hypergreeze.FcmAppScan
 import io.github.iamqwert.hypergreeze.R
 import io.github.iamqwert.hypergreeze.theme.LocalAppSurfaces
+import io.github.iamqwert.hypergreeze.theme.LocalIsExpressive
 import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
 import io.github.iamqwert.hypergreeze.ui.AppDialog
 import io.github.iamqwert.hypergreeze.ui.GroupRow
@@ -482,15 +495,18 @@ fun RecordsScreen(
                 // page's bar icons wear ([LongPressTooltip] is a no-op under
                 // Miuix); this was the only bar control without one.
                 LongPressTooltip(label = stringResource(R.string.records_export)) {
-                    IconButton(onClick = {
-                        exportText = diagnosticsReport(
-                            archive = archive,
-                            versionName = versionName,
-                            exportedAt = System.currentTimeMillis(),
-                            env = env
-                        )
-                        createDoc.launch(exportFileName())
-                    }) {
+                    IconButton(
+                        onClick = {
+                            exportText = diagnosticsReport(
+                                archive = archive,
+                                versionName = versionName,
+                                exportedAt = System.currentTimeMillis(),
+                                env = env
+                            )
+                            createDoc.launch(exportFileName())
+                        },
+                        shapes = IconButtonDefaults.shapes(),
+                    ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_upload),
                             contentDescription = stringResource(R.string.records_export),
@@ -620,7 +636,7 @@ fun RecordsScreen(
             RecordsPageTabRow(
                 selected = pageTab,
                 onSelect = { pageTabIndex = it.ordinal },
-                modifier = Modifier.padding(start = inset, end = inset)
+                modifier = Modifier.padding(start = inset, end = inset, top = 4.dp, bottom = 8.dp)
             )
             // The pull seat. Unlike the apps page — whose box begins at the
             // window's top edge and therefore drops its indicator by the bar's
@@ -791,6 +807,7 @@ private fun exportFileName(): String {
  * The Material look keeps its strip in the page column: M3 has no bar of this
  * shape to mount it in, and its rows own their divider there.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun RecordsPageTabRow(
     selected: PageTab,
@@ -811,24 +828,46 @@ private fun RecordsPageTabRow(
         )
         return
     }
-    PrimaryTabRow(
-        selectedTabIndex = selected.ordinal,
-        modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.background,
-        contentColor = MaterialTheme.colorScheme.primary
-        // The divider stays the component's own default: M3 draws a
-        // HorizontalDivider at the row's foot, which is the separation between
-        // this row and the secondary strip below it. The explicit
-        // `divider = {}` here used to strip that away, leaving the two rows to
-        // melt into one band.
+    val expressive = LocalIsExpressive.current
+    val labelStyle = if (expressive) {
+        MaterialTheme.typography.labelLargeEmphasized
+    } else {
+        MaterialTheme.typography.labelLarge
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
     ) {
-        PageTab.entries.forEach { tab ->
-            RecordsLeadingIconTab(
-                selected = tab == selected,
-                onClick = { onSelect(tab) },
-                symbolRes = tab.symbolRes,
-                labelRes = tab.labelRes
-            )
+        PageTab.entries.forEachIndexed { index, tab ->
+            val checked = tab == selected
+            val shapes = when (index) {
+                0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                PageTab.entries.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+            }
+            FilledTonalToggleButton(
+                checked = checked,
+                onCheckedChange = { if (it) onSelect(tab) },
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { role = Role.Tab },
+                shapes = shapes,
+            ) {
+                Icon(
+                    painter = painterResource(tab.symbolRes),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(ToggleButtonDefaults.IconSpacing))
+                Text(
+                    text = labels[index],
+                    style = labelStyle,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -1555,7 +1594,7 @@ private fun EventsTab(
         EventsTabRow(
             selected = selected,
             onSelect = onSelect,
-            modifier = Modifier.padding(start = inset, end = inset)
+            modifier = Modifier.padding(start = inset, end = inset, bottom = 8.dp)
         )
         // `key(selected)`: a new category starts at the top, the behaviour the
         // single shared scroll state used to give — and a fresh scroll state.
@@ -1664,6 +1703,7 @@ private val EventTab.emptyRes: Int
  * row. Only the floor and the gap are overridden ([MiuixMetrics]).
  * Nothing here sits inside the list.
  */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun EventsTabRow(
     selected: EventTab,
@@ -1683,103 +1723,47 @@ private fun EventsTabRow(
         )
         return
     }
-    SecondaryTabRow(
-        selectedTabIndex = selected.ordinal,
-        modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.background,
-        contentColor = MaterialTheme.colorScheme.primary
-        // The divider stays the component's own default — the hairline at the
-        // row's foot is the spec's separation between the strip and the list it
-        // opens onto (and it double-serves as the boundary under the two
-        // stacked rows the primary's own divider opens).
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
     ) {
-        EventTab.entries.forEach { tab ->
-            RecordsIconTab(
-                selected = tab == selected,
-                onClick = { onSelect(tab) },
-                symbolRes = tab.symbolRes,
-                labelRes = tab.labelRes
-            )
+        EventTab.entries.forEachIndexed { index, tab ->
+            val checked = tab == selected
+            val label = labels[index]
+            val shapes = when (index) {
+                0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                EventTab.entries.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+            }
+            Box(modifier = Modifier.weight(1f)) {
+                TooltipBox(
+                    positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
+                        TooltipAnchorPosition.Below
+                    ),
+                    tooltip = { PlainTooltip { Text(label) } },
+                    state = rememberTooltipState(),
+                ) {
+                    FilledTonalToggleButton(
+                        checked = checked,
+                        onCheckedChange = { if (it) onSelect(tab) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics { role = Role.Tab },
+                        shapes = shapes,
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(tab.symbolRes),
+                            contentDescription = label,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
         }
     }
-}
-
-/**
- * One tab of the M3 look's top strip: the library's own [LeadingIconTab].
- *
- * The component is exactly what the 状态/事件 strip wanted and why it is not
- * hand-laid: glyph in front of the label 8dp apart, one 48dp line, the pair
- * centred in the tab, the label on the tab's own `titleSmall`-class style, and
- * the selected/unselected ink crossfaded by the component's own transition
- * (provided through `LocalContentColor`, so the icon's default tint and the
- * label inherit the same animated colour without either being told what it is).
- * M3's plain [Tab] stacks an icon ABOVE its label — the primary-tab shape —
- * which is not what this row is after; the secondary strip has no label left
- * to place, so it takes [Tab] through [RecordsIconTab] instead.
- *
- * The glyph is a 24dp Material Symbols `fill1` drawable, the size the
- * component's own documentation asks for. `contentDescription` is null on
- * purpose: the label next to it already names the tab, and announcing both
- * would read every tab twice.
- */
-@Composable
-private fun RecordsLeadingIconTab(
-    selected: Boolean,
-    onClick: () -> Unit,
-    symbolRes: Int,
-    labelRes: Int
-) {
-    LeadingIconTab(
-        selected = selected,
-        onClick = onClick,
-        text = {
-            Text(
-                text = stringResource(labelRes),
-                maxLines = 1
-            )
-        },
-        icon = {
-            Icon(
-                painter = painterResource(symbolRes),
-                contentDescription = null,
-                modifier = Modifier.size(MATERIAL_SYMBOL_SIZE)
-            )
-        }
-    )
-}
-
-/**
- * One tab of the M3 look's secondary strip: glyph only, no label.
- *
- * [Tab] with `text = null` is the component's own icon-only form — one 24dp
- * glyph centred in the tab, one 48dp line high, the ink crossfaded by the same
- * transition [RecordsLeadingIconTab] gets, so the six categories sit at exactly
- * the height the 状态/事件 row above them does and the two strips read as one
- * block of chrome.
- *
- * Because the label is gone, `contentDescription` now carries it: with no text
- * in the tab, the description is the tab's only accessible name. The category
- * names are short and unambiguous ("连接", "心跳", "推送"…), so they read fine
- * spoken on their own even without the row's context.
- */
-@Composable
-private fun RecordsIconTab(
-    selected: Boolean,
-    onClick: () -> Unit,
-    symbolRes: Int,
-    labelRes: Int
-) {
-    Tab(
-        selected = selected,
-        onClick = onClick,
-        icon = {
-            Icon(
-                painter = painterResource(symbolRes),
-                contentDescription = stringResource(labelRes),
-                modifier = Modifier.size(MATERIAL_SYMBOL_SIZE)
-            )
-        }
-    )
 }
 
 /**

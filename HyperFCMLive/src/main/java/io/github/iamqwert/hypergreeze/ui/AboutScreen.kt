@@ -121,6 +121,7 @@ import io.github.iamqwert.hypergreeze.mcu.Scheme
 import io.github.iamqwert.hypergreeze.theme.AppearanceState
 import io.github.iamqwert.hypergreeze.theme.HyperFCMLiveTheme
 import io.github.iamqwert.hypergreeze.theme.LocalAppShapes
+import io.github.iamqwert.hypergreeze.theme.LocalIsExpressive
 import io.github.iamqwert.hypergreeze.theme.LocalAppSurfaces
 import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
 import io.github.iamqwert.hypergreeze.theme.MIUIX_ACCENT_OPTIONS
@@ -741,7 +742,11 @@ private fun AboutHeroMaterial(versionTag: String) {
         Text(
             modifier = Modifier.padding(top = 12.dp),
             text = stringResource(R.string.launcher_name),
-            style = MaterialTheme.typography.headlineMediumEmphasized
+            style = if (LocalIsExpressive.current) {
+                MaterialTheme.typography.headlineMediumEmphasized
+            } else {
+                MaterialTheme.typography.headlineMedium
+            }
         )
         Text(
             text = versionTag,

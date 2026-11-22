@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -335,6 +337,7 @@ private fun LicensesBody(
  * 「查看源代码」 left, filled 「关闭」 right — which on the View side needed
  * `layoutDialogButtons` to rebuild the framework's button bar.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun LicenseDialog(
     sheet: LicenseSheet,
@@ -371,7 +374,10 @@ private fun LicenseDialog(
         // a stray button above the prose. null when there is no repository.
         neutralButton = sheet.url?.let { url ->
             {
-                TextButton(onClick = { onOpenSource(url) }) {
+                TextButton(
+                    onClick = { onOpenSource(url) },
+                    shapes = ButtonDefaults.shapes(),
+                ) {
                     Text(sourceLabel)
                 }
             }

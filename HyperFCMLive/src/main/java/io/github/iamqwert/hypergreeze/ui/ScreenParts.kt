@@ -32,8 +32,10 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberOverscrollEffect
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PlainTooltip
@@ -97,6 +99,7 @@ import androidx.compose.ui.unit.dp
 import io.github.iamqwert.hypergreeze.R
 import io.github.iamqwert.hypergreeze.theme.LocalAppShapes
 import io.github.iamqwert.hypergreeze.theme.LocalAppSurfaces
+import io.github.iamqwert.hypergreeze.theme.LocalIsExpressive
 import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
 import io.github.iamqwert.hypergreeze.theme.ThemeEngine
 import top.yukonga.miuix.kmp.blur.Backdrop
@@ -184,6 +187,7 @@ fun SectionTitle(
  * The same heading for a label computed at runtime — the records page's day
  * headers, which are dates rather than resources.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SectionTitleText(
     text: String,
@@ -241,7 +245,11 @@ fun SectionTitleText(
         // in — small, medium-weight, tracked — not the body size this wore
         // before. The primary tone itself stays: that is the reference
         // reading of a section break.
-        style = MaterialTheme.typography.labelLarge
+        style = if (LocalIsExpressive.current) {
+            MaterialTheme.typography.labelLargeEmphasized
+        } else {
+            MaterialTheme.typography.labelLarge
+        }
     )
 }
 
@@ -2025,6 +2033,7 @@ fun AppText(
  * [content] overrides [text] for bodies that are not one paragraph (the licence
  * text is scrollable); it renders inside the dialog's own body slot.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AppDialog(
     onDismissRequest: () -> Unit,
@@ -2101,13 +2110,23 @@ fun AppDialog(
         }
         return
     }
+    val expressive = LocalIsExpressive.current
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismissRequest,
         // Popup level, like every panel drawn over the page: M3's dialog default
         // is a tone *below* the page on this ramp, so the dialog would sit behind
         // the surface it is drawn over.
         containerColor = LocalAppSurfaces.current.popup,
-        title = { Text(title) },
+        title = {
+            Text(
+                text = title,
+                style = if (expressive) {
+                    MaterialTheme.typography.headlineSmallEmphasized
+                } else {
+                    MaterialTheme.typography.headlineSmall
+                }
+            )
+        },
         text = {
             if (content != null) {
                 content()
@@ -2128,19 +2147,25 @@ fun AppDialog(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 neutralButton?.invoke()
                 if (confirmLabel != null) {
-                    TextButton(onClick = {
-                        onConfirm()
-                        onDismissRequest()
-                    }) { Text(confirmLabel) }
+                    TextButton(
+                        onClick = {
+                            onConfirm()
+                            onDismissRequest()
+                        },
+                        shapes = ButtonDefaults.shapes(),
+                    ) { Text(confirmLabel) }
                 }
             }
         },
         dismissButton = {
             if (dismissLabel != null) {
-                TextButton(onClick = {
-                    onDismiss()
-                    onDismissRequest()
-                }) { Text(dismissLabel) }
+                TextButton(
+                    onClick = {
+                        onDismiss()
+                        onDismissRequest()
+                    },
+                    shapes = ButtonDefaults.shapes(),
+                ) { Text(dismissLabel) }
             }
         }
     )

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
@@ -55,7 +56,7 @@ import io.github.iamqwert.hypergreeze.R
  * a constant, a settled large-title bar reading as chrome from the first
  * frame, while the Miuix bar keeps the library's own naked arrow.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AppTopBar(
     titleRes: Int,
@@ -119,7 +120,7 @@ fun AppTopBar(
                         // fill the Miuix bar's plates wear.
                         FilledIconButton(
                             onClick = onBack,
-                            shape = CircleShape,
+                            shapes = IconButtonDefaults.shapes(),
                             colors = IconButtonDefaults.filledIconButtonColors(
                                 containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
                                     .copy(alpha = TOP_BAR_PLATE_ALPHA),

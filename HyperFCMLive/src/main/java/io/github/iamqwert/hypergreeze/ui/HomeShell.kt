@@ -7,9 +7,15 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
@@ -17,6 +23,7 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -25,6 +32,10 @@ import androidx.compose.material3.ShortNavigationBar
 import androidx.compose.material3.ShortNavigationBarDefaults
 import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.Text
+import androidx.compose.material3.WideNavigationRail
+import androidx.compose.material3.WideNavigationRailItem
+import androidx.compose.material3.WideNavigationRailValue
+import androidx.compose.material3.rememberWideNavigationRailState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -140,6 +151,85 @@ fun HomeShell(
     modifier: Modifier = Modifier,
     content: @Composable (HomeTab) -> Unit
 ) {
+    val containerSize = LocalContainerSize.current ?: LocalWindowInfo.current.containerSize
+    val platformDensity = LocalPlatformDensity.current ?: LocalDensity.current
+    val widthDp = with(platformDensity) { containerSize.width.toDp() }
+    val heightDp = with(platformDensity) { containerSize.height.toDp() }
+    val useWideRail = widthDp >= 600.dp
+    // Phone landscape (heightDp < 480dp) stays Collapsed so the rail doesn't eat a third of the screen;
+    // tablets / unfolded large screens (widthDp >= 840dp && heightDp >= 480dp, or >= 1200dp) expand.
+    val expandWideRail = widthDp >= 1200.dp || (widthDp >= 840.dp && heightDp >= 480.dp)
+    val stateHolder = rememberSaveableStateHolder()
+    val effectsSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+
+    val tabHost: @Composable (Modifier) -> Unit = { hostModifier ->
+        Box(modifier = hostModifier) {
+            // Standard Material 3 top-level navigation transition: Fade Through
+            // (fast, critically-damped cross-fade with a subtle 0.98 -> 1.0 scale)
+            // so tab switches are immediately interactive with zero pager hold.
+            AnimatedContent(
+                targetState = selected,
+                transitionSpec = {
+                    (fadeIn(animationSpec = effectsSpec) +
+                        scaleIn(initialScale = 0.98f, animationSpec = effectsSpec)) togetherWith
+                        fadeOut(animationSpec = effectsSpec)
+                },
+                label = "HomeTabFadeThrough"
+            ) { tab ->
+                stateHolder.SaveableStateProvider(tab) {
+                    content(tab)
+                }
+            }
+        }
+    }
+
+    if (useWideRail) {
+        val railState = rememberWideNavigationRailState(
+            initialValue = if (expandWideRail) {
+                WideNavigationRailValue.Expanded
+            } else {
+                WideNavigationRailValue.Collapsed
+            }
+        )
+        LaunchedEffect(expandWideRail) {
+            if (expandWideRail) railState.expand() else railState.collapse()
+        }
+        val railExpanded = railState.targetValue == WideNavigationRailValue.Expanded
+        Row(modifier = modifier.fillMaxSize()) {
+            WideNavigationRail(state = railState) {
+                HomeTab.entries.forEach { tab ->
+                    WideNavigationRailItem(
+                        railExpanded = railExpanded,
+                        selected = tab == selected,
+                        onClick = { onSelect(tab) },
+                        icon = {
+                            Icon(
+                                painter = painterResource(
+                                    if (tab == selected) tab.iconFilledRes else tab.iconRes
+                                ),
+                                contentDescription = null
+                            )
+                        },
+                        label = { Text(stringResource(tab.titleRes)) }
+                    )
+                }
+            }
+            CompositionLocalProvider(LocalFloatingBarClearance provides 0.dp) {
+                tabHost(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxSize()
+                        .consumeWindowInsets(
+                            WindowInsets.systemBars
+                                .union(WindowInsets.displayCutout)
+                                .only(WindowInsetsSides.Start)
+                        )
+                )
+            }
+        }
+        return
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         // The bar below is a reserved row here, so a page's viewport already
         // stops at the bar's top edge — but the last row of a list would still
@@ -148,31 +238,12 @@ fun HomeShell(
         // has at the top; it is the pages' business to spend it (see
         // [LocalFloatingBarClearance]), and every page does.
         CompositionLocalProvider(LocalFloatingBarClearance provides FLOATING_BAR_GAP) {
-            Box(
-                modifier = Modifier
+            tabHost(
+                Modifier
                     .weight(1f)
                     .fillMaxSize()
                     .consumeWindowInsets(ShortNavigationBarDefaults.windowInsets)
-            ) {
-                val stateHolder = rememberSaveableStateHolder()
-                val effectsSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
-                // Standard Material 3 top-level navigation transition: Fade Through
-                // (fast, critically-damped cross-fade with a subtle 0.98 -> 1.0 scale)
-                // so tab switches are immediately interactive with zero pager hold.
-                AnimatedContent(
-                    targetState = selected,
-                    transitionSpec = {
-                        (fadeIn(animationSpec = effectsSpec) +
-                            scaleIn(initialScale = 0.98f, animationSpec = effectsSpec)) togetherWith
-                            fadeOut(animationSpec = effectsSpec)
-                    },
-                    label = "HomeTabFadeThrough"
-                ) { tab ->
-                    stateHolder.SaveableStateProvider(tab) {
-                        content(tab)
-                    }
-                }
-            }
+            )
         }
         // The bar, on the expressive cut: [ShortNavigationBar] pads the
         // gesture inset INSIDE itself off the same container token the
