@@ -226,7 +226,7 @@ private fun ThemeSettingsBody(
         item(key = "followSystem") {
             SettingsGroup {
                 SettingsSwitchCard(
-                    iconRes = R.drawable.ic_theme_mode,
+                    iconRes = R.drawable.ic_brightness_auto,
                     title = stringResource(R.string.follow_system),
                     description = "",
                     checked = isSystem,
@@ -416,7 +416,7 @@ private fun ThemeSettingsBody(
             SectionTitle(R.string.theme_section_navigation)
             SettingsGroup {
                 SettingsSwitchCard(
-                    iconRes = R.drawable.ic_swipe_left,
+                    iconRes = R.drawable.ic_swipe_right,
                     title = stringResource(R.string.enable_swipe_back),
                     description = stringResource(R.string.about_sub_enable_swipe_back),
                     checked = enableSwipeBack,
@@ -1042,7 +1042,7 @@ private fun GlobalScaleCard(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    RowIcon(painter = painterResource(R.drawable.ic_tune))
+                    RowIcon(painter = painterResource(R.drawable.ic_zoom_in))
                     Text(
                         text = stringResource(R.string.global_scale),
                         modifier = Modifier.weight(1f),
