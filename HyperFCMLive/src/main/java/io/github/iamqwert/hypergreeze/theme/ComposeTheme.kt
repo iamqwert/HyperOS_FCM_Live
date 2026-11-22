@@ -3,6 +3,8 @@ package io.github.iamqwert.hypergreeze.theme
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.LocalOverscrollFactory
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberPlatformOverscrollFactory
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -18,17 +20,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntSize
 import io.github.iamqwert.hypergreeze.AppLocale
 import io.github.iamqwert.hypergreeze.mcu.Scheme
-import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassSpec
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassFineTuning
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassTuning
-import io.github.iamqwert.hypergreeze.ui.softglass.createSoftGlassSpec
+import io.github.iamqwert.hypergreeze.ui.LocalContainerSize
+import io.github.iamqwert.hypergreeze.ui.LocalPlatformDensity
 import top.yukonga.miuix.kmp.utils.MiuixIndication
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.Colors
@@ -108,11 +110,18 @@ fun HyperFCMLiveTheme(content: @Composable () -> Unit) {
     val latestContent by rememberUpdatedState(content)
     val stableContent = remember { movableContentOf { latestContent() } }
     val styleScope = rememberSaveableStateHolder()
-    CompositionLocalProvider(LocalDensity provides appDensity) {
-        styleScope.SaveableStateProvider(style) {
-            when (style) {
-                UiStyle.Miuix -> MiuixStyleTheme(style, stableContent)
-                UiStyle.Material -> MaterialStyleTheme(stableContent)
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val containerSize = IntSize(constraints.maxWidth, constraints.maxHeight)
+        CompositionLocalProvider(
+            LocalPlatformDensity provides currentDensity,
+            LocalDensity provides appDensity,
+            LocalContainerSize provides containerSize,
+        ) {
+            styleScope.SaveableStateProvider(style) {
+                when (style) {
+                    UiStyle.Miuix -> MiuixStyleTheme(style, stableContent)
+                    UiStyle.Material -> MaterialStyleTheme(stableContent)
+                }
             }
         }
     }
@@ -369,21 +378,6 @@ private fun MiuixStyleTheme(style: UiStyle, content: @Composable () -> Unit) {
                 LocalMiuixLightPrimary provides lightAnchor.lightColors.primary,
                 LocalAppShapes provides appShapes,
                 LocalAppSurfaces provides appSurfaces,
-                // The 柔光玻璃 material, resolved once for the whole look. It is
-                // provided to *both* Miuix-dressed styles rather than to 柔光玻璃
-                // alone, because the bar-material row is its own decision: a person
-                // on plain Miuix can still lift the foot onto the glass pill, and
-                // the material would then degrade to its opaque fallback if this
-                // provider had gated on the style. What stops the glass from
-                // appearing on pages that did not ask for it is the call sites —
-                // each one decides for itself whether to wear it, and none of them
-                // runs under Material, which is the only place this provider does
-                // not reach.
-                LocalSoftGlassSpec provides if (AppearanceState.enableBlur.value) {
-                    MIUIX_SOFT_GLASS
-                } else {
-                    MIUIX_SOFT_GLASS_DISABLED
-                },
                 LocalUiStyle provides style
             ) {
                 content()
@@ -391,25 +385,6 @@ private fun MiuixStyleTheme(style: UiStyle, content: @Composable () -> Unit) {
         }
     }
 }
-
-/**
- * The 柔光玻璃 material this look reads: the recipes' own defaults, at the radius
- * they were tuned around, switched on. One value rather than one per surface —
- * the material is a fact about the look, and the surfaces that wear it are
- * expected to agree on it. Only the recipe changes per surface (a pill is not a
- * dialog), and the recipe is taken at the call site.
- */
-private val MIUIX_SOFT_GLASS = createSoftGlassSpec(
-    enabled = true,
-    blurRadius = SoftGlassTuning.DefaultBlurRadius,
-    fineTuning = SoftGlassFineTuning.Default,
-)
-
-private val MIUIX_SOFT_GLASS_DISABLED = createSoftGlassSpec(
-    enabled = false,
-    blurRadius = SoftGlassTuning.DefaultBlurRadius,
-    fineTuning = SoftGlassFineTuning.Default,
-)
 
 /**
  * Miuix's palette styles are the same nine Material families the app offers, under

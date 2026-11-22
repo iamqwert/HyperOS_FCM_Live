@@ -45,17 +45,15 @@ import io.github.iamqwert.hypergreeze.R
 import io.github.iamqwert.hypergreeze.theme.AppearanceState
 import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
 import io.github.iamqwert.hypergreeze.theme.ThemePrefs
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassNavigationBar
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassNavigationBarDefaults
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassNavigationItem
-import io.github.iamqwert.hypergreeze.ui.softglass.softGlassNavigationBarBottomMargin
 import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.glass.GlassNavigationBar
+import top.yukonga.miuix.kmp.glass.GlassNavigationBarDefaults
+import top.yukonga.miuix.kmp.glass.GlassNavigationItem
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.GridView
-import top.yukonga.miuix.kmp.icon.extended.Home
-import top.yukonga.miuix.kmp.icon.extended.Notes
-import top.yukonga.miuix.kmp.icon.extended.Settings
+import top.yukonga.miuix.kmp.icon.glass.GridView
+import top.yukonga.miuix.kmp.icon.glass.HomeOutline
+import top.yukonga.miuix.kmp.icon.glass.NotesOutline
+import top.yukonga.miuix.kmp.icon.glass.SettingsOutline
 import top.yukonga.miuix.kmp.utils.PagerGestureNestedScrollConnection
 import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
 import top.yukonga.miuix.kmp.utils.pagerGestureOverride
@@ -91,17 +89,15 @@ enum class HomeTab(val titleRes: Int, val iconRes: Int, val iconFilledRes: Int) 
 }
 
 /**
- * The Miuix cut of each tab glyph: the library's own icon set — the marks
- * every Miuix-styled system app draws — not the Material Symbols the M3 bar
- * wears. One glyph per tab: selection under this look is the bar's own ink
- * treatment (tint on the selected item), not a fill swap between two cuts.
+ * The Miuix Glass cut of each tab glyph (`MiuixIcons.Glass.*`, native 28dp) shared
+ * between [GlassNavigationBar] and wide-screen [top.yukonga.miuix.kmp.glass.GlassNavigationRail].
  */
-private val HomeTab.miuixIcon: ImageVector
+internal val HomeTab.miuixGlassIcon: ImageVector
     get() = when (this) {
-        HomeTab.Modules -> MiuixIcons.Home
-        HomeTab.Apps -> MiuixIcons.GridView
-        HomeTab.Records -> MiuixIcons.Notes
-        HomeTab.Settings -> MiuixIcons.Settings
+        HomeTab.Modules -> MiuixIcons.Glass.HomeOutline
+        HomeTab.Apps -> MiuixIcons.Glass.GridView
+        HomeTab.Records -> MiuixIcons.Glass.NotesOutline
+        HomeTab.Settings -> MiuixIcons.Glass.SettingsOutline
     }
 
 /**
@@ -255,30 +251,37 @@ fun MiuixHomeShell(
 ) {
     val stateHolder = rememberSaveableStateHolder()
     val density = LocalDensity.current
+    val useGlassRail = LocalUseGlassNavigationRail.current
+    val blurActive = isMiuixBlurActive()
     MiuixScaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0.dp)
     ) { _ ->
         Box(modifier = Modifier.fillMaxSize()) {
-            val blurEnabled by AppearanceState.enableBlur
-            val backdropSurface = MiuixTheme.colorScheme.surface
-            val backdrop = rememberLayerBackdrop {
-                drawRect(backdropSurface)
-                drawContent()
-            }
+            val backdrop = if (!useGlassRail) rememberMiuixSurfaceBackdrop(blurActive) else null
             val insetDp = with(density) {
                 WindowInsets.navigationBars.getBottom(this).toDp()
             }
-            val clearance = SoftGlassNavigationBarDefaults.Height +
-                softGlassNavigationBarBottomMargin(insetDp) +
-                FLOATING_BAR_GAP
+            val clearance = if (useGlassRail) {
+                0.dp
+            } else {
+                GlassNavigationBarDefaults.Height +
+                    glassNavigationBarBottomMargin(insetDp) +
+                    FLOATING_BAR_GAP
+            }
             CompositionLocalProvider(LocalFloatingBarClearance provides clearance) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .then(if (blurEnabled) Modifier.layerBackdrop(backdrop) else Modifier)
-                        .consumeWindowInsets(WindowInsets.navigationBars)
+                        .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier)
+                        .then(
+                            if (!useGlassRail) {
+                                Modifier.consumeWindowInsets(WindowInsets.navigationBars)
+                            } else {
+                                Modifier
+                            }
+                        )
                 ) {
                     AnimatedTabContent(
                         selected = selected,
@@ -288,20 +291,23 @@ fun MiuixHomeShell(
                     )
                 }
             }
-            SoftGlassNavigationBar(
-                items = HomeTab.entries.map { tab ->
-                    SoftGlassNavigationItem(
-                        icon = tab.miuixIcon,
+            if (!useGlassRail) {
+                val navItems = HomeTab.entries.map { tab ->
+                    GlassNavigationItem(
+                        icon = tab.miuixGlassIcon,
                         label = stringResource(tab.titleRes),
                     )
-                },
-                selectedIndex = selected.ordinal,
-                onSelect = { onSelect(HomeTab.entries[it]) },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(horizontal = SOFTGLASS_BAR_SIDE_INSET),
-                backdrop = if (blurEnabled) backdrop else null,
-            )
+                }
+                GlassNavigationBar(
+                    items = navItems,
+                    selectedIndex = selected.ordinal,
+                    onSelect = { onSelect(HomeTab.entries[it]) },
+                    backdrop = backdrop,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = SOFTGLASS_BAR_SIDE_INSET),
+                )
+            }
         }
     }
 }
@@ -425,6 +431,7 @@ private fun AnimatedTabContent(
             .fillMaxSize()
             .pagerGestureOverride(
                 pagerState = pagerState,
+                flingBehavior = flingBehavior,
                 mode = pagerGestureMode,
                 enabled = enablePageUserScroll,
             ),

@@ -54,6 +54,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.computedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -98,10 +99,6 @@ import io.github.iamqwert.hypergreeze.theme.LocalAppShapes
 import io.github.iamqwert.hypergreeze.theme.LocalAppSurfaces
 import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
 import io.github.iamqwert.hypergreeze.theme.ThemeEngine
-import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassBackdrop
-import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassSpec
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassDropdownItem
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassDropdownMenu
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.BackdropEffectScope
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
@@ -116,6 +113,7 @@ import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
 import top.yukonga.miuix.kmp.basic.DropdownArrowEndAction
+import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -123,6 +121,15 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+import top.yukonga.miuix.kmp.glass.GlassDialog
+import top.yukonga.miuix.kmp.glass.GlassDialogButton
+import top.yukonga.miuix.kmp.glass.GlassDialogButtonRole
+import top.yukonga.miuix.kmp.glass.GlassDropdownPreference
+import top.yukonga.miuix.kmp.glass.GlassIconButton
+import top.yukonga.miuix.kmp.glass.GlassTopAppBar
+import top.yukonga.miuix.kmp.glass.GlassTopAppBarDefaults
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.glass.Back
 import top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
@@ -294,7 +301,15 @@ fun Modifier.listScrollEndHaptic(): Modifier = composed {
  * keeps the platform stretch and its own nothing-else.
  */
 fun Modifier.pageOverscroll(): Modifier = composed {
-    if (LocalUiStyle.current.isMiuixBased) Modifier.overScrollVertical() else Modifier
+    if (LocalUiStyle.current.isMiuixBased) {
+        val scrollBehavior = LocalPageScrollBehavior.current
+        val onOffsetChanged: ((Float) -> Unit)? = remember(scrollBehavior) {
+            scrollBehavior?.state?.let { state -> { offset -> state.overscrollOffset = offset } }
+        }
+        Modifier.overScrollVertical(onOffsetChanged = onOffsetChanged)
+    } else {
+        Modifier
+    }
 }
 
 /**
@@ -359,30 +374,6 @@ fun MiuixScrollBar(
         modifier = modifier.fillMaxHeight(),
         trackPadding = PaddingValues(top = top, bottom = bottom)
     )
-}
-
-/**
- * The registry of currently-open popups — dropdown rows, overflow menus — that
- * the shell's chromes consult. A popup's veil is drawn inside the layer the
- * frosted bars record, so glass reading that layer would take the veil in as
- * its own sample and go pale over the page; and the pill answers by dropping
- * back to its opaque build while any popup is up. Reporters key by their own
- * identity ([Any]), so nested or sibling popups never fight over one flag.
- */
-object PopupOverlay {
-    private val overlays = mutableStateMapOf<Any, Boolean>()
-
-    /** True while at least one popup holds its veil up. */
-    val dimming: Boolean
-        get() = overlays.isNotEmpty()
-
-    fun report(key: Any, visible: Boolean) {
-        if (visible) overlays[key] = true else overlays.remove(key)
-    }
-
-    fun clear(key: Any) {
-        overlays.remove(key)
-    }
 }
 
 /**
@@ -510,41 +501,6 @@ private val LocalGroupGlassPlane = compositionLocalOf { false }
  * away, which is the one thing this look exists for.
  */
 val LocalFloatingBarClearance = compositionLocalOf { 0.dp }
-
-/**
- * Whether the 柔光玻璃 look's floating bar controls — the back disc, the batch
- * and overflow plates — are revealed. The look's rule: bare at the very top of
- * a page (nothing has scrolled under the bar yet, so a plate would frost
- * nothing), glass the moment the page moves. The scaffolds provide their
- * bar-collapse fraction here; the default keeps today's always-glass behaviour
- * for any control composed outside a scaffold's bar.
- */
-val LocalSoftGlassBarReveal = compositionLocalOf { 1f }
-
-/**
- * The material progress the plates read for the fraction a Miuix scroll state
- * reports — the reference implementation's own curve (F1Info/Deadliner's
- * `resolveTopBarButtonMaterialProgress`), verbatim: the plate holds off for the
- * first sliver of the collapse travel, then rides a smoothstep across a short
- * window so the material is fully in by a fifth of the way down. Top of the
- * page — including the pre-measure NaN the fraction holds before the scroll
- * range exists (see [MiuixGlassTopAppBar]) — reads as fully bare.
- */
-private const val SOFT_GLASS_REVEAL_START = 0.015f
-private const val SOFT_GLASS_REVEAL_RANGE = 0.18f
-
-internal fun softGlassBarMaterialProgress(fraction: Float): Float {
-    if (fraction.isNaN()) return 0f
-    val normalized = (
-        (fraction.coerceIn(0f, 1f) - SOFT_GLASS_REVEAL_START) /
-            SOFT_GLASS_REVEAL_RANGE
-    )
-        .coerceIn(0f, 1f)
-    return normalized * normalized * (3f - 2f * normalized)
-}
-
-/** The settle the plate's material progress animates along, as the reference runs it. */
-internal val SOFT_GLASS_REVEAL_FADE = tween<Float>(durationMillis = 350, easing = LinearEasing)
 
 /**
  * The glass tints' dark read. The app's own palette owns darkness — it can force
@@ -1297,60 +1253,19 @@ fun SettingsMenuCard(
     alignValueToSwitchSlot: Boolean = true
 ) {
     if (softGlassChrome()) {
-        // 柔光玻璃 wears MIUIX's NEW dropdown (miuix-glass's
-        // GlassDropdownPreference), which 0.9.4 does not publish — see
-        // [SoftGlassDropdownMenu]. The row is the library's own BasicComponent
-        // with its up-down arrow, so the OS 4 row and the OS 3 row are the same
-        // row; only the panel behind them differs.
-        var expanded by remember { mutableStateOf(false) }
-        var rowBounds by remember { mutableStateOf(Rect.Zero) }
-        val backdrop = LocalSoftGlassBackdrop.current
         val view = LocalView.current
-        val actionColor = MiuixTheme.colorScheme.onSurfaceVariantActions
-        val current = entries.getOrNull(currentIndex) ?: ""
         MiuixCardSurface(shape = connectedGroupShape(first, last), modifier = modifier) {
-            BasicComponent(
-                modifier = Modifier.onGloballyPositioned { rowBounds = it.boundsInWindow() },
+            GlassDropdownPreference(
+                onSelectedIndexChange = { index ->
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    onPick(index)
+                },
+                items = entries,
+                selectedIndex = currentIndex,
                 title = title,
                 summary = description.ifEmpty { null },
-                endActions = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (current.isNotEmpty()) {
-                            MiuixText(
-                                text = current,
-                                modifier = Modifier.padding(end = 8.dp),
-                                fontSize = MiuixTheme.textStyles.body2.fontSize,
-                                color = actionColor
-                            )
-                        }
-                        DropdownArrowEndAction(actionColor = actionColor)
-                    }
-                },
-                onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                    expanded = true
-                },
-                role = Role.DropdownList,
-                holdDownState = expanded
+                backdrop = LocalPageBackdrop.current,
             )
-        }
-        SoftGlassDropdownMenu(
-            show = expanded,
-            onDismissRequest = { expanded = false },
-            anchorBounds = rowBounds,
-            backdrop = backdrop
-        ) {
-            entries.forEachIndexed { index, label ->
-                SoftGlassDropdownItem(
-                    text = label,
-                    selected = index == currentIndex,
-                    onClick = {
-                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        expanded = false
-                        onPick(index)
-                    }
-                )
-            }
         }
         return
     }
@@ -1842,51 +1757,68 @@ fun PageScaffold(
     if (LocalUiStyle.current.isMiuixBased) {
         val title = stringResource(titleRes)
         val scrollBehavior = MiuixScrollBehavior()
-        val blurEnabled = LocalSoftGlassSpec.current.enabled
-        val pageBackdrop = rememberPageLayerBackdrop()
-        val activeBackdrop = if (blurEnabled) pageBackdrop else null
+        val blurActive = isMiuixBlurActive()
+        val activeBackdrop = rememberMiuixSurfaceBackdrop(blurActive)
+        val isCompactAbout = barExtension == null && compactBar && barScrollProgress != null
+        val surfaceColor = MiuixTheme.colorScheme.surface
+        val bandBrush = remember(surfaceColor) { GlassTopAppBarDefaults.bandBrush(surfaceColor) }
+        val chromeTitleAlpha = LocalTopAppBarTitleAlpha.current
+        val centerObstructionStart = LocalTopAppBarCenterObstructionStart.current
+        val isContentScrolled by remember(scrollBehavior, barScrollProgress) {
+            computedStateOf {
+                val baseScrolled = barScrollProgress?.let { it() > 0f }
+                    ?: (scrollBehavior.state.contentOffset < -1f)
+                baseScrolled || scrollBehavior.state.overscrollOffset < -1f
+            }
+        }
+        val titleAlphaLambda: () -> Float = remember(isCompactAbout, barScrollProgress, chromeTitleAlpha) {
+            if (isCompactAbout && barScrollProgress != null) {
+                { ((barScrollProgress() - 0.35f) / 0.65f).coerceIn(0f, 1f) * chromeTitleAlpha() }
+            } else {
+                chromeTitleAlpha
+            }
+        }
+        val backDesc = stringResource(io.github.iamqwert.hypergreeze.R.string.back)
         MiuixScaffold(
             modifier = modifier,
-            // The page colour on both the scaffold and the bar, not Miuix's
-            // defaults: the app's surface policy owns the page colour, and the
-            // defaults would disagree with it behind the content and in the bar.
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                val travel = barScrollProgress?.invoke()
-                    ?: scrollBehavior.state.collapsedFraction
-                val reveal = softGlassBarMaterialProgress(travel)
                 CompositionLocalProvider(
-                    LocalSoftGlassBackdrop provides activeBackdrop,
-                    LocalSoftGlassBarReveal provides reveal
+                    LocalTopAppBarBackdrop provides activeBackdrop,
                 ) {
-                    MiuixGlassTopAppBar(
+                    GlassTopAppBar(
                         title = title,
-                        scrolled = travel > 0f,
-                        showBack = showBack,
-                        backDescription = stringResource(
-                            io.github.iamqwert.hypergreeze.R.string.back
-                        ),
-                        onBack = onBack,
+                        isContentScrolled = isContentScrolled,
+                        contentModifier = Modifier.miuixSidebarStartInset(),
+                        expandable = !isCompactAbout,
+                        progressiveBlur = blurActive,
+                        backdrop = activeBackdrop,
                         scrollBehavior = scrollBehavior,
-                        actions = actions,
-                        bottomContent = barExtension,
-                        compactTitleAlpha = if (barExtension == null && compactBar && barScrollProgress != null) {
-                            { ((travel - 0.35f) / 0.65f).coerceIn(0f, 1f) }
-                        } else {
-                            null
+                        bandBrush = bandBrush,
+                        titleAlpha = titleAlphaLambda,
+                        centerObstructionStart = centerObstructionStart,
+                        navigationIcon = {
+                            if (showBack) {
+                                GlassIconButton(onClick = onBack) {
+                                    MiuixIcon(
+                                        imageVector = MiuixIcons.Glass.Back,
+                                        contentDescription = backDesc,
+                                        tint = MiuixTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(28.dp),
+                                    )
+                                }
+                            }
                         },
-                        scrollProgress = barScrollProgress
+                        actions = actions,
+                        bottomContent = {
+                            if (barExtension != null) {
+                                Column { barExtension() }
+                            }
+                        },
                     )
                 }
             }
         ) { innerPadding ->
-            // No snackbar host on this look: its acknowledgments are the system
-            // toast (see the About and Licenses pages), not a bar at the foot.
-            //
-            // The floating bar's clearance rides in here — see
-            // [LocalFloatingBarClearance]: it is given to the page as inset, so it
-            // becomes scroll room at the end of the list rather than a shorter
-            // viewport. Zero everywhere the docked bar is used.
             val clearance = LocalFloatingBarClearance.current
             val layoutDirection = LocalLayoutDirection.current
             val bodyPadding = if (clearance == 0.dp) {
@@ -1902,15 +1834,17 @@ fun PageScaffold(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(if (blurEnabled) Modifier.layerBackdrop(pageBackdrop) else Modifier)
-                    // The bar reads the list's scroll through this connection;
-                    // the page bodies all scroll, so putting it here covers them
-                    // all without each page having to opt in.
+                    .then(if (activeBackdrop != null) Modifier.layerBackdrop(activeBackdrop) else Modifier)
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
             ) {
-                CompositionLocalProvider(LocalSoftGlassBackdrop provides activeBackdrop) {
+                CompositionLocalProvider(
+                    LocalTopAppBarBackdrop provides activeBackdrop,
+                    LocalPageScrollBehavior provides scrollBehavior,
+                ) {
                     background?.invoke(this)
-                    content(bodyPadding)
+                    Box(modifier = Modifier.fillMaxSize().miuixSidebarStartInset()) {
+                        content(bodyPadding)
+                    }
                 }
             }
         }
@@ -2109,30 +2043,16 @@ fun AppDialog(
     content: (@Composable () -> Unit)? = null
 ) {
     if (LocalUiStyle.current.isMiuixBased) {
-        // A dialog dims the page exactly as a dropdown does, and its veil lands
-        // inside the layer the floating pill records — so it reports itself too,
-        // and the pill holds its plain build while it is up. See [PopupOverlay].
-        // Composed only while shown (callers wrap it in a `let`), so entering the
-        // composition is the open and leaving it is the close.
-        val overlayKey = remember { Any() }
-        DisposableEffect(overlayKey) {
-            PopupOverlay.report(overlayKey, true)
-            onDispose { PopupOverlay.clear(overlayKey) }
-        }
-        OverlayDialog(
+        GlassDialog(
             show = true,
             title = title,
-            onDismissRequest = onDismissRequest
+            backdrop = LocalPageBackdrop.current,
+            onDismissRequest = onDismissRequest,
         ) {
             Column {
                 if (content != null) {
                     content()
                 } else if (text != null) {
-                    // Printed by hand rather than handed to the library's
-                    // summary slot: that slot centres its text, which shredded
-                    // a multi-line caution into a centred wall. Left-aligned in
-                    // the page's prose style, in the summary's own color slot —
-                    // the same reading order the Material branch prints with.
                     AppText(
                         text = text,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -2140,12 +2060,6 @@ fun AppDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
-                // The system dialog's own action row: two equal-width buttons,
-                // dismiss leading and confirm trailing — not a right-aligned
-                // pair of text links, which is what read as "not Miuix". The
-                // confirm side carries the primary fill, the way the licence
-                // sheet's closing button does: one look at the row and the
-                // forward action is the filled one.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -2153,25 +2067,34 @@ fun AppDialog(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     if (dismissLabel != null) {
-                        MiuixTextButton(
-                            text = dismissLabel,
+                        GlassDialogButton(
                             onClick = {
                                 onDismiss()
                                 onDismissRequest()
                             },
-                            modifier = Modifier.weight(1f)
-                        )
+                            modifier = Modifier.weight(1f),
+                            role = GlassDialogButtonRole.Normal,
+                        ) {
+                            MiuixText(
+                                text = dismissLabel,
+                                style = MiuixTheme.textStyles.button,
+                            )
+                        }
                     }
                     if (confirmLabel != null) {
-                        MiuixTextButton(
-                            text = confirmLabel,
+                        GlassDialogButton(
                             onClick = {
                                 onConfirm()
                                 onDismissRequest()
                             },
                             modifier = Modifier.weight(1f),
-                            colors = MiuixButtonDefaults.textButtonColorsPrimary()
-                        )
+                            role = GlassDialogButtonRole.Primary,
+                        ) {
+                            MiuixText(
+                                text = confirmLabel,
+                                style = MiuixTheme.textStyles.button,
+                            )
+                        }
                     }
                 }
             }

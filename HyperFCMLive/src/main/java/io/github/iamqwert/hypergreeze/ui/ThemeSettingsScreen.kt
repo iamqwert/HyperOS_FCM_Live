@@ -89,7 +89,10 @@ import io.github.iamqwert.hypergreeze.theme.toComposeColorScheme
 import top.yukonga.miuix.kmp.basic.Slider as MiuixSlider
 import top.yukonga.miuix.kmp.basic.SliderDefaults as MiuixSliderDefaults
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
-import top.yukonga.miuix.kmp.basic.TextField as MiuixTextField
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import top.yukonga.miuix.kmp.glass.GlassTextField
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.squircle.isSquircleEnabled
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -1064,12 +1067,15 @@ private fun GlobalScaleCard(
     }
 
     if (showDialog) {
+        val isMiuix = LocalUiStyle.current.isMiuixBased
+        val miuixScaleState = rememberTextFieldState(initialText = inputText)
         AppDialog(
             onDismissRequest = { showDialog = false },
             title = stringResource(R.string.global_scale),
             confirmLabel = stringResource(android.R.string.ok),
             onConfirm = {
-                val parsed = inputText.toIntOrNull()?.toFloat() ?: draftPercent
+                val raw = if (isMiuix) miuixScaleState.text.toString() else inputText
+                val parsed = raw.toIntOrNull()?.toFloat() ?: draftPercent
                 commitPercent(parsed)
                 showDialog = false
             },
@@ -1079,23 +1085,23 @@ private fun GlobalScaleCard(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 AppText(
                     text = stringResource(R.string.global_scale_summary),
-                    color = if (LocalUiStyle.current.isMiuixBased) {
+                    color = if (isMiuix) {
                         MiuixTheme.colorScheme.onSurfaceVariantSummary
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
                     style = pageProseStyle(),
                 )
-                if (LocalUiStyle.current.isMiuixBased) {
-                    MiuixTextField(
-                        value = inputText,
-                        onValueChange = { raw ->
-                            if (raw.length <= 3 && raw.all { it.isDigit() }) {
-                                inputText = raw
+                if (isMiuix) {
+                    GlassTextField(
+                        state = miuixScaleState,
+                        modifier = Modifier.fillMaxWidth(),
+                        lineLimits = TextFieldLineLimits.SingleLine,
+                        inputTransformation = InputTransformation {
+                            if (length > 3 || asCharSequence().any { !it.isDigit() }) {
+                                revertAllChanges()
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         trailingIcon = {
                             MiuixText(

@@ -33,9 +33,13 @@ import top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 import top.yukonga.miuix.kmp.basic.CardDefaults as MiuixCardDefaults
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
+import androidx.compose.ui.graphics.luminance
+import top.yukonga.miuix.kmp.basic.Text as MiuixText
+import top.yukonga.miuix.kmp.glass.GlassDialog
+import top.yukonga.miuix.kmp.glass.GlassDialogButton
+import top.yukonga.miuix.kmp.glass.GlassDialogButtonRole
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -776,27 +780,28 @@ private fun MiuixLicenseDialog(
     onDismiss: () -> Unit,
     onOpenSource: (String) -> Unit
 ) {
-    OverlayDialog(
+    GlassDialog(
         show = true,
         title = sheet.title,
-        onDismissRequest = onDismiss
+        backdrop = LocalPageBackdrop.current,
+        onDismissRequest = onDismiss,
     ) {
         val density = LocalDensity.current
+        val containerSize = LocalContainerSize.current ?: LocalWindowInfo.current.containerSize
         val bodyHeight = with(density) {
-            val px = LocalWindowInfo.current.containerSize.height
+            val px = containerSize.height
             if (px <= 0) Dp.Infinity else (px * 0.45f).toDp()
         }
+        val isDark = MiuixTheme.colorScheme.background.luminance() < 0.5f
+        val nestedCardColor = MiuixTheme.colorScheme.onBackground.copy(
+            alpha = if (isDark) 36f / 255f else 15f / 255f,
+        )
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Same ceiling idea as the Material dialog, measured from the window
-            // the dialog is actually in; 0.45 rather than 0.55 because the Miuix
-            // sheet is anchored to the foot and the buttons must stay below it.
             MiuixCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = bodyHeight),
-                colors = MiuixCardDefaults.defaultColors(
-                    color = MiuixTheme.colorScheme.surfaceContainerHighest
-                )
+                colors = MiuixCardDefaults.defaultColors(color = nestedCardColor),
             ) {
                 AppText(
                     modifier = Modifier
@@ -814,18 +819,27 @@ private fun MiuixLicenseDialog(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (sheet.url != null) {
-                    MiuixTextButton(
-                        text = sourceLabel,
+                    GlassDialogButton(
                         modifier = Modifier.weight(1f),
-                        onClick = { onOpenSource(sheet.url) }
+                        role = GlassDialogButtonRole.Normal,
+                        onClick = { onOpenSource(sheet.url) },
+                    ) {
+                        MiuixText(
+                            text = sourceLabel,
+                            style = MiuixTheme.textStyles.button,
+                        )
+                    }
+                }
+                GlassDialogButton(
+                    modifier = Modifier.weight(1f),
+                    role = GlassDialogButtonRole.Primary,
+                    onClick = onDismiss,
+                ) {
+                    MiuixText(
+                        text = closeLabel,
+                        style = MiuixTheme.textStyles.button,
                     )
                 }
-                MiuixTextButton(
-                    text = closeLabel,
-                    modifier = Modifier.weight(1f),
-                    onClick = onDismiss,
-                    colors = MiuixButtonDefaults.textButtonColorsPrimary()
-                )
             }
         }
     }

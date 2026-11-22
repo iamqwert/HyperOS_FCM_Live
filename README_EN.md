@@ -69,7 +69,7 @@ Good to know before using:
 - **Unselected apps stay untouched**: unselected apps keep stock behavior and are force-stopped when swiped from Recents
 - **No keep-alive**: apps woken by push may be frozen or reclaimed afterward; this is normal and does not affect the next push
 - **Sleep mode is untouched by default**: HyperOS cuts networking device-wide during sleep; enable the Sleep mode options in Settings if you want overnight connectivity
-- **Proxies are outside module control**: if you use a VPN or proxy, set the `mtalk` domains to direct per [FCM's network configuration docs](https://firebase.google.com/docs/cloud-messaging/network-configuration) (see the [User Guide](HELP_EN.md)). See [Configure your Network for FCM](https://firebase.google.com/docs/cloud-messaging/network-configuration)
+- **Proxies are outside module control**: if you use a VPN or proxy, set the `mtalk` domains to direct per [FCM's network configuration docs](https://firebase.google.com/docs/cloud-messaging/network-configuration) (see the [User Guide](HELP_EN.md))
 
 For hook details and ROM internals, see [Technical Docs (FCM_HOOK_TECH_DOC.md)](FCM_HOOK_TECH_DOC.md).
 

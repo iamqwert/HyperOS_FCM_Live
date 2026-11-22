@@ -122,13 +122,25 @@ import top.yukonga.miuix.kmp.basic.PullToRefresh as MiuixPullToRefresh
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi
+import top.yukonga.miuix.kmp.basic.DropdownEntry
+import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
+import top.yukonga.miuix.kmp.glass.GlassIconButton
+import top.yukonga.miuix.kmp.glass.GlassIconDropdownMenu
+import top.yukonga.miuix.kmp.glass.GlassSearchOverlay
+import top.yukonga.miuix.kmp.glass.GlassSearchOverlayDefaults
+import top.yukonga.miuix.kmp.glass.GlassTopAppBar
+import top.yukonga.miuix.kmp.glass.GlassTopAppBarDefaults
+import top.yukonga.miuix.kmp.glass.glassPopupAnchor
+import top.yukonga.miuix.kmp.glass.glassPopupAnchorContent
+import top.yukonga.miuix.kmp.glass.rememberGlassPopupAnchor
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Close
-import top.yukonga.miuix.kmp.icon.extended.Ok
-import top.yukonga.miuix.kmp.icon.extended.SelectAll
-import top.yukonga.miuix.kmp.icon.extended.Sort
+import top.yukonga.miuix.kmp.icon.glass.Close
+import top.yukonga.miuix.kmp.icon.glass.Ok
+import top.yukonga.miuix.kmp.icon.glass.Search
+import top.yukonga.miuix.kmp.icon.glass.SelectAll
+import top.yukonga.miuix.kmp.icon.glass.Sort
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.state.ToggleableState
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
@@ -137,13 +149,10 @@ import top.yukonga.miuix.kmp.basic.TextButton as MiuixTextButton
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Checkbox as MiuixCheckbox
-import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassBackdrop
-import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassSpec
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassDropdownItem
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassDropdownMenu
-import io.github.iamqwert.hypergreeze.ui.softglass.SoftGlassIconButton
 import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.lazy.rememberLazyListState
 import io.github.iamqwert.hypergreeze.theme.HyperFCMLiveTheme
 import io.github.iamqwert.hypergreeze.theme.LocalAppShapes
 import io.github.iamqwert.hypergreeze.theme.LocalAppSurfaces
@@ -281,85 +290,19 @@ fun MainScreen(
         // The system's own pull-to-refresh, the circle with the refresh text,
         // stays the M3 spinner's counterpart.
         val scrollBehavior = MiuixScrollBehavior()
-        val blurEnabled = LocalSoftGlassSpec.current.enabled
-        val pageBackdrop = rememberPageLayerBackdrop()
-        val activeBackdrop = if (blurEnabled) pageBackdrop else null
-
-        // The capsule's top inset, the reference's own ride ([IconPage]'s
-        // dynamicTopPadding): 12dp while the large title stands, collapsing to
-        // 0 as the bar folds to the compact title — which is what pulls the
-        // capsule up against the small title instead of leaving it at the
-        // large title's spacing. A lambda keeps the fraction out of
-        // composition; the NaN guard is the same one [MiuixGlassTopAppBar]
-        // documents for this very property (0/0 before the scroll range is
-        // measured).
-        val searchBarTopPadding: () -> Dp = remember(scrollBehavior) {
-            {
-                val fraction = scrollBehavior.state.collapsedFraction
-                12.dp * (1f - (if (fraction.isNaN()) 0f else fraction))
-            }
-        }
-
-        // The search, as the reference app authors it (MiuixSearchPager.kt —
-        // its own machinery, ported): a fake capsule in the bar's bottom slot,
-        // and tapping it raises a full-screen layer on which the real bar rides
-        // from the capsule's position to the screen's top. The text itself
-        // still lives with the Activity — the same hoisted `query` the M3 look
-        // types into — so every status transition the machine makes lands here
-        // as both a status write and the matching query write, and the
-        // Activity's debounced filter keeps feeding whichever list is showing.
+        val blurActive = isMiuixBlurActive()
+        val activeBackdrop = rememberMiuixSurfaceBackdrop(blurActive)
         val searchHint = stringResource(R.string.search_hint)
-        var searchStatus by remember { mutableStateOf(SearchStatus(label = searchHint)) }
-        var searchOffsetY by remember { mutableStateOf(0.dp) }
-        val updateSearchStatus: (SearchStatus) -> Unit = { next ->
-            searchStatus = next
-            if (query != next.searchText) onQueryChange(next.searchText)
-        }
-        // The result kind, the reference's own derivation: blank query is the
-        // page's default content, no hits is nothing, hits is the list. `apps`
-        // already is the query's filtered product — the Activity owns the
-        // debounced filter, so the kind follows it one debounce behind, the
-        // way the reference's own pages lag their filter.
-        val searchResultStatus = when {
-            query.isBlank() -> SearchStatus.ResultStatus.DEFAULT
-            apps.isEmpty() -> SearchStatus.ResultStatus.EMPTY
-            else -> SearchStatus.ResultStatus.SHOW
-        }
-        LaunchedEffect(searchResultStatus) {
-            if (searchStatus.resultStatus != searchResultStatus) {
-                updateSearchStatus(searchStatus.copy(resultStatus = searchResultStatus))
-            }
-        }
-        // The resting capsule wears its plain High fill: there is no glass
-        // behind it to blend into any more, so the reference's 80% variant has
-        // nothing to sit on.
-        val searchCapsuleColor: Color? = null
+        var searchExpanded by remember { mutableStateOf(false) }
 
-        // The search entry is a LIST ITEM now, not a bar slot: it scrolls up
-        // with the rows, which is what lets the bar above wear the gradient
-        // band — nothing pinned reaches under it. Its window Y is still
-        // reported, so the pager's ride starts from wherever the capsule sits
-        // when it is tapped (see [SearchStatus.SearchPager]).
         val searchHeader: @Composable () -> Unit = {
-            val density = LocalDensity.current
             Box(
                 modifier = Modifier
-                    .alpha(if (searchStatus.isCollapsed()) 1f else 0f)
-                    .onGloballyPositioned { coordinates ->
-                        searchOffsetY = with(density) {
-                            coordinates.positionInWindow().y.toDp()
-                        }
-                    }
+                    .alpha(if (searchExpanded) 0f else 1f)
                     .then(
-                        if (searchStatus.isCollapsed()) {
+                        if (!searchExpanded) {
                             Modifier.pointerInput(Unit) {
-                                detectTapGestures {
-                                    updateSearchStatus(
-                                        searchStatus.copy(
-                                            current = SearchStatus.Status.EXPANDING
-                                        )
-                                    )
-                                }
+                                detectTapGestures { searchExpanded = true }
                             }
                         } else {
                             Modifier
@@ -367,12 +310,9 @@ fun MainScreen(
                     )
             ) {
                 SearchBarFake(
-                    label = searchStatus.label,
-                    capsuleColor = searchCapsuleColor,
-                    // The list already insets its items: a second inset here
-                    // would narrow the field against the app cards below it.
+                    label = searchHint,
+                    capsuleColor = null,
                     horizontalInset = 0.dp,
-                    // The list's own item spacing owns the gap to the first row.
                     bottomPadding = 0.dp
                 )
             }
@@ -380,50 +320,26 @@ fun MainScreen(
         Box(modifier = modifier.fillMaxSize()) {
         MiuixScaffold(
             modifier = Modifier.fillMaxSize(),
-            // The app's page level, not Miuix's own default: the app's surface
-            // policy owns the page colour, and a default-coloured scaffold would
-            // disagree with the window chrome behind the bar.
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                // The bar's controls read the page's own layer; the provider
-                // wraps the bar alone, because the list below is the recorded
-                // node and reads nothing. The reveal beside it is the look's
-                // bare-at-the-top rule: the plates appear once the list has
-                // scrolled under the bar.
                 CompositionLocalProvider(
-                    LocalSoftGlassBackdrop provides activeBackdrop,
-                    LocalSoftGlassBarReveal provides softGlassBarMaterialProgress(
-                        scrollBehavior.state.collapsedFraction
-                    )
+                    LocalTopAppBarBackdrop provides activeBackdrop,
                 ) {
-                    // The reference's own cross-fade: the resting bar fades out
-                    // while the pager's surface fades in, so the expanding bar
-                    // never overlaps a standing capsule. Transparent, not the
-                    // page tone: a band needs the body's rows behind it.
-                    searchStatus.TopAppBarAnim(
-                        backgroundColor = Color.Transparent
-                    ) {
-                        MainTopBar(
-                            state = topBarState,
-                            actions = actions,
-                            scrollBehavior = scrollBehavior
-                        )
-                    }
+                    MainTopBar(
+                        state = topBarState,
+                        actions = actions,
+                        scrollBehavior = scrollBehavior
+                    )
                 }
             },
         ) { innerPadding ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    // The list alone; the bar above is composed outside this node,
-                    // which is what lets its controls read the layer — see
-                    // [rememberPageLayerBackdrop].
-                    .then(if (blurEnabled) Modifier.layerBackdrop(pageBackdrop) else Modifier)
-                    // The bar's collapse and its band's fade-in both read this
-                    // connection. The page has no pinned chrome of its own now,
-                    // so it collapses exactly like every other Miuix page.
+                    .then(if (activeBackdrop != null) Modifier.layerBackdrop(activeBackdrop) else Modifier)
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
             ) {
+                Box(modifier = Modifier.fillMaxSize().miuixSidebarStartInset()) {
                 MiuixPullToRefresh(
                     isRefreshing = refreshing,
                     onRefresh = onRefresh,
@@ -489,42 +405,72 @@ fun MainScreen(
                         )
                     )
                 }
-            }
-        }
-        // The full-screen search layer, over the whole page — the reference
-        // hosts it in the scaffold's own popup slot; a Box around the
-        // scaffold is this page's equivalent seat, and the layer is the
-        // scaffold's SIBLING here, covering the bar too. Collapsed it is an
-        // empty, fully transparent, non-intercepting layer; expanded it
-        // carries the results, the same rows the page's list shows, one card
-        // to a row with the reference's own 12/6 spacing.
-        searchStatus.SearchPager(
-            onSearchStatusChange = updateSearchStatus,
-            offsetY = searchOffsetY,
-            defaultResult = {},
-            searchBarTopPadding = searchBarTopPadding,
-            collapsedCapsuleColor = searchCapsuleColor,
-            // The sheet covers the page but NOT the home's bottom chrome, which
-            // is composed outside it. Keep the last result clear of that bar.
-            resultBottomPadding = LocalFloatingBarClearance.current,
-        ) {
-                items(items = apps, key = { it.packageName }) { app ->
-                    AppRow(
-                        label = app.label,
-                        packageName = app.packageName,
-                        icon = icons[app.packageName],
-                        checked = app.checked,
-                        supportMiPush = app.supportMiPush,
-                        exempt = app.exempt,
-                        multiSelect = multiSelect,
-                        rowSelected = selected.contains(app.packageName),
-                        onClick = { onRowClick(app) },
-                        onLongClick = { onRowLongClick(app) },
-                        onIconMissing = { loadIcon(app) },
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
                 }
             }
+        }
+        val searchListState = rememberLazyListState()
+        val searchBarSpace = GlassSearchOverlayDefaults.BarHeight +
+            GlassSearchOverlayDefaults.VerticalPadding * 2
+        val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val searchBottomClearance = LocalFloatingBarClearance.current
+        TopLayer {
+            GlassSearchOverlay(
+                expanded = searchExpanded,
+                onDismissRequest = {
+                    searchExpanded = false
+                    if (query.isNotEmpty()) onQueryChange("")
+                },
+                scrollMaterialThreshold = GlassSearchOverlayDefaults.VerticalPadding + 6.dp,
+                label = searchHint,
+                scrollOffset = {
+                    when {
+                        searchListState.layoutInfo.totalItemsCount == 0 -> 0f
+                        searchListState.firstVisibleItemIndex > 0 -> Float.MAX_VALUE
+                        else -> searchListState.firstVisibleItemScrollOffset.toFloat()
+                    }
+                },
+                blurEnabled = blurActive,
+                horizontalInsetsModifier = Modifier.miuixSidebarStartInset(),
+                searchIcon = MiuixIcons.Glass.Search,
+                closeIcon = MiuixIcons.Glass.Close,
+            ) { overlayQuery ->
+                LaunchedEffect(overlayQuery) {
+                    if (query != overlayQuery) onQueryChange(overlayQuery)
+                }
+                if (overlayQuery.isNotBlank()) {
+                    LazyColumn(
+                        state = searchListState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .miuixSidebarStartInset()
+                            .listScrollEndHaptic()
+                            .pageOverscroll(),
+                        overscrollEffect = rememberPageOverscrollEffect(),
+                        contentPadding = PaddingValues(
+                            top = statusBarTop + searchBarSpace,
+                            bottom = searchBottomClearance + 16.dp,
+                        ),
+                    ) {
+                        items(items = apps, key = { it.packageName }) { app ->
+                            AppRow(
+                                label = app.label,
+                                packageName = app.packageName,
+                                icon = icons[app.packageName],
+                                checked = app.checked,
+                                supportMiPush = app.supportMiPush,
+                                exempt = app.exempt,
+                                multiSelect = multiSelect,
+                                rowSelected = selected.contains(app.packageName),
+                                onClick = { onRowClick(app) },
+                                onLongClick = { onRowLongClick(app) },
+                                onIconMissing = { loadIcon(app) },
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
         }
         return
     }
@@ -644,34 +590,24 @@ fun MainTopBar(
     m3ScrollBehavior: androidx.compose.material3.TopAppBarScrollBehavior? = null
 ) {
     if (LocalUiStyle.current.isMiuixBased) {
-        // MainScreen always hands one in; the fallback only protects the
-        // signature for the M3 call site, which never enters this branch.
         val behavior = scrollBehavior ?: MiuixScrollBehavior()
-        val fraction = behavior.state.collapsedFraction
-        val scrolled = !fraction.isNaN() && fraction > 0f
+        val blurActive = isMiuixBlurActive()
+        val surfaceColor = MiuixTheme.colorScheme.surface
+        val bandBrush = remember(surfaceColor) { GlassTopAppBarDefaults.bandBrush(surfaceColor) }
         val view = LocalView.current
-        // Every operation control on this bar ticks (the row press's own
-        // KEYBOARD_TAP, the app page's one feedback language): the batch bar's
-        // ✕ and ✓, the resting bar's batch entry, and the overflow (筛选).
         val leading: @Composable () -> Unit = {
             BarIconButton(onClick = {
                 view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 actions.onExitMultiSelect()
             }) {
                 Icon(
-                    imageVector = MiuixIcons.Close,
+                    imageVector = MiuixIcons.Glass.Close,
                     contentDescription = stringResource(R.string.batch_exit),
                     tint = MiuixTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(28.dp)
                 )
             }
         }
-        // Batch mode keeps the resting bar's own shape: the same collapsing
-        // large title, with the count in the title slot — 「应用」 simply
-        // becomes 「已选择 N 项」. The mode's controls stay at the bar's right
-        // end where HyperOS's own batch pages keep them: the select-all flip,
-        // then 保存. Glyphs, not words — 全选 widening to 取消全选 shoved the
-        // count sideways on every flip.
         val barActions: @Composable RowScope.() -> Unit = {
             if (state.multiSelect) {
                 BatchSelectMenu(
@@ -684,18 +620,15 @@ fun MainTopBar(
                     actions.onBatchSave()
                 }) {
                     Icon(
-                        imageVector = MiuixIcons.Ok,
+                        imageVector = MiuixIcons.Glass.Ok,
                         contentDescription = stringResource(R.string.batch_save),
                         tint = MiuixTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(28.dp)
                     )
                 }
             } else {
-                // Resting bar: batch mode's entry one slot left of the
-                // overflow — the same two-control bar the reference app rests
-                // in. The NORMAL weight, so this bar carries one stroke.
                 TopBarIconButton(
-                    painter = rememberVectorPainter(MiuixIcons.Normal.SelectAll),
+                    painter = rememberVectorPainter(MiuixIcons.Glass.SelectAll),
                     description = stringResource(R.string.batch_ops),
                     onClick = {
                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -706,16 +639,18 @@ fun MainTopBar(
                 OverflowMenu(state.overflow, actions)
             }
         }
-        MiuixGlassTopAppBar(
+        GlassTopAppBar(
             title = state.title,
-            scrolled = scrolled,
-            showBack = false,
-            backDescription = "",
-            onBack = {},
-            scrollBehavior = behavior,
             modifier = modifier,
+            contentModifier = Modifier.miuixSidebarStartInset(),
+            progressiveBlur = blurActive,
+            backdrop = LocalTopAppBarBackdrop.current,
+            scrollBehavior = behavior,
+            bandBrush = bandBrush,
+            titleAlpha = LocalTopAppBarTitleAlpha.current,
+            centerObstructionStart = LocalTopAppBarCenterObstructionStart.current,
+            navigationIcon = if (state.multiSelect) leading else ({}),
             actions = barActions,
-            navigationIcon = if (state.multiSelect) leading else null
         )
         return
     }
@@ -916,7 +851,7 @@ fun TopBarIconButton(
                     painter = painter,
                     contentDescription = description,
                     tint = MiuixTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(28.dp)
                 )
             }
         }
@@ -965,17 +900,9 @@ private fun BarIconButton(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    // One control, the reference way: the plate's material alpha rides the
-    // collapse progress, so at the page's top this reads as a bare glyph —
-    // same button, same spot, the glass simply not there yet.
-    val reveal by animateFloatAsState(
-        targetValue = LocalSoftGlassBarReveal.current,
-        animationSpec = SOFT_GLASS_REVEAL_FADE
-    )
-    SoftGlassIconButton(
+    GlassIconButton(
         onClick = onClick,
         modifier = modifier,
-        materialAlpha = reveal,
         content = content
     )
 }
@@ -993,46 +920,71 @@ private fun BatchSelectMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val view = LocalView.current
-    var anchorBounds by remember { mutableStateOf(Rect.Zero) }
-    Box(modifier = Modifier.onGloballyPositioned { anchorBounds = it.boundsInWindow() }) {
-        BarIconButton(onClick = {
-            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-            expanded = true
-        }) {
-            Icon(
-                imageVector = MiuixIcons.Normal.SelectAll,
-                contentDescription = stringResource(
-                    if (allVisibleSelected) R.string.deselect_all else R.string.select_all
+    val anchor = rememberGlassPopupAnchor()
+    val pageBackdrop = LocalPageBackdrop.current
+    val selectAllLabel = stringResource(R.string.select_all)
+    val deselectAllLabel = stringResource(R.string.deselect_all)
+    val entries = listOf(
+        DropdownEntry(
+            items = listOf(
+                DropdownItem(
+                    text = selectAllLabel,
+                    selected = allVisibleSelected,
+                    onClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        expanded = false
+                        if (!allVisibleSelected) onSelectAll()
+                    }
                 ),
-                tint = MiuixTheme.colorScheme.onSurface,
-                modifier = Modifier.size(24.dp)
+                DropdownItem(
+                    text = deselectAllLabel,
+                    selected = !allVisibleSelected,
+                    onClick = {
+                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        expanded = false
+                        if (allVisibleSelected) onSelectAll()
+                    }
+                )
             )
-        }
-        SoftGlassDropdownMenu(
+        )
+    )
+    BarIconButton(
+        onClick = {
+            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            expanded = !expanded
+        },
+        modifier = Modifier.glassPopupAnchor(
+            anchor = anchor,
+            cornerRadius = GlassTopAppBarDefaults.ButtonSize / 2,
+            floating = true,
+        )
+    ) {
+        Icon(
+            imageVector = MiuixIcons.Glass.SelectAll,
+            contentDescription = if (allVisibleSelected) deselectAllLabel else selectAllLabel,
+            tint = MiuixTheme.colorScheme.onSurface,
+            modifier = Modifier
+                .size(28.dp)
+                .glassPopupAnchorContent(anchor)
+        )
+    }
+    TopLayer {
+        GlassIconDropdownMenu(
             show = expanded,
             onDismissRequest = { expanded = false },
-            anchorBounds = anchorBounds,
-            backdrop = LocalSoftGlassBackdrop.current
-        ) {
-            SoftGlassDropdownItem(
-                text = stringResource(R.string.select_all),
-                selected = allVisibleSelected,
-                onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                    expanded = false
-                    if (!allVisibleSelected) onSelectAll()
-                }
-            )
-            SoftGlassDropdownItem(
-                text = stringResource(R.string.deselect_all),
-                selected = !allVisibleSelected,
-                onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                    expanded = false
-                    if (allVisibleSelected) onSelectAll()
-                }
-            )
-        }
+            anchor = anchor,
+            anchorContent = {
+                Icon(
+                    imageVector = MiuixIcons.Glass.SelectAll,
+                    contentDescription = null,
+                    tint = MiuixTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(28.dp)
+                )
+            },
+            entries = entries,
+            backdrop = pageBackdrop,
+            collapseOnSelection = true,
+        )
     }
 }
 
@@ -1070,9 +1022,9 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
     // window, which can neither dim what is behind it nor mark the current value
     // without putting a plate behind it.
     if (LocalUiStyle.current.isMiuixBased) {
-        // The filter button ticks like every other operation control on this
-        // bar (see MainTopBar's note).
         val view = LocalView.current
+        val anchor = rememberGlassPopupAnchor()
+        val pageBackdrop = LocalPageBackdrop.current
         val toggleLabels = listOf(
             stringResource(R.string.exclude_mipush_apps),
             stringResource(R.string.show_system_apps)
@@ -1085,30 +1037,10 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
             actions.onToggleExcludeMiPush,
             actions.onToggleShowSystemApps
         )
-        var anchorBounds by remember { mutableStateOf(Rect.Zero) }
-        Box(modifier = Modifier.onGloballyPositioned { anchorBounds = it.boundsInWindow() }) {
-            // No long-press bubble under this look — see [LongPressTooltip].
-            // In the bar's own material, like every home-bar control (see
-            // [BarIconButton] and [TopBarIconButton]).
-            BarIconButton(onClick = {
-                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                expanded = true
-            }) {
-                Icon(
-                    imageVector = MiuixIcons.Normal.Sort,
-                    contentDescription = moreLabel,
-                    tint = MiuixTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-            SoftGlassDropdownMenu(
-                show = expanded,
-                onDismissRequest = { expanded = false },
-                anchorBounds = anchorBounds,
-                backdrop = LocalSoftGlassBackdrop.current
-            ) {
-                toggleLabels.forEachIndexed { index, label ->
-                    SoftGlassDropdownItem(
+        val entries = listOf(
+            DropdownEntry(
+                items = toggleLabels.mapIndexed { index, label ->
+                    DropdownItem(
                         text = label,
                         selected = toggled[index],
                         onClick = {
@@ -1118,7 +1050,45 @@ private fun OverflowMenu(state: OverflowState, actions: MainActions) {
                         }
                     )
                 }
-            }
+            )
+        )
+        BarIconButton(
+            onClick = {
+                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                expanded = !expanded
+            },
+            modifier = Modifier.glassPopupAnchor(
+                anchor = anchor,
+                cornerRadius = GlassTopAppBarDefaults.ButtonSize / 2,
+                floating = true,
+            )
+        ) {
+            Icon(
+                imageVector = MiuixIcons.Glass.Sort,
+                contentDescription = moreLabel,
+                tint = MiuixTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .size(28.dp)
+                    .glassPopupAnchorContent(anchor)
+            )
+        }
+        TopLayer {
+            GlassIconDropdownMenu(
+                show = expanded,
+                onDismissRequest = { expanded = false },
+                anchor = anchor,
+                anchorContent = {
+                    Icon(
+                        imageVector = MiuixIcons.Glass.Sort,
+                        contentDescription = null,
+                        tint = MiuixTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(28.dp)
+                    )
+                },
+                entries = entries,
+                backdrop = pageBackdrop,
+                collapseOnSelection = true,
+            )
         }
         return
     }

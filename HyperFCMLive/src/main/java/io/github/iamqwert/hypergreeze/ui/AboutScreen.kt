@@ -49,7 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.computedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -126,7 +126,6 @@ import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
 import io.github.iamqwert.hypergreeze.theme.MIUIX_ACCENT_OPTIONS
 import io.github.iamqwert.hypergreeze.theme.UiStyle
 import io.github.iamqwert.hypergreeze.theme.ThemePrefs
-import io.github.iamqwert.hypergreeze.ui.softglass.LocalSoftGlassSpec
 import kotlinx.coroutines.launch
 
 /**
@@ -284,7 +283,7 @@ fun AboutTabScreen(
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
 ) {
     val miuix = LocalUiStyle.current.isMiuixBased
-    val blurEnabled = LocalSoftGlassSpec.current.enabled
+    val blurEnabled = isMiuixBlurActive()
     // The page's dynamic background is also what its glass is made of: the
     // gradient is recorded into this layer, the background fills it, and
     // everything drawn on top of it samples it — the hero's wordmark, the
@@ -306,7 +305,7 @@ fun AboutTabScreen(
     // scrollable on every screen even though it carries only two cards.
     val listState = rememberPageListState()
     val scrollProgress by remember {
-        derivedStateOf {
+        computedStateOf {
             when {
                 listState.firstVisibleItemIndex > 0 -> 1f
 

@@ -15,8 +15,9 @@ import android.util.Log
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.CapturedAnimatedVisibility
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ScrollState
@@ -62,6 +63,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.computedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -114,8 +116,11 @@ import io.github.iamqwert.hypergreeze.ui.PageScaffold
 import io.github.iamqwert.hypergreeze.ui.SectionTitle
 import io.github.iamqwert.hypergreeze.ui.SectionTitleText
 import io.github.iamqwert.hypergreeze.ui.SettingsGroup
-import io.github.iamqwert.hypergreeze.ui.softglass.MiuixCapsuleTabRow
-import io.github.iamqwert.hypergreeze.ui.softglass.MiuixCapsuleTabRowDefaults
+import io.github.iamqwert.hypergreeze.ui.AdaptiveGlassSegmentedTabRow
+import io.github.iamqwert.hypergreeze.ui.LocalTopAppBarBackdrop
+import io.github.iamqwert.hypergreeze.ui.isMiuixBlurActive
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.glass.GlassSegmentedTabRow
 import io.github.iamqwert.hypergreeze.ui.connectedGroupShape
 import io.github.iamqwert.hypergreeze.ui.androidVersion
 import io.github.iamqwert.hypergreeze.ui.deviceName
@@ -131,7 +136,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Share
+import top.yukonga.miuix.kmp.icon.glass.Share
 import top.yukonga.miuix.kmp.basic.PullToRefresh as MiuixPullToRefresh
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
@@ -460,7 +465,7 @@ fun RecordsScreen(
                 // the note on that glyph: Regular's 1.78dp stroke reads heavier
                 // than every line beside it).
                 TopBarIconButton(
-                    painter = rememberVectorPainter(MiuixIcons.Normal.Share),
+                    painter = rememberVectorPainter(MiuixIcons.Glass.Share),
                     description = stringResource(R.string.records_export),
                     onClick = {
                         exportText = diagnosticsReport(
@@ -524,9 +529,17 @@ fun RecordsScreen(
             }
         },
         barExtension = if (LocalUiStyle.current.isMiuixBased) { {
-            // Both levels stay pinned in the bar's glass band: keeping the
-            // six-category strip outside the inner HorizontalPager prevents the
-            // whole strip from sliding/bouncing with page transitions.
+            val blurActive = isMiuixBlurActive()
+            val contentUnderTopBar by remember(pagePagerState, eventPagerState) {
+                computedStateOf {
+                    val events = blendOver(eventPagerState) { eventsGlass[it] ?: 0f }
+                    val travel = blendOver(pagePagerState) { page ->
+                        if (PageTab.entries.getOrNull(page) == PageTab.Events) events else statusGlass
+                    }
+                    travel > 0.02f
+                }
+            }
+            val stripSurfaceAlpha = if (blurActive && contentUnderTopBar) 1f else 0f
             val eventsStripTargeted =
                 PageTab.entries[pagePagerState.targetPage] == PageTab.Events
             RecordsPageTabRow(
@@ -534,16 +547,16 @@ fun RecordsScreen(
                 onSelect = { tab ->
                     pagerScope.launch { pagePagerState.springAnimateToPage(tab.ordinal) }
                 },
+                surfaceAlpha = stripSurfaceAlpha,
                 modifier = Modifier.padding(
                     start = inset,
                     end = inset,
                     top = 6.dp,
-                    bottom = if (eventsStripTargeted) STRIP_GAP else STRIP_BREATH
                 )
             )
-            AnimatedVisibility(
+            CapturedAnimatedVisibility(
                 visible = eventsStripTargeted,
-                enter = expandVertically(expandFrom = Alignment.Top, clip = false),
+                enter = fadeIn() + expandVertically(expandFrom = Alignment.Top, clip = false),
                 exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top, clip = false)
             ) {
                 EventsTabRow(
@@ -551,13 +564,15 @@ fun RecordsScreen(
                     onSelect = { tab ->
                         pagerScope.launch { eventPagerState.springAnimateToPage(tab.ordinal) }
                     },
+                    surfaceAlpha = stripSurfaceAlpha,
                     modifier = Modifier.padding(
                         start = inset,
                         end = inset,
-                        bottom = STRIP_BREATH
+                        top = STRIP_GAP,
                     )
                 )
             }
+            Spacer(modifier = Modifier.height(STRIP_BREATH))
         } } else null,
         // [barExtension] above mounts the strips inside the bar's band (see
         // [PageScaffold.barExtension]); the page's own travel above drives both
@@ -780,17 +795,19 @@ private fun exportFileName(): String {
 private fun RecordsPageTabRow(
     selected: PageTab,
     onSelect: (PageTab) -> Unit,
-    modifier: Modifier = Modifier
-) {    val labels = PageTab.entries.map { stringResource(it.labelRes) }
+    modifier: Modifier = Modifier,
+    surfaceAlpha: Float = 0f,
+) {
+    val labels = PageTab.entries.map { stringResource(it.labelRes) }
     if (LocalUiStyle.current.isMiuixBased) {
-        MiuixCapsuleTabRow(
+        val fallbackBackdrop = rememberLayerBackdrop()
+        GlassSegmentedTabRow(
             tabs = labels,
-            selectedTabIndex = selected.ordinal,
-            onTabSelected = { onSelect(PageTab.entries[it]) },
-            // The default backdrop is the page's own recorded layer: the strip
-            // sits OUTSIDE that record, so it can refract the rows travelling
-            // under the band without a cycle (see `MiuixCapsuleTabRow`).
-            modifier = modifier
+            selectedIndex = selected.ordinal,
+            onSelect = { onSelect(PageTab.entries[it]) },
+            backdrop = LocalTopAppBarBackdrop.current ?: fallbackBackdrop,
+            surfaceAlpha = surfaceAlpha,
+            modifier = modifier,
         )
         return
     }
@@ -1651,19 +1668,18 @@ private val EventTab.emptyRes: Int
 private fun EventsTabRow(
     selected: EventTab,
     onSelect: (EventTab) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    surfaceAlpha: Float = 0f,
 ) {
     val labels = EventTab.entries.map { stringResource(it.labelRes) }
     if (LocalUiStyle.current.isMiuixBased) {
-        MiuixCapsuleTabRow(
+        AdaptiveGlassSegmentedTabRow(
             tabs = labels,
-            selectedTabIndex = selected.ordinal,
-            onTabSelected = { onSelect(EventTab.entries[it]) },
-            itemHorizontalPadding = MiuixCapsuleTabRowDefaults.CompactItemHorizontalPadding,
-            // Pinned in PageScaffold.barExtension outside pageBackdrop, so the
-            // capsule samples the scrolling list beneath it just like
-            // RecordsPageTabRow.
-            modifier = modifier
+            selectedIndex = selected.ordinal,
+            onSelect = { onSelect(EventTab.entries[it]) },
+            backdrop = LocalTopAppBarBackdrop.current,
+            surfaceAlpha = surfaceAlpha,
+            modifier = modifier,
         )
         return
     }
