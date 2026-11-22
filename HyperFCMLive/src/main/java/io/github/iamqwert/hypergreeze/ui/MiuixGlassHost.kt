@@ -13,12 +13,20 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.captionBar
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.Composable
@@ -246,6 +254,10 @@ val LocalPageScrollBehavior = compositionLocalOf<ScrollBehavior?> { null }
  * Applies the dynamic start inset from [LocalTopBarStartInset] during the layout phase,
  * shrinking the child's available width and placing it shifted toward the end edge while
  * keeping backgrounds full-bleed.
+ *
+ * Use directly on components that already apply horizontal platform safe areas themselves
+ * (such as `GlassTopAppBar` with `defaultWindowInsetsPadding = true`). For page bodies and
+ * overlays that do not apply horizontal safe areas, use [miuixPageHorizontalInsets].
  */
 @Composable
 fun Modifier.miuixSidebarStartInset(): Modifier {
@@ -258,6 +270,24 @@ fun Modifier.miuixSidebarStartInset(): Modifier {
             placeable.placeRelative(startPx, 0)
         }
     }
+}
+
+/**
+ * Applies horizontal platform safe areas (`systemBars ∪ captionBar ∪ displayCutout`) followed by
+ * [miuixSidebarStartInset], matching Miuix's `AppPageInsets.contentInsets` horizontal contract so
+ * page content clears both display cutouts and the expanded [top.yukonga.miuix.kmp.glass.GlassNavigationRail].
+ */
+@Composable
+fun Modifier.miuixPageHorizontalInsets(): Modifier {
+    val systemBars = WindowInsets.systemBars
+    val captionBar = WindowInsets.captionBar
+    val displayCutout = WindowInsets.displayCutout
+    val horizontalSafeInsets = remember(systemBars, captionBar, displayCutout) {
+        systemBars.union(captionBar).union(displayCutout).only(WindowInsetsSides.Horizontal)
+    }
+    return this
+        .windowInsetsPadding(horizontalSafeInsets)
+        .miuixSidebarStartInset()
 }
 
 /** 0ms instant navigation transition used when jumping from a sub-page via the persistent sidebar. */

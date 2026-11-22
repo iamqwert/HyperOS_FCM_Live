@@ -340,7 +340,7 @@ fun MainScreen(
                     .then(if (activeBackdrop != null) Modifier.layerBackdrop(activeBackdrop) else Modifier)
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
             ) {
-                Box(modifier = Modifier.fillMaxSize().miuixSidebarStartInset()) {
+                Box(modifier = Modifier.fillMaxSize().miuixPageHorizontalInsets()) {
                 MiuixPullToRefresh(
                     isRefreshing = refreshing,
                     onRefresh = onRefresh,
@@ -431,7 +431,7 @@ fun MainScreen(
                     }
                 },
                 blurEnabled = blurActive,
-                horizontalInsetsModifier = Modifier.miuixSidebarStartInset(),
+                horizontalInsetsModifier = Modifier.miuixPageHorizontalInsets(),
                 searchIcon = MiuixIcons.Glass.Search,
                 closeIcon = MiuixIcons.Glass.Close,
             ) { overlayQuery ->
@@ -443,7 +443,7 @@ fun MainScreen(
                         state = searchListState,
                         modifier = Modifier
                             .fillMaxSize()
-                            .miuixSidebarStartInset()
+                            .miuixPageHorizontalInsets()
                             .listScrollEndHaptic()
                             .pageOverscroll(),
                         overscrollEffect = rememberPageOverscrollEffect(),

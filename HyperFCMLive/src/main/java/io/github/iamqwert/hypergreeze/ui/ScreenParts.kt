@@ -1828,17 +1828,15 @@ fun PageScaffold(
             }
         ) { innerPadding ->
             val clearance = LocalFloatingBarClearance.current
-            val layoutDirection = LocalLayoutDirection.current
-            val bodyPadding = if (clearance == 0.dp) {
-                innerPadding
-            } else {
-                PaddingValues(
-                    start = innerPadding.calculateStartPadding(layoutDirection),
-                    top = innerPadding.calculateTopPadding(),
-                    end = innerPadding.calculateEndPadding(layoutDirection),
-                    bottom = innerPadding.calculateBottomPadding() + clearance
-                )
-            }
+            // Horizontal safe areas (systemBars ∪ captionBar ∪ displayCutout) and the dynamic
+            // GlassNavigationRail start inset are applied by [miuixPageHorizontalInsets] on the
+            // content host below, so horizontal padding is zeroed here to avoid double-insetting.
+            val bodyPadding = PaddingValues(
+                start = 0.dp,
+                top = innerPadding.calculateTopPadding(),
+                end = 0.dp,
+                bottom = innerPadding.calculateBottomPadding() + clearance
+            )
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1850,7 +1848,7 @@ fun PageScaffold(
                     LocalPageScrollBehavior provides scrollBehavior,
                 ) {
                     background?.invoke(this)
-                    Box(modifier = Modifier.fillMaxSize().miuixSidebarStartInset()) {
+                    Box(modifier = Modifier.fillMaxSize().miuixPageHorizontalInsets()) {
                         content(bodyPadding)
                     }
                 }
