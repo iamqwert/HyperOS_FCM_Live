@@ -83,7 +83,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.movableContentOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -97,6 +96,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Scaffold as MiuixScaffold
 import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.utils.MiuixPopupUtils.Companion.MiuixPopupHost
 import top.yukonga.miuix.kmp.glass.GlassNavigationItem
 import top.yukonga.miuix.kmp.glass.GlassNavigationRail
 import top.yukonga.miuix.kmp.glass.GlassNavigationRailDefaults
@@ -586,36 +586,6 @@ class MainActivity : AppCompatActivity() {
             Dp.Unspecified
         }
 
-        val navHost = remember {
-            movableContentOf<NavTransition, NavDisplayEffects, NavSwipeDirection, () -> Float> {
-                transition, effects, swipeDir, mainTitleAlpha ->
-                NavDisplay(
-                    backStack = backStack,
-                    onBack = { pages.pop() },
-                    transition = transition,
-                    effects = effects,
-                ) {
-                    entry<Route.Main> {
-                        CompositionLocalProvider(
-                            LocalTopAppBarTitleAlpha provides mainTitleAlpha,
-                            LocalTopAppBarCenterObstructionStart provides Dp.Unspecified,
-                        ) {
-                            HomeRoot(pages)
-                        }
-                    }
-                    entry<Route.About>(swipeDismiss = swipeDir) { AboutPage(pages) }
-                    entry<Route.Licenses>(swipeDismiss = swipeDir) { LicensesScreen(onBack = { pages.pop() }) }
-                    entry<Route.Experiment>(swipeDismiss = swipeDir) { ExperimentScreen(onBack = { pages.pop() }) }
-                    entry<Route.ThemeSettings>(swipeDismiss = swipeDir) {
-                        ThemeSettingsScreen(
-                            onBack = { pages.pop() },
-                            onAppearanceChange = aboutDelegate::applyAppearanceChange,
-                            onPredictiveBackChange = { enabled -> predictiveBack = enabled }
-                        )
-                    }
-                }
-            }
-        }
         val displayEffects = NavDisplayEffects(
             cornerClipRadius = systemCorner,
             blockInputDuringTransition = miuix,
@@ -623,69 +593,95 @@ class MainActivity : AppCompatActivity() {
             dimAmount = 0.32f,
         )
 
-        if (miuix) {
-            val topLayer = remember { TopLayerState() }
-            val blurActive = isMiuixBlurActive()
-            val sidebarBackdrop = if (useGlassRail) rememberMiuixSurfaceBackdrop(blurActive) else null
-            // Root MiuixScaffold hosts GlassDialog / GlassDropdownPreference overlays
-            // OUTSIDE PageBackdropBox so overlays sample the page + bars + rail without self-sampling.
-            MiuixScaffold(
-                modifier = Modifier.fillMaxSize(),
-                containerColor = Color.Transparent,
-                contentWindowInsets = WindowInsets(0.dp),
+        val topLayer = remember { TopLayerState() }
+        val blurActive = miuix && isMiuixBlurActive()
+        val sidebarBackdrop = if (useGlassRail) rememberMiuixSurfaceBackdrop(blurActive) else null
+        // Keep NavDisplay at a single unconditional slot inside the root MiuixScaffold
+        // (avoiding a nested movableContentOf across MiuixScaffold's SubcomposeLayout
+        // boundary, which crashes Compose Runtime when ComposeTheme moves AppPages across
+        // Miuix <-> Material in the same frame). Under Material, the scaffold is transparent
+        // with zero insets and empty popupHost/overlays, leaving M3E untouched.
+        MiuixScaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets(0.dp),
+            popupHost = { if (miuix) MiuixPopupHost() },
+        ) {
+            CompositionLocalProvider(
+                LocalTopLayer provides if (miuix) topLayer else null,
+                LocalUseGlassNavigationRail provides useGlassRail,
+                LocalTopBarStartInset provides topBarStartInset,
+                LocalTopAppBarTitleAlpha provides DefaultTopAppBarTitleAlpha,
+                LocalTopAppBarCenterObstructionStart provides centerObstructionStart,
             ) {
-                CompositionLocalProvider(
-                    LocalTopLayer provides topLayer,
-                    LocalUseGlassNavigationRail provides useGlassRail,
-                    LocalTopBarStartInset provides topBarStartInset,
-                    LocalTopAppBarTitleAlpha provides DefaultTopAppBarTitleAlpha,
-                    LocalTopAppBarCenterObstructionStart provides centerObstructionStart,
-                ) {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        PageBackdropBox {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .then(
-                                        if (sidebarBackdrop != null) {
-                                            Modifier.layerBackdrop(sidebarBackdrop)
-                                        } else {
-                                            Modifier
-                                        }
-                                    )
+                Box(modifier = Modifier.fillMaxSize()) {
+                    PageBackdropBox(enabled = miuix) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .then(
+                                    if (sidebarBackdrop != null) {
+                                        Modifier.layerBackdrop(sidebarBackdrop)
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                        ) {
+                            NavDisplay(
+                                backStack = backStack,
+                                onBack = { pages.pop() },
+                                transition = navTransition,
+                                effects = displayEffects,
                             ) {
-                                navHost(navTransition, displayEffects, swipeBackDirection, primaryTitleAlpha)
-                            }
-                            if (useGlassRail) {
-                                val railItems = HomeTab.entries.map { tab ->
-                                    GlassNavigationItem(
-                                        icon = tab.miuixGlassIcon,
-                                        label = stringResource(tab.titleRes),
+                                entry<Route.Main> {
+                                    CompositionLocalProvider(
+                                        LocalTopAppBarTitleAlpha provides primaryTitleAlpha,
+                                        LocalTopAppBarCenterObstructionStart provides Dp.Unspecified,
+                                    ) {
+                                        HomeRoot(pages)
+                                    }
+                                }
+                                entry<Route.About>(swipeDismiss = swipeBackDirection) { AboutPage(pages) }
+                                entry<Route.Licenses>(swipeDismiss = swipeBackDirection) { LicensesScreen(onBack = { pages.pop() }) }
+                                entry<Route.Experiment>(swipeDismiss = swipeBackDirection) { ExperimentScreen(onBack = { pages.pop() }) }
+                                entry<Route.ThemeSettings>(swipeDismiss = swipeBackDirection) {
+                                    ThemeSettingsScreen(
+                                        onBack = { pages.pop() },
+                                        onAppearanceChange = aboutDelegate::applyAppearanceChange,
+                                        onPredictiveBackChange = { enabled -> predictiveBack = enabled }
                                     )
                                 }
-                                val onMainRoute = backStack.lastOrNull() is Route.Main
-                                GlassNavigationRail(
-                                    items = railItems,
-                                    selectedIndex = if (onMainRoute) homeTab.ordinal else -1,
-                                    onSelect = { index ->
-                                        val target = HomeTab.entries[index]
-                                        if (!onMainRoute) {
-                                            suppressNavTransition = true
-                                            pages.popToMain()
-                                        }
-                                        selectTab(target)
-                                    },
-                                    backdrop = sidebarBackdrop,
-                                    state = sidebarState,
-                                )
                             }
                         }
+                        if (useGlassRail) {
+                            val railItems = HomeTab.entries.map { tab ->
+                                GlassNavigationItem(
+                                    icon = tab.miuixGlassIcon,
+                                    label = stringResource(tab.titleRes),
+                                )
+                            }
+                            val onMainRoute = backStack.lastOrNull() is Route.Main
+                            GlassNavigationRail(
+                                items = railItems,
+                                selectedIndex = if (onMainRoute) homeTab.ordinal else -1,
+                                onSelect = { index ->
+                                    val target = HomeTab.entries[index]
+                                    if (!onMainRoute) {
+                                        suppressNavTransition = true
+                                        pages.popToMain()
+                                    }
+                                    selectTab(target)
+                                },
+                                backdrop = sidebarBackdrop,
+                                state = sidebarState,
+                            )
+                        }
+                    }
+                    if (miuix) {
                         TopLayerHost(topLayer)
                     }
                 }
             }
-        } else {
-            navHost(navTransition, displayEffects, swipeBackDirection, DefaultTopAppBarTitleAlpha)
         }
         // 「预测性返回」开关只关这一件事：系统的返回手势还要不要**跟手预览**。
         // NavDisplay 内部的 `PredictiveBackHandlerWithSessions(enabled =

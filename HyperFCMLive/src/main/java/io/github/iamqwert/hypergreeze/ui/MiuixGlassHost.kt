@@ -157,9 +157,10 @@ val LocalPageBackdrop = compositionLocalOf<LayerBackdrop?> { null }
 @Composable
 fun PageBackdropBox(
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val blurActive = isMiuixBlurActive()
+    val blurActive = enabled && isMiuixBlurActive()
     val pageBackdrop = rememberMiuixSurfaceBackdrop(blurActive)
     Box(
         modifier = modifier
