@@ -91,13 +91,43 @@ internal class InstallBookkeeping(private val module: XposedModule) {
      */
     private val probeFindings = ArrayList<String>()
 
+    /**
+     * Hook IDs installed during the current pass (LSPosed API 102+). Used by
+     * hot reload to unhook only stale handles after the new pass replaces
+     * matching IDs in place, avoiding an unprotected gap between unhook and
+     * re-install.
+     */
+    private val hookedIds = HashSet<String>()
+
+    internal fun resetForHotReload() {
+        synchronized(lock) {
+            hooksInstalled = 0
+            hookTargetsAbsent = 0
+            hookTargetsAbsentOtherGeneration = 0
+            otherGenerationAbsent.clear()
+            probeFindings.clear()
+            hookedIds.clear()
+        }
+    }
+
+    internal fun isHookedId(id: String?): Boolean {
+        if (id == null) return false
+        synchronized(lock) {
+            return hookedIds.contains(id)
+        }
+    }
+
     internal fun hookE(executable: Executable): XposedInterface.HookBuilder {
         val builder = module.hook(executable)
+        val id = if (module.apiVersion >= 102) executable.toGenericString() else null
         synchronized(lock) {
             hooksInstalled++
+            if (id != null) {
+                hookedIds.add(id)
+            }
         }
-        if (module.apiVersion >= 102) {
-            builder.setId(executable.toGenericString())
+        if (id != null) {
+            builder.setId(id)
         }
         return builder
     }

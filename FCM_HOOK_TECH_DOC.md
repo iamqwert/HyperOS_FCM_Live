@@ -118,7 +118,7 @@ flowchart TD
 | **后台 Service / FGS** | `startServiceLocked` 与 `setFgsRestrictionLocked` 均无 MIUI 注入（走 AOSP + GMS `type0`）；`isAllowStartService` 实为 bind/Job/重启门 | S24（实验，默认关） | 无可恢复的 MIUI FGS 门 |
 | **Doze / 冻结网络** | temp allowlist + deviceidle 白名单 + `isRestrictNet` + `mNoNetworkBlackUids` | S7 / S15 + 实验 `greeze_net_release` | 恰当 |
 | **App Standby / 省电策略** | PowerKeeper `AppStandbyController#setUidState`、userTable `bgControl`、`MILLET_NO_RESTRICT_APP` | P12 / P14 / P16 / P17 | 恰当 |
-| **Partial WakeLock** | `GreezeManagerService#isAllowWakeUpList` → `AurogonImmobulusMode#isAllowWakeUpList(pkg)` | S30（仅 GMS） | 不扩至第三方 App（AOSP `no_cached_wake_locks` 原生禁缓存锁） |
+| **Partial WakeLock** | `GreezeManagerService#isAllowWakeUpList` + `PowerManagerServiceImpl#isWakelockDisabledByPolicy` / `setUidPartialWakeLockDisabledState` | S30 / S32（仅 GMS） | 仅放行全 owner 为 GMS 的 `PARTIAL_WAKE_LOCK`；不扩至第三方 App（AOSP `no_cached_wake_locks` 原生禁缓存锁） |
 | **JobScheduler / WorkManager** | `FreezeStatusRestriction#isJobRestricted` → `GreezeManagerService#isJobRestrict` | S10（仅 c2dm 后 10s 窗口） | 严格限窗，不放开常规后台 Job |
 | **AlarmManager** | `AlarmManagerServiceStubImpl`（国行 `ADJUST_WHITE_LIST` 不含 GMS） | S21（仅 GMS/GSF） | 恰当 |
 
@@ -148,12 +148,13 @@ flowchart TD
 | S17 | OS3/OS4 | `ActivityManagerService` | `broadcastIntentWithFeature`（多签名）/ `broadcastIntent` | 方法后置/字段修改 | GMS + c2dm + 目标允许：仅补 `FLAG_INCLUDE_STOPPED_PACKAGES` | 缺失 ERROR；不再覆盖写 2s temp allowlist（见 §3） |
 | S19 | OS3/OS4 | `GreezeManagerService` | `udpPackageRestrict(int, boolean)` | 替换返回值 | GMS uid 且 `allow=true` → 跳过（`null`），防止冻结路径挂载 UDP 过滤 | 缺失 INFO；仅跳过 `true` 避免卡死解除路径 |
 | S20 | OS3/OS4 | `ProcessManagerService` | `isForceStopEnable(ProcessRecord, int)` | 方法后置/替换 | ROM 判 `true` + 白名单 + FCM 客户端 + `policy ≠ 13` → `false`（降级为普通杀） | 异常 ERROR；下沉至 `ProcessManagerService` 同时覆盖常规清理与内存压力清理；已配 `deoptimize` |
-| S21 | OS3/OS4 | `AlarmManagerServiceStubImpl` / `AlarmManagerServiceStub` | `checkAlarmIsAllowedSend(Context, Alarm)`、`alignAlarmLocked(Alarm)`、`adjustAlarmLocked(Alarm)`、`isExemptFromSsru(Alarm)` | 方法前/后置替换 | GMS/GSF uid：投递与 SSRU 判 `false` 时改答 `true`；`align`/`adjust` 入口直接返 `false` | 缺失 INFO / 跨代 DEBUG；✅ OS3/OS4 签名一致，国行 `ADJUST_WHITE_LIST` 不含 GMS |
+| S21 | OS3/OS4 | `AlarmManagerServiceStubImpl` / `AlarmManagerServiceStub` | `checkAlarmIsAllowedSend(Context, Alarm)`、`alignAlarmLocked(Alarm)`、`adjustAlarmLocked(Alarm)`、`isExemptFromSsru(Alarm)` | 方法前/后置替换 | GMS/GSF uid：投递与 SSRU 判 `false` 时改答 `true`；`align` 入口返 `false`；`adjust` 清零 `POWER_PENDING_POLICY_INDEX`（`setPolicyElapsed`）并透传真实变更结果以触发重调度，同时 `deoptimize` 私有调用者 `proxyAlarm`/`-$$Nest$madjustAlarmLocked` | 缺失 INFO / 跨代 DEBUG；✅ OS3/OS4 签名一致，国行 `ADJUST_WHITE_LIST` 不含 GMS；`setPolicyElapsed` 不可用时安全回退返 `false` |
 | S22 | OS4（OS3 待验证） | `AmlMiuiThirdPartScorer` | `notifyScoreAndIsUsable()`；字段 `mLegacyIntScore` | 方法前后置/字段 | 弱 WiFi 开关开且 `50 > score ≥ floor`：临时置 `51`，调用后还原 | 解析失败跨代 DEBUG；位于 `miui-wifi-service.jar`，异步重试解析 |
 | S23 | OS3 | `SmartPowerService` / `SmartPowerPolicyManager` | `shouldInterceptBroadcast(ProcessRecord, BroadcastRecord)`、`shouldInterceptService(Intent, CallerInfo, ServiceInfo)` | 替换返回值 | 开关开 + GMS+c2dm/白名单 → `false` | OS4 跨代 DEBUG（OS4 无此拦截层） |
 | S24 | OS3/OS4 | `AutoStartManagerServiceStubImpl` | `isAllowStartService`（3 参 / 4 参重载） | 方法后置/替换 | 先 `proceed()`；仅 ROM 判 `false` 且 `autostart_service_release` 开 + 白名单包 → `true` | 缺失跨代 DEBUG；实为 bind/Job/重启门，先 `proceed()` 保留弹幕门与 `10008` 记账 |
 | S25 | OS3/OS4 | `ProcessManagerService` | `isAllowAutoStart(String, int)` | 方法后置/替换 | 先 `proceed()`；仅 ROM 判 `false` 且 `autostart_process_release` 开 + 白名单包 → `true` | 缺失 INFO；覆盖进程重启/预加载（非 c2dm 冷启动） |
 | S30 | OS3/OS4 | `GreezeManagerService` | `isAllowWakeUpList(int)` | 替换返回值 | GMS uid → `true`，防止缓存/冻结态 partial wakelock 被禁 | 缺失 INFO；每次 app partial wakelock 均会查询 |
+| S32 | OS3/OS4 | `com.android.server.power.PowerManagerServiceImpl` | `isWakelockDisabledByPolicy(WakeLock)`、`setUidPartialWakeLockDisabledState(int, String, boolean)`、`setUidPartialWakeLockDisabledState(int, String, boolean, String)` | 方法后置/前置替换 | `isWakelockDisabledByPolicy` 先 `proceed()`，仅 ROM 判 `true` 且 `PARTIAL_WAKE_LOCK` 全部 `getRealOwners` 均为 GMS 时改答 `false`；`setUidPartialWakeLockDisabledState` 仅忽略 GMS 的 `disabled=true` 请求（不翻转为 `false`） | 缺失 INFO；OS4 `PowerKeeperPolicy#isWakelockDisabledByPolicy` 仅由前者调用故不重复挂钩 |
 
 ### 4.2 PowerKeeper 现役修改点
 

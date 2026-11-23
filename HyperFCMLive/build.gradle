@@ -233,6 +233,7 @@ dependencies {
     // cases stopped running without anything failing. Test scope only — it is not
     // on releaseRuntimeClasspath and ships nothing.
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'io.github.libxposed:api:102.0.0'
 }
 
 // Refuse to produce a release artifact without a real keystore. The AOSP debug

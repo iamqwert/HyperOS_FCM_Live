@@ -24,6 +24,11 @@
     {
       "host": "system_server",
       "verb": "hook",
+      "name": "wakelock policy"
+    },
+    {
+      "host": "system_server",
+      "verb": "hook",
       "name": "DomesticPolicyManager"
     },
     {
@@ -317,6 +322,17 @@
       "os4": true,
       "methods": [
         "isAllowWakeUpList"
+      ]
+    },
+    {
+      "id": "S32",
+      "host": "system_server",
+      "generation": "OS3/OS4",
+      "os3": true,
+      "os4": true,
+      "methods": [
+        "isWakelockDisabledByPolicy",
+        "setUidPartialWakeLockDisabledState"
       ]
     },
     {

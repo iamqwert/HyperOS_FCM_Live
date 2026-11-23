@@ -140,6 +140,9 @@ class Hooker : XposedModule() {
             Group("hook", "greeze wake-up list") {
                 GreezeHooks.hookAllowWakeUpList(env)
             },
+            Group("hook", "wakelock policy") {
+                WakeLockGate.hookWakeLockPolicy(env)
+            },
             // S31 (`isNeedCachedAlarmForAurogon`) was removed on 2026-10-30: the ROM
             // answers false for any package whose name lacks "xiaomi", so the GMS
             // uid never reached the hook's override. See GreezeHooks.
@@ -280,12 +283,7 @@ class Hooker : XposedModule() {
     }
 
     override fun onHotReloaded(param: XposedModuleInterface.HotReloadedParam) {
-        param.oldHookHandles.forEach { h ->
-            try {
-                h.unhook()
-            } catch (ignored: Throwable) {
-            }
-        }
+        installBook.resetForHotReload()
         val saved = param.savedInstanceState
         if (saved is Pair<*, *>) {
             val packageName = saved.first as? String
@@ -301,6 +299,16 @@ class Hooker : XposedModule() {
                     }
                 } catch (tr: Throwable) {
                     logGated(Log.ERROR, HookerSupport.TAG, "Hot reload failed", tr)
+                }
+            }
+        }
+        // Unhook only handles not replaced in-place by the pass above, so live
+        // hooks experience no unprotected gap during hot reload.
+        param.oldHookHandles.forEach { h ->
+            if (!installBook.isHookedId(h.id)) {
+                try {
+                    h.unhook()
+                } catch (ignored: Throwable) {
                 }
             }
         }
@@ -344,19 +352,39 @@ class Hooker : XposedModule() {
 
     /**
      * True when [uid] belongs to GMS (any Android user). Resolves and caches
-     * GMS's appId once per process via [gmsUid].
+     * GMS's appId with a 60s TTL so a GMS reinstall / UID change is picked up
+     * without paying a PackageManager lookup on every hot-path call.
      */
     private fun isGmsUid(uid: Int): Boolean {
+        if (uid < 10000) return false
         val appId = uid % 100000
-        cachedGmsAppId?.let { return appId == it }
-        val gms = gmsUid() ?: return false
-        val resolved = gms % 100000
-        cachedGmsAppId = resolved
-        return appId == resolved
+        val now = android.os.SystemClock.elapsedRealtime()
+        val cached = cachedGmsAppId
+        if (cached != null && now - cachedGmsAppIdRefreshedMs < GMS_APP_ID_TTL_MS) {
+            return appId == cached
+        }
+        val gms = gmsUid()
+        if (gms != null) {
+            val resolved = gms % 100000
+            cachedGmsAppId = resolved
+            cachedGmsAppIdRefreshedMs = now
+            return appId == resolved
+        }
+        // Keep the last known appId if PackageManager is transiently unavailable,
+        // but still advance the stamp to avoid hammering PMS on every call.
+        cachedGmsAppIdRefreshedMs = now
+        return cached != null && appId == cached
     }
 
     @Volatile
     private var cachedGmsAppId: Int? = null
+
+    @Volatile
+    private var cachedGmsAppIdRefreshedMs: Long = Long.MIN_VALUE / 2
+
+    private companion object {
+        private const val GMS_APP_ID_TTL_MS = 60_000L
+    }
 
     /**
      * Experiment switch: release OS3 SmartPower intercepts for checked apps.

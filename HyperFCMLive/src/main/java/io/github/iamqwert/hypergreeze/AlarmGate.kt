@@ -38,6 +38,10 @@ internal object AlarmGate {
     @Volatile
     private var alarmAdjustBypassLogged = false
 
+    /** One-shot: confirms adjustAlarmLocked actively cleared a pre-existing vendor pending delay. */
+    @Volatile
+    private var alarmAdjustClearedLogged = false
+
     /** One-shot: confirms isExemptFromSsru exempted a GMS alarm the ROM would have gated. */
     @Volatile
     private var alarmSsruExemptLogged = false
@@ -192,17 +196,138 @@ internal object AlarmGate {
             alreadyLogged = { alarmAlignBypassLogged },
             markLogged = { alarmAlignBypassLogged = true }
         )
-        hookAlarmSkipForGms(
-            env = env,
-            stubClass = resolvedStub,
-            alarmClass = alarmClass,
-            creatorUidField = creatorUidField,
-            methodName = "adjustAlarmLocked",
-            logTag = "adjustAlarmLocked: skipped screen-off/offline deferral for GMS alarm",
-            alreadyLogged = { alarmAdjustBypassLogged },
-            markLogged = { alarmAdjustBypassLogged = true }
-        )
+        hookAdjustAlarmLocked(env, resolvedStub, alarmClass, creatorUidField)
         hookSsruExemption(env, resolvedStub, alarmClass, creatorUidField)
+    }
+
+    /**
+     * Entry-point bypass for `adjustAlarmLocked(Alarm)Z`.
+     *
+     * Unlike `alignAlarmLocked`, an alarm scheduled before hot reload or early-boot
+     * GMS UID resolution may already carry a vendor pending delay in
+     * `Alarm.policyElapsed[POWER_PENDING_POLICY_INDEX]`. When `setPolicyElapsed`
+     * and the policy index constants are present (verified on OS4 `services.jar`),
+     * clear that slot to `0L` and propagate the real boolean return value so
+     * `AlarmStore` reschedules delivery without disturbing requester/Doze policies.
+     * Falls back to returning `false` if the fields/method are unavailable.
+     *
+     * Also deoptimizes `proxyAlarm` and `-$$Nest$madjustAlarmLocked` on the stub
+     * class because `adjustAlarmLocked` is `private` and otherwise eligible for
+     * ART inlining into its same-class callers.
+     */
+    private fun hookAdjustAlarmLocked(
+        env: HookEnv,
+        stubClass: Class<*>,
+        alarmClass: Class<*>,
+        creatorUidField: Field
+    ) {
+        val module = env.module
+        val method = try {
+            stubClass.getDeclaredMethod("adjustAlarmLocked", alarmClass)
+        } catch (ignored: NoSuchMethodException) {
+            env.logSkip("${stubClass.simpleName}#adjustAlarmLocked absent, skip")
+            return
+        }
+        if (method.returnType != Boolean::class.javaPrimitiveType) {
+            env.logSkip(
+                "${stubClass.simpleName}#adjustAlarmLocked unexpected return type " +
+                    "${method.returnType.name}, skip"
+            )
+            return
+        }
+        val pendingClear = resolvePendingPolicyClear(alarmClass)
+        method.isAccessible = true
+        env.hookE(method).intercept { chain: XposedInterface.Chain ->
+            try {
+                val alarm = chain.getArg(0)
+                if (alarm != null) {
+                    val uid = creatorUidField.getInt(alarm)
+                    if (env.isGmsUid(uid)) {
+                        if (pendingClear != null) {
+                            try {
+                                val changed = module.getInvoker(pendingClear.setPolicyElapsed)
+                                    .invoke(alarm, pendingClear.pendingPolicyIndex, 0L) == true
+                                if (changed && !alarmAdjustClearedLogged) {
+                                    alarmAdjustClearedLogged = true
+                                    module.logGated(
+                                        Log.INFO, HookerSupport.TAG,
+                                        "adjustAlarmLocked: cleared pre-existing vendor pending delay " +
+                                            "for GMS alarm (creatorUid=$uid, policy=${pendingClear.pendingPolicyIndex})"
+                                    )
+                                } else if (!alarmAdjustBypassLogged) {
+                                    alarmAdjustBypassLogged = true
+                                    module.logGated(
+                                        Log.INFO, HookerSupport.TAG,
+                                        "adjustAlarmLocked: skipped screen-off/offline deferral for GMS alarm (creatorUid=$uid)"
+                                    )
+                                }
+                                return@intercept changed
+                            } catch (t: Throwable) {
+                                module.logGated(
+                                    Log.ERROR, HookerSupport.TAG,
+                                    "adjustAlarmLocked: setPolicyElapsed failed, falling back to false", t
+                                )
+                            }
+                        }
+                        if (!alarmAdjustBypassLogged) {
+                            alarmAdjustBypassLogged = true
+                            module.logGated(
+                                Log.INFO, HookerSupport.TAG,
+                                "adjustAlarmLocked: skipped screen-off/offline deferral for GMS alarm (creatorUid=$uid)"
+                            )
+                        }
+                        return@intercept false
+                    }
+                }
+            } catch (t: Throwable) {
+                module.logGated(Log.ERROR, HookerSupport.TAG, "Failed to evaluate adjustAlarmLocked", t)
+            }
+            chain.proceed()
+        }
+        module.deoptimize(method)
+        for (callerName in arrayOf("proxyAlarm", "-\$\$Nest\$madjustAlarmLocked")) {
+            for (caller in stubClass.declaredMethods) {
+                if (caller.name == callerName) {
+                    module.deoptimize(caller)
+                }
+            }
+        }
+        module.logGated(
+            Log.INFO, HookerSupport.TAG,
+            "adjustAlarmLocked hooked on ${method.declaringClass.simpleName}" +
+                " (clearPending=${pendingClear != null})"
+        )
+    }
+
+    private class PendingPolicyClear(
+        val pendingPolicyIndex: Int,
+        val setPolicyElapsed: Method
+    )
+
+    private fun resolvePendingPolicyClear(alarmClass: Class<*>): PendingPolicyClear? {
+        return try {
+            val pendingPolicy = alarmClass.getDeclaredField("POWER_PENDING_POLICY_INDEX")
+                .apply { isAccessible = true }
+                .getInt(null)
+            val policyCount = alarmClass.getDeclaredField("NUM_POLICIES")
+                .apply { isAccessible = true }
+                .getInt(null)
+            if (pendingPolicy <= 0 || pendingPolicy >= policyCount) {
+                return null
+            }
+            val setPolicy = alarmClass.getDeclaredMethod(
+                "setPolicyElapsed",
+                Int::class.javaPrimitiveType,
+                Long::class.javaPrimitiveType
+            )
+            if (setPolicy.returnType != Boolean::class.javaPrimitiveType) {
+                return null
+            }
+            setPolicy.isAccessible = true
+            PendingPolicyClear(pendingPolicy, setPolicy)
+        } catch (ignored: Throwable) {
+            null
+        }
     }
 
     /**
