@@ -47,6 +47,8 @@ class Hooker : XposedModule() {
      */
     private val installBook = InstallBookkeeping(this)
 
+    private val remotePrefsObserver = RemotePrefsObserver()
+
     private fun envFor(classLoader: ClassLoader): HookEnv = HookEnv(
         module = this,
         classLoader = classLoader,
@@ -66,13 +68,10 @@ class Hooker : XposedModule() {
     override fun onSystemServerStarting(param: XposedModuleInterface.SystemServerStartingParam) {
         val classLoader = param.classLoader
         this.param = Pair.create("system", classLoader)
-        // Load the debug-log snapshot before the install pass logs anything, so
-        // a troubleshooting session opened before this boot already sees the
-        // install lines; a failed read keeps the gate closed, which is the
-        // same value a fresh snapshot would carry.
-        try {
-            HookLog.refresh(getRemotePreferences(Prefs.GROUP_CONFIG))
-        } catch (ignored: Throwable) {
+        // Load the debug-log snapshot and attach the parallel RemotePreferences
+        // change observer before the install pass logs anything.
+        remotePrefsObserver.attach(this, "system_server") { _, _ ->
+            AllowlistGate.requestAllowlistReload(this)
         }
         try {
             hookSystemServer(classLoader)
@@ -211,13 +210,10 @@ class Hooker : XposedModule() {
         val packageName = param.packageName
         val classLoader = param.classLoader
         this.param = Pair.create(packageName, classLoader)
-        // Same pre-install snapshot as the system_server entry: the PowerKeeper
-        // process has no allowlist reload to ride, so the entry is where the
-        // debug-log gate gets its first — and otherwise only — config read.
-        try {
-            HookLog.refresh(getRemotePreferences(Prefs.GROUP_CONFIG))
-        } catch (ignored: Throwable) {
-        }
+        // Same pre-install snapshot + RemotePreferences change observer as
+        // system_server, so config flips in the module UI can be observed
+        // directly in PowerKeeper as well.
+        remotePrefsObserver.attach(this, packageName)
         try {
             hookPackage(packageName, classLoader)
         } catch (tr: Throwable) {
@@ -278,6 +274,7 @@ class Hooker : XposedModule() {
         // that would need a reboot. Do not reintroduce any "reboot required" wording —
         // HELP.md / README state no reboot is needed and this method proves it.
         logGated(Log.INFO, HookerSupport.TAG, "Hot reload requested — re-installing hooks without reboot")
+        remotePrefsObserver.detach()
         param.setSavedInstanceState(this.param)
         return true
     }
@@ -292,9 +289,13 @@ class Hooker : XposedModule() {
                 this.param = Pair.create(packageName, classLoader)
                 try {
                     if (param.isSystemServer) {
+                        remotePrefsObserver.attach(this, "system_server") { _, _ ->
+                            AllowlistGate.requestAllowlistReload(this)
+                        }
                         WifiWeakSignalSwitch.resetForHotReload()
                         hookSystemServer(classLoader)
                     } else {
+                        remotePrefsObserver.attach(this, packageName)
                         hookPackage(packageName, classLoader)
                     }
                 } catch (tr: Throwable) {

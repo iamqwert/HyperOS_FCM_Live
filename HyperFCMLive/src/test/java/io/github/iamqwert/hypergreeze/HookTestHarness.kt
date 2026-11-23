@@ -13,7 +13,10 @@ import java.lang.reflect.Proxy
  * approach so firmware differences (OS3 vs OS4), polarity, and hot-reload
  * bookkeeping can be verified directly in `:HyperFCMLive:testDebugUnitTest`.
  */
-internal class FakeXposedFramework(apiVersion: Int = 102) {
+internal class FakeXposedFramework(
+    apiVersion: Int = 102,
+    private val remotePrefsProvider: ((String) -> android.content.SharedPreferences?)? = null
+) {
 
     val hooks: MutableMap<Executable, XposedInterface.Hooker> = LinkedHashMap()
     val hookIds: MutableMap<Executable, String> = LinkedHashMap()
@@ -25,6 +28,7 @@ internal class FakeXposedFramework(apiVersion: Int = 102) {
     ) { _, method, args ->
         when (method.name) {
             "getApiVersion" -> apiVersion
+            "getRemotePreferences" -> remotePrefsProvider?.invoke(args[0] as String)
             "deoptimize" -> {
                 deoptimized.add(args[0] as Executable)
                 true

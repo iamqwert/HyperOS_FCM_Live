@@ -375,7 +375,7 @@ internal object AllowlistGate {
         }
     }
 
-    private fun requestAllowlistReload(module: XposedInterface) {
+    internal fun requestAllowlistReload(module: XposedInterface) {
         val sinceLastRead = SystemClock.uptimeMillis() - sAllowlistReadMs
         if (sinceLastRead >= HookerSupport.ALLOWLIST_RELOAD_MIN_MS) {
             allowlistBackgroundHandler().post { loadAllowlistFromRemotePrefs(module) }

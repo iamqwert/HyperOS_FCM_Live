@@ -256,4 +256,50 @@ class CoreHookBehaviorTest {
         assertFalse("Removed hook ID should be marked stale for unhook", fw.installBook.isHookedId(idB))
         assertFalse(fw.installBook.isHookedId(null))
     }
+
+    // ---------- RemotePrefsObserver: attach / reattach / detach ----------
+
+    @Test
+    fun remotePrefsObserverUnregistersPreviousListenerOnReattachAndDetach() {
+        val listeners = LinkedHashSet<android.content.SharedPreferences.OnSharedPreferenceChangeListener>()
+        val fakePrefs = java.lang.reflect.Proxy.newProxyInstance(
+            javaClass.classLoader,
+            arrayOf(android.content.SharedPreferences::class.java)
+        ) { _, method, args ->
+            when (method.name) {
+                "getBoolean" -> args[1] as Boolean
+                "registerOnSharedPreferenceChangeListener" -> {
+                    listeners.add(args[0] as android.content.SharedPreferences.OnSharedPreferenceChangeListener)
+                    null
+                }
+                "unregisterOnSharedPreferenceChangeListener" -> {
+                    listeners.remove(args[0] as android.content.SharedPreferences.OnSharedPreferenceChangeListener)
+                    null
+                }
+                else -> null
+            }
+        } as android.content.SharedPreferences
+
+        val fw = FakeXposedFramework(remotePrefsProvider = { fakePrefs })
+        val observer = RemotePrefsObserver()
+        val seenKeys = ArrayList<String?>()
+
+        observer.attach(fw.xposedInterface, "system_server") { _, key -> seenKeys.add(key) }
+        assertEquals(1, listeners.size)
+
+        // Fire once -> seen once.
+        listeners.toList().forEach { it.onSharedPreferenceChanged(fakePrefs, Prefs.KEY_ALLOWLIST) }
+        assertEquals(listOf(Prefs.KEY_ALLOWLIST), seenKeys)
+
+        // Re-attach (e.g. hot reload): old listener unregistered, still exactly 1 active.
+        observer.attach(fw.xposedInterface, "system_server") { _, key -> seenKeys.add(key) }
+        assertEquals(1, listeners.size)
+
+        listeners.toList().forEach { it.onSharedPreferenceChanged(fakePrefs, Prefs.KEY_DEBUG_LOG) }
+        assertEquals(listOf(Prefs.KEY_ALLOWLIST, Prefs.KEY_DEBUG_LOG), seenKeys)
+
+        // Detach removes listener cleanly.
+        observer.detach()
+        assertEquals(0, listeners.size)
+    }
 }
