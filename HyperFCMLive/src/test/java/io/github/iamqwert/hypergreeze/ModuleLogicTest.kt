@@ -1,6 +1,5 @@
 package io.github.iamqwert.hypergreeze
 
-import io.github.iamqwert.hypergreeze.AllowlistGate.allowlistSenderIsForeign
 import io.github.iamqwert.hypergreeze.ui.licenseRawFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -8,28 +7,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pure JVM tests for two decision matrices that live deep inside the module:
+ * Pure JVM tests for decision matrices that live deep inside the module:
  *
  * - [licenseRawFor] — which licence body a row shows. The branch order has
  *   bitten once (EPL showed the Apache fallback under a correct-looking label),
  *   so the Eclipse branch and the name-precedence rules are pinned here.
  *
- * - [allowlistSenderIsForeign] — who may drive the FCM allowlist over
- *   broadcast. A wrong "false" here lets a foreign package rewrite the
- *   allowlist; a wrong "true" breaks adb debugging. Both directions are
- *   pinned.
+ * - [FcmAppScan.isFcmClient] — FCM client detection rules.
  *
  * No Android runtime required.
  */
 class ModuleLogicTest {
-
-    // Mirrors of android.os.Process constants — the unit-test classpath's
-    // mockable android.jar does not resolve them, and these values are stable
-    // public API.
-    private val systemUid = 1000
-    private val rootUid = 0
-    private val shellUid = 2000
-    private val invalidUid = -1
 
     // ---------- licenseRawFor ----------
 
@@ -78,38 +66,6 @@ class ModuleLogicTest {
         // Non-empty repos without a LICENSE are filtered before this function,
         // so an unmatched label here means the fallback, not a regression.
         assertEquals(R.raw.license_apache2, licenseRawFor("x", "Unrecognised"))
-    }
-
-    // ---------- allowlistSenderIsForeign ----------
-
-    @Test
-    fun theModuleItselfIsAlwaysTrusted() {
-        assertFalse(allowlistSenderIsForeign(Prefs.MODULE_PKG, 10123))
-    }
-
-    @Test
-    fun anyOtherNamedPackageIsForeign() {
-        assertTrue(allowlistSenderIsForeign("com.evil.app", 10123))
-        assertTrue(allowlistSenderIsForeign("com.android.systemui", systemUid))
-        // Package identity beats uid: a package name that is not the module's
-        // is rejected even when the uid happens to be privileged.
-        assertTrue(allowlistSenderIsForeign("com.some.app", rootUid))
-    }
-
-    @Test
-    fun unstampedSendersAreNeverRejected() {
-        // Fail-open by construction: null package + INVALID_UID is processed
-        // exactly as before the check existed.
-        assertFalse(allowlistSenderIsForeign(null, invalidUid))
-    }
-
-    @Test
-    fun unnamedSendersPassOnlyForSystemRootShell() {
-        assertFalse(allowlistSenderIsForeign(null, systemUid))
-        assertFalse(allowlistSenderIsForeign(null, rootUid))
-        assertFalse(allowlistSenderIsForeign(null, shellUid))
-        // Any other unnamed uid is foreign.
-        assertTrue(allowlistSenderIsForeign(null, 10123))
     }
 
     // ---------- FcmAppScan.isFcmClient ----------

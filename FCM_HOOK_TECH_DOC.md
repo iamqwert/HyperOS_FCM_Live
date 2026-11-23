@@ -46,7 +46,7 @@ LSPosed (META-INF/xposed/module.prop: minApi=101, targetApi=102, staticScope=tru
   - `com.google.android.gms` / `com.google.android.gms.persistent` 无条件返回 `true`。
   - 空白名单对非 GMS 应用一律返回 `false`（维持系统原判）；读取远程配置失败时保留上次快照，绝不因读失败而全放行（fail-closed）。
   - 「自动勾选新装 FCM 应用」公式：`effective = allowlist ∪ (当前 FCM 扫描 − baseline)`；baseline 缺失时该扩宽自动关闭。
-  - `ACTION_ALLOWLIST_CHANGED` 为 `RECEIVER_EXPORTED`，回调校验 `getSentFromPackage()` / `getSentFromUid()`，仅接受模块自身、system、root、shell。
+  - 配置变更通过 libxposed API 102 原生 `RemotePreferences` `OnSharedPreferenceChangeListener`（`RemotePrefsObserver`）直接推送到 `system_server` 与 `com.miui.powerkeeper`，无需暴露导出配置广播；`AllowlistGate` 仅保留系统受保护广播 `ACTION_PACKAGE_ADDED / REPLACED` 用于自动勾选新装应用。
 - **多用户兼容**：`Hooker.isGmsUid(uid)` 使用 `uid % 100000` 兼容副用户与手机分身（`userId=999`）；GMS 后台控制回写与扫描支持多用户路径。
 - **FCM 客户端识别（`FcmAppScan` / `ProcessCleanerHooks`）**：用于列表可见性与防强停守门。检查五项信号：① `FirebaseMessagingService` 子类、② `FirebaseInstanceIdReceiver`、③ `MESSAGING_EVENT`、④ c2dm `RECEIVE`、⑤ Google 通知平台 `PushReceiver`；满足 **②③④ 任二，或 ② / ③ / ⑤ 任一单独命中** 即判定为 FCM 客户端（仅 ① 或仅 ④ 不算）。
 
@@ -132,7 +132,7 @@ flowchart TD
 
 | # | 目标版本 | 类 | 方法/字段签名 | Hook 类型 | 修改逻辑与目的 | 失败表现与兼容备注 |
 | --- | --- | --- | --- | --- | --- | --- |
-| S1 | OS3/OS4 | `AllowlistGate`（模块自身） | remote prefs `config` + `ACTION_ALLOWLIST_CHANGED` | 接收器/配置 | 启动读白名单，收到广播后后台重载；包安装/替换触发自动勾选扫描 | 注册失败 WARN；外部发送者 WARN；`RECEIVER_EXPORTED` + sender 校验 |
+| S1 | OS3/OS4 | `AllowlistGate` / `RemotePrefsObserver`（模块自身） | remote prefs `config`（`OnSharedPreferenceChangeListener`）+ `ACTION_PACKAGE_ADDED/REPLACED` | 监听器/配置 | 启动读白名单并挂原生监听器实时重载双进程快照；包安装/替换触发自动勾选扫描 | 监听器挂载失败 WARN 并自动退回过期轮询兜底；不再暴露导出配置广播 |
 | S2 | OS3/OS4 | `com.miui.server.greeze.GreezeManagerService` | `isAllowBroadcast(int, String, int, String, String)` | 替换返回值 | `callee` 为 GMS 且 `action ∈ CN_DEFER_BROADCAST` → `true`；其余 `proceed` | 缺失 ERROR；arg 序：`callerUid, callerPkg, calleeUid, calleePkg, action` |
 | S4 | OS3/OS4 | `GreezeManagerService` | `triggerGMSLimitAction()` | 跳过方法体 | 直接返回 `null`，阻断息屏延迟消息（`what=10`）将 GMS 移出 Aurogon 白名单并触发快冻 | 缺失 INFO；✅ OS3/OS4 签名一致，由 `GreezeManagerService$12$1#run()` 在息屏触发 |
 | S5 | OS4 | `GreezeManagerService` | `updateGmsNetStatus(boolean)` | 改写参数 | 参数强制 `false`，关闭框架侧 GMS 网络限额 | 缺失跨代 DEBUG（✅ OS3 dump 实证无此方法） |

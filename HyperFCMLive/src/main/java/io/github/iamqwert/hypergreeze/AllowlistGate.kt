@@ -173,8 +173,15 @@ internal object AllowlistGate {
         )
     }
 
+    @Volatile
+    private var remotePrefsObserverAttached = false
+
+    internal fun setRemotePrefsObserverAttached(attached: Boolean) {
+        remotePrefsObserverAttached = attached
+    }
+
     private fun maybeScheduleStaleConfigReload(module: XposedInterface) {
-        if (!allowlistReceiverRegistered &&
+        if (!remotePrefsObserverAttached &&
             SystemClock.uptimeMillis() - sAllowlistFreshMs >= HookerSupport.ALLOWLIST_STALE_MS
         ) {
             requestAllowlistReload(module)
@@ -444,7 +451,7 @@ internal object AllowlistGate {
         systemContext: () -> Context?
     ) {
         registerAllowlistReceiver(module, systemContext)
-        if (!allowlistReceiverRegistered &&
+        if (!remotePrefsObserverAttached &&
             SystemClock.uptimeMillis() - sAllowlistFreshMs >= HookerSupport.ALLOWLIST_STALE_MS
         ) {
             requestAllowlistReload(module)
@@ -543,44 +550,11 @@ internal object AllowlistGate {
         }
         try {
             val sys = systemContext() ?: return false
-            val receiver = object : BroadcastReceiver() {
-                override fun onReceive(context: Context, intent: Intent) {
-                    // This receiver *has* to be RECEIVER_EXPORTED: it lives on
-                    // the system_server context and the only legitimate sender —
-                    // the settings app — is a different uid, so a non-exported
-                    // registration would never receive anything. Being exported
-                    // with no broadcast permission also means any app on the
-                    // device can reach these two actions, so the sender is
-                    // checked in the callback instead of at registration time.
-                    val fromPackage = try {
-                        sentFromPackage
-                    } catch (t: Throwable) {
-                        null
-                    }
-                    val fromUid = try {
-                        sentFromUid
-                    } catch (t: Throwable) {
-                        Process.INVALID_UID
-                    }
-                    if (allowlistSenderIsForeign(fromPackage, fromUid)) {
-                        logForeignAllowlistSenderOnce(module, fromPackage, fromUid)
-                        return
-                    }
-                    when (intent.action) {
-                        Prefs.ACTION_ALLOWLIST_CHANGED -> requestAllowlistReload(module)
-                    }
-                }
-            }
-            val filter = IntentFilter(Prefs.ACTION_ALLOWLIST_CHANGED)
             val handler = allowlistBackgroundHandler()
-            sys.registerReceiver(receiver, filter, null, handler, Context.RECEIVER_EXPORTED)
-            // Package events feed the auto-check scan cache, on a receiver of
-            // their own — deliberately NOT an action on the receiver above.
-            // That one rejects every sender it cannot positively identify as
-            // this module, and a system broadcast's sender is the platform
-            // ("android"), which would be rejected as foreign. These two
-            // actions are protected broadcasts: only the system can send them,
-            // so there is nothing for a sender check to guard against.
+            // Config sync is driven directly by RemotePrefsObserver (libxposed
+            // OnSharedPreferenceChangeListener); only system-protected package
+            // broadcasts remain here to trigger the auto-check FCM scan on new
+            // installs / updates.
             val packageReceiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context, intent: Intent) {
                     when (intent.action) {
@@ -596,7 +570,7 @@ internal object AllowlistGate {
                 packageReceiver, packageFilter, null, handler, Context.RECEIVER_EXPORTED
             )
             allowlistReceiverRegistered = true
-            module.logGated(Log.INFO, HookerSupport.TAG, "Allowlist receiver installed")
+            module.logGated(Log.INFO, HookerSupport.TAG, "Package event receiver installed (auto-check scan)")
             return true
         } catch (e: Throwable) {
             // The boot retry loop reports only its final attempt, so it stays
@@ -611,57 +585,6 @@ internal object AllowlistGate {
         } finally {
             allowlistRegistering.set(false)
         }
-    }
-
-    /**
-     * Whether a delivery was positively sent by somebody other than this module's
-     * own app.
-     *
-     * Registration cannot express this: a required broadcast permission would have
-     * to be granted to the settings app, and a permission that is ever missing
-     * would take the whole allowlist path down silently — a worse failure than the
-     * one it guards against. So the identity the system already stamps on every
-     * delivery is read back instead ([BroadcastReceiver.getSentFromPackage] /
-     * [BroadcastReceiver.getSentFromUid], API 34+, and minSdk is 35).
-     *
-     * Fail-open by construction: only a sender that is *positively* identified as
-     * different is rejected. Anything unstamped (null package and INVALID_UID) is
-     * processed exactly as it was before this check existed, so it can never
-     * narrow the legitimate path — the worst case is that it filters nothing.
-     *
-     * `internal` so the unit tests can pin the sender matrix down; this is the
-     * gate that keeps foreign packages from rewriting the allowlist.
-     */
-    internal fun allowlistSenderIsForeign(fromPackage: String?, fromUid: Int): Boolean {
-        if (fromPackage != null) {
-            return fromPackage != Prefs.MODULE_PKG
-        }
-        if (fromUid == Process.INVALID_UID) {
-            return false
-        }
-        // Unknown package but a known uid: system / root / shell are the only
-        // uids besides the module's own that legitimately drive this (adb
-        // `am broadcast` debugging).
-        return fromUid != Process.SYSTEM_UID &&
-            fromUid != Process.ROOT_UID &&
-            fromUid != Process.SHELL_UID
-    }
-
-    @Volatile
-    private var foreignAllowlistSenderLogged = false
-
-    /** Once per boot: a rejected sender is worth seeing, a flood of them is not. */
-    private fun logForeignAllowlistSenderOnce(module: XposedInterface, fromPackage: String?, fromUid: Int) {
-        if (foreignAllowlistSenderLogged) {
-            return
-        }
-        foreignAllowlistSenderLogged = true
-        module.logGated(
-            Log.WARN, HookerSupport.TAG,
-            "Ignored allowlist broadcast from " +
-                (fromPackage ?: "uid $fromUid") +
-                "; only " + Prefs.MODULE_PKG + " may drive the allowlist"
-        )
     }
 
     @Volatile

@@ -68,11 +68,14 @@ class Hooker : XposedModule() {
     override fun onSystemServerStarting(param: XposedModuleInterface.SystemServerStartingParam) {
         val classLoader = param.classLoader
         this.param = Pair.create("system", classLoader)
-        // Load the debug-log snapshot and attach the parallel RemotePreferences
-        // change observer before the install pass logs anything.
-        remotePrefsObserver.attach(this, "system_server") { _, _ ->
-            AllowlistGate.requestAllowlistReload(this)
-        }
+        // Load the debug-log snapshot and attach the RemotePreferences change
+        // observer before the install pass logs anything.
+        val observerAttached = remotePrefsObserver.attach(
+            module = this,
+            processLabel = "system_server",
+            onChanged = { _, _ -> AllowlistGate.requestAllowlistReload(this) }
+        )
+        AllowlistGate.setRemotePrefsObserverAttached(observerAttached)
         try {
             hookSystemServer(classLoader)
         } catch (tr: Throwable) {
@@ -210,10 +213,16 @@ class Hooker : XposedModule() {
         val packageName = param.packageName
         val classLoader = param.classLoader
         this.param = Pair.create(packageName, classLoader)
-        // Same pre-install snapshot + RemotePreferences change observer as
-        // system_server, so config flips in the module UI can be observed
-        // directly in PowerKeeper as well.
-        remotePrefsObserver.attach(this, packageName)
+        // Load the debug-log + PowerKeeper switch snapshots and attach the
+        // RemotePreferences change observer so UI flips update in-memory state.
+        remotePrefsObserver.attach(
+            module = this,
+            processLabel = packageName,
+            onSnapshot = { prefs ->
+                PowerKeeperHooks.refreshSwitches(prefs)
+                SleepModeGate.refreshSwitches(prefs)
+            }
+        )
         try {
             hookPackage(packageName, classLoader)
         } catch (tr: Throwable) {
@@ -289,13 +298,23 @@ class Hooker : XposedModule() {
                 this.param = Pair.create(packageName, classLoader)
                 try {
                     if (param.isSystemServer) {
-                        remotePrefsObserver.attach(this, "system_server") { _, _ ->
-                            AllowlistGate.requestAllowlistReload(this)
-                        }
+                        val observerAttached = remotePrefsObserver.attach(
+                            module = this,
+                            processLabel = "system_server",
+                            onChanged = { _, _ -> AllowlistGate.requestAllowlistReload(this) }
+                        )
+                        AllowlistGate.setRemotePrefsObserverAttached(observerAttached)
                         WifiWeakSignalSwitch.resetForHotReload()
                         hookSystemServer(classLoader)
                     } else {
-                        remotePrefsObserver.attach(this, packageName)
+                        remotePrefsObserver.attach(
+                            module = this,
+                            processLabel = packageName,
+                            onSnapshot = { prefs ->
+                                PowerKeeperHooks.refreshSwitches(prefs)
+                                SleepModeGate.refreshSwitches(prefs)
+                            }
+                        )
                         hookPackage(packageName, classLoader)
                     }
                 } catch (tr: Throwable) {

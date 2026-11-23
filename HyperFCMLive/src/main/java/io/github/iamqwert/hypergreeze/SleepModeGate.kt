@@ -578,43 +578,53 @@ internal object SleepModeGate {
         return false
     }
 
+    @Volatile
+    private var sleepSwitchesLoaded = false
+
+    @Volatile
+    private var sleepKeepaliveEnabled = false
+
+    @Volatile
+    private var sleepKeepaliveDataEnabled = false
+
+    internal fun refreshSwitches(prefs: android.content.SharedPreferences) {
+        sleepKeepaliveEnabled = prefs.getBoolean(Prefs.KEY_SLEEP_KEEPALIVE, false)
+        sleepKeepaliveDataEnabled = prefs.getBoolean(Prefs.KEY_SLEEP_KEEPALIVE_DATA, false)
+        sleepSwitchesLoaded = true
+    }
+
     /**
-     * Keepalive switch, read lazily like the WeChat keepout's.
-     *
-     * Fails to *disabled*: this is an opt-in experiment
-     * that overrides a power-saving decision the user asked for, so an
-     * unreadable switch must leave sleep mode alone rather than quietly
-     * keeping both radios up all night.
+     * Keepalive switch, served from the in-memory snapshot maintained by
+     * [RemotePrefsObserver] (fail-closed default off), with a lazy fallback
+     * only if the observer has not attached yet.
      */
     private fun isSleepKeepaliveEnabled(module: XposedInterface): Boolean {
+        if (sleepSwitchesLoaded) {
+            return sleepKeepaliveEnabled
+        }
         return try {
-            module.getRemotePreferences(Prefs.GROUP_CONFIG)
-                .also { HookLog.refresh(it) }
-                .getBoolean(Prefs.KEY_SLEEP_KEEPALIVE, false)
+            val prefs = module.getRemotePreferences(Prefs.GROUP_CONFIG)
+            HookLog.refresh(prefs)
+            refreshSwitches(prefs)
+            sleepKeepaliveEnabled
         } catch (ignored: Throwable) {
             false
         }
     }
 
     /**
-     * Mobile-data switch, read lazily like its WiFi sibling.
-     *
-     * The two sleep switches are **peers, not a master and a sub**: each radio
-     * follows its own key, and a night that keeps exactly one of them up is a
-     * configuration the user can ask for. This one used to AND the WiFi key,
-     * back when "keep WiFi, let mobile data go" was the only shape the pair
-     * offered; hiding it on screen behind the other would now claim a hierarchy
-     * the hook does not have.
-     *
-     * Fails to *disabled* for the same reason as the WeChat pair: an
-     * unreadable switch must mean "leave the system's own data policy alone",
-     * never "hold cellular open all night".
+     * Mobile-data switch, peer of [isSleepKeepaliveEnabled], served from the
+     * same [RemotePrefsObserver]-maintained snapshot (fail-closed default off).
      */
     private fun isSleepKeepaliveDataEnabled(module: XposedInterface): Boolean {
+        if (sleepSwitchesLoaded) {
+            return sleepKeepaliveDataEnabled
+        }
         return try {
-            module.getRemotePreferences(Prefs.GROUP_CONFIG)
-                .also { HookLog.refresh(it) }
-                .getBoolean(Prefs.KEY_SLEEP_KEEPALIVE_DATA, false)
+            val prefs = module.getRemotePreferences(Prefs.GROUP_CONFIG)
+            HookLog.refresh(prefs)
+            refreshSwitches(prefs)
+            sleepKeepaliveDataEnabled
         } catch (ignored: Throwable) {
             false
         }

@@ -5,17 +5,12 @@ import android.util.Log
 import io.github.libxposed.api.XposedInterface
 
 /**
- * Parallel observer for libxposed `RemotePreferences` change callbacks
- * (Stage 1 verification).
+ * Observer for libxposed `RemotePreferences` change callbacks.
  *
  * Keeps a strong reference to the registered [SharedPreferences.OnSharedPreferenceChangeListener]
  * (since `SharedPreferences` implementations typically store listeners in a
  * `WeakHashMap`) and explicitly unregisters on [detach] during hot reload so a
  * replaced `Hooker` instance does not keep firing until GC.
- *
- * Existing broadcast-based sync in [AllowlistGate] and lazy reads in
- * PowerKeeper remain intact until dual-process callback reliability is
- * confirmed on device.
  */
 internal class RemotePrefsObserver {
 
@@ -26,18 +21,17 @@ internal class RemotePrefsObserver {
     internal fun attach(
         module: XposedInterface,
         processLabel: String,
+        onSnapshot: ((SharedPreferences) -> Unit)? = null,
         onChanged: ((SharedPreferences, String?) -> Unit)? = null
-    ) {
-        try {
+    ): Boolean {
+        return try {
             val prefs = module.getRemotePreferences(Prefs.GROUP_CONFIG)
             HookLog.refresh(prefs)
+            onSnapshot?.invoke(prefs)
             val listener = SharedPreferences.OnSharedPreferenceChangeListener { updated, key ->
                 try {
                     HookLog.refresh(updated)
-                    module.logGated(
-                        Log.INFO, HookerSupport.TAG,
-                        "remote-prefs changed in $processLabel: key=$key"
-                    )
+                    onSnapshot?.invoke(updated)
                     onChanged?.invoke(updated, key)
                 } catch (t: Throwable) {
                     module.logGated(
@@ -52,15 +46,13 @@ internal class RemotePrefsObserver {
                 registeredPrefs = prefs
                 activeListener = listener
             }
-            module.logGated(
-                Log.INFO, HookerSupport.TAG,
-                "remote-prefs listener attached in $processLabel"
-            )
+            true
         } catch (t: Throwable) {
             module.logGated(
                 Log.WARN, HookerSupport.TAG,
                 "Failed to attach remote-prefs listener in $processLabel", t
             )
+            false
         }
     }
 

@@ -1356,21 +1356,13 @@ object Prefs {
     }
 
     /**
-     * Ask system_server to re-read the shared config group. Sent three times
-     * over ~1.5s because the receiver there is installed by a retry loop shortly
-     * after boot (`AllowlistGate.installAllowlistReceiverAsync`): a change made
-     * in that window would otherwise be dropped and appear to need a refresh.
-     *
-     * Despite the name it is not allowlist-only: the receiver reloads
-     * [GROUP_CONFIG] wholesale, so any remote config change rides the same
-     * action — which is why the writers share it.
+     * Retained as a no-op hook point: libxposed API 102 pushes `RemotePreferences`
+     * changes directly to both `system_server` and `com.miui.powerkeeper` via
+     * `RemotePrefsObserver` (`OnSharedPreferenceChangeListener`), so the legacy
+     * 3x staggered `ACTION_ALLOWLIST_CHANGED` broadcast is no longer needed.
      */
     @JvmStatic
-    fun broadcastAllowlistChanged(context: Context) {
-        val app = appContext(context)
-        app.sendBroadcast(Intent(ACTION_ALLOWLIST_CHANGED))
-        val handler = Handler(Looper.getMainLooper())
-        handler.postDelayed({ app.sendBroadcast(Intent(ACTION_ALLOWLIST_CHANGED)) }, 400L)
-        handler.postDelayed({ app.sendBroadcast(Intent(ACTION_ALLOWLIST_CHANGED)) }, 1500L)
+    fun broadcastAllowlistChanged(@Suppress("UNUSED_PARAMETER") context: Context) {
+        // No-op: RemotePreferences listeners receive commit() notifications directly.
     }
 }

@@ -314,17 +314,31 @@ internal object PowerKeeperHooks {
         )
     }
 
+    @Volatile
+    private var wechatDozeKeepoutLoaded = false
+
+    @Volatile
+    private var wechatDozeKeepoutEnabled = false
+
+    internal fun refreshSwitches(prefs: android.content.SharedPreferences) {
+        wechatDozeKeepoutEnabled = prefs.getBoolean(Prefs.KEY_WECHAT_DOZE_KEEPOUT, false)
+        wechatDozeKeepoutLoaded = true
+    }
+
     /**
-     * The keepout flag lives in the shared config group and is read lazily at
-     * each qualifying call: the PowerKeeper process has no broadcast receiver,
-     * and the reads only happen after the package gate matches, so the
-     * frequency is that of whitelist writes, not of general battery traffic.
+     * Served from the in-memory snapshot maintained by [RemotePrefsObserver]
+     * (fail-closed default off). Falls back to a one-shot lazy read only if
+     * the observer has not attached yet.
      */
     private fun isWechatDozeKeepoutEnabled(module: XposedInterface): Boolean {
+        if (wechatDozeKeepoutLoaded) {
+            return wechatDozeKeepoutEnabled
+        }
         return try {
-            module.getRemotePreferences(Prefs.GROUP_CONFIG)
-                .also { HookLog.refresh(it) }
-                .getBoolean(Prefs.KEY_WECHAT_DOZE_KEEPOUT, false)
+            val prefs = module.getRemotePreferences(Prefs.GROUP_CONFIG)
+            HookLog.refresh(prefs)
+            refreshSwitches(prefs)
+            wechatDozeKeepoutEnabled
         } catch (ignored: Throwable) {
             // Fail closed: an unreadable switch must not start deciding
             // where the system puts an app.
