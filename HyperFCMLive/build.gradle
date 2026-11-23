@@ -196,11 +196,11 @@ dependencies {
     // Jetpack Compose (View-compatible). Theme bridge lives in theme/ComposeTheme.kt.
     // Aligned to 1.13.0-rc01 to match Miuix 0.9.5-beta03 (Compose Multiplatform 1.13.0-rc01)
     // and provide computedStateOf / CapturedAnimatedVisibility / TextFieldState APIs.
-    def composeVersion = '1.13.0-rc01'
+    def composeVersion = '1.14.0-alpha01'
     implementation "androidx.compose.ui:ui:$composeVersion"
     implementation "androidx.compose.foundation:foundation:$composeVersion"
     // Keep Material 3 Expressive on 1.5.0-rc01 untouched.
-    implementation 'androidx.compose.material3:material3:1.5.0-rc01'
+    implementation 'androidx.compose.material3:material3:1.6.0-alpha01'
     implementation "androidx.compose.ui:ui-tooling-preview:$composeVersion"
     debugImplementation "androidx.compose.ui:ui-tooling:$composeVersion"
     // Miuix (compose-miuix-ui) 0.9.5-beta03 — official miuix-glass / miuix-glass-icons stack.

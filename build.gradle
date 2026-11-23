@@ -18,7 +18,7 @@ buildscript {
 }
 
 plugins {
-    id 'com.android.application' version '9.5.1' apply false
+    id 'com.android.application' version '9.5.2' apply false
     // Route keys are `@Serializable` (the back stack is persisted by serializing
     // it). Published in lockstep with the compiler it plugs into, hence the same
     // version — the module applies it without a version, from here.
