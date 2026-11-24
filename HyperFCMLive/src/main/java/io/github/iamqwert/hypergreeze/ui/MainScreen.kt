@@ -90,7 +90,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -571,7 +579,7 @@ fun MainScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun MainTopBar(
     state: MainTopBarState,
@@ -655,74 +663,82 @@ fun MainTopBar(
         )
         return
     }
-    if (state.multiSelect) {
-        // Batch mode keeps the resting bar's own shape — the same collapsing
-        // large title. 「应用」 becomes 「已选择 N 项」 in the title slot, the
-        // leading ✕ leaves without saving, and the bar's right end carries the
-        // mode's controls where HyperOS's own batch pages keep them: the
-        // select-all flip, then 保存. Glyphs, not words — 全选 widening to
-        // 取消全选 would shove the count sideways on every flip. The
-        // select-all control is a single icon that states the action it
-        // offers: select_all at rest, select once everything is on.
-        //
-        // The search card lives in the list now, so it stays put across the
-        // mode's edges without a second copy here: batch is a tool over the
-        // list, not a different page.
-        Column(modifier = modifier.fillMaxWidth()) {
-            AppTopBar(
-                titleRes = R.string.settings_title,
-                title = state.title,
-                onBack = { actions.onExitMultiSelect() },
-                navIconRes = R.drawable.ic_close,
-                navDescRes = R.string.batch_exit,
-                actions = {
-                    TopBarIconButton(
-                        painter = painterResource(
-                            if (state.allVisibleSelected) {
-                                R.drawable.ic_select
-                            } else {
-                                R.drawable.ic_select_all
-                            }
-                        ),
-                        description = stringResource(
-                            if (state.allVisibleSelected) {
-                                R.string.deselect_all
-                            } else {
-                                R.string.select_all
-                            }
-                        ),
-                        onClick = { actions.onSelectAll() }
-                    )
-                    TopBarIconButton(
-                        painter = painterResource(R.drawable.ic_done_all),
-                        description = stringResource(R.string.batch_save),
-                        onClick = { actions.onBatchSave() }
-                    )
-                },
-                scrollBehavior = m3ScrollBehavior
-            )
-        }
-        return
-    }
-    // The resting M3 bar: the collapsing large title every secondary page
-    // wears, the batch entry one slot left of the overflow at its end — the
-    // same two-control bar the Miuix branch rests in. The search card is
-    // the list's first item (see MainScreen), not a bar slot.
-    Column(modifier = modifier.fillMaxWidth()) {
-        AppTopBar(
-            titleRes = R.string.settings_title,
-            onBack = {},
-            showBack = false,
-            actions = {
-                TopBarIconButton(
-                    painter = painterResource(R.drawable.ic_checklist),
-                    description = stringResource(R.string.batch_ops),
-                    onClick = { actions.onStartMultiSelect() }
+    val effectsSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    AnimatedContent(
+        targetState = state.multiSelect,
+        transitionSpec = { fadeIn(effectsSpec) togetherWith fadeOut(effectsSpec) },
+        modifier = modifier.fillMaxWidth(),
+        label = "MainTopBarMode",
+    ) { inMultiSelect ->
+        if (inMultiSelect) {
+            // Batch mode keeps the resting bar's own shape — the same collapsing
+            // large title. 「应用」 becomes 「已选择 N 项」 in the title slot, the
+            // leading ✕ leaves without saving, and the bar's right end carries the
+            // mode's controls where HyperOS's own batch pages keep them: the
+            // select-all flip, then 保存. Glyphs, not words — 全选 widening to
+            // 取消全选 would shove the count sideways on every flip. The
+            // select-all control is a single icon that states the action it
+            // offers: select_all at rest, select once everything is on.
+            //
+            // The search card lives in the list now, so it stays put across the
+            // mode's edges without a second copy here: batch is a tool over the
+            // list, not a different page.
+            Column(modifier = Modifier.fillMaxWidth()) {
+                AppTopBar(
+                    titleRes = R.string.settings_title,
+                    title = state.title,
+                    onBack = { actions.onExitMultiSelect() },
+                    navIconRes = R.drawable.ic_close,
+                    navDescRes = R.string.batch_exit,
+                    actions = {
+                        TopBarIconButton(
+                            painter = painterResource(
+                                if (state.allVisibleSelected) {
+                                    R.drawable.ic_select
+                                } else {
+                                    R.drawable.ic_select_all
+                                }
+                            ),
+                            description = stringResource(
+                                if (state.allVisibleSelected) {
+                                    R.string.deselect_all
+                                } else {
+                                    R.string.select_all
+                                }
+                            ),
+                            onClick = { actions.onSelectAll() }
+                        )
+                        TopBarIconButton(
+                            painter = painterResource(R.drawable.ic_done_all),
+                            description = stringResource(R.string.batch_save),
+                            onClick = { actions.onBatchSave() }
+                        )
+                    },
+                    scrollBehavior = m3ScrollBehavior
                 )
-                OverflowMenu(state.overflow, actions)
-            },
-            scrollBehavior = m3ScrollBehavior
-        )
+            }
+        } else {
+            // The resting M3 bar: the collapsing large title every secondary page
+            // wears, the batch entry one slot left of the overflow at its end — the
+            // same two-control bar the Miuix branch rests in. The search card is
+            // the list's first item (see MainScreen), not a bar slot.
+            Column(modifier = Modifier.fillMaxWidth()) {
+                AppTopBar(
+                    titleRes = R.string.settings_title,
+                    onBack = {},
+                    showBack = false,
+                    actions = {
+                        TopBarIconButton(
+                            painter = painterResource(R.drawable.ic_checklist),
+                            description = stringResource(R.string.batch_ops),
+                            onClick = { actions.onStartMultiSelect() }
+                        )
+                        OverflowMenu(state.overflow, actions)
+                    },
+                    scrollBehavior = m3ScrollBehavior
+                )
+            }
+        }
     }
 }
 
@@ -1207,6 +1223,7 @@ private fun appListOpeningAir(): Dp =
  * pinning chrome under the bar; the list's own content padding insets it, which
  * is why the field itself no longer carries a horizontal padding of its own.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AppListPane(
     apps: List<AppListStore.AppEntry>,
@@ -1223,6 +1240,9 @@ fun AppListPane(
     /** First list item — the page's search field, travelling with the rows. */
     header: (@Composable () -> Unit)? = null
 ) {
+    val isMiuix = LocalUiStyle.current.isMiuixBased
+    val m3ItemFadeSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    val m3ItemPlacementSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier
@@ -1242,7 +1262,7 @@ fun AppListPane(
             // 12dp between cards under Miuix, the spacing the reference apps leave
             // between their section cards; 8dp is the Material ramp's own choice.
             verticalArrangement = Arrangement.spacedBy(
-                if (LocalUiStyle.current.isMiuixBased) 12.dp else 8.dp
+                if (isMiuix) 12.dp else 8.dp
             )
         ) {
             if (header != null) {
@@ -1260,7 +1280,16 @@ fun AppListPane(
                     rowSelected = selected.contains(app.packageName),
                     onClick = { onRowClick(app) },
                     onLongClick = { onRowLongClick(app) },
-                    onIconMissing = { loadIcon(app) }
+                    onIconMissing = { loadIcon(app) },
+                    modifier = if (isMiuix) {
+                        Modifier
+                    } else {
+                        Modifier.animateItem(
+                            fadeInSpec = m3ItemFadeSpec,
+                            placementSpec = m3ItemPlacementSpec,
+                            fadeOutSpec = m3ItemFadeSpec,
+                        )
+                    }
                 )
             }
         }
@@ -1292,7 +1321,7 @@ fun AppListPane(
  * there would be a control that does nothing — and a control that does nothing
  * reads as a bug. The subtitle keeps the package name every row shows.
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun LazyItemScope.AppRow(
     label: String,
@@ -1380,12 +1409,27 @@ private fun LazyItemScope.AppRow(
         LaunchedEffect(packageName) { onIconMissing() }
     }
 
-    // Sizing wrapper around the card. It used to anchor the Miuix long-press
-    // popup; the popup is gone (long-press now starts a batch selection), and
-    // the wrapper stays as the row's fillMaxWidth host.
-    Box(modifier = Modifier.fillMaxWidth()) {
+    // Sizing wrapper around the card. `modifier` sits here (on the LazyItemScope's
+    // direct child) so Modifier.animateItem() animates placement and fade cleanly.
+    val isMiuix = LocalUiStyle.current.isMiuixBased
+    val m3ColorEffects = MaterialTheme.motionScheme.fastEffectsSpec<Color>()
+    val targetCardColor = if (selectedWash) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        LocalAppSurfaces.current.card
+    }
+    val cardColor = if (isMiuix) {
+        targetCardColor
+    } else {
+        animateColorAsState(
+            targetValue = targetCardColor,
+            animationSpec = m3ColorEffects,
+            label = "AppRowContainerColor"
+        ).value
+    }
+    Box(modifier = modifier.fillMaxWidth()) {
     Surface(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 72.dp)
             .semantics {
@@ -1435,11 +1479,7 @@ private fun LazyItemScope.AppRow(
                 }
             ),
         shape = shape,
-        color = if (selectedWash) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            LocalAppSurfaces.current.card
-        }
+        color = cardColor
     ) {
         Row(
             modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 12.dp),
@@ -1531,33 +1571,6 @@ private fun LazyItemScope.AppRow(
                         modifier = Modifier.clearAndSetSemantics {}
                     )
                 }
-            } else if (multiSelect && !exempt) {
-                // The Material look's batch rows answer with their own checkbox, the
-                // M3 multi-select language, mirroring the Miuix branch above: the
-                // staged state lives at the trailing edge instead of the saved
-                // allowlist glyph, which under batch semantics would be a readout
-                // that never moves while the tap rewrites something else. Silent in
-                // the a11y tree for the same reason — the row carries the state.
-                //
-                // When selectedWash is true the card wears primaryContainer, so the
-                // box pairs with onPrimaryContainer / primaryContainer (>=4.54:1
-                // across all 144 palette combos) instead of default primary (which
-                // drops below 2:1 on MONOCHROME light).
-                val scheme = MaterialTheme.colorScheme
-                Checkbox(
-                    checked = rowSelected,
-                    onCheckedChange = null,
-                    colors = if (selectedWash) {
-                        CheckboxDefaults.colors(
-                            checkedColor = scheme.onPrimaryContainer,
-                            checkmarkColor = scheme.primaryContainer,
-                            uncheckedColor = scheme.onPrimaryContainer
-                        )
-                    } else {
-                        CheckboxDefaults.colors()
-                    },
-                    modifier = Modifier.clearAndSetSemantics {}
-                )
             } else if (exempt) {
                 // A lock rather than the on/off glyph: the checkbox states do
                 // not apply, and drawing an "off" tick would suggest the user
@@ -1569,14 +1582,64 @@ private fun LazyItemScope.AppRow(
                     modifier = Modifier.size(28.dp)
                 )
             } else {
-                Icon(
-                    painter = painterResource(
-                        if (checked) R.drawable.ic_status_enabled else R.drawable.ic_status_disabled
-                    ),
-                    contentDescription = null,
-                    tint = statusTint,
-                    modifier = Modifier.size(28.dp)
+                val m3Effects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+                val animatedTint by animateColorAsState(
+                    targetValue = statusTint,
+                    animationSpec = m3ColorEffects,
+                    label = "AppRowStatusTint"
                 )
+                Box(
+                    modifier = Modifier.size(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AnimatedContent(
+                        targetState = multiSelect,
+                        transitionSpec = {
+                            (fadeIn(m3Effects) + scaleIn(initialScale = 0.82f, animationSpec = m3Effects)) togetherWith
+                                (fadeOut(m3Effects) + scaleOut(targetScale = 0.82f, animationSpec = m3Effects))
+                        },
+                        contentAlignment = Alignment.Center,
+                        label = "AppRowTrailingControl"
+                    ) { inMultiSelect ->
+                        if (inMultiSelect) {
+                            // The Material look's batch rows answer with their own checkbox, the
+                            // M3 multi-select language, mirroring the Miuix branch above: the
+                            // staged state lives at the trailing edge instead of the saved
+                            // allowlist glyph, which under batch semantics would be a readout
+                            // that never moves while the tap rewrites something else. Silent in
+                            // the a11y tree for the same reason — the row carries the state.
+                            //
+                            // When selectedWash is true the card wears primaryContainer, so the
+                            // box pairs with onPrimaryContainer / primaryContainer (>=4.54:1
+                            // across all 144 palette combos) instead of default primary (which
+                            // drops below 2:1 on MONOCHROME light).
+                            val scheme = MaterialTheme.colorScheme
+                            Checkbox(
+                                checked = rowSelected,
+                                onCheckedChange = null,
+                                colors = if (selectedWash) {
+                                    CheckboxDefaults.colors(
+                                        checkedColor = scheme.onPrimaryContainer,
+                                        checkmarkColor = scheme.primaryContainer,
+                                        uncheckedColor = scheme.onPrimaryContainer
+                                    )
+                                } else {
+                                    CheckboxDefaults.colors()
+                                },
+                                modifier = Modifier.clearAndSetSemantics {}
+                            )
+                        } else {
+                            Icon(
+                                painter = painterResource(
+                                    if (checked) R.drawable.ic_status_enabled else R.drawable.ic_status_disabled
+                                ),
+                                contentDescription = null,
+                                tint = animatedTint,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
     }

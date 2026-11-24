@@ -15,11 +15,16 @@ import android.util.Log
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.CapturedAnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.TargetedFlingBehavior
@@ -687,26 +692,38 @@ fun RecordsScreen(
                 // 上沿、中间没有呼吸位，内容一下移就在条脚下裂出一道缝，看着像
                 // 内容脱开了条，而不是像 indicator 把它顶开。指示器因此回到覆盖
                 // 式（和应用页同一套），滑出时压住第一行 48dp，收手即退。
-                when (pageTab) {
-                    PageTab.Status -> StatusTab(
-                        archive = archive,
-                        noSource = noSource,
-                        problem = problem,
-                        loading = loading,
-                        onOpenStatus = onOpenStatus,
-                        inset = inset,
-                        bottomPad = innerPadding.calculateBottomPadding(),
-                        scrollState = statusScroll,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    PageTab.Events -> EventsTab(
-                        archive = archive,
-                        selected = selectedEventTab,
-                        onSelect = { eventTabIndex = it.ordinal },
-                        inset = inset,
-                        bottomPad = innerPadding.calculateBottomPadding(),
-                        modifier = Modifier.fillMaxSize()
-                    )
+                val effectsSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+                val spatialSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
+                AnimatedContent(
+                    targetState = pageTab,
+                    transitionSpec = {
+                        val dir = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                        (fadeIn(effectsSpec) + slideInHorizontally(spatialSpec) { dir * (it / 12) }) togetherWith
+                            (fadeOut(effectsSpec) + slideOutHorizontally(spatialSpec) { -dir * (it / 12) })
+                    },
+                    label = "RecordsPageTab",
+                ) { activeTab ->
+                    when (activeTab) {
+                        PageTab.Status -> StatusTab(
+                            archive = archive,
+                            noSource = noSource,
+                            problem = problem,
+                            loading = loading,
+                            onOpenStatus = onOpenStatus,
+                            inset = inset,
+                            bottomPad = innerPadding.calculateBottomPadding(),
+                            scrollState = statusScroll,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        PageTab.Events -> EventsTab(
+                            archive = archive,
+                            selected = selectedEventTab,
+                            onSelect = { eventTabIndex = it.ordinal },
+                            inset = inset,
+                            bottomPad = innerPadding.calculateBottomPadding(),
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
         }
@@ -1596,18 +1613,30 @@ private fun EventsTab(
             onSelect = onSelect,
             modifier = Modifier.padding(start = inset, end = inset, bottom = 8.dp)
         )
-        // `key(selected)`: a new category starts at the top, the behaviour the
-        // single shared scroll state used to give — and a fresh scroll state.
-        key(selected) {
+        // AnimatedContent keys each category independently so a new category
+        // still starts at the top with a fresh scroll state, while gliding
+        // along the horizontal axis with M3 Expressive motion tokens.
+        val effectsSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+        val spatialSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
+        AnimatedContent(
+            targetState = selected,
+            transitionSpec = {
+                val dir = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                (fadeIn(effectsSpec) + slideInHorizontally(spatialSpec) { dir * (it / 14) }) togetherWith
+                    (fadeOut(effectsSpec) + slideOutHorizontally(spatialSpec) { -dir * (it / 14) })
+            },
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            label = "RecordsEventTab",
+        ) { activeEventTab ->
             EventsContent(
                 archive = archive,
-                selected = selected,
+                selected = activeEventTab,
                 classes = classes,
                 inset = inset,
                 bottomPad = bottomPad,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
+                modifier = Modifier.fillMaxSize()
             )
         }
     }

@@ -31,9 +31,9 @@ import android.view.View
 import android.view.WindowManager
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
-import io.github.iamqwert.hypergreeze.nav.CrossActivityTransition
 import io.github.iamqwert.hypergreeze.nav.Navigator
 import io.github.iamqwert.hypergreeze.nav.Route
+import io.github.iamqwert.hypergreeze.nav.rememberMaterialExpressiveNavTransition
 import io.github.iamqwert.hypergreeze.theme.AppPalette
 import io.github.iamqwert.hypergreeze.theme.HyperFCMLiveTheme
 import io.github.iamqwert.hypergreeze.theme.ThemeEngine
@@ -522,11 +522,12 @@ class MainActivity : AppCompatActivity() {
         // Wide-screen layouts keep 0dp corner clip radius.
         val systemCorner = if (useGlassRail) 0.dp else rememberNavSystemCornerRadius()
         // Miuix keeps its own default transition untouched (unless jumping via sidebar);
-        // Material uses Miuix's AOSP cross-activity transition style.
+        // Material uses Material 3 Expressive spring-driven Shared Axis + Predictive Back.
+        val m3Transition = rememberMaterialExpressiveNavTransition()
         val navTransition = when {
             miuix && suppressNavTransition -> InstantNavTransition
             miuix -> NavTransitions.MiuixDefault
-            else -> CrossActivityTransition
+            else -> m3Transition
         }
         val enableSwipeBack by AppearanceState.enableSwipeBack
         val swipeBackDirection = when {
@@ -558,13 +559,13 @@ class MainActivity : AppCompatActivity() {
 
         val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
         val displayEffects = NavDisplayEffects(
-            cornerClipRadius = if (!miuix && systemCorner <= 0.dp) 32.dp else systemCorner,
+            cornerClipRadius = if (!miuix && systemCorner <= 0.dp) 28.dp else systemCorner,
             cornerClipMode = if (miuix) NavCornerClipMode.Leading else NavCornerClipMode.All,
             blockInputDuringTransition = miuix,
             backdropColor = backdrop,
             dimAmount = when {
                 miuix -> 0.32f
-                isDarkTheme -> 0.8f
+                isDarkTheme -> 0.5f
                 else -> 0.2f
             },
         )

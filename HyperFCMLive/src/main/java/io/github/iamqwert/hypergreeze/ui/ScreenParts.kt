@@ -1,6 +1,9 @@
 package io.github.iamqwert.hypergreeze.ui
 
 import android.view.HapticFeedbackConstants
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.OverscrollEffect
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -677,6 +680,7 @@ fun pageHorizontalInset(): Dp {
  * The Material look's answer is unchanged: `LocalAppShapes`, which is the M3
  * generation's own corner set.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun connectedGroupShape(first: Boolean, last: Boolean): Shape {
     if (LocalUiStyle.current.isMiuixBased) {
@@ -698,22 +702,38 @@ fun connectedGroupShape(first: Boolean, last: Boolean): Shape {
         }
     }
     val shapes = LocalAppShapes.current
-    return when {
-        first && last -> shapes.menu
-        first -> RoundedCornerShape(
-            topStart = shapes.groupOuter.topStart,
-            topEnd = shapes.groupOuter.topEnd,
-            bottomStart = shapes.groupInner.bottomStart,
-            bottomEnd = shapes.groupInner.bottomEnd
-        )
-        last -> RoundedCornerShape(
-            topStart = shapes.groupInner.topStart,
-            topEnd = shapes.groupInner.topEnd,
-            bottomStart = shapes.groupOuter.bottomStart,
-            bottomEnd = shapes.groupOuter.bottomEnd
-        )
-        else -> shapes.groupInner
+    val density = LocalDensity.current
+    val topCornerSize = when {
+        first && last -> shapes.menu.topStart
+        first -> shapes.groupOuter.topStart
+        else -> shapes.groupInner.topStart
     }
+    val bottomCornerSize = when {
+        first && last -> shapes.menu.bottomStart
+        last -> shapes.groupOuter.bottomStart
+        else -> shapes.groupInner.bottomStart
+    }
+    val topTarget = with(density) { topCornerSize.toPx(Size.Unspecified, this).toDp() }
+    val bottomTarget = with(density) { bottomCornerSize.toPx(Size.Unspecified, this).toDp() }
+    val cornerSpec = MaterialTheme.motionScheme.fastSpatialSpec<Dp>()
+    val topRadius by animateDpAsState(
+        targetValue = topTarget,
+        animationSpec = cornerSpec,
+        label = "ConnectedGroupTopCorner"
+    )
+    val bottomRadius by animateDpAsState(
+        targetValue = bottomTarget,
+        animationSpec = cornerSpec,
+        label = "ConnectedGroupBottomCorner"
+    )
+    val safeTop = topRadius.coerceAtLeast(0.dp)
+    val safeBottom = bottomRadius.coerceAtLeast(0.dp)
+    return RoundedCornerShape(
+        topStart = safeTop,
+        topEnd = safeTop,
+        bottomStart = safeBottom,
+        bottomEnd = safeBottom
+    )
 }
 
 /**

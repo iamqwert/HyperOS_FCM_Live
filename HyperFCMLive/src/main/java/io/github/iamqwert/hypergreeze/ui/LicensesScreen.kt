@@ -16,12 +16,16 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialogDefaults
+import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
@@ -67,6 +71,7 @@ import io.github.iamqwert.hypergreeze.theme.UiStyle
 import io.github.iamqwert.hypergreeze.UiUtils
 import io.github.iamqwert.hypergreeze.theme.HyperFCMLiveTheme
 import io.github.iamqwert.hypergreeze.theme.LocalAppSurfaces
+import io.github.iamqwert.hypergreeze.theme.LocalIsExpressive
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.launch
 
@@ -337,7 +342,7 @@ private fun LicensesBody(
  * 「查看源代码」 left, filled 「关闭」 right — which on the View side needed
  * `layoutDialogButtons` to rebuild the framework's button bar.
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun LicenseDialog(
     sheet: LicenseSheet,
@@ -352,7 +357,8 @@ private fun LicenseDialog(
     // Under Miuix this is InstallerX's licence dialog, not the generic one: the
     // text rides in a card on the dialog's raised container, scrolls inside it
     // with Miuix's own overscroll, and the actions are two full-width Miuix
-    // buttons at the foot. Under Material it stays the M3 dialog it always was.
+    // buttons at the foot. Under Material it uses BasicAlertDialog so the
+    // title-to-body and body-to-actions spacing stay balanced.
     if (LocalUiStyle.current.isMiuixBased) {
         MiuixLicenseDialog(
             sheet = sheet,
@@ -364,55 +370,112 @@ private fun LicenseDialog(
         )
         return
     }
-    AppDialog(
-        onDismissRequest = onDismiss,
-        title = sheet.title,
-        confirmLabel = closeLabel,
-        onConfirm = onDismiss,
-        // 查看源代码 lives on the dialog's bottom action row, leading of
-        // 关闭 — it used to ride at the top of the body slot, which read as
-        // a stray button above the prose. null when there is no repository.
-        neutralButton = sheet.url?.let { url ->
-            {
-                TextButton(
-                    onClick = { onOpenSource(url) },
-                    shapes = ButtonDefaults.shapes(),
+    MaterialLicenseDialog(
+        sheet = sheet,
+        body = body,
+        sourceLabel = sourceLabel,
+        closeLabel = closeLabel,
+        onDismiss = onDismiss,
+        onOpenSource = onOpenSource
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun MaterialLicenseDialog(
+    sheet: LicenseSheet,
+    body: String,
+    sourceLabel: String,
+    closeLabel: String,
+    onDismiss: () -> Unit,
+    onOpenSource: (String) -> Unit
+) {
+    val expressive = LocalIsExpressive.current
+    // Without a ceiling the body grows to the dialog's full height and
+    // the dialog itself takes over the screen — these files run to
+    // hundreds of lines. Capping at part of the screen keeps the title
+    // and buttons reachable with the text scrolling inside.
+    //
+    // The cap is measured from the window the dialog is actually in,
+    // not from `Configuration.screenHeightDp`: the configuration value
+    // does not move when the window is resized, so in split screen the
+    // dialog would cap itself against the height of the full screen it
+    // is not occupying. Zero only means the host window has not been
+    // measured yet — the ceiling is left off for that one frame rather
+    // than clamping the text to nothing.
+    val density = LocalDensity.current
+    val bodyHeight = with(density) {
+        val px = LocalWindowInfo.current.containerSize.height
+        if (px <= 0) Dp.Infinity else (px * 0.55f).toDp()
+    }
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier.widthIn(min = 280.dp, max = 560.dp),
+            shape = AlertDialogDefaults.shape,
+            color = LocalAppSurfaces.current.popup,
+            tonalElevation = AlertDialogDefaults.TonalElevation,
+        ) {
+            Column(
+                modifier = Modifier.padding(
+                    start = 24.dp,
+                    top = 24.dp,
+                    end = 24.dp,
+                    bottom = 12.dp
+                )
+            ) {
+                Text(
+                    text = sheet.title,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = if (expressive) {
+                        MaterialTheme.typography.headlineSmallEmphasized
+                    } else {
+                        MaterialTheme.typography.headlineSmall
+                    }
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                SelectionContainer {
+                    AppText(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = bodyHeight)
+                            .verticalScroll(rememberScrollState()),
+                        // readLicenseText appends a trailing newline; trim it here
+                        // so short licences (e.g. MIT) do not add an extra blank
+                        // line below the body under Material.
+                        text = body.trimEnd(),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = pageProseStyle(),
+                        textAlign = TextAlign.Start
+                    )
+                }
+                // Keep the gap above the action row (body -> buttons) equal to
+                // the gap below it (buttons -> dialog bottom edge): both sides
+                // add 12dp outside the TextButton's symmetric 48dp touch box
+                // (16dp to the 40dp pill, 26dp to the label text).
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(sourceLabel)
+                    sheet.url?.let { url ->
+                        TextButton(
+                            onClick = { onOpenSource(url) },
+                            shapes = ButtonDefaults.shapes(),
+                        ) {
+                            Text(sourceLabel)
+                        }
+                    }
+                    TextButton(
+                        onClick = onDismiss,
+                        shapes = ButtonDefaults.shapes(),
+                    ) {
+                        Text(closeLabel)
+                    }
                 }
             }
-        },
-        content = {
-            // Without a ceiling the body grows to the dialog's full height and
-            // the dialog itself takes over the screen — these files run to
-            // hundreds of lines. Capping at part of the screen keeps the title
-            // and buttons reachable with the text scrolling inside.
-            //
-            // The cap is measured from the window the dialog is actually in,
-            // not from `Configuration.screenHeightDp`: the configuration value
-            // does not move when the window is resized, so in split screen the
-            // dialog would cap itself against the height of the full screen it
-            // is not occupying. Zero only means the host window has not been
-            // measured yet — the ceiling is left off for that one frame rather
-            // than clamping the text to nothing.
-            val density = LocalDensity.current
-            val bodyHeight = with(density) {
-                val px = LocalWindowInfo.current.containerSize.height
-                if (px <= 0) Dp.Infinity else (px * 0.55f).toDp()
-            }
-            SelectionContainer {
-                AppText(
-                    modifier = Modifier
-                        .heightIn(max = bodyHeight)
-                        .verticalScroll(rememberScrollState()),
-                    text = body,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = pageProseStyle(),
-                    textAlign = TextAlign.Start
-                )
-            }
         }
-    )
+    }
 }
 
 /**
@@ -610,16 +673,24 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  * - Miuix: 0.9.4 → **0.9.5-beta03**
  * `kotlinx-collections-immutable:0.5.2` and `dev.drewhamilton.poko:poko-annotations:0.23.2`
  * both have 0 surviving classes in `mapping.txt`, so they stay off the list.
+ *
+ * The 2026-11-24 pass (4.6.0, post-Compose 1.14.0-alpha01 / Material3 1.6.0-alpha01
+ * bump) re-audited `releaseRuntimeClasspath` and `mapping/release/mapping.txt`.
+ * Five versions drifted and were aligned:
+ * - AndroidX Collection: 1.6.0 → **1.7.0**
+ * - AndroidX Compose Foundation / UI: 1.13.0-rc01 → **1.14.0-alpha01**
+ * - AndroidX Compose Material3: 1.5.0-rc01 → **1.6.0-alpha01**
+ * - AndroidX Core: 1.19.0 → **1.20.0-alpha01**
  */
 private val DEPS = arrayOf(
     arrayOf("AndroidX Activity", "1.13.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Annotation", "1.10.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX AppCompat", "1.8.0", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Arch Core", "2.2.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Collection", "1.6.0", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose Foundation", "1.13.0-rc01", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose Material3", "1.5.0-rc01", "Apache License 2.0", ANDROIDX_URL),
-    arrayOf("AndroidX Compose UI", "1.13.0-rc01", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Collection", "1.7.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose Foundation", "1.14.0-alpha01", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose Material3", "1.6.0-alpha01", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Compose UI", "1.14.0-alpha01", "Apache License 2.0", ANDROIDX_URL),
     // Separate repository, so ANDROIDX_URL does not cover it. Only on the
     // classpath behind Material Components, but its code does survive R8.
     arrayOf(
@@ -628,7 +699,7 @@ private val DEPS = arrayOf(
         "Apache License 2.0",
         "https://github.com/androidx/constraintlayout"
     ),
-    arrayOf("AndroidX Core", "1.19.0", "Apache License 2.0", ANDROIDX_URL),
+    arrayOf("AndroidX Core", "1.20.0-alpha01", "Apache License 2.0", ANDROIDX_URL),
     arrayOf("AndroidX Interpolator", "1.0.0", "Apache License 2.0", ANDROIDX_URL),
     // Miuix's responsive-layout chain (material3-window-size-class): real code
     // in the APK, 11 classes of it (window + window-core), verified against the
@@ -744,6 +815,7 @@ private val REFERENCES = arrayOf(
     // URL directly and it still wears the right-side chevron.
     arrayOf("onijiang0/fcmfix", "—", "https://github.com/onijiang0/fcmfix"),
     arrayOf("ReedGAOOO/FCMGuard-HyperOS", "MIT License", "https://github.com/ReedGAOOO/FCMGuard-HyperOS"),
+    arrayOf("reF1nd/HyperOS_FCM_Live", "GPL-3.0", "https://github.com/reF1nd/HyperOS_FCM_Live"),
     // The idea to put the settings icon at the home bar's leading edge came
     // from this manager's own leading-edge placement.
     arrayOf("Replica0110/Lyrico", "Apache License 2.0", "https://github.com/Replica0110/Lyrico"),

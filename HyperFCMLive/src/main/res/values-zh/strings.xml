@@ -144,17 +144,17 @@
         <item>Material 3</item>
         <item>Miuix</item>
     </string-array>
-    <!-- 顺序与 Scheme.Variant 一致（Material 3 官方调色风格 + 末位 CMF），选项保留英文原文。 -->
+    <!-- 顺序与 Scheme.Variant 一致（Material 3 调色风格 + 末位 CMF）。 -->
     <string-array name="palette_style_entries">
-        <item>Monochrome</item>
-        <item>Neutral</item>
-        <item>Tonal spot</item>
-        <item>Vibrant</item>
-        <item>Expressive</item>
-        <item>Fidelity</item>
-        <item>Content</item>
-        <item>Rainbow</item>
-        <item>Fruit salad</item>
+        <item>单色</item>
+        <item>中性</item>
+        <item>柔和色调</item>
+        <item>鲜艳</item>
+        <item>表现力</item>
+        <item>高保真</item>
+        <item>内容</item>
+        <item>彩虹</item>
+        <item>水果沙拉</item>
         <item>CMF</item>
     </string-array>
     <string-array name="color_spec_entries">
