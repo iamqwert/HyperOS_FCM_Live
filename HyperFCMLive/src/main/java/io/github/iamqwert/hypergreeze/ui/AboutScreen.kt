@@ -1018,7 +1018,7 @@ private fun AboutBody(
         mutableStateOf(Prefs.readLocalDebugLog(context))
     }
     // 记录页归档的行数上限：纯本地值，钩子侧不读，所以没有 remote 镜像要同步。
-    var recordRows by remember { mutableStateOf(Prefs.readRecordRows(context)) }
+    var recordRows by remember { mutableIntStateOf(Prefs.readRecordRows(context)) }
     val themeMode by AppearanceState.themeMode
     val uiStyle by AppearanceState.uiStyle
     val miuixMonet by AppearanceState.miuixMonet

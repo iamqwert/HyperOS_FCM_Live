@@ -107,12 +107,10 @@
         <item>Default</item>
         <item>Cross-Axis</item>
     </string-array>
-    <string name="theme_mode">Theme</string>
     <string name="palette_style">Palette Style</string>
     <string name="ui_style">UI Style</string>
     <string name="miuix_accent">Key Color</string>
     <string name="color_spec">Color Spec</string>
-    <string name="about_sub_theme_mode">Choose the app\'s theme mode</string>
     <string name="about_sub_ui_style">Choose the app\'s UI style</string>
     <string name="about_sub_miuix_accent">Pick the key color for the Monet palette</string>
     <string name="about_sub_palette_style">Choose a dynamic color style</string>

@@ -126,7 +126,7 @@ internal class InstallBookkeeping(private val module: XposedModule) {
                 hookedIds.add(id)
             }
         }
-        if (id != null) {
+        if (module.apiVersion >= 102 && id != null) {
             builder.setId(id)
         }
         return builder

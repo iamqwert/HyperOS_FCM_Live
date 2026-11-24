@@ -27,7 +27,6 @@
     <string name="exit_search">退出搜索</string>
     <string name="batch_ops">批量操作</string>
     <plurals name="selected_count">
-        <item quantity="one">已选择 %1$d 项</item>
         <item quantity="other">已选择 %1$d 项</item>
     </plurals>
     <string name="batch_added">白名单已更新</string>
@@ -108,12 +107,10 @@
         <item>默认</item>
         <item>跨轴拦截</item>
     </string-array>
-    <string name="theme_mode">主题模式</string>
     <string name="palette_style">调色风格</string>
     <string name="ui_style">界面风格</string>
     <string name="miuix_accent">强调色</string>
     <string name="color_spec">颜色规格</string>
-    <string name="about_sub_theme_mode">调整应用的主题模式</string>
     <string name="about_sub_ui_style">选择应用的界面风格</string>
     <string name="about_sub_miuix_accent">挑选莫奈配色的主色调</string>
     <string name="about_sub_palette_style">选择动态取色风格</string>

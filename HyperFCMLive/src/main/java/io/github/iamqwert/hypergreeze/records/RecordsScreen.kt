@@ -105,6 +105,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -2790,11 +2791,10 @@ internal interface EventText {
  */
 @Composable
 private fun rememberEventText(): EventText {
-    val context = LocalContext.current
+    val resources = LocalResources.current
     val configuration = LocalConfiguration.current
-    return remember(context, configuration) {
+    return remember(resources, configuration) {
         object : EventText {
-            private val resources = context.resources
             override fun get(id: Int): String = resources.getString(id)
             override fun format(id: Int, vararg args: Any): String =
                 resources.getString(id, *args)
@@ -3307,10 +3307,11 @@ private fun durationText(raw: String): String {
     }
     val seconds = millis / 1000.0
     if (seconds >= 60) return secondsText((millis / 1000).toInt())
+    val locale = LocalConfiguration.current.locales[0] ?: Locale.ROOT
     val text = if (seconds % 1.0 == 0.0) {
         seconds.toInt().toString()
     } else {
-        String.format(Locale.getDefault(), "%.2f", seconds)
+        String.format(locale, "%.2f", seconds)
     }
     return stringResource(R.string.records_seconds, text)
 }

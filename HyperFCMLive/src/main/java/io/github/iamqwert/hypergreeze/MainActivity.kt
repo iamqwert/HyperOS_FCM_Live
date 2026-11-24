@@ -5,6 +5,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -254,7 +255,7 @@ class MainActivity : AppCompatActivity() {
      * tab wears it as a badge; zero keeps the badge off — a pill with nothing
      * behind it is decoration, not information.
      */
-    private var moduleApiVersion by mutableStateOf(boundService?.apiVersion ?: 0)
+    private var moduleApiVersion by mutableIntStateOf(boundService?.apiVersion ?: 0)
 
     /**
      * "x.y.z (build)" as the bound service reports its framework, or empty
