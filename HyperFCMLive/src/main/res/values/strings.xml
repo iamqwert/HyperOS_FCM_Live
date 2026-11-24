@@ -83,9 +83,7 @@
     <string name="licenses_section_refs">Reference Projects</string>
     <string name="licenses_section_licenses">Licenses</string>
     <string name="license_view_full_text">Tap to view the full text</string>
-    <string name="license_apache_2">Apache License 2.0</string>
     <string name="license_gpl_3">GPL-3.0</string>
-    <string name="license_mit">MIT License</string>
     <string name="hide_launcher_icon">Hide Launcher Icon</string>
     <string name="predictive_back">Predictive Back</string>
     <string name="about_sub_predictive_back">Preview the return while your finger drags; off goes back on release</string>

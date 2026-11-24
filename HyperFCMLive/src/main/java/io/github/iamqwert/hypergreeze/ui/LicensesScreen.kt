@@ -185,10 +185,11 @@ private fun LicensesBody(
     // padding — the line heights close it — and Miuix spaces its own lines. The
     // 4dp this page used to add was propping up a 12sp summary and now only
     // pushes the row 4dp past the token.
+    // Top section declares this project's own licence (GPL-3.0); every
+    // third-party licence text is reachable directly from its row in DEPS /
+    // REFERENCES below.
     val plainLicenses = listOf(
-        stringResource(R.string.license_apache_2) to R.raw.license_apache2,
         stringResource(R.string.license_gpl_3) to R.raw.license_gpl3,
-        stringResource(R.string.license_mit) to R.raw.license_mit,
     )
 
     val inset = pageHorizontalInset()
