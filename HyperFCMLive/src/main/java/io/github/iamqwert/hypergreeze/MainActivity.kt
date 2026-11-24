@@ -1,8 +1,5 @@
 package io.github.iamqwert.hypergreeze
 
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.SpringSpec
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
@@ -34,6 +31,7 @@ import android.view.View
 import android.view.WindowManager
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
+import io.github.iamqwert.hypergreeze.nav.CrossActivityTransition
 import io.github.iamqwert.hypergreeze.nav.Navigator
 import io.github.iamqwert.hypergreeze.nav.Route
 import io.github.iamqwert.hypergreeze.theme.AppPalette
@@ -85,6 +83,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -101,6 +100,7 @@ import top.yukonga.miuix.kmp.glass.GlassNavigationItem
 import top.yukonga.miuix.kmp.glass.GlassNavigationRail
 import top.yukonga.miuix.kmp.glass.GlassNavigationRailDefaults
 import top.yukonga.miuix.kmp.glass.rememberGlassNavigationRailState
+import top.yukonga.miuix.kmp.nav.core.NavCornerClipMode
 import top.yukonga.miuix.kmp.nav.core.NavDisplay
 import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
 import top.yukonga.miuix.kmp.nav.core.rememberNavBackStack
@@ -108,11 +108,7 @@ import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import io.github.iamqwert.hypergreeze.theme.AppearanceState
-import top.yukonga.miuix.kmp.nav.transition.NavMotion
-import top.yukonga.miuix.kmp.nav.transition.NavSettleSpec
 import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
-import top.yukonga.miuix.kmp.nav.transition.NavTransition
-import top.yukonga.miuix.kmp.nav.transition.NavTransitionScope
 import top.yukonga.miuix.kmp.nav.transition.NavTransitions
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -497,7 +493,6 @@ class MainActivity : AppCompatActivity() {
      * layers is the surface of whichever theme is in force, and input is closed for
      * the duration of a transition under Miuix only.
      */
-    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
     @Composable
     private fun AppPages() {
         val backStack = rememberNavBackStack<Route>(Route.Main)
@@ -527,36 +522,11 @@ class MainActivity : AppCompatActivity() {
         // Wide-screen layouts keep 0dp corner clip radius.
         val systemCorner = if (useGlassRail) 0.dp else rememberNavSystemCornerRadius()
         // Miuix keeps its own default transition untouched (unless jumping via sidebar);
-        // Material keeps the same 1:1 predictive-back slide geometry while driving settle
-        // stiffness from MaterialTheme.motionScheme (Expressive vs Standard 2021).
-        val m3Spatial = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
-        val navTransition = remember(miuix, m3Spatial, suppressNavTransition) {
-            when {
-                miuix && suppressNavTransition -> InstantNavTransition
-                miuix -> NavTransitions.MiuixDefault
-                else -> {
-                    val stiffness = (m3Spatial as? SpringSpec)?.stiffness ?: Spring.StiffnessMediumLow
-                    val settle = NavSettleSpec.Spring(
-                        dampingRatio = 1f,
-                        stiffness = stiffness,
-                        clampOvershoot = true,
-                    )
-                    val m3Motion = NavMotion(
-                        commit = settle,
-                        cancel = settle,
-                        programmatic = settle,
-                    )
-                    object : NavTransition {
-                        override val opaqueDepth: Float = NavTransitions.MiuixDefault.opaqueDepth
-                        override val motion: NavMotion = m3Motion
-                        override fun Modifier.transformEntry(
-                            scope: NavTransitionScope
-                        ): Modifier = with(NavTransitions.MiuixDefault) {
-                            transformEntry(scope)
-                        }
-                    }
-                }
-            }
+        // Material uses Miuix's AOSP cross-activity transition style.
+        val navTransition = when {
+            miuix && suppressNavTransition -> InstantNavTransition
+            miuix -> NavTransitions.MiuixDefault
+            else -> CrossActivityTransition
         }
         val enableSwipeBack by AppearanceState.enableSwipeBack
         val swipeBackDirection = when {
@@ -586,11 +556,17 @@ class MainActivity : AppCompatActivity() {
             Dp.Unspecified
         }
 
+        val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
         val displayEffects = NavDisplayEffects(
-            cornerClipRadius = systemCorner,
+            cornerClipRadius = if (!miuix && systemCorner <= 0.dp) 32.dp else systemCorner,
+            cornerClipMode = if (miuix) NavCornerClipMode.Leading else NavCornerClipMode.All,
             blockInputDuringTransition = miuix,
             backdropColor = backdrop,
-            dimAmount = 0.32f,
+            dimAmount = when {
+                miuix -> 0.32f
+                isDarkTheme -> 0.8f
+                else -> 0.2f
+            },
         )
 
         val topLayer = remember { TopLayerState() }
