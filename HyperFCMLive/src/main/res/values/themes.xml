@@ -66,4 +66,9 @@
         <item name="android:textColorPrimary">@color/md_on_surface</item>
         <item name="android:textColorSecondary">@color/md_on_surface_variant</item>
     </style>
+
+    <!-- Persisted via SplashScreen.setSplashScreenTheme when Dynamic Launcher Icon is enabled. -->
+    <style name="Theme.HyperFCMLive.DynamicSplash" parent="Theme.HyperFCMLive">
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_animated_dynamic</item>
+    </style>
 </resources>

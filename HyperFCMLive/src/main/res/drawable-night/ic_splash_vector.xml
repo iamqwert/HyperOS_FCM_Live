@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark-mode counterpart of ic_splash_vector.xml: #242424 HyperOS squircle
+     badge with warm coral-to-amber gradient cloud and #242424 ECG heartbeat
+     trace animated by ic_splash_animated.xml. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#242424"
+        android:pathData="M36.15,18 L71.85,18 C83.52,18 90,24.48 90,36.15 L90,71.85 C90,83.52 83.52,90 71.85,90 L36.15,90 C24.48,90 18,83.52 18,71.85 L18,36.15 C18,24.48 24.48,18 36.15,18 Z" />
+
+    <group
+        android:name="cloud_group"
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.90"
+        android:scaleY="0.90">
+
+        <path
+            android:name="cloud_body"
+            android:fillAlpha="0"
+            android:pathData="M36.50,72.00 A13.50,13.50 0 0,1 39.66,45.37 A14.50,14.50 0 0,1 68.34,45.37 A13.50,13.50 0 0,1 71.50,72.00 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="23"
+                    android:startY="33"
+                    android:endX="85"
+                    android:endY="72"
+                    android:type="linear">
+                    <item android:offset="0.0" android:color="#F2543B" />
+                    <item android:offset="0.5" android:color="#F98C2B" />
+                    <item android:offset="1.0" android:color="#FFBC42" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <path
+            android:name="ecg_pulse"
+            android:pathData="M34.50,57.50 L42.50,57.50 L46.00,51.00 L49.20,59.00 L54.00,42.50 L58.80,65.50 L62.20,57.50 L73.50,57.50"
+            android:strokeColor="#242424"
+            android:strokeWidth="3.8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:trimPathStart="0"
+            android:trimPathEnd="0" />
+    </group>
+</vector>

@@ -1043,8 +1043,6 @@ private fun AboutBody(
     val dynamicIconOnText = stringResource(R.string.dynamic_icon_on_toast)
     val dynamicIconOffText = stringResource(R.string.dynamic_icon_off_toast)
     val dynamicLauncherIcon by AppearanceState.dynamicLauncherIcon
-    val startTab by AppearanceState.startTab
-    val startTabEntries = HomeTab.entries.map { stringResource(it.titleRes) }
     // Read here, in composition, not inside show(): LocalUiStyle.current is a
     // @Composable read and show() is a plain function.
     val miuixNow = LocalUiStyle.current.isMiuixBased
@@ -1124,16 +1122,6 @@ private fun AboutBody(
                     first = false,
                     last = false
                 )
-                PopupCard(
-                    iconRes = R.drawable.ic_home_filled,
-                    title = stringResource(R.string.start_page),
-                    subtitle = stringResource(R.string.about_sub_start_page),
-                    entries = startTabEntries,
-                    currentIndex = startTab.coerceIn(0, startTabEntries.lastIndex),
-                    first = false,
-                    last = false,
-                    onPick = { index -> AppearanceState.setStartTab(context, index) }
-                )
                 // 语言选择交给平台的 LocaleManager：写下去系统自己持久化并重建
                 // 界面，本应用不落偏好。未选择时的默认（ currentIndex 的取值）
                 // 走资源回退——values/ 英文、values-zh/ 简体中文，任意中文变体
@@ -1154,26 +1142,26 @@ private fun AboutBody(
         item {
             SectionTitle(R.string.about_section_theme)
             SettingsGroup {
-                NavCard(
-                    iconRes = R.drawable.ic_theme_mode,
-                    title = stringResource(R.string.theme_settings),
-                    subtitle = themeSummary,
-                    first = true,
-                    last = false,
-                    onClick = actions.onThemeSettings
-                )
                 PopupCard(
                     iconRes = R.drawable.ic_ui_style,
                     title = stringResource(R.string.ui_style),
                     subtitle = stringResource(R.string.about_sub_ui_style),
                     entries = uiStyleEntries.toList(),
                     currentIndex = if (miuixStyle) 1 else 0,
-                    first = false,
-                    last = true,
+                    first = true,
+                    last = false,
                     onPick = { index ->
                         AppearanceState.setUiStyle(context, index)
                         actions.onAppearanceChange()
                     }
+                )
+                NavCard(
+                    iconRes = R.drawable.ic_theme_mode,
+                    title = stringResource(R.string.theme_settings),
+                    subtitle = themeSummary,
+                    first = false,
+                    last = true,
+                    onClick = actions.onThemeSettings
                 )
             }
         }

@@ -174,23 +174,7 @@ private fun LicensesBody(
     onOpenUrl: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val hint = stringResource(R.string.license_view_full_text)
-    // The Miuix look marks every row whose tap leads somewhere — a licence sheet
-    // or a repository — with the library's own chevron, the way its
-    // ArrowPreference does. The plain licence texts open a sheet like any dep
-    // row does, so they wear the mark too.
     val miuixRows = LocalUiStyle.current.isMiuixBased
-    // No gap between a row's title and its summary on either look. M3's 72dp
-    // two-line item is bodyLarge's 24dp over bodyMedium's 20dp against 28dp of
-    // padding — the line heights close it — and Miuix spaces its own lines. The
-    // 4dp this page used to add was propping up a 12sp summary and now only
-    // pushes the row 4dp past the token.
-    // Top section declares this project's own licence (GPL-3.0); every
-    // third-party licence text is reachable directly from its row in DEPS /
-    // REFERENCES below.
-    val plainLicenses = listOf(
-        stringResource(R.string.license_gpl_3) to R.raw.license_gpl3,
-    )
 
     val inset = pageHorizontalInset()
     LazyColumn(
@@ -205,38 +189,7 @@ private fun LicensesBody(
         contentPadding = PaddingValues(top = topPadding, bottom = bottomPadding)
     ) {
         item {
-            SectionTitle(R.string.licenses_section_licenses, first = true)
-            SettingsGroup {
-                plainLicenses.forEachIndexed { index, (name, rawRes) ->
-                    val first = index == 0
-                    val last = index == plainLicenses.lastIndex
-                    GroupRow(first = first, last = last, onClick = {
-                        onOpenSheet(LicenseSheet(name, rawRes, url = null))
-                    }) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                AppText(
-                                    text = name,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    style = pageBodyStyle()
-                                )
-                                AppText(
-                                    text = hint,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    style = pageSecondaryStyle()
-                                )
-                            }
-                            if (miuixRows) {
-                                MiuixChevron()
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        item {
-            SectionTitle(R.string.licenses_section_deps)
+            SectionTitle(R.string.licenses_section_deps, first = true)
             SettingsGroup {
                 DEPS.forEachIndexed { index, dep ->
                     val name = dep[0]

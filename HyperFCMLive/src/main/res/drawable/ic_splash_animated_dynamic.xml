@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_splash_vector_dynamic">
+    <target
+        android:name="cloud_group"
+        android:animation="@animator/splash_cloud_scale" />
+    <target
+        android:name="cloud_body"
+        android:animation="@animator/splash_cloud_alpha" />
+    <target
+        android:name="ecg_pulse"
+        android:animation="@animator/splash_ecg_draw" />
+</animated-vector>

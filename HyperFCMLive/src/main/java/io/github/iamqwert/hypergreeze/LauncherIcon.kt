@@ -1,9 +1,12 @@
 package io.github.iamqwert.hypergreeze
 
+import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Resources
 import android.net.Uri
 import android.util.Log
 import io.github.iamqwert.hypergreeze.theme.AppearanceState
@@ -64,8 +67,37 @@ object LauncherIcon {
     @JvmStatic
     fun setDynamicIcon(context: Context, dynamic: Boolean): Boolean {
         AppearanceState.setDynamicLauncherIcon(context, dynamic)
+        syncSplashScreenTheme(context, dynamic)
         if (isHidden(context)) return true
         return applyState(context, hidden = false, dynamic = dynamic)
+    }
+
+    /**
+     * Persist the matching Android 13+ SplashScreen theme (`Theme.HyperFCMLive.DynamicSplash`
+     * when dynamic launcher icon is enabled, `Resources.ID_NULL` to reset to the default
+     * warm-gradient splash). Safe no-op when called without an Activity context.
+     */
+    @JvmStatic
+    fun syncSplashScreenTheme(
+        context: Context,
+        dynamic: Boolean = isDynamicEnabled(context),
+    ) {
+        val activity = findActivity(context) ?: return
+        val themeRes = if (dynamic) R.style.Theme_HyperFCMLive_DynamicSplash else Resources.ID_NULL
+        try {
+            activity.splashScreen.setSplashScreenTheme(themeRes)
+        } catch (t: Throwable) {
+            Log.w(TAG, "setSplashScreenTheme failed", t)
+        }
+    }
+
+    private fun findActivity(context: Context): Activity? {
+        var cur: Context? = context
+        while (cur is ContextWrapper) {
+            if (cur is Activity) return cur
+            cur = cur.baseContext
+        }
+        return cur as? Activity
     }
 
     private fun applyState(context: Context, hidden: Boolean, dynamic: Boolean): Boolean {

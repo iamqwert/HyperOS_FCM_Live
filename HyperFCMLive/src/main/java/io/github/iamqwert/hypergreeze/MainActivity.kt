@@ -362,6 +362,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        LauncherIcon.syncSplashScreenTheme(this)
         splashScreen.setOnExitAnimationListener { splashView ->
             val interpolator = AccelerateDecelerateInterpolator()
             splashView.iconView?.animate()

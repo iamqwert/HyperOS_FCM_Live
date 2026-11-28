@@ -157,6 +157,8 @@ private fun ThemeSettingsBody(
     val pagerGestureMode by AppearanceState.pagerGestureMode
     val densityScale by AppearanceState.densityScale
     val enableSwipeBack by AppearanceState.enableSwipeBack
+    val startTab by AppearanceState.startTab
+    val startTabEntries = HomeTab.entries.map { stringResource(it.titleRes) }
     var predictiveBack by remember { mutableStateOf(Prefs.readPredictiveBack(context)) }
 
     val miuixStyle = uiStyle != ThemePrefs.UI_STYLE_MATERIAL
@@ -411,7 +413,7 @@ private fun ThemeSettingsBody(
             }
         }
 
-        // 5. Navigation section (Enable Swipe Back + Predictive Back)
+        // 5. Navigation section (Enable Swipe Back + Predictive Back + Startup Page)
         item(key = "navigationSection") {
             SectionTitle(R.string.theme_section_navigation)
             SettingsGroup {
@@ -437,7 +439,17 @@ private fun ThemeSettingsBody(
                         onPredictiveBackChange(checked)
                     },
                     first = false,
+                    last = false,
+                )
+                PopupCard(
+                    iconRes = R.drawable.ic_home_filled,
+                    title = stringResource(R.string.start_page),
+                    subtitle = stringResource(R.string.about_sub_start_page),
+                    entries = startTabEntries,
+                    currentIndex = startTab.coerceIn(0, startTabEntries.lastIndex),
+                    first = false,
                     last = true,
+                    onPick = { index -> AppearanceState.setStartTab(context, index) },
                 )
             }
             Spacer(Modifier.height(16.dp))
