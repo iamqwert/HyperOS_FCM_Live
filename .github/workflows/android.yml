@@ -123,7 +123,7 @@ jobs:
           python3 scripts/check_hook_targets.py
 
       - name: Run unit tests
-        run: ./gradlew --no-daemon :HyperFCMLive:testDebugUnitTest
+        run: ./gradlew --no-daemon :HyperGreeze:testDebugUnitTest
 
       - name: Build with Gradle
         # 没有配签名 secret 时显式声明「允许 debug 签名」，否则发布构建会直接失败
@@ -137,10 +137,10 @@ jobs:
           # secret，PR 构建会走正式签名分支却在无 keystore 的 runner 上被
           # 签名守卫拒绝。按文件存在性分流对一切事件类型都成立。
           if [ -f key.jks ] && grep -q "^storeFile=" local.properties; then
-            ./gradlew --no-daemon :HyperFCMLive:assembleRelease
+            ./gradlew --no-daemon :HyperGreeze:assembleRelease
           else
             echo "::warning::未配置 SIGNING_KEY，本次产物使用 debug 签名，仅适合内部测试"
-            ./gradlew --no-daemon -PallowDebugSignedRelease :HyperFCMLive:assembleRelease
+            ./gradlew --no-daemon -PallowDebugSignedRelease :HyperGreeze:assembleRelease
           fi
 
       - name: Stage release artifacts
@@ -161,19 +161,19 @@ jobs:
         # so the two cannot drift apart.
         run: |
           mkdir -p dist
-          cp HyperFCMLive/build/outputs/apk/release/*.apk dist/
-          cp HyperFCMLive/build/outputs/mapping/release/mapping.txt dist/
+          cp HyperGreeze/build/outputs/apk/release/*.apk dist/
+          cp HyperGreeze/build/outputs/mapping/release/mapping.txt dist/
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v7
         with:
-          name: hyperos-fcm-live-release
+          name: hypergreeze-release
           path: dist/
           if-no-files-found: error
           retention-days: 30
 
   # Formal versioned release (not nightly). Tag/name come from the APK
-  # filename built from HyperFCMLive/build.gradle (versionName.versionCode).
+  # filename built from HyperGreeze/build.gradle (versionName.versionCode).
   release:
     # 日常 push 只做 CI 构建。发版改为手动触发：Actions → Android CI →
     # Run workflow → 勾选 publish_release。这样误推 main 不会自动发 Release。
@@ -192,7 +192,7 @@ jobs:
       - name: Download release APK
         uses: actions/download-artifact@v8
         with:
-          name: hyperos-fcm-live-release
+          name: hypergreeze-release
           path: release
 
       - name: Resolve version from APK name
@@ -200,8 +200,8 @@ jobs:
         run: |
           apk=$(ls release/*.apk | head -1)
           base=$(basename "$apk")
-          # e.g. HyperFCMLive-1.5.0-beta2.13-release.apk -> 1.5.0-beta2.13
-          ver=${base#HyperFCMLive-}
+          # e.g. HyperGreeze-4.6.0.60-release.apk -> 4.6.0.60
+          ver=${base#HyperGreeze-}
           ver=${ver%-release.apk}
           echo "version=$ver" >> "$GITHUB_OUTPUT"
           echo "tag=v${ver}" >> "$GITHUB_OUTPUT"
@@ -226,7 +226,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
-          name: HyperOS FCM Live ${{ steps.ver.outputs.version }}
+          name: HyperGreeze ${{ steps.ver.outputs.version }}
           prerelease: false
           make_latest: true
           target_commitish: ${{ github.sha }}
@@ -267,7 +267,7 @@ jobs:
         if: steps.token.outputs.available == 'true'
         uses: actions/download-artifact@v8
         with:
-          name: hyperos-fcm-live-release
+          name: hypergreeze-release
           path: release
 
       - name: Publish to LSPosed Module Repository
@@ -278,8 +278,8 @@ jobs:
         run: |
           apk=$(ls release/*.apk | head -1)
           base=$(basename "$apk")
-          # e.g. HyperFCMLive-4.6.0.60-release.apk -> versionName=4.6.0, versionCode=60
-          ver=${base#HyperFCMLive-}
+          # e.g. HyperGreeze-4.6.0.60-release.apk -> versionName=4.6.0, versionCode=60
+          ver=${base#HyperGreeze-}
           ver=${ver%-release.apk}
           version_name="${ver%.*}"
           version_code="${ver##*.}"

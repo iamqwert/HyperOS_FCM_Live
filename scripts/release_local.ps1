@@ -1,7 +1,7 @@
-# 本机发版（GitHub Actions 被限制/排队不出 runner 时的兜底）
+﻿# 本机发版（GitHub Actions 被限制/排队不出 runner 时的兜底）
 #
 # 复刻 .github/workflows/android.yml 的 build + release 两步，只少了 CI 的
-# artifact 中转：APK 直接留在 HyperFCMLive/build/outputs/apk/release/。
+# artifact 中转：APK 直接留在 HyperGreeze/build/outputs/apk/release/。
 #
 #   只出包：            pwsh scripts/release_local.ps1
 #   出包并装到设备：    pwsh scripts/release_local.ps1 -Install
@@ -36,7 +36,7 @@ function Fail($msg) {
 }
 
 # ── 版本号（单一来源：build.gradle；发版前记得手动 bump）──────────────────
-$gradleFile = Join-Path $root 'HyperFCMLive/build.gradle'
+$gradleFile = Join-Path $root 'HyperGreeze/build.gradle'
 $gradleText = Get-Content $gradleFile -Raw
 if ($gradleText -notmatch '(?m)^\s*versionCode\s+(\d+)') { Fail "读不到 versionCode：$gradleFile" }
 $versionCode = $Matches[1]
@@ -79,7 +79,7 @@ if ($LASTEXITCODE -ne 0) { Fail "check_hook_targets.py 失败" }
 
 if (-not $SkipTests) {
     Write-Host "`n== 单元测试 ==" -ForegroundColor Cyan
-    ./gradlew.bat --no-daemon :HyperFCMLive:testDebugUnitTest
+    ./gradlew.bat --no-daemon :HyperGreeze:testDebugUnitTest
     if ($LASTEXITCODE -ne 0) { Fail "单元测试失败" }
 }
 
@@ -87,14 +87,14 @@ if (-not $SkipTests) {
 Write-Host "`n== assembleRelease ==" -ForegroundColor Cyan
 $env:GRADLE_OPTS = '-Xmx4g'
 if ($hasSigning) {
-    ./gradlew.bat --no-daemon :HyperFCMLive:assembleRelease
+    ./gradlew.bat --no-daemon :HyperGreeze:assembleRelease
 } else {
     Write-Host "! 未配置 SIGNING_KEY 等价物，产物用 debug 签名" -ForegroundColor Yellow
-    ./gradlew.bat --no-daemon -PallowDebugSignedRelease :HyperFCMLive:assembleRelease
+    ./gradlew.bat --no-daemon -PallowDebugSignedRelease :HyperGreeze:assembleRelease
 }
 if ($LASTEXITCODE -ne 0) { Fail "构建失败" }
 
-$apkDir = Join-Path $root 'HyperFCMLive/build/outputs/apk/release'
+$apkDir = Join-Path $root 'HyperGreeze/build/outputs/apk/release'
 $apk = Get-ChildItem $apkDir -Filter *.apk | Select-Object -First 1
 if (-not $apk) { Fail "没找到 APK：$apkDir" }
 Write-Host "产物      : $($apk.FullName)  ($([math]::Round($apk.Length / 1MB, 2)) MB)"
@@ -138,7 +138,7 @@ if ($start -lt 0) {
     }
 }
 
-$body = Join-Path ([System.IO.Path]::GetTempPath()) "hyperfcm-release-$tag.md"
+$body = Join-Path ([System.IO.Path]::GetTempPath()) "hypergreeze-release-$tag.md"
 $section | Set-Content $body -Encoding utf8
 $templatePath = Join-Path $root '.github/release-notes.md'
 if (Test-Path $templatePath) { Add-Content $body -Value (Get-Content $templatePath -Raw) -Encoding utf8 }
@@ -146,7 +146,7 @@ if (Test-Path $templatePath) { Add-Content $body -Value (Get-Content $templatePa
 $sha = git rev-parse HEAD
 gh release create $tag $apk.FullName `
     --repo iamqwert/HyperOS_FCM_Live `
-    --title "HyperOS FCM Live $fullVersion" `
+    --title "HyperGreeze $fullVersion" `
     --notes-file $body `
     --target $sha `
     --latest

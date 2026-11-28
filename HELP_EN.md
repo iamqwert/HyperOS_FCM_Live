@@ -126,10 +126,10 @@ The module requests **no sensitive permissions**, collects or uploads no persona
 
 Grab a **diagnostic report** before opening an issue:
 
-- **Preferred**: open the **Records** tab → tap the top-right upload icon to export the diagnostic text (includes the `HyperFCMLive active in ...` hook summary and event history).
+- **Preferred**: open the **Records** tab → tap the top-right upload icon to export the diagnostic text (includes the `HyperGreeze active in ...` hook summary and event history).
 - **Fallback (if the module is not responding)**: enable **Show debug logs** under Settings → Experiments & Debugging, wait for boot to finish, and run:
   ```bash
-  adb logcat -d | grep "HyperFCMLive active in"
+  adb logcat -d | grep "HyperGreeze active in"
   ```
   Or attach `modules_*.log` exported from LSPosed Manager.
 

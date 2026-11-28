@@ -126,12 +126,12 @@ GMS 与推送重连**始终受保护**，与白名单勾选无关，因此列表
 
 提交 Issue 前请先获取 **诊断文本**：
 
-- **首选**：打开 **「记录」** 页 → 点击右上角上传图标导出诊断文本（已含钩子装载摘要 `HyperFCMLive active in ...` 与事件历史）。
+- **首选**：打开 **「记录」** 页 → 点击右上角上传图标导出诊断文本（已含钩子装载摘要 `HyperGreeze active in ...` 与事件历史）。
 
 - **备选（模块未响应时）**：在「设置 → 实验与调试」中开启 **显示调试日志**，等待开机完成后执行：
 
   ```bash
-  adb logcat -d | grep "HyperFCMLive active in"
+  adb logcat -d | grep "HyperGreeze active in"
   ```
 
   或直接附带 LSPosed 管理器导出的 `modules_*.log`。

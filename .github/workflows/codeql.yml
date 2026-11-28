@@ -1,10 +1,10 @@
 # CodeQL —— 高级设置（advanced setup），Java/Kotlin 用显式构建步骤。
 #
 # 为什么不能用默认设置（default setup）：
-#   仓库含 Kotlin 代码（HyperFCMLive/.../UnsafeUtils.kt）。CodeQL 对 Kotlin 只支持
+#   仓库含 Kotlin 代码（HyperGreeze/.../UnsafeUtils.kt）。CodeQL 对 Kotlin 只支持
 #   `autobuild` / `manual`，**没有 `none`**；因此默认设置必然选 autobuild，由它自己跑
 #   `./gradlew build`。而 release 打包任务在缺少 local.properties:storeFile 时会按设计抛出
-#   GradleException（防止用公开 debug 密钥签出「正式包」，见 HyperFCMLive/build.gradle 的
+#   GradleException（防止用公开 debug 密钥签出「正式包」，见 HyperGreeze/build.gradle 的
 #   签名守护），干净 runner 上没有 local.properties —— autobuild 必然失败。
 #   这里改为手动构建，只编 debug 变体：不触碰签名守护，也不需要任何密钥。
 #
@@ -75,10 +75,10 @@ jobs:
       # Kotlin 不支持 build-mode: none，必须真正编译一次供 CodeQL 抽取。
       # 只编 debug：不涉及 release 签名，GitHub runner 上无需配置任何密钥。
       # （若希望分析 R8 混淆后的产物，可改为
-      #   ./gradlew --no-daemon -PallowDebugSignedRelease :HyperFCMLive:assembleRelease）
+      #   ./gradlew --no-daemon -PallowDebugSignedRelease :HyperGreeze:assembleRelease）
       - name: Build (manual)
         if: matrix.language == 'java-kotlin'
-        run: ./gradlew --no-daemon :HyperFCMLive:assembleDebug
+        run: ./gradlew --no-daemon :HyperGreeze:assembleDebug
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

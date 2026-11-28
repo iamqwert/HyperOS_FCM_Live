@@ -52,7 +52,7 @@ body:
       description: |
         应用「记录」页 → 右上角上传图标 → 导出诊断文本，把文件内容整段粘贴到这里。
         它已经包含机型、系统版本、模块版本、钩子装载摘要和最近的事件，比 logcat 截图有用得多。
-        如果记录页显示「模块未响应查询」，请直接说明，并附上 `adb logcat -d | grep "HyperFCMLive active in"` 的输出。
+        如果记录页显示「模块未响应查询」，请直接说明，并附上 `adb logcat -d | grep "HyperGreeze active in"` 的输出。
       render: text
     validations:
       required: true

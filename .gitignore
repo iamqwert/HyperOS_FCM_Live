@@ -3,7 +3,7 @@
 /.idea/*
 .DS_Store
 /build
-/HyperFCMLive/build
+/HyperGreeze/build
 /captures
 .externalNativeBuild
 .cxx

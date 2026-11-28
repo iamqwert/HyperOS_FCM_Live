@@ -12,7 +12,7 @@
 - **作用域**：仅 `system`（`system_server`）与 `com.miui.powerkeeper`。不注入 `com.google.android.gms`（4.1.1 起退役，避免触发 GMS 完整性检测），不调用 `su`，不改 SELinux。
 - **定位**：白名单收窄的系统省电策略放行器——放行 HyperOS 对 FCM 广播与 GMS 的冻结、自启动、Alarm、强停与睡眠断网限制；**不保活目标应用**，不阻断系统正常回收进程。
 - **工程约束**：`minSdk 35`、`arm64-v8a`；所有 hook 回调遵守 **fail-open**（捕获异常并 `chain.proceed()`），不阻塞系统关键线程。
-- **验收方式**：日志 tag `HyperGreeze`；开启「显示调试日志」后查看 `HyperFCMLive active in …: N hook(s) installed, M target(s) absent…`，或在模块「记录」页一键导出诊断文本。
+- **验收方式**：日志 tag `HyperGreeze`；开启「显示调试日志」后查看 `HyperGreeze active in …: N hook(s) installed, M target(s) absent…`，或在模块「记录」页一键导出诊断文本。
 
 ---
 
@@ -54,22 +54,22 @@ LSPosed (META-INF/xposed/module.prop: minApi=101, targetApi=102, staticScope=tru
 
 | 文件 | 职责 |
 | --- | --- |
-| [Hooker.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/Hooker.kt) | 模块入口、分组表、生命周期、GMS UID 与系统上下文 |
-| [InstallBookkeeping.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/InstallBookkeeping.kt) | hook 计数、`setId` 去重、两级缺失与探针合并摘要 |
-| [HookLog.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/HookLog.kt) | `HyperGreeze` 调试日志门控 |
-| [AllowlistGate.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/AllowlistGate.kt) | 白名单加载/刷新、自动勾选与发送者校验 |
-| [GreezeHooks.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/GreezeHooks.kt) | greeze 冻结、广播、网络、wakelock、c2dm 后 10s Job 放行 |
-| [GmsSupport.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/GmsSupport.kt) | `GmsObserver`、`NetdExecutor`、不限制名单、场景编译、P4 恢复 |
-| [AmsHooks.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/AmsHooks.kt) | AMS 广播投递（补 `FLAG_INCLUDE_STOPPED_PACKAGES`） |
-| [ProcessCleanerHooks.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/ProcessCleanerHooks.kt) | `ProcessManagerService#isForceStopEnable` 防误强停与 FCM 识别 |
-| [AlarmGate.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/AlarmGate.kt) | GMS Alarm 投递、息屏对齐/延迟跳过与 SSRU 豁免 |
-| [SleepModeGate.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/SleepModeGate.kt) | 旧代睡眠链保护 + PowerKeeper 手机/平板睡眠保网 |
-| [AutostartGate.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/AutostartGate.kt) | 实验性服务绑定门与进程重启门（全链只读，不写 AppOp） |
-| [WifiWeakSignalSwitch.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/WifiWeakSignalSwitch.kt) | 弱 WiFi 评分临时 clamp |
-| [SmartPowerHooks.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/SmartPowerHooks.kt) | OS3 SmartPower 广播/服务拦截放行 |
-| [PowerKeeperHooks.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/PowerKeeperHooks.kt) | `AppStandbyController`、不限制名单、微信 doze keepout |
-| [SystemProbes.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/SystemProbes.kt) | 启动期只读存在性探针 |
-| [HookerSupport.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/HookerSupport.kt) / [Prefs.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/Prefs.kt) | 反射工具、常量、配置键与主/子开关规则 |
+| [Hooker.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/Hooker.kt) | 模块入口、分组表、生命周期、GMS UID 与系统上下文 |
+| [InstallBookkeeping.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/InstallBookkeeping.kt) | hook 计数、`setId` 去重、两级缺失与探针合并摘要 |
+| [HookLog.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/HookLog.kt) | `HyperGreeze` 调试日志门控 |
+| [AllowlistGate.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/AllowlistGate.kt) | 白名单加载/刷新、自动勾选与发送者校验 |
+| [GreezeHooks.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/GreezeHooks.kt) | greeze 冻结、广播、网络、wakelock、c2dm 后 10s Job 放行 |
+| [GmsSupport.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/GmsSupport.kt) | `GmsObserver`、`NetdExecutor`、不限制名单、场景编译、P4 恢复 |
+| [AmsHooks.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/AmsHooks.kt) | AMS 广播投递（补 `FLAG_INCLUDE_STOPPED_PACKAGES`） |
+| [ProcessCleanerHooks.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/ProcessCleanerHooks.kt) | `ProcessManagerService#isForceStopEnable` 防误强停与 FCM 识别 |
+| [AlarmGate.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/AlarmGate.kt) | GMS Alarm 投递、息屏对齐/延迟跳过与 SSRU 豁免 |
+| [SleepModeGate.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/SleepModeGate.kt) | 旧代睡眠链保护 + PowerKeeper 手机/平板睡眠保网 |
+| [AutostartGate.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/AutostartGate.kt) | 实验性服务绑定门与进程重启门（全链只读，不写 AppOp） |
+| [WifiWeakSignalSwitch.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/WifiWeakSignalSwitch.kt) | 弱 WiFi 评分临时 clamp |
+| [SmartPowerHooks.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/SmartPowerHooks.kt) | OS3 SmartPower 广播/服务拦截放行 |
+| [PowerKeeperHooks.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/PowerKeeperHooks.kt) | `AppStandbyController`、不限制名单、微信 doze keepout |
+| [SystemProbes.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/SystemProbes.kt) | 启动期只读存在性探针 |
+| [HookerSupport.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/HookerSupport.kt) / [Prefs.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/Prefs.kt) | 反射工具、常量、配置键与主/子开关规则 |
 
 ---
 
@@ -178,7 +178,7 @@ flowchart TD
 
 ### 4.3 实验开关与只读探针
 
-**配置开关**（均位于 [Prefs.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/Prefs.kt)，默认全关；子开关在 hook 读点必须与主开关做逻辑 AND）：
+**配置开关**（均位于 [Prefs.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/Prefs.kt)，默认全关；子开关在 hook 读点必须与主开关做逻辑 AND）：
 
 | 配置键 | 默认 | 落点 | 说明 |
 | --- | --- | --- | --- |
@@ -191,7 +191,7 @@ flowchart TD
 | `smartpower_release` | 关 | S23 | OS3 SmartPower 广播/服务拦截放行 |
 | `auto_check_new_apps` | 关 | `AllowlistGate` | 按 `allowlist ∪ (scan − baseline)` 自动放行新装 FCM 应用 |
 
-**现役只读探针**（[SystemProbes.kt](HyperFCMLive/src/main/java/io/github/iamqwert/hypergreeze/SystemProbes.kt)，启动时采样一次并合并为 `probe: ...`）：
+**现役只读探针**（[SystemProbes.kt](HyperGreeze/src/main/java/io/github/iamqwert/hypergreeze/SystemProbes.kt)，启动时采样一次并合并为 `probe: ...`）：
 - **R3** `AurogonImmobulusMode.mMessageApp`：检查 GMS 是否在消息豁免表（不在则冻结期 `isRestrictNet` 会为 true）。
 - **R4** `ConnectivityManager#updateSleepModeUidRule` / `enableSleepModeChain`：检查旧代睡眠链反射入口存在性。
 - **R5** `FilterEnablePolicy#isSupportPacketFilter`：检查 UDP 包过滤能力。
@@ -216,8 +216,8 @@ flowchart TD
 - **日志门**：tag 固定为 `HyperGreeze`。`WARN` / `ERROR` 始终输出；`INFO` / `DEBUG` 仅在开启 `debug_log` 后输出。**日志为空不等于未生效**。
 - **安装摘要（INFO）**：
   ```text
-  HyperFCMLive active in system_server: <N> hook(s) installed, <M> target(s) absent on this ROM, <K> cross-generation (expected)
-  HyperFCMLive active in com.miui.powerkeeper: <N> hook(s) installed, <M> target(s) absent on this ROM, <K> cross-generation (expected)
+  HyperGreeze active in system_server: <N> hook(s) installed, <M> target(s) absent on this ROM, <K> cross-generation (expected)
+  HyperGreeze active in com.miui.powerkeeper: <N> hook(s) installed, <M> target(s) absent on this ROM, <K> cross-generation (expected)
   ```
 - **一次性哨兵**：4.4.0 起已撤除 30min 周期计数与 `TrafficProbe`，改为每进程一次的哨兵行——**无声即该分支在本次启动未被 ROM 走到**：
   - `isRestrictReceiver: c2dm allowed for callee=…`（S10 放行真实推送）
@@ -232,7 +232,7 @@ flowchart TD
 
 ```bash
 # 1. 安装与异常过滤（需先开 debug_log，或直接看 LSPosed 导出的 modules_*.log）
-adb logcat -v time -s HyperGreeze | grep -E "HyperFCMLive active|Failed to|target\\(s\\) absent|cross-generation"
+adb logcat -v time -s HyperGreeze | grep -E "HyperGreeze active|Failed to|target\\(s\\) absent|cross-generation"
 
 # 2. 系统策略核查
 adb shell dumpsys greezer                          # mCurrentCNPolicy / mGmsLimitEnabled / 冻结列表
@@ -244,7 +244,7 @@ adb shell am broadcast -a io.github.iamqwert.hypergreeze.ALLOWLIST_CHANGED  # �
 
 **常见误判与二分原则**：
 - **手工 `adb am broadcast -a com.google.android.c2dm.intent.RECEIVE` 不能替代真实推送**：caller 是 shell 而非 GMS，不会命中 S9/S10 的 caller 判定。
-- **热重载后无 `HyperFCMLive active` 行属正常**（见 §1.1）。
+- **热重载后无 `HyperGreeze active` 行属正常**（见 §1.1）。
 - **`cross-generation` 缺失属正常**：OS4 上 OS3-only 钩（P1/P3/P5/P6/P7/S23）缺失不会计入本代 absent。
 - **二分排障顺序**：关所有实验开关 → 禁用模块 → 在 `Hooker.kt` 注释单个 `Group` 重装验证。崩溃/卡死时优先在 LSPosed 禁用模块并抓取 `adb logcat -b all -v threadtime -d` 与 `dumpsys dropbox`。
 
