@@ -635,6 +635,10 @@ private const val MCU_URL = "https://github.com/material-foundation/material-col
  * - AndroidX Compose Foundation / UI: 1.13.0-rc01 → **1.14.0-alpha01**
  * - AndroidX Compose Material3: 1.5.0-rc01 → **1.6.0-alpha01**
  * - AndroidX Core: 1.19.0 → **1.20.0-alpha01**
+ *
+ * The 2026-11-28 pass (4.6.0, post-Miuix 0.9.5-rc02 / AGP 9.5.3 sync)
+ * re-audited `releaseRuntimeClasspath`:
+ * - Miuix: 0.9.5-beta03 → **0.9.5-rc02**
  */
 private val DEPS = arrayOf(
     arrayOf("AndroidX Activity", "1.13.0", "Apache License 2.0", ANDROIDX_URL),
@@ -705,14 +709,14 @@ private val DEPS = arrayOf(
         "Apache License 2.0",
         "https://github.com/jordond/materialkolor"
     ),
-    // The Miuix look (界面风格 = Miuix). Migrated 0.9.4 → 0.9.5-beta03 on
-    // 2026-11-22 for the official miuix-glass / miuix-glass-icons stack. One row
+    // The Miuix look (界面风格 = Miuix). Migrated 0.9.5-beta03 → 0.9.5-rc02 on
+    // 2026-11-28 for the official miuix-glass / miuix-glass-icons stack. One row
     // for the project, though it ships as miuix-ui, miuix-core, miuix-preference,
     // miuix-icons, miuix-blur, miuix-glass, miuix-glass-icons, miuix-material,
     // miuix-squircle, and miuix-nav.
     arrayOf(
         "Miuix",
-        "0.9.5-beta03",
+        "0.9.5-rc02",
         "Apache License 2.0",
         "https://github.com/compose-miuix-ui/miuix"
     ),
