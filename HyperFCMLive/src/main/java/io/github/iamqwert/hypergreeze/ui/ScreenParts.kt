@@ -107,14 +107,10 @@ import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
 import io.github.iamqwert.hypergreeze.theme.ThemeEngine
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.BackdropEffectScope
-import top.yukonga.miuix.kmp.blur.BlendColorEntry
-import top.yukonga.miuix.kmp.blur.BlurBlendMode
-import top.yukonga.miuix.kmp.blur.BlurColors
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.colorControls
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
-import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
@@ -127,6 +123,7 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+import top.yukonga.miuix.kmp.glass.GlassCardDefaults
 import top.yukonga.miuix.kmp.glass.GlassDialog
 import top.yukonga.miuix.kmp.glass.GlassDialogButton
 import top.yukonga.miuix.kmp.glass.GlassDialogButtonRole
@@ -143,7 +140,6 @@ import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.squircle.isSquircleEnabled
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -426,77 +422,19 @@ fun SettingsGroup(
         )
         return
     }
-    val backdrop = LocalMiuixGlassBackdrop.current
-    if (backdrop == null) {
-        Column(
-            modifier = modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
-            content = content
-        )
-        return
-    }
-    // Glass group: ONE glass plane behind the whole run, and the rows above it
-    // contribute no blur of their own (see [LocalGroupGlassPlane]).
-    //
-    // It used to be both: every row carried its own [textureBlur] and this plane
-    // existed only to fill the seam where two of those blurs met — the
-    // anti-aliased edge let a hairline of the moving backdrop through, which
-    // over a still fill is invisible and over the about page's drifting mesh is
-    // not. But a row's glass is opaque, so the plane was never visible under
-    // it; the app paid one full-resolution 60dp Gaussian per row to hide a
-    // hairline between them. Handing the blur to the plane alone is the same
-    // picture with one pass per group rather than one per row, and there is no
-    // seam left to leak because there is no longer an edge between two glasses.
-    //
-    // The plane wears the group's own shape, which is the squircle under the
-    // Miuix looks (see [connectedGroupShape]) — the outermost silhouette of the
-    // run, and the only one that needs one, since the rows inside are
-    // square-cornered bar the first and last.
-    Box(modifier = modifier.fillMaxWidth()) {
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .textureBlur(
-                    backdrop = backdrop,
-                    shape = connectedGroupShape(first = true, last = true),
-                    blurRadius = CARD_BLUR_RADIUS,
-                    colors = BlurColors(
-                        blendColors = if (miuixGlassIsDark()) CARD_BLEND_DARK
-                        else CARD_BLEND_LIGHT
-                    ),
-                    enabled = true
-                )
-        )
-        CompositionLocalProvider(LocalGroupGlassPlane provides true) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
-                content = content
-            )
-        }
-    }
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
+        content = content
+    )
 }
 
 /**
  * The glass backdrop a Miuix page offers its cards: the page's own dynamic
- * background, recorded into a layer so a card can sample what sits behind it.
- * Null — the default — leaves every card on its solid fill, which is what every
- * page without a dynamic background wants.
- *
- * Only the OS3-background pages have one to offer, and only the about page has
- * the background to fill it ([MiuixBgEffectBackground]).
+ * background, recorded into a layer so the hero wordmark can sample what sits
+ * behind it, and cards over that dynamic background switch to [GlassCardDefaults.color].
  */
 val LocalMiuixGlassBackdrop = compositionLocalOf<LayerBackdrop?> { null }
-
-/**
- * True inside a [SettingsGroup] that has already laid the group's glass down.
- *
- * A row reads it to skip its own blur: the plane is the glass now, and a second
- * one drawn over it is the same pixels for a full-resolution pass per row. Set
- * only where a plane actually exists — a group with no backdrop leaves it false,
- * so rows keep the solid card fill they have always had.
- */
-private val LocalGroupGlassPlane = compositionLocalOf { false }
 
 /**
  * The room the Miuix look's floating bar takes at the foot of the screen, as the
@@ -514,33 +452,9 @@ private val LocalGroupGlassPlane = compositionLocalOf { false }
 val LocalFloatingBarClearance = compositionLocalOf { 0.dp }
 
 /**
- * The glass tints' dark read. The app's own palette owns darkness — it can force
- * a look the system does not — so this asks the page background rather than the
- * system night flag, exactly as the backdrop's own dark read does.
- */
-@Composable
-private fun miuixGlassIsDark(): Boolean =
-    MaterialTheme.colorScheme.background.luminance() < 0.5f
-
-/**
- * The surface a Miuix row sits on: the look's card fill normally, the same row
- * as frosted glass wherever the page provides [LocalMiuixGlassBackdrop].
- *
- * The glass is the reference's own card treatment — KernelSU's about page — a
- * [textureBlur] of the recorded dynamic background with the reference's
- * light/dark blend tints, over a transparent fill, so the gradient shows
- * THROUGH the card instead of being covered by it. Shape, metrics and the row's
- * press feedback are untouched: only what the card is made of changes.
- *
- * The silhouette is the library's: [connectedGroupShape] hands this a
- * [MiuixGroupShape] under the Miuix looks, so the fill, the clip and the blur's
- * own shape all draw continuous corners — a card next to an `ArrowPreference`
- * must not be the one with shaved corners.
- *
- * Inside a group whose plane already carries the glass — [LocalGroupGlassPlane]
- * — the row contributes content only. Its own blur would be drawn over a plane
- * made of the very same pixels, at one full-resolution pass per row: the group
- * looks identical either way, the page just stops paying for the second one.
+ * The surface a Miuix row sits on: the look's solid card fill normally, or
+ * [GlassCardDefaults.color] when placed over a dynamic background page
+ * providing [LocalMiuixGlassBackdrop].
  */
 @Composable
 internal fun MiuixCardSurface(
@@ -548,54 +462,14 @@ internal fun MiuixCardSurface(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    val backdrop = LocalMiuixGlassBackdrop.current
-    if (backdrop == null || LocalGroupGlassPlane.current) {
-        Surface(
-            modifier = modifier.fillMaxWidth(),
-            // Transparent over the plane, the page's card fill with none: the
-            // row sits ON glass in the first case and IS the surface's paint in
-            // the second, so one call site covers both.
-            color = if (backdrop == null) LocalAppSurfaces.current.card else Color.Transparent,
-            shape = shape,
-            content = content
-        )
-        return
-    }
-    val isDark = miuixGlassIsDark()
+    val hasDynamicBg = LocalMiuixGlassBackdrop.current != null
     Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .textureBlur(
-                backdrop = backdrop,
-                shape = shape,
-                blurRadius = CARD_BLUR_RADIUS,
-                colors = BlurColors(
-                    blendColors = if (isDark) CARD_BLEND_DARK else CARD_BLEND_LIGHT
-                ),
-                enabled = true
-            ),
-        color = Color.Transparent,
+        modifier = modifier.fillMaxWidth(),
+        color = if (hasDynamicBg) GlassCardDefaults.color() else LocalAppSurfaces.current.card,
         shape = shape,
         content = content
     )
 }
-
-/** The card glass's blur radius, in the blur library's own units. */
-private const val CARD_BLUR_RADIUS = 60f
-
-/**
- * The card glass's tints, copied from the reference (KernelSU's own
- * `ColorBlendToken`): a blue overlay plus a hard white light on light pages, a
- * grey luminosity pass plus a plus-darker on dark ones.
- */
-private val CARD_BLEND_LIGHT = listOf(
-    BlendColorEntry(Color(0x340034F9), BlurBlendMode.Overlay),
-    BlendColorEntry(Color(0xB3FFFFFF), BlurBlendMode.HardLight)
-)
-private val CARD_BLEND_DARK = listOf(
-    BlendColorEntry(Color(0x4DA9A9A9), BlurBlendMode.Luminosity),
-    BlendColorEntry(Color(0x1A9C9C9C), BlurBlendMode.PlusDarker)
-)
 
 /**
  * The seam as a placeable atom — the manual counterpart of [SettingsGroup],
@@ -1823,17 +1697,35 @@ fun PageScaffold(
                 baseScrolled || scrollBehavior.state.overscrollOffset < -1f
             }
         }
-        val titleAlphaLambda: () -> Float = remember(isCompactAbout, barScrollProgress, chromeTitleAlpha) {
-            if (isCompactAbout && barScrollProgress != null) {
-                { ((barScrollProgress() - 0.35f) / 0.65f).coerceIn(0f, 1f) * chromeTitleAlpha() }
+        val compactCollapsed by remember(isCompactAbout, barScrollProgress) {
+            computedStateOf {
+                isCompactAbout && barScrollProgress != null && barScrollProgress() >= 0.45f
+            }
+        }
+        val compactTitleAlphaState = animateFloatAsState(
+            targetValue = if (compactCollapsed) 1f else 0f,
+            animationSpec = tween(200),
+            label = "aboutCompactTitleAlpha",
+        )
+        val titleAlphaLambda: () -> Float = remember(isCompactAbout, compactTitleAlphaState, chromeTitleAlpha) {
+            if (isCompactAbout) {
+                { compactTitleAlphaState.value * chromeTitleAlpha() }
             } else {
                 chromeTitleAlpha
+            }
+        }
+        val backgroundAlphaLambda: () -> Float = remember(isCompactAbout) {
+            if (isCompactAbout) {
+                { if (compactCollapsed) 1f else 0f }
+            } else {
+                { 1f }
             }
         }
         val backDesc = stringResource(io.github.iamqwert.hypergreeze.R.string.back)
         MiuixScaffold(
             modifier = modifier,
             containerColor = MaterialTheme.colorScheme.background,
+            popupHost = {},
             topBar = {
                 CompositionLocalProvider(
                     LocalTopAppBarBackdrop provides activeBackdrop,
@@ -1848,6 +1740,7 @@ fun PageScaffold(
                         scrollBehavior = scrollBehavior,
                         bandBrush = bandBrush,
                         titleAlpha = titleAlphaLambda,
+                        backgroundAlpha = backgroundAlphaLambda,
                         centerObstructionStart = centerObstructionStart,
                         navigationIcon = {
                             if (showBack) {

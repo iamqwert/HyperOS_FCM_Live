@@ -16,6 +16,7 @@ dependencyResolutionManagement {
         mavenLocal {
             content {
                 includeGroup("io.github.libxposed")
+                includeGroup("top.yukonga.miuix.kmp")
             }
         }
     }

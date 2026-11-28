@@ -62,6 +62,12 @@ object ThemePrefs {
     private const val KEY_DENSITY_SCALE = "density_scale"
     private const val KEY_ENABLE_SWIPE_BACK = "enable_swipe_back"
     private const val KEY_DYNAMIC_LAUNCHER_ICON = "dynamic_launcher_icon"
+    private const val KEY_START_TAB = "start_tab"
+
+    const val START_TAB_MODULES = 0
+    const val START_TAB_APPS = 1
+    const val START_TAB_RECORDS = 2
+    const val START_TAB_SETTINGS = 3
 
     const val MIN_DENSITY_SCALE = 0.8f
     const val MAX_DENSITY_SCALE = 1.1f
@@ -378,6 +384,18 @@ object ThemePrefs {
     @JvmStatic
     fun setDynamicLauncherIcon(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_DYNAMIC_LAUNCHER_ICON, enabled).apply()
+    }
+
+    @JvmStatic
+    fun startTab(context: Context): Int {
+        val raw = prefs(context).getInt(KEY_START_TAB, START_TAB_MODULES)
+        return if (raw in START_TAB_MODULES..START_TAB_SETTINGS) raw else START_TAB_MODULES
+    }
+
+    @JvmStatic
+    fun setStartTab(context: Context, tab: Int) {
+        val normalized = if (tab in START_TAB_MODULES..START_TAB_SETTINGS) tab else START_TAB_MODULES
+        prefs(context).edit().putInt(KEY_START_TAB, normalized).apply()
     }
 
     /** Resolved dark/light for the current mode (MODE_SYSTEM reads the device). */

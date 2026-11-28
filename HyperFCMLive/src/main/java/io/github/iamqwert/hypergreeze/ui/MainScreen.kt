@@ -34,6 +34,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.captionBar
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListState
@@ -88,6 +93,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.animation.AnimatedContent
@@ -121,6 +127,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import io.github.iamqwert.hypergreeze.R
 import io.github.iamqwert.hypergreeze.theme.LocalUiStyle
@@ -143,7 +150,9 @@ import top.yukonga.miuix.kmp.glass.GlassTopAppBar
 import top.yukonga.miuix.kmp.glass.GlassTopAppBarDefaults
 import top.yukonga.miuix.kmp.glass.glassPopupAnchor
 import top.yukonga.miuix.kmp.glass.glassPopupAnchorContent
+import top.yukonga.miuix.kmp.glass.glassSearchBarTransition
 import top.yukonga.miuix.kmp.glass.rememberGlassPopupAnchor
+import top.yukonga.miuix.kmp.glass.rememberGlassSearchBarAlpha
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.glass.Close
 import top.yukonga.miuix.kmp.icon.glass.Ok
@@ -326,10 +335,16 @@ fun MainScreen(
                 )
             }
         }
+        val barAlpha = rememberGlassSearchBarAlpha(searchExpanded)
+        val searchTransitionModifier = Modifier.glassSearchBarTransition(searchExpanded, blurActive) { 1f }
         Box(modifier = modifier.fillMaxSize()) {
         MiuixScaffold(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { alpha = barAlpha.value }
+                .then(if (searchExpanded) Modifier.clearAndSetSemantics { } else Modifier),
             containerColor = MaterialTheme.colorScheme.background,
+            popupHost = {},
             topBar = {
                 CompositionLocalProvider(
                     LocalTopAppBarBackdrop provides activeBackdrop,
@@ -337,7 +352,8 @@ fun MainScreen(
                     MainTopBar(
                         state = topBarState,
                         actions = actions,
-                        scrollBehavior = scrollBehavior
+                        scrollBehavior = scrollBehavior,
+                        searchTransitionModifier = searchTransitionModifier,
                     )
                 }
             },
@@ -420,8 +436,23 @@ fun MainScreen(
         val searchListState = rememberLazyListState()
         val searchBarSpace = GlassSearchOverlayDefaults.BarHeight +
             GlassSearchOverlayDefaults.VerticalPadding * 2
-        val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val systemBarsInsets = WindowInsets.systemBars
+        val captionBarInsets = WindowInsets.captionBar
+        val displayCutoutInsets = WindowInsets.displayCutout
+        val searchTopInsets = remember(systemBarsInsets, captionBarInsets, displayCutoutInsets) {
+            systemBarsInsets.union(captionBarInsets).union(displayCutoutInsets).only(WindowInsetsSides.Top)
+        }
+        val density = LocalDensity.current
         val searchBottomClearance = LocalFloatingBarClearance.current
+        val searchListPadding = remember(searchTopInsets, density, searchBarSpace, searchBottomClearance) {
+            object : PaddingValues {
+                override fun calculateLeftPadding(layoutDirection: LayoutDirection): Dp = 0.dp
+                override fun calculateTopPadding(): Dp =
+                    with(density) { searchTopInsets.getTop(this).toDp() } + searchBarSpace
+                override fun calculateRightPadding(layoutDirection: LayoutDirection): Dp = 0.dp
+                override fun calculateBottomPadding(): Dp = searchBottomClearance + 16.dp
+            }
+        }
         TopLayer {
             GlassSearchOverlay(
                 expanded = searchExpanded,
@@ -438,6 +469,7 @@ fun MainScreen(
                         else -> searchListState.firstVisibleItemScrollOffset.toFloat()
                     }
                 },
+                topInsets = searchTopInsets,
                 blurEnabled = blurActive,
                 horizontalInsetsModifier = Modifier.miuixPageHorizontalInsets(),
                 searchIcon = MiuixIcons.Glass.Search,
@@ -445,6 +477,7 @@ fun MainScreen(
             ) { overlayQuery ->
                 LaunchedEffect(overlayQuery) {
                     if (query != overlayQuery) onQueryChange(overlayQuery)
+                    searchListState.scrollToItem(0)
                 }
                 if (overlayQuery.isNotBlank()) {
                     LazyColumn(
@@ -455,10 +488,7 @@ fun MainScreen(
                             .listScrollEndHaptic()
                             .pageOverscroll(),
                         overscrollEffect = rememberPageOverscrollEffect(),
-                        contentPadding = PaddingValues(
-                            top = statusBarTop + searchBarSpace,
-                            bottom = searchBottomClearance + 16.dp,
-                        ),
+                        contentPadding = searchListPadding,
                     ) {
                         items(items = apps, key = { it.packageName }) { app ->
                             AppRow(
@@ -596,7 +626,8 @@ fun MainTopBar(
      * nested-scroll connection wraps the same Scaffold the bar sits in.
      * Unused under Miuix, which carries its own behavior type.
      */
-    m3ScrollBehavior: androidx.compose.material3.TopAppBarScrollBehavior? = null
+    m3ScrollBehavior: androidx.compose.material3.TopAppBarScrollBehavior? = null,
+    searchTransitionModifier: Modifier = Modifier,
 ) {
     if (LocalUiStyle.current.isMiuixBased) {
         val behavior = scrollBehavior ?: MiuixScrollBehavior()
@@ -651,7 +682,7 @@ fun MainTopBar(
         GlassTopAppBar(
             title = state.title,
             modifier = modifier,
-            contentModifier = Modifier.miuixSidebarStartInset(),
+            contentModifier = Modifier.miuixSidebarStartInset().then(searchTransitionModifier),
             progressiveBlur = blurActive,
             backdrop = LocalTopAppBarBackdrop.current,
             scrollBehavior = behavior,

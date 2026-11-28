@@ -82,6 +82,9 @@ object AppearanceState {
     /** Whether the desktop launcher icon uses wallpaper dynamic colors. */
     val dynamicLauncherIcon: MutableState<Boolean> = mutableStateOf(false)
 
+    /** Default bottom navigation tab opened on cold start ([ThemePrefs.START_TAB_MODULES]..[ThemePrefs.START_TAB_SETTINGS]). */
+    val startTab: MutableIntState = mutableIntStateOf(ThemePrefs.START_TAB_MODULES)
+
     /**
      * Re-read every value from disk. Idempotent and cheap: assigning the value
      * a state already holds does not invalidate anything (structural equality
@@ -103,6 +106,7 @@ object AppearanceState {
         densityScale.floatValue = ThemePrefs.densityScale(context)
         enableSwipeBack.value = ThemePrefs.enableSwipeBack(context)
         dynamicLauncherIcon.value = ThemePrefs.dynamicLauncherIcon(context)
+        startTab.intValue = ThemePrefs.startTab(context)
     }
 
     @JvmStatic
@@ -223,5 +227,11 @@ object AppearanceState {
     fun setDynamicLauncherIcon(context: Context, enabled: Boolean) {
         ThemePrefs.setDynamicLauncherIcon(context, enabled)
         dynamicLauncherIcon.value = enabled
+    }
+
+    @JvmStatic
+    fun setStartTab(context: Context, tab: Int) {
+        ThemePrefs.setStartTab(context, tab)
+        startTab.intValue = ThemePrefs.startTab(context)
     }
 }

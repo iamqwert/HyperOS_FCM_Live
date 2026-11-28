@@ -4,7 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.Configuration
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.CapturedAnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -217,7 +217,7 @@ private fun ExperimentBody(
                 // This one narrows rather than widens — scores below the chosen
                 // floor go back to the ROM — so there is nothing to show until the
                 // master says the user wants the wider switch at all.
-                AnimatedVisibility(
+                CapturedAnimatedVisibility(
                     visible = wifiWeakSignalRelaxed,
                     enter = expandVertically(
                         expandFrom = Alignment.Top,

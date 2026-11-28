@@ -254,7 +254,7 @@ private fun ThemeSettingsBody(
                 if (miuixStyle) {
                     val showAdvanced = miuixMonet && miuixAccent != 0
                     SettingsSwitchCard(
-                        iconRes = R.drawable.ic_dynamic_color,
+                        iconRes = R.drawable.ic_colorize,
                         title = stringResource(R.string.miuix_monet_dynamic_color),
                         description = stringResource(R.string.about_sub_miuix_monet),
                         checked = miuixMonet,
@@ -799,7 +799,7 @@ internal fun DynamicColorCard(
                     .padding(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                RowIcon(painter = painterResource(R.drawable.ic_dynamic_color))
+                RowIcon(painter = painterResource(R.drawable.ic_colorize))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.dynamic_color),

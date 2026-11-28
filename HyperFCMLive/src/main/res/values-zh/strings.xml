@@ -52,6 +52,8 @@
     <string name="about_sub_hide_icon_on">已隐藏，可从 LSPosed 打开</string>
     <string name="about_sub_hide_icon_off">已显示，点击后隐藏</string>
     <string name="dynamic_launcher_icon">桌面图标使用动态取色</string>
+    <string name="start_page">自定义启动页</string>
+    <string name="about_sub_start_page">打开应用时默认显示的底部页面</string>
     <string name="about_sub_dynamic_icon_on">跟随系统壁纸自动取色</string>
     <string name="about_sub_dynamic_icon_off">使用默认品牌图标</string>
     <string name="about_sub_dynamic_icon_hidden">桌面图标已隐藏</string>

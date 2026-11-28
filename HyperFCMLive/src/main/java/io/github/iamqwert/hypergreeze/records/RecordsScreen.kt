@@ -835,13 +835,14 @@ private fun RecordsPageTabRow(
 ) {
     val labels = PageTab.entries.map { stringResource(it.labelRes) }
     if (LocalUiStyle.current.isMiuixBased) {
+        val barBackdrop = LocalTopAppBarBackdrop.current
         val fallbackBackdrop = rememberLayerBackdrop()
         GlassSegmentedTabRow(
             tabs = labels,
             selectedIndex = selected.ordinal,
             onSelect = { onSelect(PageTab.entries[it]) },
-            backdrop = LocalTopAppBarBackdrop.current ?: fallbackBackdrop,
-            surfaceAlpha = surfaceAlpha,
+            backdrop = barBackdrop ?: fallbackBackdrop,
+            surfaceAlpha = if (barBackdrop != null) surfaceAlpha else 0f,
             modifier = modifier,
         )
         return

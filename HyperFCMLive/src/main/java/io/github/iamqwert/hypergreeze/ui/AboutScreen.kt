@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.view.HapticFeedbackConstants
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -75,6 +74,7 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+import top.yukonga.miuix.kmp.glass.GlassCard
 import top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
@@ -387,8 +387,9 @@ fun AboutTabScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .listScrollEndHaptic()
+                        .pageOverscroll()
                         // The reference leaves the list inset-free — its cards
-                        // carry the page's 12dp margin themselves (the [Card]s
+                        // carry the page's 12dp margin themselves (the [GlassCard]s
                         // below). The Material look keeps its own inset at the
                         // list, whose rows are full-width group members.
                         .padding(
@@ -396,6 +397,7 @@ fun AboutTabScreen(
                             end = if (miuix) 0.dp else pageHorizontalInset()
                         ),
                     state = listState,
+                    overscrollEffect = rememberPageOverscrollEffect(),
                     // No bottom padding: the card column below owns its own foot
                     // (and the floating-bar clearance), the way the reference
                     // does — putting it on the list would double it.
@@ -832,44 +834,34 @@ private fun AboutProjectSection(
     // Material look keeps its own group card, the same three rows single-line.
     if (LocalUiStyle.current.isMiuixBased) {
         Column {
-            MiuixCardSurface(
-                shape = connectedGroupShape(first = true, last = true),
+            GlassCard(
                 modifier = Modifier.padding(horizontal = MiuixMetrics.PageInset)
             ) {
-                Column(Modifier.fillMaxWidth()) {
-                    ArrowPreference(
-                        title = stringResource(R.string.view_source_code),
-                        onClick = actions.onViewSource,
-                        endActions = { AboutRowValue("GitHub") }
-                    )
-                    ArrowPreference(
-                        title = stringResource(R.string.help_guide),
-                        onClick = actions.onHelp,
-                        endActions = { AboutRowValue("GitHub") }
-                    )
-                }
+                ArrowPreference(
+                    title = stringResource(R.string.view_source_code),
+                    onClick = actions.onViewSource,
+                    endActions = { AboutRowValue("GitHub") }
+                )
+                ArrowPreference(
+                    title = stringResource(R.string.help_guide),
+                    onClick = actions.onHelp,
+                    endActions = { AboutRowValue("GitHub") }
+                )
             }
-            MiuixCardSurface(
-                shape = connectedGroupShape(first = true, last = true),
+            GlassCard(
                 modifier = Modifier
                     .padding(horizontal = MiuixMetrics.PageInset)
                     .padding(top = MiuixMetrics.PageGap)
             ) {
-                // [MiuixCardSurface]'s [Surface] is a box — its children stack
-                // rather than arrange — so the two rows of this card must sit
-                // in a column, exactly as the reference's own [Card] (whose
-                // content is a column scope) would lay them out.
-                Column(Modifier.fillMaxWidth()) {
-                    ArrowPreference(
-                        title = stringResource(R.string.about_license),
-                        onClick = actions.onLicense,
-                        endActions = { AboutRowValue("GPL-3.0") }
-                    )
-                    ArrowPreference(
-                        title = stringResource(R.string.open_source_licenses),
-                        onClick = actions.onLicenses
-                    )
-                }
+                ArrowPreference(
+                    title = stringResource(R.string.about_license),
+                    onClick = actions.onLicense,
+                    endActions = { AboutRowValue("GPL-3.0") }
+                )
+                ArrowPreference(
+                    title = stringResource(R.string.open_source_licenses),
+                    onClick = actions.onLicenses
+                )
             }
             Spacer(modifier = Modifier.height(MiuixMetrics.PageGap))
         }
@@ -1051,6 +1043,8 @@ private fun AboutBody(
     val dynamicIconOnText = stringResource(R.string.dynamic_icon_on_toast)
     val dynamicIconOffText = stringResource(R.string.dynamic_icon_off_toast)
     val dynamicLauncherIcon by AppearanceState.dynamicLauncherIcon
+    val startTab by AppearanceState.startTab
+    val startTabEntries = HomeTab.entries.map { stringResource(it.titleRes) }
     // Read here, in composition, not inside show(): LocalUiStyle.current is a
     // @Composable read and show() is a plain function.
     val miuixNow = LocalUiStyle.current.isMiuixBased
@@ -1129,6 +1123,16 @@ private fun AboutBody(
                     },
                     first = false,
                     last = false
+                )
+                PopupCard(
+                    iconRes = R.drawable.ic_home_filled,
+                    title = stringResource(R.string.start_page),
+                    subtitle = stringResource(R.string.about_sub_start_page),
+                    entries = startTabEntries,
+                    currentIndex = startTab.coerceIn(0, startTabEntries.lastIndex),
+                    first = false,
+                    last = false,
+                    onPick = { index -> AppearanceState.setStartTab(context, index) }
                 )
                 // 语言选择交给平台的 LocaleManager：写下去系统自己持久化并重建
                 // 界面，本应用不落偏好。未选择时的默认（ currentIndex 的取值）

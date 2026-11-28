@@ -9,6 +9,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -596,6 +598,11 @@ fun MiuixBgEffectBackground(
         var last = withFrameNanos { it }
         val switchNanos = (preset.colorInterpPeriod * 500L * 1_000_000L).toLong()
         while (isActive) {
+            if (alpha() <= 0f) {
+                snapshotFlow { alpha() > 0f }.first { it }
+                last = withFrameNanos { it }
+                continue
+            }
             val now = withFrameNanos { it }
             val deltaNanos = (now - last).coerceIn(0L, MAX_FRAME_STEP_NANOS)
             last = now

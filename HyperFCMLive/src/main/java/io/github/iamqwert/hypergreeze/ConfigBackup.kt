@@ -541,7 +541,14 @@ internal object ConfigBackup {
                 "dynamic_launcher_icon",
                 ThemePrefs::dynamicLauncherIcon,
                 appearance = true
-            ) { c, on -> LauncherIcon.setDynamicIcon(c, on) }
+            ) { c, on -> LauncherIcon.setDynamicIcon(c, on) },
+            number(
+                "Appearance",
+                "start_tab",
+                ThemePrefs::startTab,
+                valid = { it in ThemePrefs.START_TAB_MODULES..ThemePrefs.START_TAB_SETTINGS },
+                appearance = true
+            ) { c, tab -> ThemePrefs.setStartTab(c, tab) }
         )
     }
 }

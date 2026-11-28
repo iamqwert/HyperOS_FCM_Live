@@ -367,10 +367,13 @@ class MainActivity : AppCompatActivity() {
         // saved instance state — what a backgrounded process death hands
         // back — is authoritative; without a bundle, the process-level
         // [retainedTab] covers an in-place rebuild. A cold start reads null
-        // from both and keeps the default.
+        // from both and opens the user-configured startup tab.
         val savedTab = savedInstanceState?.getString(KEY_STATE_TAB)
             ?.let { name -> HomeTab.entries.firstOrNull { it.name == name } }
-        (savedTab ?: retainedTab)?.let { homeTab = it }
+        val configuredStartTab = HomeTab.entries.getOrElse(ThemePrefs.startTab(this)) {
+            HomeTab.Modules
+        }
+        homeTab = savedTab ?: retainedTab ?: configuredStartTab
 
         // The settings tab's Activity-bound half (SAF contracts, update check,
         // links). Must exist before the window is STARTED.
@@ -520,8 +523,8 @@ class MainActivity : AppCompatActivity() {
         val backdrop =
             if (miuix) MiuixTheme.colorScheme.surface else MaterialTheme.colorScheme.background
         // Read off the window insets, like the library's own effect does.
-        // Wide-screen layouts keep 0dp corner clip radius.
-        val systemCorner = if (useGlassRail) 0.dp else rememberNavSystemCornerRadius()
+        // Wide-screen and multi-window layouts keep 0dp corner clip radius.
+        val systemCorner = if (useGlassRail || isInMultiWindowMode) 0.dp else rememberNavSystemCornerRadius()
         // Miuix keeps its own default transition untouched (unless jumping via sidebar);
         // Material uses Material 3 Expressive spring-driven Shared Axis + Predictive Back.
         val m3Transition = rememberMaterialExpressiveNavTransition()

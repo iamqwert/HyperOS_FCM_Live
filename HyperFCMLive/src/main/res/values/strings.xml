@@ -52,6 +52,8 @@
     <string name="about_sub_hide_icon_on">Hidden — open the app from LSPosed</string>
     <string name="about_sub_hide_icon_off">Visible — tap to hide</string>
     <string name="dynamic_launcher_icon">Dynamic Launcher Icon</string>
+    <string name="start_page">Startup Page</string>
+    <string name="about_sub_start_page">Tab shown when opening the app</string>
     <string name="about_sub_dynamic_icon_on">Follows wallpaper colors</string>
     <string name="about_sub_dynamic_icon_off">Uses the default brand icon</string>
     <string name="about_sub_dynamic_icon_hidden">Launcher icon is hidden</string>

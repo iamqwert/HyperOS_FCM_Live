@@ -327,7 +327,8 @@ fun MiuixHomeShell(
     MiuixScaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = Color.Transparent,
-        contentWindowInsets = WindowInsets(0.dp)
+        contentWindowInsets = WindowInsets(0.dp),
+        popupHost = {},
     ) { _ ->
         Box(modifier = Modifier.fillMaxSize()) {
             val backdrop = if (!useGlassRail) rememberMiuixSurfaceBackdrop(blurActive) else null
