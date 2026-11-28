@@ -61,6 +61,7 @@ object ThemePrefs {
     private const val KEY_PAGER_GESTURE_MODE = "pager_gesture_mode"
     private const val KEY_DENSITY_SCALE = "density_scale"
     private const val KEY_ENABLE_SWIPE_BACK = "enable_swipe_back"
+    private const val KEY_DYNAMIC_LAUNCHER_ICON = "dynamic_launcher_icon"
 
     const val MIN_DENSITY_SCALE = 0.8f
     const val MAX_DENSITY_SCALE = 1.1f
@@ -368,6 +369,15 @@ object ThemePrefs {
     @JvmStatic
     fun setEnableSwipeBack(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_ENABLE_SWIPE_BACK, enabled).apply()
+    }
+
+    @JvmStatic
+    fun dynamicLauncherIcon(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_DYNAMIC_LAUNCHER_ICON, false)
+
+    @JvmStatic
+    fun setDynamicLauncherIcon(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_DYNAMIC_LAUNCHER_ICON, enabled).apply()
     }
 
     /** Resolved dark/light for the current mode (MODE_SYSTEM reads the device). */

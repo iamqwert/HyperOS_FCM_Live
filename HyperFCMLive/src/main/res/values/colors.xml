@@ -54,4 +54,9 @@
 
     <!-- Page background: one step deeper than the cards so they stand out. -->
     <color name="md_page_bg">#F2F2F3</color>
+
+    <!-- Dynamic-color launcher icon tokens (API 34+ framework Monet roles,
+         resolved live by the launcher and the About hero). -->
+    <color name="ic_launcher_dynamic_bg">@android:color/system_primary_container_light</color>
+    <color name="ic_launcher_dynamic_fg">@android:color/system_on_primary_container_light</color>
 </resources>

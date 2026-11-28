@@ -103,5 +103,22 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity-alias>
+
+        <activity-alias
+            android:name=".LauncherAliasDynamic"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_dynamic"
+            android:roundIcon="@mipmap/ic_launcher_dynamic_round"
+            android:label="@string/launcher_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity-alias>
     </application>
 </manifest>

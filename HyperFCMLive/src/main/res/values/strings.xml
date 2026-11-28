@@ -51,6 +51,10 @@
     <string name="about_sub_experiment">Experimental toggles, off by default</string>
     <string name="about_sub_hide_icon_on">Hidden — open the app from LSPosed</string>
     <string name="about_sub_hide_icon_off">Visible — tap to hide</string>
+    <string name="dynamic_launcher_icon">Dynamic Launcher Icon</string>
+    <string name="about_sub_dynamic_icon_on">Follows wallpaper colors</string>
+    <string name="about_sub_dynamic_icon_off">Uses the default brand icon</string>
+    <string name="about_sub_dynamic_icon_hidden">Launcher icon is hidden</string>
     <string name="about_sub_check_update">Current version %1$s (%2$d)</string>
     <string name="about_sub_export">Back up the current configuration to a text file</string>
     <string name="about_sub_import">Import the module configuration from a text file</string>
@@ -203,6 +207,8 @@
     </string-array>
     <string name="hide_icon_toast">Launcher icon hidden. Open the module from LSPosed to change its settings</string>
     <string name="show_icon_toast">Launcher icon restored</string>
+    <string name="dynamic_icon_on_toast">Switched to dynamic launcher icon</string>
+    <string name="dynamic_icon_off_toast">Switched to default launcher icon</string>
     <string name="more_menu">More Options</string>
     <string name="fcm_diagnostics">FCM Diagnostics</string>
     <string name="fcm_diagnostics_not_found">FCM diagnostics isn\'t available on this device</string>

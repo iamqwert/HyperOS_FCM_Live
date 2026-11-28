@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dynamic-color counterpart of ic_launcher_foreground: vertically symmetric
+     cloud (axis x=54) with an evenOdd transparent ECG heartbeat cutout tinted
+     by the system wallpaper dynamic palette. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="@color/ic_launcher_dynamic_fg"
+        android:fillType="evenOdd"
+        android:pathData="M36.50,72.00 A13.50,13.50 0 0,1 39.66,45.37 A14.50,14.50 0 0,1 68.34,45.37 A13.50,13.50 0 0,1 71.50,72.00 Z M34.50,55.60 L41.37,55.60 L44.33,50.10 A1.90,1.90 0 0,1 47.76,50.29 L48.92,53.17 L52.18,41.97 A1.90,1.90 0 0,1 55.86,42.11 L59.42,59.18 L60.45,56.76 A1.90,1.90 0 0,1 62.20,55.60 L73.50,55.60 A1.90,1.90 0 0,1 73.50,59.40 L63.46,59.40 L60.55,66.24 A1.90,1.90 0 0,1 56.94,65.89 L53.70,50.35 L51.02,59.53 A1.90,1.90 0 0,1 47.44,59.71 L45.75,55.48 L44.17,58.40 A1.90,1.90 0 0,1 42.50,59.40 L34.50,59.40 A1.90,1.90 0 0,1 34.50,55.60 Z" />
+</vector>

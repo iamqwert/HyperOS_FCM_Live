@@ -42,4 +42,8 @@
 
     <!-- Page background: one step deeper than the cards so they stand out. -->
     <color name="md_page_bg">#0E0E10</color>
+
+    <!-- Dark counterpart for the dynamic-color launcher icon. -->
+    <color name="ic_launcher_dynamic_bg">@android:color/system_primary_container_dark</color>
+    <color name="ic_launcher_dynamic_fg">@android:color/system_on_primary_container_dark</color>
 </resources>

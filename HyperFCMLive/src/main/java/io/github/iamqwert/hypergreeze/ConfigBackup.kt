@@ -535,7 +535,13 @@ internal object ConfigBackup {
                 "enable_swipe_back",
                 ThemePrefs::enableSwipeBack,
                 appearance = true
-            ) { c, on -> ThemePrefs.setEnableSwipeBack(c, on) }
+            ) { c, on -> ThemePrefs.setEnableSwipeBack(c, on) },
+            toggle(
+                "Appearance",
+                "dynamic_launcher_icon",
+                ThemePrefs::dynamicLauncherIcon,
+                appearance = true
+            ) { c, on -> LauncherIcon.setDynamicIcon(c, on) }
         )
     }
 }

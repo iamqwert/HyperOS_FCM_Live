@@ -51,6 +51,10 @@
     <string name="about_sub_experiment">实验性开关入口，默认不启用</string>
     <string name="about_sub_hide_icon_on">已隐藏，可从 LSPosed 打开</string>
     <string name="about_sub_hide_icon_off">已显示，点击后隐藏</string>
+    <string name="dynamic_launcher_icon">桌面图标使用动态取色</string>
+    <string name="about_sub_dynamic_icon_on">跟随系统壁纸自动取色</string>
+    <string name="about_sub_dynamic_icon_off">使用默认品牌图标</string>
+    <string name="about_sub_dynamic_icon_hidden">桌面图标已隐藏</string>
     <string name="about_sub_check_update">当前版本 %1$s (%2$d)</string>
     <string name="about_sub_export">将当前配置备份为文本文件</string>
     <string name="about_sub_import">从文本文件导入模块配置</string>
@@ -198,6 +202,8 @@
     </string-array>
     <string name="hide_icon_toast">桌面图标已隐藏，需要设置时请从 LSPosed 打开模块</string>
     <string name="show_icon_toast">桌面图标已恢复</string>
+    <string name="dynamic_icon_on_toast">已切换为动态取色桌面图标</string>
+    <string name="dynamic_icon_off_toast">已切换为默认桌面图标</string>
     <string name="more_menu">更多选项</string>
     <string name="fcm_diagnostics">FCM 诊断</string>
     <string name="fcm_diagnostics_not_found">当前设备无法打开 FCM 诊断界面</string>

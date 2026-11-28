@@ -79,6 +79,9 @@ object AppearanceState {
     /** Whether in-page horizontal swipe-to-dismiss is enabled on pushed routes. */
     val enableSwipeBack: MutableState<Boolean> = mutableStateOf(false)
 
+    /** Whether the desktop launcher icon uses wallpaper dynamic colors. */
+    val dynamicLauncherIcon: MutableState<Boolean> = mutableStateOf(false)
+
     /**
      * Re-read every value from disk. Idempotent and cheap: assigning the value
      * a state already holds does not invalidate anything (structural equality
@@ -99,6 +102,7 @@ object AppearanceState {
         pagerGestureMode.intValue = ThemePrefs.pagerGestureMode(context)
         densityScale.floatValue = ThemePrefs.densityScale(context)
         enableSwipeBack.value = ThemePrefs.enableSwipeBack(context)
+        dynamicLauncherIcon.value = ThemePrefs.dynamicLauncherIcon(context)
     }
 
     @JvmStatic
@@ -213,5 +217,11 @@ object AppearanceState {
     fun setEnableSwipeBack(context: Context, enabled: Boolean) {
         ThemePrefs.setEnableSwipeBack(context, enabled)
         enableSwipeBack.value = enabled
+    }
+
+    @JvmStatic
+    fun setDynamicLauncherIcon(context: Context, enabled: Boolean) {
+        ThemePrefs.setDynamicLauncherIcon(context, enabled)
+        dynamicLauncherIcon.value = enabled
     }
 }

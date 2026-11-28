@@ -666,9 +666,13 @@ private val LOGO_BLEND_DARK = listOf(
 @Composable
 private fun rememberLauncherIconPainter(): androidx.compose.ui.graphics.painter.Painter {
     val context = LocalContext.current
-    return remember {
+    val dynamicIcon by AppearanceState.dynamicLauncherIcon
+    val nightMode = androidx.compose.ui.platform.LocalConfiguration.current.uiMode and
+        Configuration.UI_MODE_NIGHT_MASK
+    return remember(dynamicIcon, nightMode) {
+        val resId = if (dynamicIcon) R.mipmap.ic_launcher_dynamic else R.mipmap.ic_launcher
         val drawable = androidx.core.content.ContextCompat.getDrawable(
-            context, R.mipmap.ic_launcher
+            context, resId
         ) ?: error("no launcher icon")
         val side = 432 // 108dp at 4x: plenty for a 74dp mark
         val bitmap = android.graphics.Bitmap.createBitmap(
@@ -1044,6 +1048,9 @@ private fun AboutBody(
 
     val hideText = stringResource(R.string.hide_icon_toast)
     val showText = stringResource(R.string.show_icon_toast)
+    val dynamicIconOnText = stringResource(R.string.dynamic_icon_on_toast)
+    val dynamicIconOffText = stringResource(R.string.dynamic_icon_off_toast)
+    val dynamicLauncherIcon by AppearanceState.dynamicLauncherIcon
     // Read here, in composition, not inside show(): LocalUiStyle.current is a
     // @Composable read and show() is a plain function.
     val miuixNow = LocalUiStyle.current.isMiuixBased
@@ -1094,6 +1101,33 @@ private fun AboutBody(
                         hideIcon = checked
                     },
                     first = true,
+                    last = false
+                )
+                SettingsSwitchCard(
+                    iconRes = R.drawable.ic_dynamic_color,
+                    title = stringResource(R.string.dynamic_launcher_icon),
+                    description = if (hideIcon) {
+                        stringResource(R.string.about_sub_dynamic_icon_hidden)
+                    } else {
+                        ""
+                    },
+                    stateLine = if (hideIcon) {
+                        null
+                    } else {
+                        stringResource(R.string.about_sub_dynamic_icon_on)
+                    },
+                    stateLineOff = if (hideIcon) {
+                        null
+                    } else {
+                        stringResource(R.string.about_sub_dynamic_icon_off)
+                    },
+                    checked = dynamicLauncherIcon,
+                    enabled = !hideIcon,
+                    onCheckedChange = { checked ->
+                        LauncherIcon.setDynamicIcon(context, checked)
+                        show(if (checked) dynamicIconOnText else dynamicIconOffText)
+                    },
+                    first = false,
                     last = false
                 )
                 // 语言选择交给平台的 LocaleManager：写下去系统自己持久化并重建

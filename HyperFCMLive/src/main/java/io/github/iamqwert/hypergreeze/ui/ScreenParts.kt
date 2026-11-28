@@ -1136,7 +1136,8 @@ fun SettingsSwitchCard(
     stateLine: String? = null,
     stateLineOff: String? = null,
     first: Boolean = true,
-    last: Boolean = true
+    last: Boolean = true,
+    enabled: Boolean = true
 ) {
     if (LocalUiStyle.current.isMiuixBased) {
         MiuixSwitchSlice(
@@ -1146,6 +1147,7 @@ fun SettingsSwitchCard(
             onCheckedChange = onCheckedChange,
             first = first,
             last = last,
+            enabled = enabled,
             modifier = modifier
         )
         return
@@ -1155,14 +1157,26 @@ fun SettingsSwitchCard(
     // One toggle path for both hit areas — the row and the switch itself — so
     // the haptic fires exactly once per flip, whichever way it was flipped.
     val toggle: () -> Unit = {
-        // VIRTUAL_KEY: the click a switch is expected to make in the hand.
-        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-        onCheckedChange(!checked)
+        if (enabled) {
+            // VIRTUAL_KEY: the click a switch is expected to make in the hand.
+            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            onCheckedChange(!checked)
+        }
     }
     val stateText = when {
         checked && stateLine != null -> stateLine
         !checked && stateLineOff != null -> stateLineOff
         else -> null
+    }
+    val titleColor = if (enabled) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+    val secondaryColor = if (enabled) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     }
     // A state line AND a description makes this M3's three-line item: 24 + 20 +
     // 20 of type against 12/12 of padding is the 88dp token. Either one alone
@@ -1185,17 +1199,21 @@ fun SettingsSwitchCard(
                 .clip(shape)
                 .toggleable(
                     value = checked,
+                    enabled = enabled,
                     role = Role.Switch,
                     onValueChange = { toggle() }
                 )
                 .padding(start = 16.dp, top = rowPadding, end = 16.dp, bottom = rowPadding),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            RowIcon(painter = painterResource(iconRes))
+            RowIcon(
+                painter = painterResource(iconRes),
+                modifier = if (enabled) Modifier else Modifier.alpha(0.38f)
+            )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = titleColor,
                     style = MaterialTheme.typography.bodyLarge
                 )
                 if (stateText != null) {
@@ -1207,14 +1225,14 @@ fun SettingsSwitchCard(
                         // fell short of those tokens; with the summary on
                         // bodyMedium it would overshoot both by 4dp.
                         text = stateText,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = secondaryColor,
                         style = pageSecondaryStyle()
                     )
                 }
                 if (description.isNotEmpty()) {
                     Text(
                         text = description,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = secondaryColor,
                         style = pageSecondaryStyle()
                     )
                 }
@@ -1224,6 +1242,7 @@ fun SettingsSwitchCard(
                 // the slot [SettingsMenuCard] holds its value in.
                 modifier = Modifier.padding(start = SWITCH_TRAILING_GAP),
                 checked = checked,
+                enabled = enabled,
                 onCheckedChange = { toggle() },
                 colors = appSwitchColors(),
                 thumbContent = { SwitchThumbMark(checked = checked) }
@@ -1558,12 +1577,15 @@ internal fun MiuixSwitchSlice(
     onCheckedChange: (Boolean) -> Unit,
     first: Boolean,
     last: Boolean,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
     val toggle: () -> Unit = {
-        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-        onCheckedChange(!checked)
+        if (enabled) {
+            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            onCheckedChange(!checked)
+        }
     }
     // Reading the generation here is what subscribes this row to appearance
     // changes; without the read the row would be skipped as unchanged and the
@@ -1573,6 +1595,7 @@ internal fun MiuixSwitchSlice(
         BasicComponent(
             title = title,
             summary = summary,
+            enabled = enabled,
             onClick = toggle,
             // What the library's own switch row declares (SwitchPreference puts
             // role = Role.Switch on its BasicComponent): the whole row reads as a
@@ -1584,6 +1607,7 @@ internal fun MiuixSwitchSlice(
                     // SwitchPreference, ArrowPreference and DropdownArrowEndAction.
                     MiuixSwitch(
                         checked = checked,
+                        enabled = enabled,
                         onCheckedChange = { toggle() }
                     )
                 }
