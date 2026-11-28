@@ -19,10 +19,10 @@ class UpdateCheckerAtomFeedTest {
         <?xml version="1.0" encoding="UTF-8"?>
         <feed xmlns="http://www.w3.org/2005/Atom">
           <title>Release notes from HyperOS_FCM_Live</title>
-          <id>tag:github.com,2008:https://github.com/iamqwert/HyperOS_FCM_Live/releases</id>
+          <id>tag:github.com,2008:https://github.com/iamqwert/HyperGreeze/releases</id>
           <entry>
             <id>tag:github.com,2008:Repository/123456/v1.8.0.18</id>
-            <link rel="alternate" type="text/html" href="https://github.com/iamqwert/HyperOS_FCM_Live/releases/tag/v1.8.0.18"/>
+            <link rel="alternate" type="text/html" href="https://github.com/iamqwert/HyperGreeze/releases/tag/v1.8.0.18"/>
           </entry>
         </feed>
     """.trimIndent()
@@ -32,7 +32,7 @@ class UpdateCheckerAtomFeedTest {
         val parsed = UpdateChecker.parseAtomFeed(feed)!!
         assertEquals("1.8.0.18", parsed[0])
         assertEquals(
-            "https://github.com/iamqwert/HyperOS_FCM_Live/releases/tag/v1.8.0.18",
+            "https://github.com/iamqwert/HyperGreeze/releases/tag/v1.8.0.18",
             parsed[1]
         )
     }
@@ -61,24 +61,24 @@ class UpdateCheckerAtomFeedTest {
     @Test
     fun untrustedPageFallsBackToTheFixedReleasesPage() {
         val hijacked = feed.replace(
-            "https://github.com/iamqwert/HyperOS_FCM_Live/releases/tag/v1.8.0.18",
+            "https://github.com/iamqwert/HyperGreeze/releases/tag/v1.8.0.18",
             "https://evil.example.com/phishing/releases/tag/v1.8.0.18"
         )
         val parsed = UpdateChecker.parseAtomFeed(hijacked)!!
         assertEquals("1.8.0.18", parsed[0])
-        assertEquals("https://github.com/iamqwert/HyperOS_FCM_Live/releases", parsed[1])
+        assertEquals("https://github.com/iamqwert/HyperGreeze/releases", parsed[1])
     }
 
     @Test
     fun trustedPagesPassTheWhitelist() {
         assertTrue(
             UpdateChecker.isTrustedReleasePage(
-                "https://github.com/iamqwert/HyperOS_FCM_Live/releases/tag/v1.8.0.18"
+                "https://github.com/iamqwert/HyperGreeze/releases/tag/v1.8.0.18"
             )
         )
         assertTrue(
             UpdateChecker.isTrustedReleasePage(
-                "https://github.com/iamqwert/HyperOS_FCM_Live/releases"
+                "https://github.com/iamqwert/HyperGreeze/releases"
             )
         )
     }
@@ -88,7 +88,7 @@ class UpdateCheckerAtomFeedTest {
         // Not https.
         assertFalse(
             UpdateChecker.isTrustedReleasePage(
-                "http://github.com/iamqwert/HyperOS_FCM_Live/releases/tag/v1.8.0.18"
+                "http://github.com/iamqwert/HyperGreeze/releases/tag/v1.8.0.18"
             )
         )
         // A host that merely contains github.com is not github.com.
@@ -100,12 +100,12 @@ class UpdateCheckerAtomFeedTest {
         // Sibling subdomain is a different host.
         assertFalse(
             UpdateChecker.isTrustedReleasePage(
-                "https://api.github.com/repos/iamqwert/HyperOS_FCM_Live/releases/latest"
+                "https://api.github.com/repos/iamqwert/HyperGreeze/releases/latest"
             )
         )
         // A github.com page outside /releases/ is not a release page.
         assertFalse(
-            UpdateChecker.isTrustedReleasePage("https://github.com/iamqwert/HyperOS_FCM_Live")
+            UpdateChecker.isTrustedReleasePage("https://github.com/iamqwert/HyperGreeze")
         )
         // Nothing at all.
         assertFalse(UpdateChecker.isTrustedReleasePage(null))

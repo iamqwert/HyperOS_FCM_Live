@@ -6,7 +6,7 @@
 
 > 本模块使用 AI 辅助开发。
 
-[使用帮助](HELP.md) · [技术文档](FCM_HOOK_TECH_DOC.md) · [更新日志](CHANGELOG.md) · [下载](https://github.com/iamqwert/HyperOS_FCM_Live/releases)
+[使用帮助](HELP.md) · [技术文档](FCM_HOOK_TECH_DOC.md) · [更新日志](CHANGELOG.md) · [下载](https://github.com/iamqwert/HyperGreeze/releases)
 
 ---
 
@@ -32,7 +32,7 @@
 
 ### 安装步骤
 
-1. 从 [Releases](https://github.com/iamqwert/HyperOS_FCM_Live/releases) 下载并安装 APK
+1. 从 [Releases](https://github.com/iamqwert/HyperGreeze/releases) 下载并安装 APK
 2. 在 LSPosed 管理器中启用模块，勾选作用域：**系统框架（`system`）** 与 **电量和性能（`com.miui.powerkeeper`）**
 3. 等待作用域自动热重载（API 102+）；若未自动生效，手动重启设备
 4. 打开模块，勾选需要接收 FCM 推送的应用（GMS 始终自动受保护，无需勾选）

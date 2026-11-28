@@ -6,7 +6,7 @@ Removes HyperOS 3 / 4 restrictions on Firebase Cloud Messaging (FCM) broadcasts 
 
 > Developed with AI assistance.
 
-[User Guide](HELP_EN.md) · [Technical Docs (Chinese)](FCM_HOOK_TECH_DOC.md) · [Changelog](CHANGELOG.md) · [Downloads](https://github.com/iamqwert/HyperOS_FCM_Live/releases)
+[User Guide](HELP_EN.md) · [Technical Docs (Chinese)](FCM_HOOK_TECH_DOC.md) · [Changelog](CHANGELOG.md) · [Downloads](https://github.com/iamqwert/HyperGreeze/releases)
 
 ---
 
@@ -32,7 +32,7 @@ This module lifts those gates at the framework level (`system` and `com.miui.pow
 
 ### Installation
 
-1. Download and install the APK from [Releases](https://github.com/iamqwert/HyperOS_FCM_Live/releases)
+1. Download and install the APK from [Releases](https://github.com/iamqwert/HyperGreeze/releases)
 2. Enable the module in LSPosed Manager and select scope: **System Framework (`system`)** and **Battery and Performance (`com.miui.powerkeeper`)**
 3. Wait for automatic hot-reload (API 102+); if it does not trigger, reboot manually
 4. Open the module and select the apps that need FCM push wake-ups (GMS is always protected automatically)

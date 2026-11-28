@@ -362,7 +362,7 @@ class AboutDelegate(
          */
         private const val MAX_CONFIG_CHARS = 512 * 1024
 
-        const val REPO_URL = "https://github.com/iamqwert/HyperOS_FCM_Live"
+        const val REPO_URL = "https://github.com/iamqwert/HyperGreeze"
 
         /** The GPL-3.0 licence text — the about page's licence rows open it. */
         const val GPL3_URL = "https://www.gnu.org/licenses/gpl-3.0.txt"
@@ -376,8 +376,8 @@ class AboutDelegate(
          * a single copy in the repository means a wording fix ships without an
          * APK release. Point this at a URL that renders Markdown.
          */
-        private const val HELP_URL_ZH = "https://github.com/iamqwert/HyperOS_FCM_Live/blob/main/HELP.md"
-        private const val HELP_URL_EN = "https://github.com/iamqwert/HyperOS_FCM_Live/blob/main/HELP_EN.md"
+        private const val HELP_URL_ZH = "https://github.com/iamqwert/HyperGreeze/blob/main/HELP.md"
+        private const val HELP_URL_EN = "https://github.com/iamqwert/HyperGreeze/blob/main/HELP_EN.md"
 
         /**
          * The help doc in the app's current display language — the guide is

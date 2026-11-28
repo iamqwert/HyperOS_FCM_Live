@@ -32,7 +32,7 @@
              launcher resolves ACTION_VIEW to a browser. -->
         <intent
             android:action="android.intent.action.VIEW"
-            android:data="https://github.com/iamqwert/HyperOS_FCM_Live/blob/main/HELP.md" />
+            android:data="https://github.com/iamqwert/HyperGreeze/blob/main/HELP.md" />
     </shortcut>
 
     <shortcut

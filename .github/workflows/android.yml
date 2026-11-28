@@ -2,7 +2,7 @@
 # （GH006 … Required status check "build" is expected），必须走「分支 → PR → 等 check → 合并 → dispatch」：
 #   ① 本地 commit → `git branch release/<ver>`
 #   ② 推到远端 —— 见下面「agent 沙箱怎么推」；推完 `git rev-parse origin/main` 核对
-#   ③ 开 PR：`gh pr create --repo iamqwert/HyperOS_FCM_Live --base main --head release/<ver>`
+#   ③ 开 PR：`gh pr create --repo iamqwert/HyperGreeze --base main --head release/<ver>`
 #   ④ 轮询 `gh api repos/<o>/<r>/commits/<sha>/check-runs`，等 name == "build" 的 conclusion == success
 #   ⑤ `gh pr merge <n> --merge`
 #   ⑥ `gh workflow run android.yml --ref main -f publish_release=true`

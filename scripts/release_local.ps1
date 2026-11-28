@@ -117,7 +117,7 @@ if (-not $Publish) {
 
 # ── 发布（对应 release job）──────────────────────────────────────────────
 Write-Host "`n== 发布 $tag ==" -ForegroundColor Cyan
-$existing = gh release view $tag --repo iamqwert/HyperOS_FCM_Live --json url 2>$null
+$existing = gh release view $tag --repo iamqwert/HyperGreeze --json url 2>$null
 if ($LASTEXITCODE -eq 0) {
     Fail "$tag 已存在：$existing 。同一版本号重复发布会覆盖资产，先 bump 版本或手工处理。"
 }
@@ -145,7 +145,7 @@ if (Test-Path $templatePath) { Add-Content $body -Value (Get-Content $templatePa
 
 $sha = git rev-parse HEAD
 gh release create $tag $apk.FullName `
-    --repo iamqwert/HyperOS_FCM_Live `
+    --repo iamqwert/HyperGreeze `
     --title "HyperGreeze $fullVersion" `
     --notes-file $body `
     --target $sha `

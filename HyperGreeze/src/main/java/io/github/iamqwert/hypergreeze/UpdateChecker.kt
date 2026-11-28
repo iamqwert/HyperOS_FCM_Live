@@ -41,12 +41,12 @@ object UpdateChecker {
 
     private const val TAG = "UpdateChecker"
     private const val LATEST_RELEASE_API =
-        "https://api.github.com/repos/iamqwert/HyperOS_FCM_Live/releases/latest"
+        "https://api.github.com/repos/iamqwert/HyperGreeze/releases/latest"
     /** Fallback source: no API rate limit and no User-Agent requirement. */
     private const val LATEST_RELEASE_ATOM =
-        "https://github.com/iamqwert/HyperOS_FCM_Live/releases.atom"
+        "https://github.com/iamqwert/HyperGreeze/releases.atom"
     private const val RELEASES_PAGE =
-        "https://github.com/iamqwert/HyperOS_FCM_Live/releases"
+        "https://github.com/iamqwert/HyperGreeze/releases"
     /** GitHub rejects requests with no User-Agent header (HTTP 403). */
     private const val USER_AGENT = "HyperOS-FCM-Live"
     private const val KEY_UPDATE_AVAILABLE = "update_available"

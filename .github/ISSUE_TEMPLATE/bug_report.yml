@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        反馈前请先看一遍 [常见问题](https://github.com/iamqwert/HyperOS_FCM_Live/blob/main/HELP.md#八常见问题) 与 [已知边界](https://github.com/iamqwert/HyperOS_FCM_Live/blob/main/HELP.md#九已知边界)。
+        反馈前请先看一遍 [常见问题](https://github.com/iamqwert/HyperGreeze/blob/main/HELP.md#八常见问题) 与 [已知边界](https://github.com/iamqwert/HyperGreeze/blob/main/HELP.md#九已知边界)。
 
         本模块不保活应用、不阻止系统回收，也不修改 GMS 的处理逻辑；这些行为不属缺陷。描述现象时请分清「收不到推送」和「收到得晚」。
 

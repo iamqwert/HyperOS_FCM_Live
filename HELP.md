@@ -8,7 +8,7 @@
 
 ## 1. 快速上手
 
-1. **安装模块**：从 [Releases](https://github.com/iamqwert/HyperOS_FCM_Live/releases) 下载并安装 APK。
+1. **安装模块**：从 [Releases](https://github.com/iamqwert/HyperGreeze/releases) 下载并安装 APK。
 2. **启用并勾选作用域**：在 LSPosed 管理器中启用模块，勾选 **系统框架（`system`）** 与 **电量和性能（`com.miui.powerkeeper`）**。
 3. **生效**：支持 API 102 的 LSPosed 会自动热重载并即时生效；更低版本需手动重启设备。
 4. **勾选应用**：打开模块，在主页勾选需要及时收到 FCM 推送的应用。
@@ -136,4 +136,4 @@ GMS 与推送重连**始终受保护**，与白名单勾选无关，因此列表
 
   或直接附带 LSPosed 管理器导出的 `modules_*.log`。
 
-在 [GitHub Issues](https://github.com/iamqwert/HyperOS_FCM_Live/issues) 按模板提交并附上诊断文本即可。
+在 [GitHub Issues](https://github.com/iamqwert/HyperGreeze/issues) 按模板提交并附上诊断文本即可。

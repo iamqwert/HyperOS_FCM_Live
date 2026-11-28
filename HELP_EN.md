@@ -8,7 +8,7 @@ This guide covers setup, key options, and fast troubleshooting. For framework ho
 
 ## 1. Quick Start
 
-1. **Install the module**: download and install the APK from [Releases](https://github.com/iamqwert/HyperOS_FCM_Live/releases).
+1. **Install the module**: download and install the APK from [Releases](https://github.com/iamqwert/HyperGreeze/releases).
 2. **Enable and select scope**: in LSPosed Manager, enable the module and select **System Framework (`system`)** and **Battery and Performance (`com.miui.powerkeeper`)**.
 3. **Apply**: LSPosed builds supporting API 102 hot-reload automatically; older builds require a manual reboot.
 4. **Select apps**: open the module and select the apps that need timely FCM push notifications.
@@ -133,4 +133,4 @@ Grab a **diagnostic report** before opening an issue:
   ```
   Or attach `modules_*.log` exported from LSPosed Manager.
 
-Open an issue using the template on [GitHub Issues](https://github.com/iamqwert/HyperOS_FCM_Live/issues) and attach the exported report.
+Open an issue using the template on [GitHub Issues](https://github.com/iamqwert/HyperGreeze/issues) and attach the exported report.
