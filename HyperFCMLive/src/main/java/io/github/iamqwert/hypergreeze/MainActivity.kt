@@ -28,6 +28,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.View
 import android.view.WindowManager
 import android.window.OnBackInvokedCallback
@@ -361,6 +362,22 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        splashScreen.setOnExitAnimationListener { splashView ->
+            val interpolator = AccelerateDecelerateInterpolator()
+            splashView.iconView?.animate()
+                ?.scaleX(1.08f)
+                ?.scaleY(1.08f)
+                ?.alpha(0f)
+                ?.setDuration(220L)
+                ?.setInterpolator(interpolator)
+                ?.start()
+            splashView.animate()
+                .alpha(0f)
+                .setDuration(220L)
+                .setInterpolator(interpolator)
+                .withEndAction { splashView.remove() }
+                .start()
+        }
         ThemeSupport.onCreate(this)
         appliedPalette = ThemeEngine.palette(this)
         // Land back on the tab the user was reading (see [homeTab]): the

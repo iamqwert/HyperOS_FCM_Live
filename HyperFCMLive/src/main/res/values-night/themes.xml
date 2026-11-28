@@ -10,6 +10,10 @@
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowBackground">@color/md_page_bg</item>
         <item name="android:windowLightStatusBar">false</item>
+        <!-- Native Android 12+ SplashScreen (minSdk 35). -->
+        <item name="android:windowSplashScreenBackground">@color/md_page_bg</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_animated</item>
+        <item name="android:windowSplashScreenAnimationDuration">520</item>
 
         <item name="colorPrimary">@color/md_primary</item>
         <item name="colorOnPrimary">@color/md_on_primary</item>
